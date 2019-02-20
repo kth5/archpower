@@ -1,0 +1,52 @@
+# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
+# Contributor: Ionut Biru <ibiru@archlinux.org>
+
+pkgname=at-spi2-core
+pkgver=2.30.0
+pkgrel=2
+pkgdesc="Protocol definitions and daemon for D-Bus at-spi"
+url="https://gitlab.gnome.org/GNOME/at-spi2-core"
+arch=(x86_64 powerpc64le)
+license=(GPL2)
+depends=(dbus glib2 libxtst)
+makedepends=(intltool gobject-introspection git gtk-doc meson dbus-broker)
+optdepends=('dbus-broker: Alternative bus implementation')
+_commit=2f3b23bb626e91aa321f06374ff66a709c323430  # tags/AT_SPI2_CORE_2_30_0^0
+source=("git+https://gitlab.gnome.org/GNOME/at-spi2-core.git#commit=$_commit"
+        fallback.diff
+        at-spi2-core-dbtest.patch)
+sha256sums=('SKIP'
+            'e2254af6fe94a42402544dc9fd0f322318d2809be01ef1e9e944388f2aa3cad7'
+            '574c5de65424850e900b3f5d29075ec4623df0ceb0a8e7be2a4c2c271e082229')
+
+pkgver() {
+  cd $pkgname
+  git describe --tags | sed 's/^AT_SPI2_CORE_//;s/_/./g;s/-/+/g'
+}
+
+prepare() {
+  cd $pkgname
+
+  # Try to unbreak fallback
+  patch -Np1 -i ../fallback.diff
+  patch -Np1 -i ../at-spi2-core-dbtest.patch
+}
+
+build() {
+  arch-meson $pkgname build \
+    -D default_bus=dbus-broker \
+    -D enable_docs=true
+  ninja -C build
+}
+
+check() {
+  # memory test fails without desktop
+  # broker fails to launch without journald
+  dbus-run-session meson test -C build || :
+}
+
+package() {
+  DESTDIR="$pkgdir" meson install -C build
+}
+
+# vim:set ts=2 sw=2 et:

@@ -1,0 +1,47 @@
+# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
+# Contributor: Corrado Primier <bardo@aur.archlinux.org>
+
+pkgname=rtkit
+pkgver=0.11+10+g493a135
+pkgrel=1
+pkgdesc="Realtime Policy and Watchdog Daemon"
+arch=(x86_64 powerpc64le)
+url="https://github.com/heftig/rtkit"
+license=(GPL3 'custom:BSD')
+depends=(dbus polkit systemd)
+makedepends=(git)
+_commit=493a135af21f9146c2bb6b80d050ca77e4f48171  # master
+source=("git+https://github.com/heftig/rtkit#commit=$_commit")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd $pkgname
+  git describe --tags | sed 's/^v//;s/-/+/g'
+}
+
+prepare() {
+  cd $pkgname
+  ./autogen.sh
+}
+
+build() {
+  cd $pkgname
+  ./configure \
+    --prefix=/usr \
+    --sbindir=/usr/bin \
+    --sysconfdir=/etc \
+    --libexecdir=/usr/lib \
+    --with-systemdsystemunitdir=/usr/lib/systemd/system
+  make
+}
+
+package() {
+  cd $pkgname
+  make DESTDIR="$pkgdir" install
+
+  echo 'u rtkit 133 "RealtimeKit" /proc' |
+    install -Dm644 /dev/stdin "$pkgdir/usr/lib/sysusers.d/$pkgname.conf"
+
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 LICENSE
+  sed -ne '4,25p' rtkit.c >"$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}

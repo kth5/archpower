@@ -1,0 +1,53 @@
+# Maintainer: David Runge <dave@sleepmap.de>
+# Contributor: speps <speps at aur dot archlinux dot org>
+# Contributor: Philipp Überbacher <murks at lavabit dot com>
+
+pkgname=zita-resampler
+pkgver=1.6.2
+pkgrel=1
+pkgdesc="A C++ library for resampling audio signals"
+url="https://kokkinizita.linuxaudio.org/linuxaudio/"
+arch=('x86_64' 'powerpc64le')
+license=('GPL3')
+depends=('gcc-libs' 'libsndfile')
+source=("https://kokkinizita.linuxaudio.org/linuxaudio/downloads/${pkgname}-${pkgver}.tar.bz2")
+sha512sums=('d547419dd222c8a399d8f196efa1ec88a3f781275b696ae2fe1bb6e2fc329285affb8aace85972c304ad256becc4a155534dd5ef4ce3c57cbc9dcca0122b670c')
+
+prepare() {
+  cd "${pkgname}-${pkgver}"
+  # FS#36248 - strip march=native
+  sed -e '/native/d' \
+      -i {source,apps}/Makefile
+  # removing local call to ldconfig
+  sed -e 's/ldconfig/& -N $(DESTDIR)\/$(LIBDIR)/' \
+      -i source/Makefile
+  # fix use of BINDIR without preceeding DESTDIR
+  # fix use of MANDIR without preceeding DESTDIR
+  sed -e 's/\ $(BINDIR)/\ $(DESTDIR)$(BINDIR)/' \
+      -e 's/\ $(MANDIR)/\ $(DESTDIR)$(MANDIR)/' \
+      -i apps/Makefile
+}
+
+build() {
+  cd "${pkgname}-${pkgver}/source"
+  # libs
+  make
+  # create lib link for building apps
+  ln -sv "lib${pkgname}.so.${pkgver}" "lib${pkgname}.so"
+  # apps
+  cd ../apps
+  make LDFLAGS+=" -L../source" CXXFLAGS+=" -I../source"
+  # cleanup link
+  rm -rv ../source/"lib${pkgname}.so"
+}
+
+package() {
+  cd "${pkgname}-${pkgver}"
+  make -C source DESTDIR="$pkgdir/" PREFIX=/usr SUFFIX="" install
+  make -C apps DESTDIR="$pkgdir/" PREFIX=/usr install
+  # docs
+  install -t "${pkgdir}/usr/share/doc/${pkgname}" \
+    -vDm 644 {AUTHORS,README} \
+    -vDm 644 docs/*
+}
+

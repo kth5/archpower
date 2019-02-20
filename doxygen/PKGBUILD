@@ -1,0 +1,66 @@
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Dan McGee <dan@archlinux.org>
+
+pkgbase=doxygen
+pkgname=('doxygen') # 'doxygen-docs')
+pkgver=1.8.15
+pkgrel=1
+pkgdesc='Documentation system for C++, C, Java, IDL and PHP'
+url='http://www.doxygen.org/'
+arch=('x86_64' 'powerpc64le')
+license=('GPL')
+makedepends=('cmake' 'gcc-libs' 'flex' 'ghostscript'
+             'graphviz' 'python2' 'qt4') # 'texlive-core' 'texlive-latexextra' 'qt5-base')
+source=(${pkgbase}-${pkgver}.tar.gz::https://github.com/doxygen/doxygen/archive/Release_${pkgver//./_}.tar.gz)
+sha256sums=('cc5492b3e2d1801ae823c88e0e7a38caee61a42303587e987142fe9b68a43078')
+sha512sums=('bc3ea295b894a73324bf41408d05332bc480638840b62fac6f12493be15de29eedd4e7f2d7ad61e0db36623887ca364eda5eb5e46d9b91a4241240cb380b07d5')
+
+prepare() {
+  cd ${pkgbase}-Release_${pkgver//./_}
+  mkdir -p build
+  # Install the man pages in the right place
+  sed -i 's:DESTINATION man/man1:DESTINATION "${CMAKE_INSTALL_PREFIX}/share/man/man1":g' \
+    doc/CMakeLists.txt
+}
+
+build() {
+  cd ${pkgbase}-Release_${pkgver//./_}/build
+
+  cmake .. \
+    -DCMAKE_INSTALL_PREFIX:PATH=/usr \
+    -DDOC_INSTALL_DIR:PATH=share/doc/doxygen \
+    -DPYTHON_EXECUTABLE:FILE=/usr/bin/python2 \
+    -Dbuild_doc:BOOL=OFF \
+    -Dbuild_wizard:BOOL=ON
+  make
+  #make VERBOSE=1 docs
+}
+
+check() {
+  cd ${pkgbase}-Release_${pkgver//./_}/build
+  make tests
+}
+
+package_doxygen() {
+  pkgdesc='Documentation system for C++, C, Java, IDL and PHP'
+  depends=('gcc-libs')
+  optdepends=('graphviz: for caller/callee graph generation'
+              'qt4: for doxywizard')
+
+  cd ${pkgbase}-Release_${pkgver//./_}/build
+  make DESTDIR="${pkgdir}" install
+
+  rm -rf "${pkgdir}/usr/share/doc"
+}
+
+package_doxygen-docs() {
+  pkgdesc='Developer documentation for doxygen'
+
+  cd ${pkgbase}-Release_${pkgver//./_}/build
+  make DESTDIR="${pkgdir}" install
+
+  rm -rf "${pkgdir}/usr/bin"
+  rm -rf "${pkgdir}/usr/share/man"
+}
+
+# vim: ts=2 sw=2 et:

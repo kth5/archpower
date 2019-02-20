@@ -1,0 +1,53 @@
+# Maintainer: David Runge <dave@sleepmap.de>
+# Contributor: speps <speps at aur dot archlinux dot org>
+
+pkgname=zita-alsa-pcmi
+pkgver=0.3.2
+pkgrel=1
+pkgdesc="The successor of clalsadrv, provides easy access to ALSA PCM devices."
+arch=('x86_64' 'powerpc64le')
+url="https://kokkinizita.linuxaudio.org/linuxaudio/"
+license=('GPL3')
+depends=('gcc-libs' 'alsa-lib')
+source=("https://kokkinizita.linuxaudio.org/linuxaudio/downloads/$pkgname-$pkgver.tar.bz2")
+sha512sums=('9d6040d0ec636ebcf02a033cdc017105bbed8e0ddb99584890d8e027402a85791e0983a1a9cd677dc6f1da0ced530afb5e65a8e863329a5e785ef09e0b7124f0')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  # remove optimization
+  # call ldconfig in local context
+  sed -e '/native/d' \
+      -e 's/ldconfig/& -N $(DESTDIR)\/$(LIBDIR)/' \
+      -i source/Makefile
+  # fix use of BINDIR without preceeding DESTDIR
+  sed -e 's/\ $(BINDIR)/\ $(DESTDIR)$(BINDIR)/' \
+      -i apps/Makefile
+}
+
+build() {
+  cd "$pkgname-$pkgver/source"
+  make
+  # create lib link for building apps
+  ln -sv lib$pkgname.so.$pkgver lib$pkgname.so
+
+  # apps
+  cd ../apps
+  CXXFLAGS+=" -I../source" \
+  LDFLAGS+=" -L../source" \
+  make
+
+  rm -v ../source/lib$pkgname.so
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+
+  # libs
+  make -C source DESTDIR="$pkgdir/" PREFIX=/usr SUFFIX="" install
+
+  # apps
+  make -C apps DESTDIR="$pkgdir/" PREFIX=/usr install
+}
+
+# vim:set ts=2 sw=2 et:
+

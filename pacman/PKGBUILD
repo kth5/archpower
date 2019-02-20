@@ -1,0 +1,62 @@
+# vim: set ts=2 sw=2 et:
+# Maintainer: Dan McGee <dan@archlinux.org>
+# Maintainer: Dave Reisner <dreisner@archlinux.org>
+
+pkgname=pacman
+pkgver=5.1.2
+pkgrel=3
+pkgdesc="A library-based package manager with dependency support"
+arch=('powerpc64le')
+url="http://www.archlinux.org/pacman/"
+license=('GPL')
+groups=('base' 'base-devel')
+depends=('bash' 'glibc' 'libarchive' 'curl' 'gpgme')
+makedepends=('asciidoc')
+checkdepends=('python2' 'fakechroot')
+optdepends=('perl-locale-gettext: translation support in makepkg-template'
+            'xdelta3: delta support in repo-add')
+backup=(etc/pacman.conf
+        etc/makepkg.conf)
+options=('strip' 'debug')
+validpgpkeys=('6645B0A8C7005E78DB1D7864F99FFE0FEAE999BD'  # Allan McRae <allan@archlinux.org>
+              'B8151B117037781095514CA7BBDFFC92306B1121') # Andrew Gregory (pacman) <andrew@archlinux.org>
+source=(https://sources.archlinux.org/other/pacman/$pkgname-$pkgver.tar.gz
+        pacman.conf
+        makepkg.conf)
+sha256sums=('ce4eef1585fe64fd1c65c269e263577261edd7535fe2278240103012d74b6ef6'
+            '63f374736f657bbce61da2e857d66acfde2c14135e8864b524ab9cb08ba3fb56'
+            '39f5716ac02da773e03ca91062c51fbc97aed8de9bd96060599d0d076ff47b8b')
+
+build() {
+  cd "$pkgname-$pkgver"
+
+  ./configure --prefix=/usr --sysconfdir=/etc \
+    --localstatedir=/var --enable-doc \
+    --with-scriptlet-shell=/usr/bin/bash \
+    --with-ldconfig=/usr/bin/ldconfig
+  make V=1
+}
+
+check() {
+  make -C "$pkgname-$pkgver" check
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+
+  make DESTDIR="$pkgdir" install
+
+  # install Arch specific stuff
+  install -dm755 "$pkgdir/etc"
+  install -m644 "$srcdir/pacman.conf" "$pkgdir/etc"
+  install -m644 "$srcdir/makepkg.conf" "$pkgdir/etc"
+
+  # put bash_completion in the right location
+  install -dm755 "$pkgdir/usr/share/bash-completion/completions"
+  mv "$pkgdir/etc/bash_completion.d/pacman" "$pkgdir/usr/share/bash-completion/completions"
+  rmdir "$pkgdir/etc/bash_completion.d"
+
+  for f in makepkg pacman-key; do
+    ln -s pacman "$pkgdir/usr/share/bash-completion/completions/$f"
+  done
+}

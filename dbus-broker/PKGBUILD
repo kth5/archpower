@@ -1,0 +1,56 @@
+# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
+# Contributor: David Herrmann <dh.herrmann@gmail.com>
+
+pkgname=dbus-broker
+pkgver=17
+pkgrel=1
+pkgdesc="Linux D-Bus Message Broker"
+url="https://groups.google.com/forum/#!forum/bus1-devel"
+arch=(x86_64 powerpc64le)
+license=(Apache)
+depends=(systemd-libs expat audit)
+makedepends=(git meson systemd python-docutils)
+_commit=2902f7d21c3762c5c6941201c9745287c0f2fd80  # tags/v17^0
+source=("git+https://github.com/bus1/dbus-broker#commit=$_commit"
+        git+https://github.com/c-util/c-{rbtree,sundry,list,dvar,utf8,shquote,ini})
+sha256sums=('SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP')
+
+pkgver() {
+  cd $pkgname
+  git describe --tags | sed 's/^v//;s/-/+/g'
+}
+
+prepare() {
+  cd $pkgname
+
+  git submodule init
+
+  local sm
+  for sm in c-{rbtree,sundry,list,dvar,utf8,shquote,ini}; do
+    git config --local submodule.subprojects/$sm.url "$srcdir/$sm"
+  done
+
+  git submodule update
+}
+
+build() {
+  arch-meson $pkgname build -D docs=true -D audit=true
+  ninja -C build
+}
+
+check() {
+  meson test -C build
+}
+
+package() {
+  DESTDIR="$pkgdir" meson install -C build
+}
+
+# vim:set sw=2 et:

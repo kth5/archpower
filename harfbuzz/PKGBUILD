@@ -1,0 +1,69 @@
+# Maintainer: Jan de Groot <jgc@archlinux.org>
+
+pkgbase=(harfbuzz)
+pkgname=(harfbuzz harfbuzz-icu)
+pkgver=2.3.1
+pkgrel=2
+pkgdesc="OpenType text shaping engine"
+url="http://www.freedesktop.org/wiki/Software/HarfBuzz"
+arch=(x86_64 powerpc64le)
+license=(MIT)
+depends=(glib2 freetype2 graphite)
+makedepends=(cairo icu gobject-introspection gtk-doc ragel git python)
+checkdepends=(python-fonttools python-setuptools)
+_commit=55d1d7c8bcd8d97c4e618e5dd21f13df50b10ce8  # tags/2.3.1^0
+source=("git+https://github.com/harfbuzz/harfbuzz#commit=$_commit")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd $pkgbase
+  git describe --tags | sed 's/-/+/g'
+}
+
+prepare() {
+  cd $pkgbase
+  NOCONFIGURE=1 ./autogen.sh
+}
+
+build() {
+  cd $pkgbase
+  ./configure \
+    --prefix=/usr \
+    --with-cairo \
+    --with-freetype \
+    --with-glib \
+    --with-gobject \
+    --with-icu \
+    --enable-gtk-doc \
+    --with-graphite2
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+  make
+}
+
+check() {
+  cd $pkgbase
+  make check
+}
+
+package_harfbuzz() {
+  optdepends=('cairo: hb-view program')
+
+  cd $pkgbase
+  make DESTDIR="$pkgdir" install
+  install -Dm644 COPYING "$pkgdir/usr/share/licenses/harfbuzz/COPYING"
+
+# Split harfbuzz-icu
+  mkdir -p ../hb-icu/usr/{include/harfbuzz,lib/pkgconfig}; cd ../hb-icu
+  mv "$pkgdir"/usr/lib/libharfbuzz-icu* ./usr/lib
+  mv "$pkgdir"/usr/lib/pkgconfig/harfbuzz-icu.pc ./usr/lib/pkgconfig
+  mv "$pkgdir"/usr/include/harfbuzz/hb-icu.h ./usr/include/harfbuzz
+}
+
+package_harfbuzz-icu() {
+  pkgdesc="$pkgdesc (ICU integration)"
+  depends=(harfbuzz icu)
+
+  mv hb-icu/* "$pkgdir"
+
+  install -Dm644 $pkgbase/COPYING "$pkgdir/usr/share/licenses/harfbuzz-icu/COPYING"
+}
