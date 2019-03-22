@@ -3,14 +3,14 @@
 # Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
 
 pkgname=clang
-pkgver=7.0.1
+pkgver=8.0.0
 pkgrel=1
 pkgdesc="C language family frontend for LLVM"
 arch=('x86_64' 'powerpc64le')
 url="https://clang.llvm.org/"
 license=('custom:University of Illinois/NCSA Open Source License')
 depends=('llvm-libs' 'gcc' 'compiler-rt')
-makedepends=('llvm' 'cmake' 'ninja' 'python-sphinx' 'python2')
+makedepends=('llvm' 'cmake' 'ninja' 'python-sphinx' 'python2' 'extra-cmake-modules')
 optdepends=('openmp: OpenMP support in clang with -fopenmp'
             'python: for git-clang-format'
             'python2: for scan-view')
@@ -33,9 +33,9 @@ validpgpkeys+=('474E22316ABF4785A88C6E8EA2C794A986419D8A') # Tom Stellard <tstel
 
 prepare() {
   cd "$srcdir/cfe-$pkgver.src"
-  mkdir build
+  mkdir -p build
   mv "$srcdir/clang-tools-extra-$pkgver.src" tools/extra
-  patch -Np1 -i ../enable-SSP-and-PIE-by-default.patch
+  #patch -Np1 -i ../enable-SSP-and-PIE-by-default.patch
 }
 
 build() {
@@ -54,8 +54,16 @@ build() {
     -DLLVM_ENABLE_SPHINX=ON \
     -DSPHINX_WARNINGS_AS_ERRORS=OFF \
     -DLLVM_EXTERNAL_LIT=/usr/bin/lit \
-    -DLLVM_MAIN_SRC_DIR="$srcdir/llvm-$pkgver.src"
-  ninja
+    -DLLVM_MAIN_SRC_DIR="$srcdir/llvm-$pkgver.src" \
+    -DLLVM_CMAKE_PATH="$srcdir/llvm-$pkgver.src/cmake/modules"
+
+  RAM_TOTAL=$(free --giga | grep Mem | awk '{print $2}')
+  if [ ${RAM_TOTAL} -lt 16 ]; then
+    warning "Limiting to 2 parallel job due to RAM constrains"
+    NINJA_ARGS="-j2"
+  fi
+
+  ninja $NINJA_ARGS
 }
 
 check() {
@@ -105,3 +113,10 @@ package() {
 }
 
 # vim:set ts=2 sw=2 et:
+sha256sums=('084c115aab0084e63b23eee8c233abb6739c399e29966eaeccfc6e088e0b736b'
+            'SKIP'
+            '4f00122be408a7482f2004bcf215720d2b88cf8dc78b824abb225da8ad359d4b'
+            'SKIP'
+            '8872be1b12c61450cacc82b3d153eab02be2546ef34fa3580ed14137bb26224c'
+            'SKIP'
+            '8dd3938afb93a051acf69373f7a4e1eb7cf9dd28d8e334c98d30a531d4af0181')
