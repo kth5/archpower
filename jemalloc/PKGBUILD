@@ -6,7 +6,7 @@
 pkgname=jemalloc
 epoch=1
 pkgver=5.1.0
-pkgrel=1
+pkgrel=2
 pkgdesc='General-purpose scalable concurrent malloc implementation'
 arch=('x86_64' 'powerpc64le')
 license=('BSD')
@@ -20,9 +20,30 @@ sha256sums=('5396e61cc6103ac393136c309fae09e44d74743c86f90e266948c50f3dbb7268')
 build() {
   cd $pkgname-$pkgver
 
+  # configure sets -O3 so remove our -O?
+  CFLAGS="${CFLAGS/-O?/}"
+  CXXFLAGS="${CXXFLAGS/-O?/}"
+
+  # jemalloc supports a runtime page size that's smaller or equal to the build
+  # time one, but aborts on a larger one. If not defined, it falls back to the
+  # the build system's _SC_PAGESIZE, which in many architectures can vary. Set
+  # this to 4K on x86 for performance, and set it to 64K (2^16) on every other
+  # architecture, which should be a reasonable maximum. See Debian #843926, as
+  # well as upstream #467 for more context.
+  if [ "${CARCH}" = "x86_64" ]; then
+    extra_configure_flags="--with-lg-page=12"
+  else
+    extra_configure_flags="--with-lg-page=16"
+  fi
+
+  # 2MB (2^21) is the default, but (as of 5.1.0) is overriden by whatever is
+  # found in /proc/meminfo. Avoid relying on the build system's configuration and
+  # just set it statically here.
+  extra_configure_flags="${extra_configure_flags} --with-lg-hugepage=21"
+
   ./configure \
     --enable-autogen \
-    --prefix=/usr
+    --prefix=/usr ${extra_configure_flags}
   make
 }
 
@@ -33,4 +54,9 @@ package() {
 
   install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
   chmod 644 "$pkgdir/usr/lib/libjemalloc_pic.a"
+}
+
+check() {
+  cd ${pkgname}-${pkgver}
+  make tests
 }
