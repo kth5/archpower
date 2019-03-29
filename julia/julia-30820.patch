@@ -1,0 +1,118 @@
+From 92c26a6a03721af9b214f36d6d609ac24575ca52 Mon Sep 17 00:00:00 2001
+From: Keno Fischer <keno@juliacomputing.com>
+Date: Wed, 23 Jan 2019 20:09:57 -0500
+Subject: [PATCH 1/2] Implement jl_start_fiber on powerpc
+
+---
+ src/julia_threads.h |  3 ++-
+ src/task.c          | 23 +++++++++++++++++++++++
+ 2 files changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/src/julia_threads.h b/src/julia_threads.h
+index eedab742ef6b..a768ffea378f 100644
+--- a/src/julia_threads.h
++++ b/src/julia_threads.h
+@@ -27,7 +27,8 @@ typedef win32_ucontext_t jl_ucontext_t;
+     !defined(JL_HAVE_ASM) && \
+     !defined(JL_HAVE_UNW_CONTEXT) && \
+     !defined(JL_HAVE_SIGALTSTACK)
+-#if (defined(_CPU_X86_64_) || defined(_CPU_X86_) || defined(_CPU_AARCH64_) || defined(_CPU_ARM_))
++#if (defined(_CPU_X86_64_) || defined(_CPU_X86_) || defined(_CPU_AARCH64_) ||  \
++     defined(_CPU_ARM_) || defined(_CPU_PPC64_))
+ #define JL_HAVE_ASM
+ #elif defined(_OS_DARWIN_)
+ #define JL_HAVE_UNW_CONTEXT
+diff --git a/src/task.c b/src/task.c
+index b54bbbc2df32..a22be317f55e 100644
+--- a/src/task.c
++++ b/src/task.c
+@@ -767,6 +767,29 @@ static void jl_start_fiber(jl_ucontext_t *lastt, jl_ucontext_t *t)
+                     // because all our addresses are word-aligned.
+         " udf #0" // abort
+         : : "r" (stk), "r"(fn) : "memory" );
++#elif defined(_CPU_PPC64_)
++    // N.B.: There is two iterations of the PPC64 ABI.
++    // v2 is current and used here. Make sure you have the
++    // correct version of the ABI reference when working on this code.
++    asm volatile(
++        // Move stack (-0x30 for initial stack frame) to stack pointer
++        " addi 1, %0, -0x30;\n"
++        // Build stack frame
++        // Skip local variable save area
++        " std 2, 0x28(1);\n" // Save TOC
++        // Clear link editor/compiler words
++        " std 0, 0x20(1);\n"
++        " std 0, 0x18(1);\n"
++        // Clear LR/CR save area
++        " std 0, 0x10(1);\n"
++        " std 0, 0x8(1);\n"
++        " std 0, 0x0(1); \n" // Clear back link to terminate unwinder
++        " mtlr 0; \n"        // Clear link register
++        " mr 12, %1; \n"     // Set up target global entry point
++        " mtctr 12; \n"      // Move jump target to counter register
++        " bctr; \n"          // branch to counter (lr update disabled)
++        " trap; \n"
++        : : "r"(stk), "r"(fn) : "memory");
+ #else
+ #error JL_HAVE_ASM defined but not implemented for this CPU type
+ #endif
+
+From 39cde43f7f605d2453d9f9b6e5ff0731271d659b Mon Sep 17 00:00:00 2001
+From: Keno Fischer <keno@juliacomputing.com>
+Date: Wed, 23 Jan 2019 20:16:02 -0500
+Subject: [PATCH 2/2] Add patch to fix LLVM build on ppc64le
+
+---
+ deps/llvm.mk                           |  1 +
+ deps/patches/llvm-D57118-powerpc.patch | 30 ++++++++++++++++++++++++++
+ 2 files changed, 31 insertions(+)
+ create mode 100644 deps/patches/llvm-D57118-powerpc.patch
+
+diff --git a/deps/llvm.mk b/deps/llvm.mk
+index ed3342f397bf..5b707af66c9a 100644
+--- a/deps/llvm.mk
++++ b/deps/llvm.mk
+@@ -429,6 +429,7 @@ ifeq ($(LLVM_VER_PATCH), 0)
+ $(eval $(call LLVM_PATCH,llvm-windows-race))
+ endif
+ $(eval $(call LLVM_PATCH,llvm-D51842-win64-byval-cc))
++$(eval $(call LLVM_PATCH,llvm-D57118-powerpc))
+ endif # LLVM_VER
+ 
+ # Independent to the llvm version add a JL prefix to the version map
+diff --git a/deps/patches/llvm-D57118-powerpc.patch b/deps/patches/llvm-D57118-powerpc.patch
+new file mode 100644
+index 000000000000..328fe205d128
+--- /dev/null
++++ b/deps/patches/llvm-D57118-powerpc.patch
+@@ -0,0 +1,30 @@
++commit 812db527538f30ac77a19d755e24109a6db7e569
++Author: Keno Fischer <keno@juliacomputing.com>
++Date:   Wed Jan 23 16:46:59 2019 -0500
++
++    [CMake][PowerPC] Recognize LLVM_NATIVE_TARGET="ppc64le" as PowerPC
++    
++    Summary:
++    This value is derived from the host triple, which on the machine
++    I'm currently using is `ppc64le-linux-redhat`. This change makes
++    LLVM compile.
++    
++    Reviewers: hfinkel
++    
++    Subscribers: nemanjai, mgorny, jsji, llvm-commits
++    
++    Differential Revision: https://reviews.llvm.org/D57118
++
++diff --git a/cmake/config-ix.cmake b/cmake/config-ix.cmake
++index 900c35ee4f0..b9c9757a4f6 100644
++--- a/cmake/config-ix.cmake
+++++ b/cmake/config-ix.cmake
++@@ -386,6 +386,8 @@ elseif (LLVM_NATIVE_ARCH MATCHES "sparc")
++   set(LLVM_NATIVE_ARCH Sparc)
++ elseif (LLVM_NATIVE_ARCH MATCHES "powerpc")
++   set(LLVM_NATIVE_ARCH PowerPC)
+++elseif (LLVM_NATIVE_ARCH MATCHES "ppc64le")
+++  set(LLVM_NATIVE_ARCH PowerPC)
++ elseif (LLVM_NATIVE_ARCH MATCHES "aarch64")
++   set(LLVM_NATIVE_ARCH AArch64)
++ elseif (LLVM_NATIVE_ARCH MATCHES "arm64")
