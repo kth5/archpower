@@ -1,0 +1,76 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributors:
+#   Andrei Antoukh - niwi@niwi.be - http://www.niwi.be
+#   henning mueller <henning@orgizm.net>
+
+pkgname=glusterfs
+epoch=1
+pkgver=5.5
+pkgrel=1
+pkgdesc='a cluster file-system capable of scaling to several peta-bytes.'
+arch=(x86_64 powerpc64le)
+url='http://www.gluster.org/'
+license=(GPL2 LGPL3)
+install=glusterfs.install
+backup=('etc/glusterfs/glusterd.vol'
+        'etc/glusterfs/eventsconfig.json'
+        'etc/glusterfs/gluster-rsyslog-5.8.conf'
+        'etc/glusterfs/gluster-rsyslog-7.2.conf'
+        'etc/glusterfs/glusterd.vol'
+        'etc/glusterfs/glusterfs-georep-logrotate'
+        'etc/glusterfs/glusterfs-logrotate')
+depends=(fuse python libxml2 libaio liburcu attr rpcbind)
+optdepends=('glib2: qemu-block')
+#source=($pkgname-$pkgver.tar.gz::https://github.com/gluster/glusterfs/archive/v$pkgver.tar.gz)
+source=(https://bits.gluster.org/pub/gluster/glusterfs/src/glusterfs-$pkgver.tar.gz
+        https://github.com/gluster/glusterfs/commit/82987486a9c9145caa6ce9ff31506ba2563a4a97.patch
+        glusterfs.sysusers)
+sha256sums=('781da2e9e955eec6b411abd8df5851353936e5cc6f6aef9b8e6c8b970610cdf4'
+            '7d3793449105e3cbfef57b78b707f37a53430bb2caf16f4674ace1ab61be5acb'
+            'a470d07aedb2674adfb295b4775e490b48816b87974946da4dcf62aa0d72108a')
+
+prepare() {
+  cd "$srcdir"/$pkgname-$pkgver
+  # https://bugzilla.redhat.com/show_bug.cgi?id=1656100 make autoreconf work
+  patch -p1 -i ../82987486a9c9145caa6ce9ff31506ba2563a4a97.patch
+  autoreconf -fi
+}
+
+build() {
+  cd "$srcdir"/$pkgname-$pkgver
+  ./configure \
+    --prefix=/usr \
+    --sbindir=/usr/bin \
+    --with-mountutildir=/usr/bin \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --mandir=/usr/share/man \
+    --libexecdir=/usr/lib/$pkgname \
+    --with-systemddir=/usr/lib/systemd/system \
+    --with-tmpfilesdir=/usr/lib/tmpfiles.d \
+    --enable-gnfs \
+    LEXLIB=
+  make
+}
+
+package() {
+  cd "$srcdir"/$pkgname-$pkgver
+
+  make -j1 DESTDIR="$pkgdir" install
+
+  # https://bugzilla.redhat.com/show_bug.cgi?id=1598900
+  install -Dm644 "$srcdir"/glusterfs.sysusers \
+    "$pkgdir"/usr/lib/sysusers.d/glusterfs.conf
+
+  install -D -m 644 \
+    "$srcdir"/$pkgname-$pkgver/{README.md,INSTALL,COPYING*} \
+    "$pkgdir"/usr/share/doc/glusterfs/
+
+  cp -rf \
+    "$srcdir"/$pkgname-$pkgver/doc/* \
+    "$pkgdir"/usr/share/doc/glusterfs/
+  rm -rf "$pkgdir"/var/run
+}
+
+# vim:set ts=2 sw=2 et:
