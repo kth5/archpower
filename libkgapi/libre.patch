@@ -1,0 +1,618 @@
+diff -rupN libkgapi-18.12.2/CMakeLists.txt libkgapi-18.12.2.new/CMakeLists.txt
+--- libkgapi-18.12.2/CMakeLists.txt	2019-02-05 01:50:26.000000000 +0100
++++ libkgapi-18.12.2.new/CMakeLists.txt	2019-02-26 16:14:12.360250591 +0100
+@@ -40,7 +40,7 @@ find_package(Qt5 ${QT_REQUIRED_VERSION}
+     Core
+     Network
+     Widgets
+-    WebEngineWidgets
++    WebKitWidgets
+     Xml
+ )
+ 
+diff -rupN libkgapi-18.12.2/src/core/CMakeLists.txt libkgapi-18.12.2.new/src/core/CMakeLists.txt
+--- libkgapi-18.12.2/src/core/CMakeLists.txt	2019-01-28 08:39:56.000000000 +0100
++++ libkgapi-18.12.2.new/src/core/CMakeLists.txt	2019-02-26 16:14:27.087110146 +0100
+@@ -73,7 +73,7 @@ PRIVATE
+     KF5::KIOWidgets
+     KF5::WindowSystem
+     KF5::Wallet
+-    Qt5::WebEngineWidgets
++    Qt5::WebKitWidgets
+ PUBLIC
+     Qt5::Widgets
+ )
+diff -rupN libkgapi-18.12.2/src/core/private/newtokensfetchjob.cpp libkgapi-18.12.2.new/src/core/private/newtokensfetchjob.cpp
+--- libkgapi-18.12.2/src/core/private/newtokensfetchjob.cpp	2019-01-28 08:39:56.000000000 +0100
++++ libkgapi-18.12.2.new/src/core/private/newtokensfetchjob.cpp	2019-02-26 16:11:48.048358393 +0100
+@@ -43,21 +43,19 @@ class Q_DECL_HIDDEN NewTokensFetchJob::P
+     QString tmpToken;
+     QString apiKey;
+     QString secretKey;
+-    int localPort;
+ 
+     QString accessToken;
+     QString refreshToken;
+     qulonglong expiresIn;
+ };
+ 
+-NewTokensFetchJob::NewTokensFetchJob(const QString &tmpToken, const QString &apiKey, const QString &secretKey, int localPort, QObject *parent):
++NewTokensFetchJob::NewTokensFetchJob(const QString &tmpToken, const QString &apiKey, const QString &secretKey, QObject *parent):
+     Job(parent),
+     d(new Private)
+ {
+     d->tmpToken = tmpToken;
+     d->apiKey = apiKey;
+     d->secretKey = secretKey;
+-    d->localPort = localPort;
+ }
+ 
+ NewTokensFetchJob::~NewTokensFetchJob()
+@@ -106,7 +104,7 @@ void NewTokensFetchJob::start()
+     params.addQueryItem(QStringLiteral("client_id"), d->apiKey);
+     params.addQueryItem(QStringLiteral("client_secret"), d->secretKey);
+     params.addQueryItem(QStringLiteral("code"), d->tmpToken);
+-    params.addQueryItem(QStringLiteral("redirect_uri"), QStringLiteral("http://127.0.0.1:%1").arg(d->localPort)); // we need to use the same URL as in AuthWidget
++    params.addQueryItem(QStringLiteral("redirect_uri"), QStringLiteral("urn:ietf:wg:oauth:2.0:oob"));
+     params.addQueryItem(QStringLiteral("grant_type"), QStringLiteral("authorization_code"));
+ 
+     enqueueRequest(request, params.toString(QUrl::FullyEncoded).toLatin1());
+diff -rupN libkgapi-18.12.2/src/core/private/newtokensfetchjob_p.h libkgapi-18.12.2.new/src/core/private/newtokensfetchjob_p.h
+--- libkgapi-18.12.2/src/core/private/newtokensfetchjob_p.h	2019-01-28 08:39:56.000000000 +0100
++++ libkgapi-18.12.2.new/src/core/private/newtokensfetchjob_p.h	2019-02-26 16:10:55.497668238 +0100
+@@ -38,7 +38,7 @@ class KGAPICORE_EXPORT NewTokensFetchJob
+     Q_OBJECT
+ 
+   public:
+-    explicit NewTokensFetchJob(const QString &tmpToken, const QString &apiKey, const QString &secretKey, int localPort, QObject* parent = nullptr);
++    explicit NewTokensFetchJob(const QString &tmpToken, const QString &apiKey, const QString &secretKey, QObject* parent = nullptr);
+     ~NewTokensFetchJob() override;
+ 
+     QString accessToken() const;
+diff -rupN libkgapi-18.12.2/src/core/ui/authwidget.cpp libkgapi-18.12.2.new/src/core/ui/authwidget.cpp
+--- libkgapi-18.12.2/src/core/ui/authwidget.cpp	2019-01-28 08:39:56.000000000 +0100
++++ libkgapi-18.12.2.new/src/core/ui/authwidget.cpp	2019-02-26 16:06:23.994089473 +0100
+@@ -21,10 +21,6 @@
+ #include "authwidget.h"
+ #include "authwidget_p.h"
+ #include "../../debug.h"
+-
+-#include <QTcpServer>
+-#include <QTcpSocket>
+-#include <QAbstractSocket>
+ #include <QUrlQuery>
+ 
+ using namespace KGAPI2;
+@@ -34,14 +30,7 @@ AuthWidget::AuthWidget(QWidget* parent):
+     QWidget(parent),
+     d(new AuthWidgetPrivate(this))
+ {
+-    d->setupUi();
+-}
+ 
+-AuthWidget::AuthWidget(AuthWidgetPrivate *dptr, QWidget *parent)
+-    : QWidget(parent)
+-    , d(dptr)
+-{
+-    d->setupUi();
+ }
+ 
+ AuthWidget::~AuthWidget()
+@@ -110,34 +99,20 @@ void AuthWidget::authenticate()
+         scopes << scope.toString();
+     }
+ 
+-    d->server = new QTcpServer(this);
+-    if (!d->server->listen(QHostAddress::LocalHost, d->serverPort)) {
+-        Q_EMIT error(InvalidAccount, tr("Could not start oauth http server"));
+-        return;
+-    }
+-    connect(d->server, &QTcpServer::acceptError, d, &AuthWidgetPrivate::socketError);
+-    d->serverPort = d->server->serverPort();
+-    connect(d->server, &QTcpServer::newConnection, [&]() {
+-        d->connection = d->server->nextPendingConnection();
+-        d->connection->setParent(this);
+-        connect(d->connection, static_cast<void (QAbstractSocket::*)(QAbstractSocket::SocketError)>
+-            (&QAbstractSocket::error), d, &AuthWidgetPrivate::socketError);
+-        connect(d->connection, &QTcpSocket::readyRead, d, &AuthWidgetPrivate::socketReady);
+-        d->server->close();
+-        d->server->deleteLater();
+-    });
+-
+     QUrl url(QStringLiteral("https://accounts.google.com/o/oauth2/auth"));
+     QUrlQuery query(url);
+     query.addQueryItem(QStringLiteral("client_id"), d->apiKey);
+-    query.addQueryItem(QStringLiteral("redirect_uri"), QStringLiteral("http://127.0.0.1:%1").arg(d->serverPort));
++    query.addQueryItem(QStringLiteral("redirect_uri"), QStringLiteral("urn:ietf:wg:oauth:2.0:oob"));
+     query.addQueryItem(QStringLiteral("scope"), scopes.join(QStringLiteral(" ")));
+     query.addQueryItem(QStringLiteral("response_type"), QStringLiteral("code"));
+     url.setQuery(query);
+ 
+     qCDebug(KGAPIDebug) << "Requesting new token.";
+ 
+-    d->setVisible(true);
+-    d->setUrl(url);
++    d->webview->setVisible(true);
++    if (d->showProgressBar) {
++        d->progressbar->setVisible(true);
++    }
++    d->webview->setUrl(url);
+     d->setProgress(AuthWidget::UserLogin);
+ }
+diff -rupN libkgapi-18.12.2/src/core/ui/authwidget_p.cpp libkgapi-18.12.2.new/src/core/ui/authwidget_p.cpp
+--- libkgapi-18.12.2/src/core/ui/authwidget_p.cpp	2019-01-28 08:39:56.000000000 +0100
++++ libkgapi-18.12.2.new/src/core/ui/authwidget_p.cpp	2019-02-26 16:10:19.700531040 +0100
+@@ -25,81 +25,33 @@
+ #include "private/newtokensfetchjob_p.h"
+ #include "../../debug.h"
+ 
+-#include <QWebEngineProfile>
+-#include <QWebEngineCertificateError>
+-#include <QContextMenuEvent>
+-
+-#include <QtGlobal>
+-#include <QVBoxLayout>
+-#include <QLabel>
+-#include <QTimer>
+-#include <QMessageBox>
+-#include <QAbstractSocket>
+-#include <QUrlQuery>
+-#include <QDateTime>
+-#include <QWebEngineView>
++#include <QWebView>
++#include <QWebFrame>
++#include <QWebElement>
++#include <QNetworkReply>
+ 
+-using namespace KGAPI2;
++#include <QDateTime>
+ 
+-namespace
+-{
++#include <KIO/AccessManager>
+ 
+-class WebView : public QWebEngineView
+-{
+-    Q_OBJECT
+-public:
+-    explicit WebView(QWidget *parent = nullptr)
+-        : QWebEngineView(parent)
+-    {
+-        // Don't store cookies, so that subsequent invocations of AuthJob won't remember
+-        // the previous accounts.
+-        QWebEngineProfile::defaultProfile()->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
+-    }
+ 
+-    void contextMenuEvent(QContextMenuEvent *e) override
+-    {
+-        // No menu
+-        e->accept();
+-    }
+-};
++using namespace KGAPI2;
+ 
+-class WebPage : public QWebEnginePage
++WebView::WebView(QWidget *parent)
++    : QWebView(parent)
+ {
+-    Q_OBJECT
+-public:
+-    explicit WebPage(QObject *parent = nullptr)
+-        : QWebEnginePage(parent)
+-        , mLastError(nullptr)
+-    {
+-    }
+-
+-    QWebEngineCertificateError *lastCertificateError() const
+-    {
+-        return mLastError;
+-    }
+-
+-    bool certificateError(const QWebEngineCertificateError &err) override
+-    {
+-        if (mLastError) {
+-            delete mLastError;
+-        }
+-        mLastError = new QWebEngineCertificateError(err.error(), err.url(), err.isOverridable(), err.errorDescription());
+-        Q_EMIT sslError();
+-
+-        return false; // don't let it through
+-    }
++}
+ 
+-Q_SIGNALS:
+-    void sslError();
+ 
+-private:
+-    QWebEngineCertificateError *mLastError;
+-};
++WebView::~WebView()
++{
+ 
+ }
+ 
+-
+-
++void WebView::contextMenuEvent(QContextMenuEvent *)
++{
++    //Not menu
++}
+ 
+ AuthWidgetPrivate::AuthWidgetPrivate(AuthWidget *parent):
+     QObject(),
+@@ -107,21 +59,13 @@ AuthWidgetPrivate::AuthWidgetPrivate(Aut
+     progress(AuthWidget::None),
+     q(parent)
+ {
++    setupUi();
+ }
+ 
+ AuthWidgetPrivate::~AuthWidgetPrivate()
+ {
+ }
+ 
+-void AuthWidgetPrivate::setSslIcon(const QString &iconName)
+-{
+-    // FIXME: workaround for silly Breeze icons: the small 22x22 icons are
+-    // monochromatic, which is absolutely useless since we are trying to security
+-    // information here, so instead we force use the bigger 48x48 icons which
+-    // have colors and downscale them
+-    sslIndicator->setIcon(QIcon::fromTheme(iconName).pixmap(48));
+-}
+-
+ void AuthWidgetPrivate::setupUi()
+ {
+     vbox = new QVBoxLayout(q);
+@@ -134,26 +78,6 @@ void AuthWidgetPrivate::setupUi()
+     label->setVisible(false);
+     vbox->addWidget(label);
+ 
+-    auto hbox = new QHBoxLayout;
+-    hbox->setSpacing(0);
+-    sslIndicator = new QToolButton(q);
+-    connect(sslIndicator, &QToolButton::clicked,
+-            this, [this]() {
+-                auto page = qobject_cast<WebPage*>(webview->page());
+-                if (auto err = page->lastCertificateError()) {
+-                    QMessageBox msg;
+-                    msg.setIconPixmap(QIcon::fromTheme(QStringLiteral("security-low")).pixmap(64));
+-                    msg.setText(err->errorDescription());
+-                    msg.addButton(QMessageBox::Ok);
+-                    msg.exec();
+-                }
+-            });
+-    hbox->addWidget(sslIndicator);
+-    urlEdit = new QLineEdit(q);
+-    urlEdit->setReadOnly(true);
+-    hbox->addWidget(urlEdit);
+-    vbox->addLayout(hbox);
+-
+     progressbar = new QProgressBar(q);
+     progressbar->setMinimum(0);
+     progressbar->setMaximum(100);
+@@ -161,36 +85,24 @@ void AuthWidgetPrivate::setupUi()
+     vbox->addWidget(progressbar);
+ 
+     webview = new WebView(q);
++    KIO::AccessManager *m = new KIO::AccessManager(webview);
++    webview->page()->networkAccessManager()->setProxyFactory(m->proxyFactory());
++    connect(webview->page()->networkAccessManager(), &QNetworkAccessManager::sslErrors,
++            this, &AuthWidgetPrivate::onSslError);
+ 
+-    auto webpage = new WebPage(webview);
+-    connect(webpage, &WebPage::sslError,
+-            this, [this]() {
+-                setSslIcon(QStringLiteral("security-low"));
+-            });
+-    webview->setPage(webpage);
+ 
+     vbox->addWidget(webview);
+-    connect(webview, &QWebEngineView::loadProgress, progressbar, &QProgressBar::setValue);
+-    connect(webview, &QWebEngineView::urlChanged, this, &AuthWidgetPrivate::webviewUrlChanged);
+-    connect(webview, &QWebEngineView::loadFinished, this, &AuthWidgetPrivate::webviewFinished);
++    connect(webview, &QWebView::loadProgress, progressbar, &QProgressBar::setValue);
++    connect(webview, &QWebView::urlChanged, this, &AuthWidgetPrivate::webviewUrlChanged);
++    connect(webview, &QWebView::loadFinished, this, &AuthWidgetPrivate::webviewFinished);
+ }
+ 
+-void AuthWidgetPrivate::setUrl(const QUrl &url)
++void AuthWidgetPrivate::onSslError(QNetworkReply *reply, const QList<QSslError> &errors)
+ {
+-    webview->setUrl(url);
+-    webview->setFocus();
+-}
+-
+-void AuthWidgetPrivate::setVisible(bool visible)
+-{
+-    sslIndicator->setVisible(visible);
+-    urlEdit->setVisible(visible);
+-    webview->setVisible(visible);
+-    if (showProgressBar && visible) {
+-        progressbar->setVisible(visible);
+-    } else {
+-        progressbar->setVisible(visible);
++    Q_FOREACH (const QSslError &error, errors) {
++        qCDebug(KGAPIDebug) << "SSL ERROR: " << error.errorString();
+     }
++    reply->ignoreSslErrors();
+ }
+ 
+ 
+@@ -206,8 +118,6 @@ void AuthWidgetPrivate::setProgress(Auth
+ void AuthWidgetPrivate::emitError(const enum Error errCode, const QString& msg)
+ {
+     label->setVisible(true);
+-    sslIndicator->setVisible(false);
+-    urlEdit->setVisible(false);
+     webview->setVisible(false);
+     progressbar->setVisible(false);
+ 
+@@ -220,51 +130,16 @@ void AuthWidgetPrivate::emitError(const
+ 
+ void AuthWidgetPrivate::webviewUrlChanged(const QUrl &url)
+ {
+-    qCDebug(KGAPIDebug) << "URLChange:" << url;
+-
+-    // Whoa! That should not happen!
+-    if (url.scheme() != QLatin1String("https")) {
+-        QTimer::singleShot(0, this, [this, url]() {
+-            QUrl sslUrl = url;
+-            sslUrl.setScheme(QStringLiteral("https"));
+-            webview->setUrl(sslUrl);
+-        });
+-        return;
+-    }
++    qCDebug(KGAPIDebug) << url;
+ 
+-    if (!isGoogleHost(url)) {
+-        // We handled SSL above, so we are secure. We are however outside of
+-        // accounts.google.com, which is a little suspicious in context of this class
+-        setSslIcon(QStringLiteral("security-medium"));
+-        return;
+-    }
++    /* Access token here - hide browser and tell user to wait until we
++     * finish the authentication process ourselves */
++    if (url.host() == QLatin1String("accounts.google.com") && url.path() == QLatin1String("/o/oauth2/approval")) {
++        webview->setVisible(false);
++        progressbar->setVisible(false);
++        label->setVisible(true);
+ 
+-    if (qobject_cast<WebPage*>(webview->page())->lastCertificateError()) {
+-        setSslIcon(QStringLiteral("security-low"));
+-    } else {
+-        // We have no way of obtaining current SSL certificate from QWebEngine, but we
+-        // handled SSL and accounts.google.com cases above and QWebEngine did not report
+-        // any SSL error to us, so we can assume we are safe.
+-        setSslIcon(QStringLiteral("security-high"));
+-    }
+-
+-
+-    // Username and password inputs are loaded dynamically, so we only get
+-    // urlChanged, but not urlFinished.
+-    if (isUsernameFrame(url)) {
+-        if (!username.isEmpty()) {
+-            webview->page()->runJavaScript(QStringLiteral("document.getElementById(\"identifierId\").value = \"%1\";").arg(username));
+-        }
+-    } else if (isPasswordFrame(url)) {
+-        if (!password.isEmpty()) {
+-            webview->page()->runJavaScript(QStringLiteral("var elems = document.getElementsByTagName(\"input\");"
+-                                                          "for (var i = 0; i < elems.length; i++) {"
+-                                                          "  if (elems[i].type == \"password\" && elems[i].name == \"password\") {"
+-                                                          "      elems[i].value = \"%1\";"
+-                                                          "      break;"
+-                                                          "  }"
+-                                                          "}").arg(password));
+-        }
++        setProgress(AuthWidget::TokensRetrieval);
+     }
+ }
+ 
+@@ -274,62 +149,58 @@ void AuthWidgetPrivate::webviewFinished(
+         qCWarning(KGAPIDebug) << "Failed to load" << webview->url();
+     }
+ 
+-    const QUrl url = webview->url();
+-    urlEdit->setText(url.toDisplayString(QUrl::PrettyDecoded));
+-    urlEdit->setCursorPosition(0);
+-    qCDebug(KGAPIDebug) << "URLFinished:" << url;
+-}
+-
+-void AuthWidgetPrivate::socketError(QAbstractSocket::SocketError socketError)
+-{
+-    if (connection)
+-        connection->deleteLater();
+-    qCDebug(KGAPIDebug) << QStringLiteral("Socket error when receiving response: %1").arg(socketError);
+-    emitError(InvalidResponse, tr("Error receiving response: %1").arg(socketError));
+-}
+-
+-void AuthWidgetPrivate::socketReady()
+-{
+-    Q_ASSERT(connection);
+-    const QByteArray data = connection->readLine();
+-    connection->write("HTTP/1.1 200 OK\n");
+-    connection->flush();
+-    connection->deleteLater();
+-    qCDebug(KGAPIDebug) << QStringLiteral("Got connection on socket");
+-    if (webview) { // when running in tests we don't have webview or any other widgets
+-        webview->stop();
+-    }
+-    setVisible(false);
+-    if (label) {
+-        label->setVisible(true);
+-    }
++    QUrl url = webview->url();
++    qCDebug(KGAPIDebug) << url;
++
++    if (url.host() == QLatin1String("accounts.google.com") && url.path() == QLatin1String("/ServiceLogin")) {
++        if (username.isEmpty() && password.isEmpty()) {
++            return;
++        }
++
++        QWebFrame *frame = webview->page()->mainFrame();
++        if (!username.isEmpty()) {
++            QWebElement email = frame->findFirstElement(QStringLiteral("input#Email"));
++            if (!email.isNull()) {
++                email.setAttribute(QStringLiteral("value"), username);
++            }
++        }
++
++        if (!password.isEmpty()) {
++            QWebElement passd = frame->findFirstElement(QStringLiteral("input#Passwd"));
++            if (!passd.isNull()) {
++                passd.setAttribute(QStringLiteral("value"), password);
++            }
++        }
+ 
+-    const auto line = data.split(' ');
+-    if (line.size() != 3 || line.at(0) != QByteArray("GET") || !line.at(2).startsWith(QByteArray("HTTP/1.1"))) {
+-        qCDebug(KGAPIDebug) << QStringLiteral("Token response invalid");
+-        emitError(InvalidResponse, tr("Token response invalid"));
+         return;
+     }
+ 
+-    //qCDebug(KGAPIDebug) << "Receiving data on socket: " << data;
+-    const QUrl url(QString::fromLatin1(line.at(1)));
+-    const QUrlQuery query(url);
+-    const QString code = query.queryItemValue(QStringLiteral("code"));
+-    if (code.isEmpty()) {
+-        const QString error = query.queryItemValue(QStringLiteral("error"));
+-        if (!error.isEmpty()) {
+-            emitError(UnknownError, error);
+-            qCDebug(KGAPIDebug) << error;
++    if (url.host() == QLatin1String("accounts.google.com") && url.path() == QLatin1String("/o/oauth2/approval")) {
++        QString title = webview->title();
++        QString token;
++
++        if (title.startsWith(QLatin1String("success"), Qt::CaseInsensitive)) {
++            int pos = title.indexOf(QLatin1String("code="));
++            /* Skip the 'code=' string as well */
++            token = title.mid (pos + 5);
+         } else {
+-            qCDebug(KGAPIDebug) << QStringLiteral("Could not extract token from HTTP answer");
+-            emitError(InvalidResponse, tr("Could not extract token from HTTP answer"));
++            qCDebug(KGAPIDebug) << "Parsing token page failed. Title:" << title;
++            qCDebug(KGAPIDebug) << webview->page()->mainFrame()->toHtml();
++            emitError(AuthError, tr("Parsing token page failed."));
++            return;
+         }
+-        return;
+-    }
+ 
+-    Q_ASSERT(serverPort != -1);
+-    auto fetch = new KGAPI2::NewTokensFetchJob(code, apiKey, secretKey, serverPort);
+-    connect(fetch, &Job::finished, this, &AuthWidgetPrivate::tokensReceived);
++        if (token.isEmpty()) {
++            qCDebug(KGAPIDebug) << "Failed to obtain token.";
++            qCDebug(KGAPIDebug) << webview->page()->mainFrame()->toHtml();
++            emitError(AuthError, tr("Failed to obtain token."));
++            return;
++        }
++
++        KGAPI2::NewTokensFetchJob *fetchJob = new KGAPI2::NewTokensFetchJob(token, apiKey, secretKey);
++        connect(fetchJob, &Job::finished,
++                this, &AuthWidgetPrivate::tokensReceived);
++    }
+ }
+ 
+ void AuthWidgetPrivate::tokensReceived(KGAPI2::Job* job)
+@@ -368,5 +239,3 @@ void AuthWidgetPrivate::accountInfoRecei
+     setProgress(AuthWidget::Finished);
+ }
+ 
+-
+-#include "authwidget_p.moc"
+diff -rupN libkgapi-18.12.2/src/core/ui/authwidget_p.h libkgapi-18.12.2.new/src/core/ui/authwidget_p.h
+--- libkgapi-18.12.2/src/core/ui/authwidget_p.h	2019-01-28 08:39:56.000000000 +0100
++++ libkgapi-18.12.2.new/src/core/ui/authwidget_p.h	2019-02-26 16:08:20.208957715 +0100
+@@ -27,21 +27,27 @@
+ #include "types.h"
+ #include "kgapicore_export.h"
+ 
+-#include <QLineEdit>
+-#include <QToolButton>
+ #include <QProgressBar>
+-#include <QAbstractSocket>
+-
+-class QVBoxLayout;
+-class QLabel;
+-class QWebEngineView;
+-class QTcpServer;
+-class QTcpSocket;
++#include <QVBoxLayout>
++#include <QWebView>
++#include <QLabel>
+ 
+ namespace KGAPI2 {
+ 
+ class Job;
+ 
++class WebView : public QWebView
++{
++    Q_OBJECT
++public:
++    explicit WebView(QWidget *parent=0);
++    ~WebView();
++
++protected:
++    void contextMenuEvent( QContextMenuEvent *);
++};
++
++
+ // Exported for tests, otherwise internal
+ class KGAPICORE_EXPORT AuthWidgetPrivate: public QObject {
+ 
+@@ -49,9 +55,6 @@ class KGAPICORE_EXPORT AuthWidgetPrivate
+ 
+   public:
+     explicit AuthWidgetPrivate(AuthWidget *parent);
+-    virtual void setupUi();
+-    virtual void setUrl(const QUrl &url);
+-    virtual void setVisible(bool visible);
+ 
+     ~AuthWidgetPrivate() override;
+ 
+@@ -64,37 +67,25 @@ class KGAPICORE_EXPORT AuthWidgetPrivate
+     QString apiKey;
+     QString secretKey;
+ 
+-    QToolButton *sslIndicator = nullptr;
+-    QLineEdit *urlEdit = nullptr;
+-    QProgressBar *progressbar = nullptr;
+-    QVBoxLayout *vbox = nullptr;
+-    QWebEngineView *webview = nullptr;
+-    QLabel *label = nullptr;
+-
+-    QTcpServer *server = nullptr;
+-    int serverPort = 0;
+-    QTcpSocket *connection = nullptr;
++    QProgressBar *progressbar;
++    QVBoxLayout *vbox;
++    WebView *webview;
++    QLabel *label;
+ 
+   private Q_SLOTS:
++    void onSslError(QNetworkReply *reply, const QList<QSslError> &errors);
++
+     void emitError(const KGAPI2::Error errCode, const QString &msg);
+     void webviewUrlChanged(const QUrl &url);
+     void webviewFinished(bool ok);
+ 
+-    void socketReady();
+-    void socketError(QAbstractSocket::SocketError error);
+     void tokensReceived(KGAPI2::Job *job);
+     void accountInfoReceived(KGAPI2::Job *job);
+ 
+   private:
++    void setupUi();
+     void setProgress(AuthWidget::Progress progress);
+ 
+-    bool isGoogleHost(const QUrl &url) const { return url.host() == QLatin1String("accounts.google.com"); }
+-    bool isSigninPage(const QUrl &url) const { return url.path() == QLatin1String("/signin/oauth"); }
+-    bool isUsernameFrame(const QUrl &url) { return url.path() == QLatin1String("/signin/oauth/identifier"); }
+-    bool isPasswordFrame(const QUrl &url) { return url.path() == QLatin1String("/signin/v2/challenge/pwd"); }
+-
+-    void setSslIcon(const QString &icon);
+-
+     AuthWidget *q;
+ 
+     friend class AuthWidget;
