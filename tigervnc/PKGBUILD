@@ -1,0 +1,75 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Maintainer: Uroš Vampl <mobile.leecher at gmail dot com>
+
+pkgname=tigervnc
+pkgver=1.9.0
+pkgrel=1
+_xorgver=1.20.4
+pkgdesc="Suite of VNC servers and clients. Based on the VNC 4 branch of TightVNC."
+arch=(x86_64 powerpc64le)
+url="http://www.tigervnc.org"
+license=('GPL')
+depends=('fltk' 'pam' 'gnutls' 'libjpeg-turbo' 'libxtst' 'pixman'
+	 'xorg-xauth' 'xorg-xsetroot' 'xkeyboard-config' 'xorg-xkbcomp'
+	 'libgl' 'libgcrypt' 'perl' 'libxdamage' 'libxfont2' 'libdrm')
+makedepends=('cmake' 'xorg-font-util' 'xorg-util-macros' 'bigreqsproto'
+	     'xtrans' 'xorgproto' 'mesa' 'imagemagick' 'java-environment=8')
+optdepends=('mesa: for OpenGL functionality in Xvnc')
+conflicts=('tightvnc')
+source=($pkgname-$pkgver.tar.gz::https://github.com/TigerVNC/tigervnc/archive/v${pkgver}.tar.gz
+	ftp://ftp.freedesktop.org/pub/xorg/individual/xserver/xorg-server-${_xorgver}.tar.bz2
+	vncserver.service
+	vncviewer.desktop
+        CVE-2014-8240-849479.patch
+        CVE-2014-8241-849478.patch)
+sha256sums=('f15ced8500ec56356c3bf271f52e58ed83729118361c7103eab64a618441f740'
+	    'fe0fd493ebe93bfc56bede382fa204458ff5f636ea54d413a5d1bd58e19166ee'
+            '80f8fc7598d05e645ae73bc3371bbdededf07136a9f024ce6ebbfe469335b16e'
+            '2ada7da1a926d78f11d2dd8ec376ac5877d2ce2bbb57a99526c13d8fcae6ddd7'
+            '7eead5d91adb424dbb30bc578aff6672c5783e74a1a724f32693500177bd7de2'
+            '2a61160f84598722f841ce9b28ee0b43785e980a866c8e150edc260ddefbe5d5')
+
+prepare() {
+  mkdir -p "$srcdir"/${pkgname}-${pkgver}/build
+  cd "$srcdir"/${pkgname}-${pkgver}/
+  patch -Np1 -i ../CVE-2014-8240-849479.patch
+  patch -Np1 -i ../CVE-2014-8241-849478.patch
+
+  cd "$srcdir"/${pkgname}-${pkgver}/unix/xserver
+  cp -r "$srcdir"/xorg-server-${_xorgver}/* .
+  patch -Np1 -i ../xserver120.patch
+}
+
+build() {
+  cd "$srcdir"/${pkgname}-${pkgver}/
+
+  cmake -G "Unix Makefiles" \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DBUILD_JAVA=TRUE \
+    "$srcdir"/${pkgname}-${pkgver}
+  make
+
+  cd "$srcdir"/${pkgname}-${pkgver}/unix/xserver
+  autoreconf -fiv
+  CFLAGS="$CFLAGS -I/usr/include/libdrm" ./configure --prefix=/usr \
+	--disable-static --without-dtrace \
+	--disable-xorg --disable-xnest --disable-xvfb --disable-dmx \
+	--disable-xwin --disable-xephyr --disable-kdrive --disable-xwayland \
+	--disable-config-hal --disable-config-udev --with-pic \
+	--disable-unit-tests --disable-devel-docs --disable-selective-werror \
+	--disable-dri --enable-dri2 --enable-dri3 --enable-glx
+  make
+}
+
+package() {
+  cd "$srcdir"/${pkgname}-${pkgver}
+  make DESTDIR="$pkgdir" install
+  cd "$srcdir"/${pkgname}-${pkgver}/unix/xserver
+  make DESTDIR="$pkgdir" install
+
+  install -Dm0644 "$srcdir"/${pkgname}-${pkgver}/contrib/systemd/user/vncserver@.service \
+    "$pkgdir"/usr/lib/systemd/user/vncserver@.service
+  install -Dm0644 "$srcdir"/vncserver.service "$pkgdir"/usr/lib/systemd/system/vncserver.service
+  install -Dm0644 "$srcdir"/vncviewer.desktop "$pkgdir"/usr/share/applications/vncviewer.desktop
+}
