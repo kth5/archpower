@@ -1,0 +1,56 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jaroslav Lichtblau <svetlemodry@archlinux.org>
+# Contributor: Chris Brannon <cmbrannon@cox.net>
+
+pkgname=emacs-nox
+pkgver=26.1
+pkgrel=1
+pkgdesc="The extensible, customizable, self-documenting real-time display editor, without X11 support"
+arch=(x86_64 powerpc64le)
+url="http://www.gnu.org/software/emacs/emacs.html"
+license=('GPL3')
+depends=('dbus' 'ncurses' 'perl' 'libxml2' 'glib2' 'gnutls')
+provides=('emacs')
+conflicts=('emacs')
+changelog=$pkgname.changelog
+source=(ftp://ftp.gnu.org/gnu/emacs/emacs-$pkgver.tar.xz{,.sig}
+        0001-Ignore-color-fonts-when-using-Xft.patch
+        0001-Port-FC_COLOR-change-to-older-fontconfig.patch
+        0001-src-ftfont.c-ftfont_spec_pattern-Fix-whitespace.patch)
+validpgpkeys=('28D3BED851FDF3AB57FEF93C233587A47C207910')
+sha256sums=('1cf4fc240cd77c25309d15e18593789c8dbfba5c2b44d8f77c886542300fd32c'
+            'SKIP'
+            '5bc53171bbb82e6dea26950f14da6a06f4371162b3bccb624397365e6e02f480'
+            '6d16de2078108d742a8935044926f439869e231cc18ec23777bbed4857625f96'
+            'ca48398d6a83e9a22a4117beca151f476e6286a9abbfddd0f7c0f187ebfc50d7')
+
+prepare() {
+  cd "${srcdir}"/emacs-$pkgver
+
+  patch -Np1 -i "${srcdir}/0001-Ignore-color-fonts-when-using-Xft.patch"
+  patch -Np1 -i "${srcdir}/0001-Port-FC_COLOR-change-to-older-fontconfig.patch"
+  patch -Np1 -i "${srcdir}/0001-src-ftfont.c-ftfont_spec_pattern-Fix-whitespace.patch"
+}
+
+build() {
+  cd "${srcdir}"/emacs-$pkgver
+
+  ./configure --prefix=/usr --sysconfdir=/etc --libexecdir=/usr/lib \
+    --localstatedir=/var --without-x --without-sound --with-modules
+  make
+}
+
+package() {
+  cd "${srcdir}"/emacs-$pkgver
+
+  make DESTDIR="${pkgdir}" install
+
+# remove conflict with ctags package
+  mv "${pkgdir}"/usr/bin/{ctags,ctags.emacs}
+  mv "${pkgdir}"/usr/share/man/man1/{ctags.1.gz,ctags.emacs.1}
+
+# fix user/root permissions on usr/share files
+  find "${pkgdir}"/usr/share/emacs/$pkgver -exec chown root.root {} \;
+# remove .desktop file and icons
+  rm -rf "${pkgdir}"/usr/share/{applications,icons}
+}
