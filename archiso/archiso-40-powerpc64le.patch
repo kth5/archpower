@@ -1,0 +1,516 @@
+diff -ruN archiso-40.orig/archiso/initcpio/install/archiso_kms archiso-40/archiso/initcpio/install/archiso_kms
+--- archiso-40.orig/archiso/initcpio/install/archiso_kms	2019-04-12 12:17:38.400000000 +0000
++++ archiso-40/archiso/initcpio/install/archiso_kms	2019-04-12 12:17:48.160000000 +0000
+@@ -3,10 +3,6 @@
+ build() {
+     add_module "radeon"
+     add_module "nouveau"
+-    add_module "i915"
+-    add_module "via-agp"
+-    add_module "sis-agp"
+-    add_module "intel-agp"
+ 
+     if [[ $(uname -m) == i686 ]]; then
+         add_module "amd64-agp"
+diff -ruN archiso-40.orig/archiso/mkarchiso archiso-40/archiso/mkarchiso
+--- archiso-40.orig/archiso/mkarchiso	2019-04-12 12:17:38.400000000 +0000
++++ archiso-40/archiso/mkarchiso	2019-04-12 12:18:53.510000000 +0000
+@@ -11,8 +11,8 @@
+ quiet="y"
+ pacman_conf="/etc/pacman.conf"
+ export iso_label="ARCH_$(date +%Y%m)"
+-iso_publisher="Arch Linux <http://www.archlinux.org>"
+-iso_application="Arch Linux Live/Rescue CD"
++iso_publisher="Arch Linux POWER <https://github.com/kth5/archpower>"
++iso_application="Arch Linux POWER Live/Rescue Image"
+ install_dir="arch"
+ work_dir="work"
+ out_dir="out"
+@@ -43,7 +43,7 @@
+ 
+ _chroot_init() {
+     mkdir -p ${work_dir}/airootfs
+-    _pacman "base syslinux"
++    _pacman "base"
+ }
+ 
+ _chroot_run() {
+@@ -276,12 +276,12 @@
+ command_iso () {
+     local _iso_efi_boot_args=""
+ 
+-    if [[ ! -f "${work_dir}/iso/isolinux/isolinux.bin" ]]; then
+-         _msg_error "The file '${work_dir}/iso/isolinux/isolinux.bin' does not exist." 1
+-    fi
+-    if [[ ! -f "${work_dir}/iso/isolinux/isohdpfx.bin" ]]; then
+-         _msg_error "The file '${work_dir}/iso/isolinux/isohdpfx.bin' does not exist." 1
+-    fi
++    #if [[ ! -f "${work_dir}/iso/isolinux/isolinux.bin" ]]; then
++    #     _msg_error "The file '${work_dir}/iso/isolinux/isolinux.bin' does not exist." 1
++    #fi
++    #if [[ ! -f "${work_dir}/iso/isolinux/isohdpfx.bin" ]]; then
++    #     _msg_error "The file '${work_dir}/iso/isolinux/isohdpfx.bin' does not exist." 1
++    #fi
+ 
+     # If exists, add an EFI "El Torito" boot image (FAT filesystem) to ISO-9660 image.
+     if [[ -f "${work_dir}/iso/EFI/archiso/efiboot.img" ]]; then
+@@ -299,20 +299,15 @@
+     if [[ ${quiet} == "y" ]]; then
+         _qflag="-quiet"
+     fi
+-    xorriso -as mkisofs ${_qflag} \
+-        -iso-level 3 \
+-        -full-iso9660-filenames \
+-        -volid "${iso_label}" \
+-        -appid "${iso_application}" \
+-        -publisher "${iso_publisher}" \
+-        -preparer "prepared by mkarchiso" \
+-        -eltorito-boot isolinux/isolinux.bin \
+-        -eltorito-catalog isolinux/boot.cat \
+-        -no-emul-boot -boot-load-size 4 -boot-info-table \
+-        -isohybrid-mbr ${work_dir}/iso/isolinux/isohdpfx.bin \
+-        ${_iso_efi_boot_args} \
+-        -output "${out_dir}/${img_name}" \
+-        "${work_dir}/iso/"
++
++    grub-mkrescue \
++       -d /usr/lib/grub/powerpc-ieee1275 \
++       -o ${out_dir}/${img_name} \
++       -volid "${iso_label}" \
++       -appid "${iso_application}" \
++       -publisher "${iso_publisher}" \
++       "${work_dir}/iso/"
++
+     _msg_info "Done! | $(ls -sh ${out_dir}/${img_name})"
+ }
+ 
+diff -ruN archiso-40.orig/configs/powerpc-ieee1275-boot/boot/grub/grub.cfg archiso-40/configs/powerpc-ieee1275-boot/boot/grub/grub.cfg
+--- archiso-40.orig/configs/powerpc-ieee1275-boot/boot/grub/grub.cfg	1970-01-01 00:00:00.000000000 +0000
++++ archiso-40/configs/powerpc-ieee1275-boot/boot/grub/grub.cfg	2019-04-12 12:19:13.640000000 +0000
+@@ -0,0 +1,19 @@
++set timeout=-1
++
++menuentry 'Arch Linux POWER Install' {
++        set gfxpayload=keep
++        insmod normal 
++        echo    'Loading Linux linux ...'
++        linux   /arch/boot/powerpc64le/vmlinuz --- quiet archisobasedir=arch archisolabel=ARCH_201904
++        echo    'Loading initial ramdisk ...'
++        initrd  /arch/boot/powerpc64le/archiso.img
++}
++
++menuentry 'Arch Linux POWER Install (serial hvc0 as console' {
++        set gfxpayload=keep
++        insmod normal 
++        echo    'Loading Linux linux ...'
++        linux   /arch/boot/powerpc64le/vmlinuz --- console=hvc0 quiet archisobasedir=arch archisolabel=ARCH_201904
++        echo    'Loading initial ramdisk ...'
++        initrd  /arch/boot/powerpc64le/archiso.img
++}
+diff -ruN archiso-40.orig/configs/releng/build.sh archiso-40/configs/releng/build.sh
+--- archiso-40.orig/configs/releng/build.sh	2019-04-12 12:17:38.430000000 +0000
++++ archiso-40/configs/releng/build.sh	2019-04-12 12:17:48.160000000 +0000
+@@ -4,8 +4,8 @@
+ 
+ iso_name=archlinux
+ iso_label="ARCH_$(date +%Y%m)"
+-iso_publisher="Arch Linux <http://www.archlinux.org>"
+-iso_application="Arch Linux Live/Rescue CD"
++iso_publisher="Arch Linux <http://www.archlinuxpower.org>"
++iso_application="Arch Linux POWER Live/Rescue CD"
+ iso_version=$(date +%Y.%m.%d)
+ install_dir=arch
+ work_dir=work
+@@ -55,39 +55,39 @@
+ make_pacman_conf() {
+     local _cache_dirs
+     _cache_dirs=($(pacman -v 2>&1 | grep '^Cache Dirs:' | sed 's/Cache Dirs:\s*//g'))
+-    sed -r "s|^#?\\s*CacheDir.+|CacheDir = $(echo -n ${_cache_dirs[@]})|g" ${script_path}/pacman.conf > ${work_dir}/pacman.conf
++    sed -r "s|^#?\\s*CacheDir.+|CacheDir = $(echo -n ${_cache_dirs[@]})|g" /etc/pacman.conf > ${work_dir}/pacman.conf
+ }
+ 
+ # Base installation, plus needed packages (airootfs)
+ make_basefs() {
+-    mkarchiso ${verbose} -w "${work_dir}/x86_64" -C "${work_dir}/pacman.conf" -D "${install_dir}" init
+-    mkarchiso ${verbose} -w "${work_dir}/x86_64" -C "${work_dir}/pacman.conf" -D "${install_dir}" -p "haveged intel-ucode amd-ucode memtest86+ mkinitcpio-nfs-utils nbd zsh efitools" install
++    mkarchiso ${verbose} -w "${work_dir}/powerpc64le" -C "${work_dir}/pacman.conf" -D "${install_dir}" init
++    mkarchiso ${verbose} -w "${work_dir}/powerpc64le" -C "${work_dir}/pacman.conf" -D "${install_dir}" -p "haveged mkinitcpio-nfs-utils nbd zsh" install
+ }
+ 
+ # Additional packages (airootfs)
+ make_packages() {
+-    mkarchiso ${verbose} -w "${work_dir}/x86_64" -C "${work_dir}/pacman.conf" -D "${install_dir}" -p "$(grep -h -v ^# ${script_path}/packages.x86_64)" install
++    mkarchiso ${verbose} -w "${work_dir}/powerpc64le" -C "${work_dir}/pacman.conf" -D "${install_dir}" -p "$(grep -h -v ^# ${script_path}/packages.powerpc64le)" install
+ }
+ 
+ # Copy mkinitcpio archiso hooks and build initramfs (airootfs)
+ make_setup_mkinitcpio() {
+     local _hook
+-    mkdir -p ${work_dir}/x86_64/airootfs/etc/initcpio/hooks
+-    mkdir -p ${work_dir}/x86_64/airootfs/etc/initcpio/install
++    mkdir -p ${work_dir}/powerpc64le/airootfs/etc/initcpio/hooks
++    mkdir -p ${work_dir}/powerpc64le/airootfs/etc/initcpio/install
+     for _hook in archiso archiso_shutdown archiso_pxe_common archiso_pxe_nbd archiso_pxe_http archiso_pxe_nfs archiso_loop_mnt; do
+-        cp /usr/lib/initcpio/hooks/${_hook} ${work_dir}/x86_64/airootfs/etc/initcpio/hooks
+-        cp /usr/lib/initcpio/install/${_hook} ${work_dir}/x86_64/airootfs/etc/initcpio/install
++        cp /usr/lib/initcpio/hooks/${_hook} ${work_dir}/powerpc64le/airootfs/etc/initcpio/hooks
++        cp /usr/lib/initcpio/install/${_hook} ${work_dir}/powerpc64le/airootfs/etc/initcpio/install
+     done
+-    sed -i "s|/usr/lib/initcpio/|/etc/initcpio/|g" ${work_dir}/x86_64/airootfs/etc/initcpio/install/archiso_shutdown
+-    cp /usr/lib/initcpio/install/archiso_kms ${work_dir}/x86_64/airootfs/etc/initcpio/install
+-    cp /usr/lib/initcpio/archiso_shutdown ${work_dir}/x86_64/airootfs/etc/initcpio
+-    cp ${script_path}/mkinitcpio.conf ${work_dir}/x86_64/airootfs/etc/mkinitcpio-archiso.conf
++    sed -i "s|/usr/lib/initcpio/|/etc/initcpio/|g" ${work_dir}/powerpc64le/airootfs/etc/initcpio/install/archiso_shutdown
++    cp /usr/lib/initcpio/install/archiso_kms ${work_dir}/powerpc64le/airootfs/etc/initcpio/install
++    cp /usr/lib/initcpio/archiso_shutdown ${work_dir}/powerpc64le/airootfs/etc/initcpio
++    cp ${script_path}/mkinitcpio.conf ${work_dir}/powerpc64le/airootfs/etc/mkinitcpio-archiso.conf
+     gnupg_fd=
+     if [[ ${gpg_key} ]]; then
+       gpg --export ${gpg_key} >${work_dir}/gpgkey
+       exec 17<>${work_dir}/gpgkey
+     fi
+-    ARCHISO_GNUPG_FD=${gpg_key:+17} mkarchiso ${verbose} -w "${work_dir}/x86_64" -C "${work_dir}/pacman.conf" -D "${install_dir}" -r 'mkinitcpio -c /etc/mkinitcpio-archiso.conf -k /boot/vmlinuz-linux -g /boot/archiso.img' run
++    ARCHISO_GNUPG_FD=${gpg_key:+17} mkarchiso ${verbose} -w "${work_dir}/powerpc64le" -C "${work_dir}/pacman.conf" -D "${install_dir}" -r 'mkinitcpio -c /etc/mkinitcpio-archiso.conf -k /boot/vmlinuz-linux -g /boot/archiso.img' run
+     if [[ ${gpg_key} ]]; then
+       exec 17<&-
+     fi
+@@ -95,77 +95,72 @@
+ 
+ # Customize installation (airootfs)
+ make_customize_airootfs() {
+-    cp -af ${script_path}/airootfs ${work_dir}/x86_64
++    cp -af ${script_path}/airootfs ${work_dir}/powerpc64le
+ 
+-    cp ${script_path}/pacman.conf ${work_dir}/x86_64/airootfs/etc
++    cp ${script_path}/pacman.conf ${work_dir}/powerpc64le/airootfs/etc
+ 
+-    curl -o ${work_dir}/x86_64/airootfs/etc/pacman.d/mirrorlist 'https://www.archlinux.org/mirrorlist/?country=all&protocol=http&use_mirror_status=on'
++#    curl -o ${work_dir}/powerpc64le/airootfs/etc/pacman.d/mirrorlist 'https://www.archlinux.org/mirrorlist/?country=all&protocol=http&use_mirror_status=on'
+ 
+-    lynx -dump -nolist 'https://wiki.archlinux.org/index.php/Installation_Guide?action=render' >> ${work_dir}/x86_64/airootfs/root/install.txt
++    lynx -dump -nolist 'https://wiki.archlinux.org/index.php/Installation_Guide?action=render' >> ${work_dir}/powerpc64le/airootfs/root/install.txt
+ 
+-    mkarchiso ${verbose} -w "${work_dir}/x86_64" -C "${work_dir}/pacman.conf" -D "${install_dir}" -r '/root/customize_airootfs.sh' run
+-    rm ${work_dir}/x86_64/airootfs/root/customize_airootfs.sh
++    mkarchiso ${verbose} -w "${work_dir}/powerpc64le" -C "${work_dir}/pacman.conf" -D "${install_dir}" -r '/root/customize_airootfs.sh' run
++    rm ${work_dir}/powerpc64le/airootfs/root/customize_airootfs.sh
+ }
+ 
+ # Prepare kernel/initramfs ${install_dir}/boot/
+ make_boot() {
+-    mkdir -p ${work_dir}/iso/${install_dir}/boot/x86_64
+-    cp ${work_dir}/x86_64/airootfs/boot/archiso.img ${work_dir}/iso/${install_dir}/boot/x86_64/archiso.img
+-    cp ${work_dir}/x86_64/airootfs/boot/vmlinuz-linux ${work_dir}/iso/${install_dir}/boot/x86_64/vmlinuz
++    mkdir -p ${work_dir}/iso/${install_dir}/boot/powerpc64le
++    cp ${work_dir}/powerpc64le/airootfs/boot/archiso.img ${work_dir}/iso/${install_dir}/boot/powerpc64le/archiso.img
++    cp ${work_dir}/powerpc64le/airootfs/boot/vmlinuz-linux ${work_dir}/iso/${install_dir}/boot/powerpc64le/vmlinuz
+ }
+ 
+ # Add other aditional/extra files to ${install_dir}/boot/
+ make_boot_extra() {
+-    cp ${work_dir}/x86_64/airootfs/boot/memtest86+/memtest.bin ${work_dir}/iso/${install_dir}/boot/memtest
+-    cp ${work_dir}/x86_64/airootfs/usr/share/licenses/common/GPL2/license.txt ${work_dir}/iso/${install_dir}/boot/memtest.COPYING
+-    cp ${work_dir}/x86_64/airootfs/boot/intel-ucode.img ${work_dir}/iso/${install_dir}/boot/intel_ucode.img
+-    cp ${work_dir}/x86_64/airootfs/usr/share/licenses/intel-ucode/LICENSE ${work_dir}/iso/${install_dir}/boot/intel_ucode.LICENSE
+-    cp ${work_dir}/x86_64/airootfs/boot/amd-ucode.img ${work_dir}/iso/${install_dir}/boot/amd_ucode.img
+-    cp ${work_dir}/x86_64/airootfs/usr/share/licenses/amd-ucode/LICENSE ${work_dir}/iso/${install_dir}/boot/amd_ucode.LICENSE
++    cp ${work_dir}/powerpc64le/airootfs/usr/share/licenses/common/GPL2/license.txt ${work_dir}/iso/${install_dir}/boot/memtest.COPYING
+ }
+ 
+ # Prepare /${install_dir}/boot/syslinux
+ make_syslinux() {
+-    _uname_r=$(file -b ${work_dir}/x86_64/airootfs/boot/vmlinuz-linux| awk 'f{print;f=0} /version/{f=1}' RS=' ')
++    _uname_r=$(file -b ${work_dir}/powerpc64le/airootfs/boot/vmlinuz-linux| awk 'f{print;f=0} /version/{f=1}' RS=' ')
+     mkdir -p ${work_dir}/iso/${install_dir}/boot/syslinux
+     for _cfg in ${script_path}/syslinux/*.cfg; do
+         sed "s|%ARCHISO_LABEL%|${iso_label}|g;
+              s|%INSTALL_DIR%|${install_dir}|g" ${_cfg} > ${work_dir}/iso/${install_dir}/boot/syslinux/${_cfg##*/}
+     done
+     cp ${script_path}/syslinux/splash.png ${work_dir}/iso/${install_dir}/boot/syslinux
+-    cp ${work_dir}/x86_64/airootfs/usr/lib/syslinux/bios/*.c32 ${work_dir}/iso/${install_dir}/boot/syslinux
+-    cp ${work_dir}/x86_64/airootfs/usr/lib/syslinux/bios/lpxelinux.0 ${work_dir}/iso/${install_dir}/boot/syslinux
+-    cp ${work_dir}/x86_64/airootfs/usr/lib/syslinux/bios/memdisk ${work_dir}/iso/${install_dir}/boot/syslinux
++    cp ${work_dir}/powerpc64le/airootfs/usr/lib/syslinux/bios/*.c32 ${work_dir}/iso/${install_dir}/boot/syslinux
++    cp ${work_dir}/powerpc64le/airootfs/usr/lib/syslinux/bios/lpxelinux.0 ${work_dir}/iso/${install_dir}/boot/syslinux
++    cp ${work_dir}/powerpc64le/airootfs/usr/lib/syslinux/bios/memdisk ${work_dir}/iso/${install_dir}/boot/syslinux
+     mkdir -p ${work_dir}/iso/${install_dir}/boot/syslinux/hdt
+-    gzip -c -9 ${work_dir}/x86_64/airootfs/usr/share/hwdata/pci.ids > ${work_dir}/iso/${install_dir}/boot/syslinux/hdt/pciids.gz
+-    gzip -c -9 ${work_dir}/x86_64/airootfs/usr/lib/modules/${_uname_r}/modules.alias > ${work_dir}/iso/${install_dir}/boot/syslinux/hdt/modalias.gz
++    gzip -c -9 ${work_dir}/powerpc64le/airootfs/usr/share/hwdata/pci.ids > ${work_dir}/iso/${install_dir}/boot/syslinux/hdt/pciids.gz
++    gzip -c -9 ${work_dir}/powerpc64le/airootfs/usr/lib/modules/${_uname_r}/modules.alias > ${work_dir}/iso/${install_dir}/boot/syslinux/hdt/modalias.gz
+ }
+ 
+ # Prepare /isolinux
+ make_isolinux() {
+     mkdir -p ${work_dir}/iso/isolinux
+     sed "s|%INSTALL_DIR%|${install_dir}|g" ${script_path}/isolinux/isolinux.cfg > ${work_dir}/iso/isolinux/isolinux.cfg
+-    cp ${work_dir}/x86_64/airootfs/usr/lib/syslinux/bios/isolinux.bin ${work_dir}/iso/isolinux/
+-    cp ${work_dir}/x86_64/airootfs/usr/lib/syslinux/bios/isohdpfx.bin ${work_dir}/iso/isolinux/
+-    cp ${work_dir}/x86_64/airootfs/usr/lib/syslinux/bios/ldlinux.c32 ${work_dir}/iso/isolinux/
++    cp ${work_dir}/powerpc64le/airootfs/usr/lib/syslinux/bios/isolinux.bin ${work_dir}/iso/isolinux/
++    cp ${work_dir}/powerpc64le/airootfs/usr/lib/syslinux/bios/isohdpfx.bin ${work_dir}/iso/isolinux/
++    cp ${work_dir}/powerpc64le/airootfs/usr/lib/syslinux/bios/ldlinux.c32 ${work_dir}/iso/isolinux/
+ }
+ 
+ # Prepare /EFI
+ make_efi() {
+     mkdir -p ${work_dir}/iso/EFI/boot
+-    cp ${work_dir}/x86_64/airootfs/usr/share/efitools/efi/PreLoader.efi ${work_dir}/iso/EFI/boot/bootx64.efi
+-    cp ${work_dir}/x86_64/airootfs/usr/share/efitools/efi/HashTool.efi ${work_dir}/iso/EFI/boot/
++    cp ${work_dir}/powerpc64le/airootfs/usr/share/efitools/efi/PreLoader.efi ${work_dir}/iso/EFI/boot/bootx64.efi
++    cp ${work_dir}/powerpc64le/airootfs/usr/share/efitools/efi/HashTool.efi ${work_dir}/iso/EFI/boot/
+ 
+-    cp ${work_dir}/x86_64/airootfs/usr/lib/systemd/boot/efi/systemd-bootx64.efi ${work_dir}/iso/EFI/boot/loader.efi
++    cp ${work_dir}/powerpc64le/airootfs/usr/lib/systemd/boot/efi/systemd-bootx64.efi ${work_dir}/iso/EFI/boot/loader.efi
+ 
+     mkdir -p ${work_dir}/iso/loader/entries
+     cp ${script_path}/efiboot/loader/loader.conf ${work_dir}/iso/loader/
+-    cp ${script_path}/efiboot/loader/entries/uefi-shell-v2-x86_64.conf ${work_dir}/iso/loader/entries/
+-    cp ${script_path}/efiboot/loader/entries/uefi-shell-v1-x86_64.conf ${work_dir}/iso/loader/entries/
++    cp ${script_path}/efiboot/loader/entries/uefi-shell-v2-powerpc64le.conf ${work_dir}/iso/loader/entries/
++    cp ${script_path}/efiboot/loader/entries/uefi-shell-v1-powerpc64le.conf ${work_dir}/iso/loader/entries/
+ 
+     sed "s|%ARCHISO_LABEL%|${iso_label}|g;
+          s|%INSTALL_DIR%|${install_dir}|g" \
+-        ${script_path}/efiboot/loader/entries/archiso-x86_64-usb.conf > ${work_dir}/iso/loader/entries/archiso-x86_64.conf
++        ${script_path}/efiboot/loader/entries/archiso-powerpc64le-usb.conf > ${work_dir}/iso/loader/entries/archiso-powerpc64le.conf
+ 
+     # EFI Shell 2.0 for UEFI 2.3+
+     curl -o ${work_dir}/iso/EFI/shellx64_v2.efi https://raw.githubusercontent.com/tianocore/edk2/master/ShellBinPkg/UefiShell/X64/Shell.efi
+@@ -183,26 +178,26 @@
+     mount ${work_dir}/iso/EFI/archiso/efiboot.img ${work_dir}/efiboot
+ 
+     mkdir -p ${work_dir}/efiboot/EFI/archiso
+-    cp ${work_dir}/iso/${install_dir}/boot/x86_64/vmlinuz ${work_dir}/efiboot/EFI/archiso/vmlinuz.efi
+-    cp ${work_dir}/iso/${install_dir}/boot/x86_64/archiso.img ${work_dir}/efiboot/EFI/archiso/archiso.img
++    cp ${work_dir}/iso/${install_dir}/boot/powerpc64le/vmlinuz ${work_dir}/efiboot/EFI/archiso/vmlinuz.efi
++    cp ${work_dir}/iso/${install_dir}/boot/powerpc64le/archiso.img ${work_dir}/efiboot/EFI/archiso/archiso.img
+ 
+     cp ${work_dir}/iso/${install_dir}/boot/intel_ucode.img ${work_dir}/efiboot/EFI/archiso/intel_ucode.img
+     cp ${work_dir}/iso/${install_dir}/boot/amd_ucode.img ${work_dir}/efiboot/EFI/archiso/amd_ucode.img
+ 
+     mkdir -p ${work_dir}/efiboot/EFI/boot
+-    cp ${work_dir}/x86_64/airootfs/usr/share/efitools/efi/PreLoader.efi ${work_dir}/efiboot/EFI/boot/bootx64.efi
+-    cp ${work_dir}/x86_64/airootfs/usr/share/efitools/efi/HashTool.efi ${work_dir}/efiboot/EFI/boot/
++    cp ${work_dir}/powerpc64le/airootfs/usr/share/efitools/efi/PreLoader.efi ${work_dir}/efiboot/EFI/boot/bootx64.efi
++    cp ${work_dir}/powerpc64le/airootfs/usr/share/efitools/efi/HashTool.efi ${work_dir}/efiboot/EFI/boot/
+ 
+-    cp ${work_dir}/x86_64/airootfs/usr/lib/systemd/boot/efi/systemd-bootx64.efi ${work_dir}/efiboot/EFI/boot/loader.efi
++    cp ${work_dir}/powerpc64le/airootfs/usr/lib/systemd/boot/efi/systemd-bootx64.efi ${work_dir}/efiboot/EFI/boot/loader.efi
+ 
+     mkdir -p ${work_dir}/efiboot/loader/entries
+     cp ${script_path}/efiboot/loader/loader.conf ${work_dir}/efiboot/loader/
+-    cp ${script_path}/efiboot/loader/entries/uefi-shell-v2-x86_64.conf ${work_dir}/efiboot/loader/entries/
+-    cp ${script_path}/efiboot/loader/entries/uefi-shell-v1-x86_64.conf ${work_dir}/efiboot/loader/entries/
++    cp ${script_path}/efiboot/loader/entries/uefi-shell-v2-powerpc64le.conf ${work_dir}/efiboot/loader/entries/
++    cp ${script_path}/efiboot/loader/entries/uefi-shell-v1-powerpc64le.conf ${work_dir}/efiboot/loader/entries/
+ 
+     sed "s|%ARCHISO_LABEL%|${iso_label}|g;
+          s|%INSTALL_DIR%|${install_dir}|g" \
+-        ${script_path}/efiboot/loader/entries/archiso-x86_64-cd.conf > ${work_dir}/efiboot/loader/entries/archiso-x86_64.conf
++        ${script_path}/efiboot/loader/entries/archiso-powerpc64le-cd.conf > ${work_dir}/efiboot/loader/entries/archiso-powerpc64le.conf
+ 
+     cp ${work_dir}/iso/EFI/shellx64_v2.efi ${work_dir}/efiboot/EFI/
+     cp ${work_dir}/iso/EFI/shellx64_v1.efi ${work_dir}/efiboot/EFI/
+@@ -212,16 +207,26 @@
+ 
+ # Build airootfs filesystem image
+ make_prepare() {
+-    cp -a -l -f ${work_dir}/x86_64/airootfs ${work_dir}
++    cp -a -l -f ${work_dir}/powerpc64le/airootfs ${work_dir}
+     mkarchiso ${verbose} -w "${work_dir}" -D "${install_dir}" pkglist
+     mkarchiso ${verbose} -w "${work_dir}" -D "${install_dir}" ${gpg_key:+-g ${gpg_key}} prepare
+     rm -rf ${work_dir}/airootfs
+-    # rm -rf ${work_dir}/x86_64/airootfs (if low space, this helps)
++    # rm -rf ${work_dir}/powerpc64le/airootfs (if low space, this helps)
+ }
+ 
+ # Build ISO
+ make_iso() {
+-    mkarchiso ${verbose} -w "${work_dir}" -D "${install_dir}" -L "${iso_label}" -P "${iso_publisher}" -A "${iso_application}" -o "${out_dir}" iso "${iso_name}-${iso_version}-x86_64.iso"
++    mkarchiso ${verbose} -w "${work_dir}" -D "${install_dir}" -L "${iso_label}" -P "${iso_publisher}" -A "${iso_application}" -o "${out_dir}" iso "${iso_name}-${iso_version}-powerpc64le.iso"
++}
++
++make_grubcfg() {
++    mount -o bind /dev ${work_dir}/powerpc64le/airootfs/dev
++    mount -o bind /proc ${work_dir}/powerpc64le/airootfs/proc
++    mount -o bind /sys ${work_dir}/powerpc64le/airootfs/sys
++    chroot ${work_dir}/powerpc64le/airootfs grub-mkconfig -o /boot/grub/grub.cfg
++    umount ${work_dir}/powerpc64le/airootfs/sys
++    umount ${work_dir}/powerpc64le/airootfs/proc
++    umount ${work_dir}/powerpc64le/airootfs/dev
+ }
+ 
+ if [[ ${EUID} -ne 0 ]]; then
+@@ -258,9 +263,10 @@
+ run_once make_customize_airootfs
+ run_once make_boot
+ run_once make_boot_extra
+-run_once make_syslinux
+-run_once make_isolinux
+-run_once make_efi
+-run_once make_efiboot
++#run_once make_syslinux
++#run_once make_isolinux
++#run_once make_efi
++#run_once make_efiboot
++run_once make_grubcfg
+ run_once make_prepare
+ run_once make_iso
+diff -ruN archiso-40.orig/configs/releng/mkinitcpio.conf archiso-40/configs/releng/mkinitcpio.conf
+--- archiso-40.orig/configs/releng/mkinitcpio.conf	2019-04-12 12:17:38.430000000 +0000
++++ archiso-40/configs/releng/mkinitcpio.conf	2019-04-12 12:17:48.160000000 +0000
+@@ -1,2 +1,2 @@
+-HOOKS=(base udev memdisk archiso_shutdown archiso archiso_loop_mnt archiso_pxe_common archiso_pxe_nbd archiso_pxe_http archiso_pxe_nfs archiso_kms block filesystems keyboard)
++HOOKS=(base udev archiso_shutdown archiso archiso_loop_mnt archiso_pxe_common archiso_pxe_nbd archiso_pxe_http archiso_pxe_nfs archiso_kms block filesystems keyboard)
+ COMPRESSION="xz"
+diff -ruN archiso-40.orig/configs/releng/packages.powerpc64le archiso-40/configs/releng/packages.powerpc64le
+--- archiso-40.orig/configs/releng/packages.powerpc64le	1970-01-01 00:00:00.000000000 +0000
++++ archiso-40/configs/releng/packages.powerpc64le	2019-04-12 12:17:48.160000000 +0000
+@@ -0,0 +1,57 @@
++arch-install-scripts
++btrfs-progs
++clonezilla
++darkhttpd
++ddrescue
++dhclient
++dialog
++dmraid
++dnsmasq
++dnsutils
++dosfstools
++elinks
++ethtool
++exfat-utils
++f2fs-tools
++fsarchiver
++gnu-netcat
++gpm
++gptfdisk
++grml-zsh-config
++hdparm
++irssi
++lftp
++linux-atm
++lsscsi
++mc
++mtools
++ndisc6
++nfs-utils
++nilfs-utils
++nmap
++ntp
++openconnect
++openssh
++openvpn
++partclone
++parted
++partimage
++ppp
++pptpclient
++rp-pppoe
++rsync
++sdparm
++sg3_utils
++smartmontools
++sudo
++tcpdump
++testdisk
++usb_modeswitch
++vim
++vpnc
++wget
++wvdial
++xl2tpd
++mkinitcpio
++binutils
++grub
+diff -ruN archiso-40.orig/configs/releng/pacman.conf archiso-40/configs/releng/pacman.conf
+--- archiso-40.orig/configs/releng/pacman.conf	2019-04-12 12:17:38.430000000 +0000
++++ archiso-40/configs/releng/pacman.conf	2019-04-12 12:17:48.160000000 +0000
+@@ -16,11 +16,11 @@
+ #GPGDir      = /etc/pacman.d/gnupg/
+ #HookDir     = /etc/pacman.d/hooks/
+ HoldPkg     = pacman glibc
+-#XferCommand = /usr/bin/curl -C - -f %u > %o
++#XferCommand = /usr/bin/curl -L -C - -f -o %o %u
+ #XferCommand = /usr/bin/wget --passive-ftp -c -O %o %u
+ #CleanMethod = KeepInstalled
+ #UseDelta    = 0.7
+-Architecture = auto
++Architecture = powerpc64le 
+ 
+ # Pacman won't upgrade packages listed in IgnorePkg and members of IgnoreGroup
+ #IgnorePkg   =
+@@ -33,19 +33,13 @@
+ #UseSyslog
+ #Color
+ #TotalDownload
+-# We cannot check disk space from within a chroot environment
+-#CheckSpace
++CheckSpace
+ #VerbosePkgLists
+ 
+-# By default, pacman accepts packages signed by keys that its local keyring
+-# trusts (see pacman-key and its man page), as well as unsigned packages.
+-SigLevel    = Required DatabaseOptional
+-LocalFileSigLevel = Optional
+-#RemoteFileSigLevel = Required
+-
+-# NOTE: You must run `pacman-key --init` before first using pacman; the local
+-# keyring can then be populated with the keys of all official Arch Linux
+-# packagers with `pacman-key --populate archlinux`.
++# PGP signature checking
++#SigLevel = Optional
++#LocalFileSigLevel = Optional
++#RemoteFileSigLevel = Optional
+ 
+ #
+ # REPOSITORIES
+@@ -66,36 +60,17 @@
+ # uncommented to enable the repo.
+ #
+ 
+-# The testing repositories are disabled by default. To enable, uncomment the
+-# repo name header and Include lines. You can add preferred servers immediately
+-# after the header, and they will be used before the default mirrors.
+-
+-#[testing]
+-#Include = /etc/pacman.d/mirrorlist
+-
+-[core]
+-Include = /etc/pacman.d/mirrorlist
+-
+-[extra]
+-Include = /etc/pacman.d/mirrorlist
+-
+-#[community-testing]
+-#Include = /etc/pacman.d/mirrorlist
+-
+-[community]
+-Include = /etc/pacman.d/mirrorlist
+-
+-# If you want to run 32 bit applications on your x86_64 system,
+-# enable the multilib repositories as required here.
+-
+-#[multilib-testing]
+-#Include = /etc/pacman.d/mirrorlist
+-
+-#[multilib]
++# An example of a disabled remote package repository with multiple servers
++# available. To enable, uncomment the following lines. You can add preferred
++# servers immediately after the header and they will be used before the
++# default mirrors.
++#[core]
++#SigLevel = Required
++#Server = ftp://ftp.example.com/foobar/$repo/os/$arch/
++# The file referenced here should contain a list of 'Server = ' lines.
+ #Include = /etc/pacman.d/mirrorlist
+ 
+ # An example of a custom package repository.  See the pacman manpage for
+ # tips on creating your own repositories.
+-#[custom]
+-#SigLevel = Optional TrustAll
+-#Server = file:///home/custompkgs
++[base]
++Server = https://archlinuxpower.org/base
