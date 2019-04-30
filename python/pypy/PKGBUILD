@@ -1,0 +1,60 @@
+# Maintainer: Sven-Hendrik Haase <sh@lutzhaase.com>
+# Contributor: William Giokas <1007380@gmail.com>
+
+pkgname=pypy
+pkgver=7.1.0
+pkgrel=3
+pkgdesc="A Python implementation written in Python, JIT enabled"
+url="https://pypy.org"
+arch=('x86_64')
+depends=('expat' 'bzip2' 'gdbm' 'openssl' 'libffi' 'zlib' 'ncurses')
+makedepends=('python2' 'tk' 'sqlite' 'mercurial' 'python2-pycparser')
+optdepends=('sqlite: sqlite module'
+            'tk: tk module')
+options=(!buildflags)
+license=('MIT')
+source=("https://bitbucket.org/pypy/pypy/downloads/pypy2.7-v${pkgver}-src.tar.bz2"
+        a93dfb333afe.patch)
+sha512sums=('fa7c1a6669686dbd9c0da627dc2a06ad696f20274218af9602f91d73f3ebe0ede380c6e1a50534f53dee8f075eaef5a403c7c5b5bdbfff25e679ba30522391bb'
+            'ed69a8ca9e407f5985c5ffad9649656c69a62a51c610df2718723d6460775e16d37cb888e8cb8ff2ec57ea6a8b2bd518a9368eb8421b435594efc6b32d1f5e19')
+
+prepare() {
+  cd pypy2.7-v${pkgver}-src
+  patch -Np1 -i ${srcdir}/a93dfb333afe.patch
+}
+
+build() {
+  cd pypy2.7-v${pkgver}-src/pypy/goal
+
+  python2 ../../rpython/bin/rpython -Ojit --shared targetpypystandalone
+
+  # Compile binary modules
+  PYTHONPATH=../.. ./pypy-c ../tool/build_cffi_imports.py
+}
+
+package() {
+  cd pypy2.7-v${pkgver}-src
+
+  # Prepare installation
+  python2 pypy/tool/release/package.py --archive-name pypy --targetdir .
+  mkdir unpacked
+  tar xf pypy.tar.bz2 -C unpacked
+
+  # Install pypy
+  cd unpacked
+  install -Dm755 pypy/bin/pypy "${pkgdir}"/opt/pypy/bin/pypy
+  install -Dm755 pypy/bin/libpypy-c.so "${pkgdir}"/opt/pypy/bin/libpypy-c.so
+  cp -r pypy/include pypy/lib_pypy pypy/lib-python pypy/site-packages "${pkgdir}"/opt/pypy/
+  cd ..
+
+  # Install symlink
+  mkdir -p "${pkgdir}"/usr/bin "${pkgdir}"/usr/lib
+  ln -s /opt/pypy/bin/pypy "${pkgdir}"/usr/bin/pypy
+  ln -s /opt/pypy/bin/libpypy-c.so "${pkgdir}"/usr/lib/libpypy-c.so
+
+  # Install misc stuff
+  install -Dm644 README.rst "${pkgdir}"/opt/pypy/README.rst
+  install -Dm644 LICENSE "${pkgdir}"/opt/pypy/LICENSE
+  install -Dm644 LICENSE "${pkgdir}"/usr/share/licenses/pypy/LICENSE
+}
+# vim: ts=2 sw=2 et:
