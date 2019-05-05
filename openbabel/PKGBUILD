@@ -1,0 +1,54 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Andrea Scarpino <andrea@archlinux.org>
+# Contributor: Damir Perisa <damir.perisa@bluewin.ch>
+
+pkgbase=openbabel
+pkgname=(openbabel python-openbabel)
+pkgver=2.4.1
+pkgrel=6
+pkgdesc="A library designed to interconvert between many file formats used in molecular modeling and computational chemistry"
+arch=(x86_64 powerpc64le)
+url="https://openbabel.org/wiki/Main_Page"
+license=('GPL')
+makedepends=('cmake' 'eigen' 'wxgtk' 'boost' 'python')
+source=("https://downloads.sourceforge.net/${pkgname}/${pkgname}-${pkgver}.tar.gz"
+        pybel_indexerror.patch
+	gcc-version.patch)
+md5sums=('d9defcd7830b0592fece4fe54a137b99'
+         'fc18239895b109d2ef5caa5f0ef94117'
+         '60101d7e39e80a96e1e6168ab7f8974d')
+
+prepare() {
+  mkdir -p build
+  cd ${pkgname}-${pkgver}
+  patch -Np1 -i ${srcdir}/pybel_indexerror.patch
+  patch -Np1 -i ${srcdir}/gcc-version.patch
+}
+
+build() {
+  cd build
+  export CXXFLAGS+=' -Wno-narrowing -Wno-unknown-warning-option'
+  cmake ../openbabel-$pkgver \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr -DwxWidgets_CONFIG_EXECUTABLE=/usr/bin/wx-config \
+    -DPYTHON_BINDINGS=ON
+  make VERBOSE=1
+
+  # To split python bindings
+  sed -i '/scripts.cmake_install.cmake/d' cmake_install.cmake
+}
+
+package_openbabel() {
+  depends=('libxml2' 'libsm')
+  optdepends=('wxgtk: GUI interface')
+
+  cd build
+  make DESTDIR="$pkgdir" install
+}
+
+package_python-openbabel() {
+  depends=('python' 'openbabel')
+
+  cd build/scripts
+  make DESTDIR="$pkgdir" install
+}
