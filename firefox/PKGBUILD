@@ -4,17 +4,17 @@
 # Contributor: Jakub Schmidtke <sjakub@gmail.com>
 
 pkgname=firefox
-pkgver=66.0.3
+pkgver=66.0.5
 pkgrel=1
 pkgdesc="Standalone web browser from mozilla.org"
 arch=(x86_64 powerpc64le)
 license=(MPL GPL LGPL)
 url="https://www.mozilla.org/firefox/"
 depends=(gtk3 mozilla-common libxt startup-notification mime-types dbus-glib
-         ffmpeg nss ttf-font libpulse gconf)
+         ffmpeg nss ttf-font libpulse jemalloc)
 makedepends=(unzip zip diffutils python2-setuptools mesa imake inetutils
-             xorg-server-xvfb autoconf2.13 rust mercurial clang llvm jack gtk2
-             python nodejs python2-psutil cbindgen )
+             xorg-server-xvfb autoconf2.13 rust mercurial jack gtk2
+             python nodejs python2-psutil cbindgen clang)
 optdepends=('networkmanager: Location detection via available WiFi networks'
             'libnotify: Notification integration'
             'pulseaudio: Audio support'
@@ -25,32 +25,41 @@ _repo=https://hg.mozilla.org/mozilla-unified
 source=("hg+$_repo#tag=FIREFOX_${pkgver//./_}_RELEASE"
         0001-bz-1468911.patch
         $pkgname.desktop firefox-symbolic.svg
-        firefox-powerpc-clang.patch)
+        firefox-powerpc-clang.patch
+        ppc-no-static-sizes.patch
+        reduce-rust-debuginfo-on-selected-architectures.patch
+        rust-drop-dll-checksums.patch)
 sha256sums=('SKIP'
             '821f858bac2e13ce02b8c20d5387d4ecc8ab2d0e4ebe0a517cbf935da6aeb31b'
-            '677e1bde4c6b3cff114345c211805c7c43085038ca0505718a11e96432e9811a'
+            '4a783dca1f88e003c72f32d22719a0915f3fa576adbc492240e7cc250246ce10'
             '9a1a572dc88014882d54ba2d3079a1cf5b28fa03c5976ed2cb763c93dabbd797'
-            '889a5a4ebe53223955bc32ae9182e20afd514934e145062d0507e0e87e46d9fd')
+            '889a5a4ebe53223955bc32ae9182e20afd514934e145062d0507e0e87e46d9fd'
+            '66036b498ac0418700359eace08e97cc291f2ea9c5a62bfb37d4ca93d6299803'
+            'f61b37f682ac10b524bc6d5ef81a590f6e242b7302987d1cdeab62d110571fd0'
+            '0d896944d110b3b71f62c8fa5941e7d6e856015cc7ad8c98efde458ee0bedbf6')
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
 # Note: These are for Arch Linux use ONLY. For your own distribution, please
 # get your own set of keys. Feel free to contact foutrelis@archlinux.org for
 # more information.
-_google_api_key=AIzaSyDwr302FpOSkGRpLlUpPThNTDPbXcIn_FM
+#_google_api_key=AIzaSyDwr302FpOSkGRpLlUpPThNTDPbXcIn_FM
 
 # Mozilla API keys (see https://location.services.mozilla.com/api)
 # Note: These are for Arch Linux use ONLY. For your own distribution, please
 # get your own set of keys. Feel free to contact heftig@archlinux.org for
 # more information.
-_mozilla_api_key=16674381-f021-49de-8622-3021c5942aff
+#_mozilla_api_key=16674381-f021-49de-8622-3021c5942aff
 
 prepare() {
-  mkdir -p mozbuild
+  mkdir mozbuild
   cd mozilla-unified
 
   # https://bugzilla.mozilla.org/show_bug.cgi?id=1521249
-  patch --force -Np1 -i ${srcdir}/0001-bz-1468911.patch
-  patch --force -Np1 -i ${srcdir}/firefox-powerpc-clang.patch
+  patch -Np1 -i ${srcdir}/0001-bz-1468911.patch
+  patch -Np1 -i ${srcdir}/firefox-powerpc-clang.patch
+  patch -Np1 -i ${srcdir}/ppc-no-static-sizes.patch
+  patch -Np1 -i ${srcdir}/reduce-rust-debuginfo-on-selected-architectures.patch
+  patch -Np1 -i ${srcdir}/rust-drop-dll-checksums.patch
 
   echo -n "$_google_api_key" >google-api-key
   echo -n "$_mozilla_api_key" >mozilla-api-key
@@ -63,28 +72,23 @@ ac_add_options --enable-release
 ac_add_options --enable-hardening
 ac_add_options --enable-optimize
 ac_add_options --enable-rust-simd
-ac_add_options --enable-lto
-export MOZ_PGO=1
-export CC=clang
-export CXX=clang++
-export AR=llvm-ar
-export NM=llvm-nm
-export RANLIB=llvm-ranlib
-export LD=ld.gold
+ac_add_options --disable-lto
+ac_add_options --with-unsigned-addon-scopes=app
+ac_add_options --enable-jemalloc
 
 # Branding
-ac_add_options --enable-official-branding
+#ac_add_options --enable-official-branding
 ac_add_options --enable-update-channel=release
-ac_add_options --with-distribution-id=org.archlinux
-export MOZILLA_OFFICIAL=1
-export MOZ_APP_REMOTINGNAME=${pkgname//-/}
-export MOZ_TELEMETRY_REPORTING=1
-export MOZ_REQUIRE_SIGNING=1
+ac_add_options --with-distribution-id=org.archlinuxpower
+#export MOZILLA_OFFICIAL=1
+#export MOZ_APP_REMOTINGNAME=${pkgname//-/}
+#export MOZ_TELEMETRY_REPORTING=0
+#export MOZ_REQUIRE_SIGNING=0
 
 # Keys
-ac_add_options --with-google-location-service-api-keyfile=${PWD@Q}/google-api-key
-ac_add_options --with-google-safebrowsing-api-keyfile=${PWD@Q}/google-api-key
-ac_add_options --with-mozilla-api-keyfile=${PWD@Q}/mozilla-api-key
+#ac_add_options --with-google-location-service-api-keyfile=${PWD@Q}/google-api-key
+#ac_add_options --with-google-safebrowsing-api-keyfile=${PWD@Q}/google-api-key
+#ac_add_options --with-mozilla-api-keyfile=${PWD@Q}/mozilla-api-key
 
 # System libraries
 ac_add_options --with-system-nspr
@@ -98,13 +102,12 @@ ac_add_options --disable-crashreporter
 ac_add_options --disable-gconf
 ac_add_options --disable-updater
 ac_add_options --disable-tests
-ac_add_options MOZ_MAKE_FLAGS="-j1"
 END
 }
 
 build() {
   cd mozilla-unified
-
+  sudo ppc64_cpu --smt=4
   export MOZ_SOURCE_REPO="$_repo"
   export MOZ_NOSPAM=1
   export MOZBUILD_STATE_PATH="$srcdir/mozbuild"
