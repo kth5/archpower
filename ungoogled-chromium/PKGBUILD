@@ -1,0 +1,49 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+pkgname=ungoogled-chromium
+pkgver=75.0.3770.80.1.r83.e97f580
+pkgrel=1
+pkgdesc="Google Chromium, sans integration with Google - PPC64LE FORK"
+arch=(x86_64 powerpc64le)
+url="https://github.com/leo-lb/ungoogled-chromium/tree/master"
+license=('GPL')
+depends=('llvm-libs' 'glib2' 'libcups' 'nss' 'openssl' 'pango' 'dbus' 'atk' 'gtk3'
+         'krb5' 'pulseaudio' 'libxss' 're2c' 'curl' 'alsa-lib' 'gperf' 'mesa' 'at-spi2-atk'
+	 'libgnome-keyring')
+makedepends=('git' 'clang' 'pkgconf' 'python' 'python2' 'cmake' 'bison' 'nodejs' 'subversion' 'ninja')
+commit="e97f58009aa7b90654ea56dce6ec0db520d08f85"
+source=("git+https://github.com/leo-lb/ungoogled-chromium.git#commit=${commit}"
+        'recent-python3.patch')
+md5sums=('SKIP'
+         'SKIP')
+
+#pkgver() {
+#	cd "$srcdir/${pkgname}"
+#	printf "%s" "$(git describe --long | sed 's/\([^-]*-\)g/r\1/;s/-/./g')"
+#}
+
+prepare() {
+	cd "$srcdir/${pkgname}"
+	git submodule update --init
+	# this removes a backport no longer necessary
+	patch -Np1 -i ${srcdir}/recent-python3.patch
+
+	# to avoid rewriting shebangs, we'll just link the two pythons
+	# as it is expected by the build system 
+	mkdir ${srcdir}/python
+	ln -s /usr/bin/python ${srcdir}/python/python3
+	ln -s /usr/bin/python2 ${srcdir}/python/python
+
+	# clean build dir
+	rm -rf build
+}
+
+build() {
+	cd "$srcdir/${pkgname}"
+	export PATH=${srcdir}/python:${PATH}
+	./ppc64le_build.bash
+}
+
+package() {
+	cd "$srcdir/${pkgname}"
+	make DESTDIR="$pkgdir/" install
+}
