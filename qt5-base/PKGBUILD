@@ -4,9 +4,9 @@
 
 pkgbase=qt5-base
 pkgname=(qt5-base qt5-xcb-private-headers)
-_qtver=5.12.3
+_qtver=5.13.0
 pkgver=${_qtver/-/}
-pkgrel=4
+pkgrel=7
 arch=(x86_64 powerpc64le)
 url='https://www.qt.io'
 license=('GPL3' 'LGPL3' 'FDL' 'custom')
@@ -21,16 +21,19 @@ optdepends=('qt5-svg: to use SVG icon themes'
             'postgresql-libs: PostgreSQL driver'
             'mariadb-libs: MariaDB driver'
             'unixodbc: ODBC driver'
-            'libfbclient: Firebird/iBase driver'
             'freetds: MS SQL driver'
             'gtk3: GTK platform plugin')
 conflicts=('qtchooser')
 groups=('qt' 'qt5')
 _pkgfqn="${pkgbase/5-/}-everywhere-src-${_qtver}"
 source=("https://download.qt.io/official_releases/qt/${pkgver%.*}/${_qtver}/submodules/${_pkgfqn}.tar.xz"
-        qtbug-61898.patch::"https://code.qt.io/cgit/qt/qtbase.git/patch/?id=2947435d")
-sha256sums=('fddfd8852ef7503febeed67b876d1425160869ae2b1ae8e10b3fb0fedc5fe701'
-            '9339a016ac55cba18c494d45fe2ca8a53313ae0c525acd18e65fcab0d552d23b')
+        qtbase-qxcbwindow.patch::"https://code.qt.io/cgit/qt/qtbase.git/patch/?id=0c183117"
+        qtbase-zlib-compression.patch::"https://code.qt.io/cgit/qt/qtbase.git/patch/?id=cbdc9a77"
+        virtualbox-focus.patch)
+sha256sums=('ff6964b3b528cd3b1d21bcf3470006e8e5cbe69591923f982871d886ea0488fe'
+            '51878fdf91d3f191fb4e19cd9ec3fc4c564bbf1eabe92802b40db2ec8ad1d646'
+            '9300d8ab7abe4145e92eea75178a26ad3d5a71b0646665c3776ca2c375dd1233'
+            '21c4acce7a789cd0e1e67aca76cf15f536ae8e30ef711a434cfe7ec377556f06')
 
 prepare() {
   cd ${_pkgfqn}
@@ -42,7 +45,9 @@ prepare() {
   sed -i -e "s|^\(QMAKE_LFLAGS_RELEASE.*\)|\1 ${LDFLAGS}|" \
     mkspecs/common/g++-unix.conf
 
-  patch -p1 -i ../qtbug-61898.patch # Fix disappearing system tray icons
+  patch -p1 -i ../qtbase-qxcbwindow.patch # Fix NVIDIA freeze
+  patch -p1 -i ../qtbase-zlib-compression.patch # Change the default compression back to zlib for backwards compatibility
+  patch -p1 -i ../virtualbox-focus.patch # Fix virtualbox constantly stealing focus https://bugreports.qt.io/browse/QTBUG-76742
 }
 
 build() {
@@ -65,6 +70,7 @@ build() {
     -dbus-linked \
     -system-harfbuzz \
     -journald \
+    -no-mimetype-database \
     -no-use-gold-linker \
     -no-reduce-relocations
   make
