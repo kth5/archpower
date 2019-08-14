@@ -1,0 +1,257 @@
+--- 0ad/source/graphics/TextureConverter.cpp.orig	2019-08-13 20:18:15.565595627 +0200
++++ 0ad/source/graphics/TextureConverter.cpp	2019-08-13 20:59:13.685280351 +0200
+@@ -52,6 +52,10 @@
+ 		memcpy(&buffer[off], data, size);
+ 		return true;
+ 	}
++
++	virtual void endImage()
++	{
++	}	
+ };
+ 
+ /**
+diff --git a/source/lib/sysdep/arch.h b/source/lib/sysdep/arch.h
+index e3e520f2e1..c9e69fea4c 100644
+--- 0ad/source/lib/sysdep/arch.h
++++ 0ad/source/lib/sysdep/arch.h
+@@ -70,9 +70,15 @@
+ #else
+ # define ARCH_MIPS 0
+ #endif
++// PowerPC
++#if defined(_ARCH_PPC)
++# define ARCH_PPC 1
++#else
++# define ARCH_PPC 0
++#endif
+ 
+ // ensure exactly one architecture has been detected
+-#if (ARCH_IA32+ARCH_IA64+ARCH_AMD64+ARCH_ALPHA+ARCH_ARM+ARCH_AARCH64+ARCH_MIPS) != 1
++#if (ARCH_IA32+ARCH_IA64+ARCH_AMD64+ARCH_ALPHA+ARCH_ARM+ARCH_AARCH64+ARCH_MIPS+ARCH_PPC) != 1
+ # error "architecture not correctly detected (either none or multiple ARCH_* defined)"
+ #endif
+ 
+--- 0ad/source/ps/GameSetup/HWDetect.cpp.orig	2019-08-13 22:34:46.043612866 +0200
++++ 0ad/source/ps/GameSetup/HWDetect.cpp	2019-08-13 22:35:13.600616429 +0200
+@@ -260,6 +260,7 @@
+ 	scriptInterface.SetProperty(settings, "arch_amd64", ARCH_AMD64);
+ 	scriptInterface.SetProperty(settings, "arch_arm", ARCH_ARM);
+ 	scriptInterface.SetProperty(settings, "arch_aarch64", ARCH_AARCH64);
++	scriptInterface.SetProperty(settings, "arch_powerpc64le", ARCH_PPC);
+ 
+ #ifdef NDEBUG
+ 	scriptInterface.SetProperty(settings, "build_debug", 0);
+--- 0ad/build/premake/premake5/src/_premake_init.lua.orig	2019-08-13 23:07:30.339014479 +0200
++++ 0ad/build/premake/premake5/src/_premake_init.lua	2019-08-13 23:07:58.215958647 +0200
+@@ -28,6 +28,7 @@
+ 			p.X86_64,
+ 			p.ARM,
+ 			p.ARM64,
++			p.PPC,
+ 		},
+ 		aliases = {
+ 			i386  = p.X86,
+--- 0ad/build/premake/premake5/src/base/_foundation.lua.orig	2019-08-13 23:09:42.224556581 +0200
++++ 0ad/build/premake/premake5/src/base/_foundation.lua	2019-08-13 23:10:06.031946496 +0200
+@@ -56,7 +56,7 @@
+ 	premake.X86_64      = "x86_64"
+ 	premake.ARM         = "ARM"
+ 	premake.ARM64       = "ARM64"
+-
++	premake.PPC       = "PPC"
+ 
+ 
+ ---
+--- 0ad/build/premake/premake5/tests/tools/test_gcc.lua.orig	2019-08-13 23:19:04.443044203 +0200
++++ 0ad/build/premake/premake5/tests/tools/test_gcc.lua	2019-08-13 23:19:49.718102273 +0200
+@@ -423,6 +423,11 @@
+ 		test.contains({ "-m64" }, gcc.getldflags(cfg))
+ 	end
+ 
++	function suite.ldflags_onPPC()
++		architecture "powerpc64le"
++		prepare()
++		test.contains({ "-m64" }, gcc.getldflags(cfg))
++	end
+ 
+ --
+ -- Non-Windows shared libraries should marked as position independent.
+--- 0ad/build/premake/premake5.lua.orig	2019-08-14 11:18:09.811969264 +0200
++++ 0ad/build/premake/premake5.lua	2019-08-14 11:19:28.733457005 +0200
+@@ -59,7 +59,7 @@
+ 	end
+ end
+ 
+--- detect CPU architecture (simplistic, currently only supports x86, amd64 and ARM)
++-- detect CPU architecture (simplistic, currently only supports x86, amd64, ARM, powerpc64le)
+ arch = "x86"
+ if _OPTIONS["android"] then
+ 	arch = "arm"
+@@ -84,6 +84,8 @@
+ 			arch = "arm"
+ 		elseif string.find(machine, "aarch64") == 1 then
+ 			arch = "aarch64"
++		elseif string.find(machine, "powerpc64le") == 1 then
++			arch = "powerpc64le"
+ 		else
+ 			print("WARNING: Cannot determine architecture from GCC, assuming x86")
+ 		end
+@@ -817,6 +819,8 @@
+ 		table.insert(source_dirs, "lib/sysdep/arch/arm");
+ 	elseif arch == "aarch64" then
+ 		table.insert(source_dirs, "lib/sysdep/arch/aarch64");
++	elseif arch == "powerpc64le" then
++		table.insert(source_dirs, "lib/sysdep/arch/powerpc64le");
+ 	end
+ 
+ 	-- OS-specific
+diff -ruN empty/powerpc64le.cpp src/0ad/source/lib/sysdep/arch/powerpc64le/powerpc64le.cpp
+--- 0ad/source/lib/sysdep/arch/powerpc64le/powerpc64le.cpp	1970-01-01 01:00:00.000000000 +0100
++++ 0ad/source/lib/sysdep/arch/powerpc64le/powerpc64le.cpp	2019-08-14 11:31:50.963280190 +0200
+@@ -0,0 +1,107 @@
++/* Copyright (C) 2010 Wildfire Games.
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining
++ * a copy of this software and associated documentation files (the
++ * "Software"), to deal in the Software without restriction, including
++ * without limitation the rights to use, copy, modify, merge, publish,
++ * distribute, sublicense, and/or sell copies of the Software, and to
++ * permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included
++ * in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
++ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
++ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
++ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
++ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++
++#include "precompiled.h"
++
++#if ARCH_PPC
++
++#include "lib/sysdep/cpu.h"
++#include "lib/sysdep/arch/powerpc64le/powerpc64le.h"
++
++
++void cpu_ConfigureFloatingPoint()
++{
++	// no need to change the FPU control word.
++}
++
++#if MSC_VERSION
++
++// VC 2008 and ICC 12 differ in their declaration of _Interlocked*
++#if ICC_VERSION
++typedef __int64* P64;
++#else
++typedef volatile __int64* P64;
++#endif
++
++bool cpu_CAS(volatile intptr_t* location, intptr_t expected, intptr_t newValue)
++{
++	const intptr_t initial = _InterlockedCompareExchange64((P64)location, newValue, expected);
++	return initial == expected;
++}
++
++bool cpu_CAS64(volatile i64* location, i64 expected, i64 newValue)
++{
++	const i64 initial = _InterlockedCompareExchange64((P64)location, newValue, expected);
++	return initial == expected;
++}
++
++intptr_t cpu_AtomicAdd(volatile intptr_t* location, intptr_t increment)
++{
++	return _InterlockedExchangeAdd64((P64)location, increment);
++}
++
++#elif OS_MACOSX
++
++#include <libkern/OSAtomic.h>
++
++intptr_t cpu_AtomicAdd(volatile intptr_t* location, intptr_t increment)
++{
++	cassert(sizeof(intptr_t) == sizeof(int64_t));
++	return OSAtomicAdd64Barrier(increment, (volatile int64_t*)location);
++}
++
++bool cpu_CAS(volatile intptr_t* location, intptr_t expected, intptr_t newValue)
++{
++	cassert(sizeof(intptr_t) == sizeof(void*));
++	return OSAtomicCompareAndSwapPtrBarrier((void*)expected, (void*)newValue, (void* volatile*)location);
++}
++
++bool cpu_CAS64(volatile i64* location, i64 expected, i64 newValue)
++{
++	return OSAtomicCompareAndSwap64Barrier(expected, newValue, location);
++}
++
++#elif GCC_VERSION
++
++intptr_t cpu_AtomicAdd(volatile intptr_t* location, intptr_t increment)
++{
++	return __sync_fetch_and_add(location, increment);
++}
++
++bool cpu_CAS(volatile intptr_t* location, intptr_t expected, intptr_t newValue)
++{
++	return __sync_bool_compare_and_swap(location, expected, newValue);
++}
++
++bool cpu_CAS64(volatile i64* location, i64 expected, i64 newValue)
++{
++	return __sync_bool_compare_and_swap(location, expected, newValue);
++}
++
++#endif
++
++const char* cpu_IdentifierString()
++{
++	return "unknown"; // TODO
++}
++
++#endif // ARCH_PPC
+diff -ruN empty/powerpc64le.h src/0ad/source/lib/sysdep/arch/powerpc64le/powerpc64le.h
+--- 0ad/source/lib/sysdep/arch/powerpc64le/powerpc64le.h	1970-01-01 01:00:00.000000000 +0100
++++ 0ad/source/lib/sysdep/arch/powerpc64le/powerpc64le.h	2019-08-14 11:22:12.655768009 +0200
+@@ -0,0 +1,34 @@
++/* Copyright (C) 2010 Wildfire Games.
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining
++ * a copy of this software and associated documentation files (the
++ * "Software"), to deal in the Software without restriction, including
++ * without limitation the rights to use, copy, modify, merge, publish,
++ * distribute, sublicense, and/or sell copies of the Software, and to
++ * permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included
++ * in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
++ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
++ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
++ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
++ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++
++/*
++ * C++ and inline asm implementations of PPC functions
++ */
++
++#ifndef INCLUDED_PPC
++#define INCLUDED_PPC
++
++#if !ARCH_PPC
++#error "including powerpc64le.h without ARCH_PPC=1"
++#endif
++
++#endif	// #ifndef INCLUDED_PPC

@@ -1,0 +1,77 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer:  Brenton Horne <brentonhorne77@gmail.com>
+# Contributor: Sven-Hendrik Haase <sh@lutzhaase.com>
+# Contributor: t3ddy  <t3ddy1988 "at" gmail {dot} com>
+# Contributor: AdriÃ¡n Chaves FernÃ¡ndez (Gallaecio) <adriyetichaves@gmail.com>
+pkgname=('0ad' '0ad-data')
+pkgver=0.23+20190814
+pkgrel=1
+arch=(x86_64 powerpc64le)
+url="http://play0ad.com/"
+license=('GPL2' 'CCPL')
+depends=('binutils' 'boost-libs' 'curl' 'enet' 'libogg' 'libpng' 'libvorbis'
+         'libxml2' 'openal' 'sdl2' 'wxgtk' 'zlib' 'libgl' 'glu'
+         'gloox' 'miniupnpc' 'icu' 'nspr' 'nvidia-texture-tools' 'libsodium')
+makedepends=('boost' 'cmake' 'mesa' 'zip' 'python2' 'libsm' 'git')
+commit=1a7967fb2307761c80827584a0952269098d1417
+source=("${pkgname}::git+https://github.com/0ad/0ad.git#commit=${commit}"
+	spidermonkey-powerpc.patch
+        spidermonkey-patchset.patch
+        0ad-powerpc64le-support.patch)
+sha512sums=('SKIP'
+	    '3a1de09a0d6c084292d3914cd39638e9fa09fbef6f8993147528c39abdae20d77496d5bab6416fe5e4b49593eb5cf74e899d96066847ce76a6156af44f429a91'
+	    'e79d96ec2c14941dbe5d1ada4ef63d64e19393065238e171b76944fac20ad007ddecd9bf74b93609a519efe1240c848d6e9ed09b8e3f353de467bb460ca23d8d'
+	    '3b0a699ca4c29623a61f9f6b5e2a499f024f76cd0716fc38158dc0b97f999bae180269f6b2855927d55d51f67ba542be98e7f9cb1a8acda97d26833728c708b6')
+
+prepare() {
+  cd "${srcdir}/${pkgname}"
+  sed -i "s/env python/env python2/g" libraries/source/cxxtest-4.4/bin/cxxtestgen
+  patch -Np0 -i "${srcdir}/spidermonkey-patchset.patch"
+  patch -Np1 -i "${srcdir}/0ad-powerpc64le-support.patch"
+}
+
+build() {
+  cd "${srcdir}/${pkgname}/build/workspaces"
+
+  unset CPPFLAGS # for le spidermonkey
+  export SDL2_CONFIG="pkg-config sdl2"
+  export HOSTTYPE=${CARCH}
+
+  ./update-workspaces.sh \
+      --bindir=/usr/bin \
+      --libdir=/usr/lib/0ad \
+      --datadir=/usr/share/${pkgname}/data \
+      --with-system-nvtt
+
+  cd "${srcdir}/${pkgname}/libraries/source/fcollada/src"
+  make config=release
+
+  cd "${srcdir}/${pkgname}/build/workspaces/gcc"
+  make config=release
+}
+
+package_0ad() {
+  pkgdesc="Cross-platform, 3D and historically-based real-time strategy game"
+  depends=('0ad-data')
+  provides=('0ad')
+
+  install -d "${pkgdir}"/usr/{bin,lib/${pkgname}}
+  cd "${srcdir}/${pkgname}"
+
+  install -Dm755 binaries/system/pyrogenesis "${pkgdir}/usr/bin"
+  install -Dm755 binaries/system/*.so "${pkgdir}/usr/lib/${pkgname}"
+  install -Dm755 build/resources/${pkgname}.sh "${pkgdir}/usr/bin/${pkgname}"
+  install -Dm644 build/resources/${pkgname}.desktop \
+    "${pkgdir}/usr/share/applications/${pkgname}.desktop"
+  install -Dm644 build/resources/${pkgname}.png \
+    "${pkgdir}/usr/share/pixmaps/${pkgname}.png"
+}
+
+package_0ad-data() {
+  pkgdesc="Data package for 0ad"
+  depends=('0ad')
+  provides=('0ad-data')
+
+  mkdir -p ${pkgdir}/usr/share/${pkgname}-git
+  cp -r ${srcdir}/${pkgname}/binaries/data ${pkgdir}/usr/share/${pkgname}-git
+}
