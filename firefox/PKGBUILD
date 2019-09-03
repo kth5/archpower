@@ -4,7 +4,7 @@
 # Contributor: Jakub Schmidtke <sjakub@gmail.com>
 
 pkgname=firefox
-pkgver=68.0.2
+pkgver=69.0
 pkgrel=1
 pkgdesc="Standalone web browser from mozilla.org"
 arch=(x86_64 powerpc64le)
@@ -22,14 +22,15 @@ optdepends=('networkmanager: Location detection via available WiFi networks'
             'hunspell-en_US: Spell checking, American English')
 options=(!emptydirs !makeflags)
 _repo=https://hg.mozilla.org/mozilla-unified
-source=("hg+$_repo#tag=FIREFOX_${pkgver//./_}_RELEASE"
+source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-$pkgver.source.tar.xz{,.asc}
         0001-Use-remoting-name-for-GDK-application-names.patch        
         $pkgname.desktop firefox-symbolic.svg
         firefox-powerpc-clang.patch
         reduce-rust-debuginfo-on-selected-architectures.patch
         rust-drop-dll-checksums.patch
         ppc-no-static-sizes.patch)
-sha256sums=('SKIP'
+sha256sums=('413c3febdfeb69eade818824eecbdb11eaeda71de229573810afd641ba741ec5'
+            'SKIP'
             'ab07ab26617ff76fce68e07c66b8aa9b96c2d3e5b5517e51a3c3eac2edd88894'
             '4a783dca1f88e003c72f32d22719a0915f3fa576adbc492240e7cc250246ce10'
             '9a1a572dc88014882d54ba2d3079a1cf5b28fa03c5976ed2cb763c93dabbd797'
@@ -37,6 +38,7 @@ sha256sums=('SKIP'
             'f61b37f682ac10b524bc6d5ef81a590f6e242b7302987d1cdeab62d110571fd0'
             '0d896944d110b3b71f62c8fa5941e7d6e856015cc7ad8c98efde458ee0bedbf6'
             '644931554cbcbc612f467e24ca6eabf98ab5aa89713c27762c159155a69e6f7a')
+validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
 # Note: These are for Arch Linux use ONLY. For your own distribution, please
@@ -52,7 +54,7 @@ sha256sums=('SKIP'
 
 prepare() {
   mkdir -p mozbuild
-  cd mozilla-unified
+  cd ${pkgname}-${pkgver} 
 
   patch -Np1 -i ${srcdir}/0001-Use-remoting-name-for-GDK-application-names.patch
   patch -Np1 -i ${srcdir}/firefox-powerpc-clang.patch
@@ -78,6 +80,7 @@ export MOZ_PGO=1
 ac_add_options --enable-official-branding
 ac_add_options --enable-update-channel=release
 ac_add_options --with-distribution-id=org.archlinuxpower
+ac_add_options --with-unsigned-addon-scopes=app,system
 export MOZILLA_OFFICIAL=1
 export MOZ_APP_REMOTINGNAME=${pkgname//-/}
 #export MOZ_TELEMETRY_REPORTING=0
@@ -105,15 +108,13 @@ END
 }
 
 build() {
-  cd mozilla-unified
-  export MOZ_SOURCE_REPO="$_repo"
+  cd ${pkgname}-${pkgver} 
   export MOZ_NOSPAM=1
   export MOZBUILD_STATE_PATH="$srcdir/mozbuild"
   export SHELL=/bin/bash
 
   # LTO needs more open files
   ulimit -n 4096
-  sudo ppc64_cpu --smt=4
   xvfb-run -a -n 97 -s "-screen 0 1600x1200x24" ./mach build
   ./mach buildsymbols
 }
@@ -121,7 +122,7 @@ build() {
 package() {
   export SHELL=/bin/bash
 
-  cd mozilla-unified
+  cd ${pkgname}-${pkgver} 
   DESTDIR="$pkgdir" ./mach install
   find . -name '*crashreporter-symbols-full.zip' -exec cp -fvt "$startdir" {} +
 
