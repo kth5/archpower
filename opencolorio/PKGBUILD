@@ -1,0 +1,52 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Sven-Hendrik Haase <sh@lutzhaase.com>
+# Contributor: Dumitru Ursu <dima@ceata.org>
+
+pkgname=opencolorio
+pkgver=1.1.1
+pkgrel=2
+pkgdesc="A color management framework for visual effects and animation"
+arch=(x86_64 powerpc64le)
+url="http://opencolorio.org"
+license=('BSD')
+depends=('lcms2' 'tinyxml' 'yaml-cpp')
+makedepends=('boost' 'cmake' 'python')
+optdepends=('python: python bindings')
+source=($pkgname-$pkgver.tar.gz::https://github.com/imageworks/OpenColorIO/tarball/v$pkgver)
+sha512sums=('aac3581e6d7cdb420d48dbe14487f6adc4ffb33455c569f4651e4545ac87e9039eea8e28c1a720bc544a9e27e095b12298359e8bb2cb2740fd9e2d071cf447e6')
+
+prepare() {
+  mv AcademySoftwareFoundation-OpenColorIO-* $pkgname-$pkgver
+
+  cd $pkgname-$pkgver
+  sed -i "s/-Werror//g" src/core/CMakeLists.txt
+  sed -i "s/-Werror//g" src/pyglue/CMakeLists.txt
+  sed -i "s/push(hidden)/push(default)/g" src/core/OCIOYaml.cpp
+}
+
+build() {
+  cd $pkgname-$pkgver
+
+  mkdir -p build && cd build
+  cmake .. \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DUSE_EXTERNAL_YAML=ON \
+    -DUSE_EXTERNAL_TINYXML=ON \
+    -DUSE_EXTERNAL_LCMS=ON \
+    -DOCIO_USE_SSE=OFF
+  make
+}
+
+package() {
+  cd "$pkgname-$pkgver"/build
+
+  make DESTDIR="$pkgdir" install
+
+  mv "$pkgdir"/usr/lib/static/libOpenColorIO.a "$pkgdir"/usr/lib/libOpenColorIO.a
+  rmdir "$pkgdir"/usr/lib/static
+
+  install -Dm644 ../LICENSE $pkgdir/usr/share/licenses/$pkgname/LICENSE
+}
+
+# vim:set ts=2 sw=2 et:
