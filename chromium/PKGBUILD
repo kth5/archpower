@@ -1,0 +1,141 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+pkgname=chromium
+_srcname=ungoogled-chromium
+pkgver=77.0.3865.120
+pkgrel=1
+pkgdesc="Google Chromium, sans integration with Google - PPC64LE FORK"
+arch=(x86_64 powerpc64le)
+url="https://github.com/leo-lb/ungoogled-chromium/tree/master"
+license=('GPL')
+provides=('chromium')
+replaces=('chromium' 'ungoogled-chromium-archlinux')
+depends=('llvm-libs' 'glib2' 'libcups' 'nss' 'openssl' 'pango' 'dbus' 'atk' 'gtk3'
+	 'krb5' 'pulseaudio' 'libxss' 're2c' 'curl' 'alsa-lib' 'gperf' 'mesa' 'at-spi2-atk'
+	 'libgnome-keyring')
+makedepends=('git' 'llvm' 'clang' 'pkgconf' 'python' 'python2' 'cmake' 'bison' 'nodejs' 'gn' 'ninja')
+commit="75ca51ff29bafa3a733b942253f45749885dfae4"
+source=("git+https://github.com/leo-lb/ungoogled-chromium.git#commit=${commit}"
+	'recent-python-ffmpeg.patch')
+sha256sums=('SKIP'
+	    '97b21f30e380e2c7137075bc9e2defa0cbd38b66028aab7361d3ed3fe39fd7fc')
+
+pkgver() {
+	cat "$srcdir/${_srcname}"/chromium_version.txt
+}
+
+prepare() {
+	_cache_dir=${srcdir}/../download-cache
+	[ ! -z "${SRCDEST}" ] && _cache_dir=${SRCDEST}/ungoogled-chrome
+	msg2 "Using ${_cache_dir} for download cache"
+
+	cd "$srcdir/${_srcname}"
+	git submodule update --init
+
+	# to avoid rewriting shebangs, we'll just link the two pythons
+	# as it is expected by the build system 
+	mkdir -p ${srcdir}/python
+	ln -sf /usr/bin/python ${srcdir}/python/python3
+	ln -sf /usr/bin/python2 ${srcdir}/python/python
+	export PATH=${srcdir}/python:${PATH}
+
+	mkdir -p ${_cache_dir} build/src 
+	msg2 'Downloading and extracting chrome...'
+	./utils/downloads.py retrieve -c ${_cache_dir} -i downloads.ini
+	./utils/downloads.py unpack -c ${_cache_dir}  -i downloads.ini -- build/src
+
+	patch -Np1 -i ${srcdir}/recent-python-ffmpeg.patch
+
+	msg2 'Pruning binaries...'
+	./utils/prune_binaries.py build/src pruning.list
+
+	msg2 'Applying patches...'
+	./utils/patches.py apply build/src patches
+
+	# the only difference between ungoogled and regular chromium
+	#msg2 'Applying domain substituions...'
+	#./utils/domain_substitution.py apply -r domain_regex.list -f domain_substitution.list -c build/domsubcache.tar.gz build/src
+}
+
+build() {
+	cd "$srcdir/${_srcname}"/build/src
+	export PATH=${srcdir}/python:${PATH}
+
+	if check_buildoption ccache y; then
+	  # Avoid falling back to preprocessor mode when sources contain time macros
+	  export CCACHE_SLOPPINESS=time_macros
+	fi
+
+	export CC=clang
+	export CXX=clang++
+	export AR=llvm-ar
+	export NM=llvm-nm
+
+	cd third_party/libvpx
+	mkdir -p source/config/linux/ppc64
+	./generate_gni.sh
+	cd ../../
+
+	cd third_party/ffmpeg
+	./chromium/scripts/build_ffmpeg.py linux ppc64
+	./chromium/scripts/generate_gn.py
+	./chromium/scripts/copy_config.sh
+	cd ../../
+
+	mkdir -p out/Default
+	cp "${srcdir}/${_srcname}"/flags.gn out/Default/args.gn
+	printf '\n' >> "out/Default/args.gn"
+	echo "custom_toolchain=\"//build/toolchain/linux/unbundle:default\"
+ffmpeg_branding=\"ChromeOS\"
+gold_path=\"\"
+goma_dir=\"\"
+host_toolchain=\"//build/toolchain/linux/unbundle:default\"
+is_clang=true
+link_pulseaudio=true" >> out/Default/args.gn
+
+
+	gn gen out/Default --fail-on-unused-args
+	ninja -C out/Default chrome chrome_sandbox chromedriver	
+}
+
+package() {
+	cd "${srcdir}/${_srcname}"/build/src
+	mkdir -p ${pkgdir}/usr/{bin,lib}
+
+	install -D out/Default/chrome "$pkgdir/usr/lib/chromium/chromium"
+        ln -s /usr/lib/chromium/chromium ${pkgdir}/usr/bin/chromium
+	install -Dm4755 out/Default/chrome_sandbox "$pkgdir/usr/lib/chromium/chrome-sandbox"
+	ln -s /usr/lib/$pkgname/chromedriver "$pkgdir/usr/bin/chromedriver"
+
+	install -Dm644 chrome/installer/linux/common/desktop.template \
+	  "$pkgdir/usr/share/applications/chromium.desktop"
+	install -Dm644 chrome/app/resources/manpage.1.in \
+	  "$pkgdir/usr/share/man/man1/chromium.1"
+	sed -i \
+	  -e "s/@@MENUNAME@@/Chromium/g" \
+	  -e "s/@@PACKAGE@@/chromium/g" \
+	  -e "s/@@USR_BIN_SYMLINK_NAME@@/chromium/g" \
+	  "$pkgdir/usr/share/applications/chromium.desktop" \
+	  "$pkgdir/usr/share/man/man1/chromium.1"
+
+	cp \
+	  out/Default/{chrome_{100,200}_percent,resources}.pak \
+	  out/Default/{*.bin,chromedriver} \
+	  "$pkgdir/usr/lib/chromium/"
+	install -Dm644 -t "$pkgdir/usr/lib/chromium/locales" out/Default/locales/*.pak
+
+	if [[ -z ${_system_libs[icu]+set} ]]; then
+	  cp out/Default/icudtl.dat "$pkgdir/usr/lib/chromium/"
+	fi
+
+	for size in 24 48 64 128 256; do
+	  install -Dm644 "chrome/app/theme/chromium/product_logo_$size.png" \
+	    "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/chromium.png"
+	done
+
+	for size in 16 32; do
+	  install -Dm644 "chrome/app/theme/default_100_percent/chromium/product_logo_$size.png" \
+	    "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/chromium.png"
+	done
+
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/chromium/LICENSE"
+}
