@@ -1,22 +1,37 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Maxime Gauduin <alucryd@archlinux.org>
 # Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 # Contributor: kfgz <kfgz@interia.pl>
+
 pkgname=x265
-pkgver=3.1.2
+pkgver=3.2
 pkgrel=1
 pkgdesc='Open Source H265/HEVC video encoder'
-arch=('x86_64' 'powerpc64le')
-url='https://bitbucket.org/multicoreware/x265'
-license=('GPL')
-depends=('glibc' 'numactl')
-makedepends=('cmake' 'mercurial')
-provides=('libx265.so')
-source=("hg+https://bitbucket.org/multicoreware/x265#tag=${pkgver}")
-sha256sums=('SKIP')
+arch=(x86_64 powerpc64le)
+url=https://bitbucket.org/multicoreware/x265
+license=(GPL)
+depends=(gcc-libs)
+makedepends=(
+  cmake
+  mercurial
+)
+provides=(libx265.so)
+source=(hg+https://bitbucket.org/multicoreware/x265#revision=353572437201d551381002aebf20d244bd49ef17
+        x265-pic.patch)
+sha256sums=(SKIP
+            429259f1c1b73739183e5a1164ac4b4191cf76cede66a6541dadf11dcb05f3ac)
+
+pkgver() {
+  cd x265
+
+  hg id --tags
+}
 
 prepare() {
   cd x265
+
+  patch -Np0 -i ${srcdir}/x265-pic.patch
 
   for d in 8 10 12; do
     if [[ -d build-$d ]]; then
@@ -27,30 +42,32 @@ prepare() {
 }
 
 build() {
+  export CFLAGS=${CFLAGS/-mabi=altivec -maltivec/}
+  export CXXFLAGS=${CXXFLAGS/-mabi=altivec -maltivec/}
+
   cd x265/build-12
 
-  export CFLAGS=${CFLAGS/-mabi=altivec -maltivec/-fPIC}
-  export CXXFLAGS=${CXXFLAGS/-mabi=altivec -maltivec/-fPIC}
-
   cmake ../source \
-    -DCMAKE_INSTALL_PREFIX='/usr' \
-    -DHIGH_BIT_DEPTH='TRUE' \
-    -DMAIN12='TRUE' \
-    -DEXPORT_C_API='FALSE' \
-    -DENABLE_CLI='FALSE' \
-    -DENABLE_SHARED='FALSE' \
-    -DENABLE_ALTIVEC='OFF'
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DHIGH_BIT_DEPTH=TRUE \
+    -DMAIN12=TRUE \
+    -DEXPORT_C_API=FALSE \
+    -DENABLE_CLI=FALSE \
+    -DENABLE_SHARED=FALSE \
+    -DENABLE_ALTIVEC='OFF' \
+    -DENABLE_PIC='ON'
   make
 
   cd ../build-10
 
   cmake ../source \
-    -DCMAKE_INSTALL_PREFIX='/usr' \
-    -DHIGH_BIT_DEPTH='TRUE' \
-    -DEXPORT_C_API='FALSE' \
-    -DENABLE_CLI='FALSE' \
-    -DENABLE_SHARED='FALSE' \
-    -DENABLE_ALTIVEC='OFF'
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DHIGH_BIT_DEPTH=TRUE \
+    -DEXPORT_C_API=FALSE \
+    -DENABLE_CLI=FALSE \
+    -DENABLE_SHARED=FALSE \
+    -DENABLE_ALTIVEC='OFF' \
+    -DENABLE_PIC='ON'
   make
 
   cd ../build-8
@@ -59,14 +76,15 @@ build() {
   ln -s ../build-12/libx265.a libx265_main12.a
 
   cmake ../source \
-    -DCMAKE_INSTALL_PREFIX='/usr' \
-    -DENABLE_SHARED='TRUE' \
-    -DENABLE_HDR10_PLUS='TRUE' \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DENABLE_SHARED=TRUE \
+    -DENABLE_HDR10_PLUS=TRUE \
     -DEXTRA_LIB='x265_main10.a;x265_main12.a' \
     -DEXTRA_LINK_FLAGS='-L .' \
-    -DLINKED_10BIT='TRUE' \
-    -DLINKED_12BIT='TRUE' \
-    -DENABLE_ALTIVEC='OFF'
+    -DLINKED_10BIT=TRUE \
+    -DLINKED_12BIT=TRUE \
+    -DENABLE_ALTIVEC='OFF' \
+    -DENABLE_PIC='ON'
   make
 }
 
