@@ -1,3 +1,4 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Johannes Löthberg <johannes@kyriasis.com>
 # Contributor: Alexander F Rødseth <xyproto@archlinux.org>
 # Contributor: Daniel Micay <danielmicay@gmail.com>
@@ -5,37 +6,84 @@
 
 pkgname=('rust' 'rust-docs')
 epoch=1
-pkgver=1.38.0
+pkgver=1.39.0
 pkgrel=1
 
-_llvm_ver=8.0.1
+_llvm_ver=9.0.0
 
 pkgdesc='Systems programming language focused on safety, speed and concurrency'
 url='https://www.rust-lang.org/'
-arch=('powerpc64le')
+arch=(x86_64 powerpc64le)
 license=('MIT' 'Apache')
 
-makedepends=('rust' "llvm8=$_llvm_ver" 'libffi' 'perl' 'python' 'curl' 'cmake')
+makedepends=('rust' "llvm=$_llvm_ver" 'libffi' 'perl' 'python' 'curl' 'cmake')
 checkdepends=('procps-ng' 'gdb')
 
 options=('!emptydirs')
 
 source=("https://static.rust-lang.org/dist/rustc-$pkgver-src.tar.gz"{,.asc}
-        "https://github.com/llvm/llvm-project/releases/download/llvmorg-$_llvm_ver/compiler-rt-$_llvm_ver.src.tar.xz"{,.sig}
-        config.toml)
+        "http://releases.llvm.org/$_llvm_ver/compiler-rt-$_llvm_ver.src.tar.xz"{,.sig}
+        0001-Fix-C-aggregate-passing-ABI-on-powerpc.patch
+        0002-Fix-zero-sized-aggregate-ABI-on-powerpc.patch)
 
-sha256sums=('644263ca7c7106f8ee8fcde6bb16910d246b30668a74be20b8c7e0e9f4a52d80'
+sha256sums=('b4a1f6b6a93931f270691aba4fc85eee032fecda973e6b9c774cd06857609357'
             'SKIP'
-            '11828fb4823387d820c6715b25f6b2405e60837d12a7469e7a8882911c721837'
+            '56e4cd96dd1d8c346b07b4d6b255f976570c6f2389697347a6c3dcb9e820d10e'
             'SKIP'
-            'b663f88f51ea5feef7f37f5757d1f53b5e86b1e1b9446325b1b40889a77830ae')
+            '7b5f836151da746cbcf4081389cf5a6314834db7b2958fda0877ce7b19060b75'
+            '25bae26372b8b0178c61ab553335d4569eec35000ffbee60956d46754b439e95')
 validpgpkeys=('108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE'  # Rust Language (Tag and Release Signing Key) <rust-key@rust-lang.org>
-              '474E22316ABF4785A88C6E8EA2C794A986419D8A') # Tom Stellard <tstellar@redhat.com>
+              '474E22316ABF4785A88C6E8EA2C794A986419D8A'  # Tom Stellard <tstellar@redhat.com>
+              'B6C8F98282B944E3B0D5C2530FC3042E345AD05D') # Hans Wennborg <hans@chromium.org>
 
 prepare() {
   cd "rustc-$pkgver-src"
 
-  cp ${srcdir}/config.toml config.toml
+_CHOST=${CHOST/powerpc64le-linux-gnu/powerpc64le-unknown-linux-gnu}
+
+  # powerpc specific
+  patch -Np1 -i ../0001-Fix-C-aggregate-passing-ABI-on-powerpc.patch
+  patch -Np1 -i ../0002-Fix-zero-sized-aggregate-ABI-on-powerpc.patch
+
+  cat >config.toml <<END
+[llvm]
+link-shared = true
+
+[build]
+target = ["${_CHOST}"]
+cargo = "/usr/bin/cargo"
+rustc = "/usr/bin/rustc"
+python = "/usr/bin/python"
+extended = true
+sanitizers = false
+profiler = true
+vendor = true
+
+[install]
+prefix = "/usr"
+
+[rust]
+# LLVM crashes when passing an object through ThinLTO twice.  This is triggered when using rust
+# code in cross-language LTO if libstd was built using ThinLTO.
+# http://blog.llvm.org/2019/09/closing-gap-cross-language-lto-between.html
+# https://github.com/rust-lang/rust/issues/54872
+codegen-units-std = 1
+
+debug-assertions = false
+debuginfo-level = 0 
+debuginfo-level-rustc = 0
+
+channel = "stable"
+
+rpath = false
+
+[dist]
+src-tarball = false
+
+[target.${_CHOST}]
+llvm-config = "/usr/bin/llvm-config"
+crt-static = false
+END
 }
 
 build() {
@@ -44,21 +92,23 @@ build() {
   export RUST_BACKTRACE=1
   export RUST_COMPILER_RT_ROOT="$srcdir/compiler-rt-$_llvm_ver.src"
 
-  python ./x.py build -j"$(nproc)"
+  python ./x.py dist ${MAKEFLAGS}
+  DESTDIR="$PWD"/dest-rust python ./x.py install ${MAKEFLAGS}
+
+  # move docs out of the way for splitting
+  mv dest-rust/usr/share/doc dest-doc
 }
 
 package_rust() {
-  depends=('gcc-libs' 'llvm8-libs' 'curl' 'libssh2')
+  depends=('gcc-libs' 'llvm-libs' 'curl' 'libssh2')
   provides=('cargo' 'rustfmt')
   conflicts=('cargo' 'rustfmt')
   replaces=('cargo' 'rustfmt')
 
   cd "rustc-$pkgver-src"
 
-  DESTDIR="$pkgdir" python ./x.py install
-
-  for license in APACHE MIT; do install -Dm644 "LICENSE-$license" \
-    "$pkgdir/usr/share/licenses/$pkgname/LICENSE-$license"; done
+  mv dest-rust/* "$pkgdir"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE*
 
   # delete unnecesary files, e.g. components and manifest files only used for the uninstall script
   cd "$pkgdir"/usr/lib/rustlib
@@ -66,11 +116,7 @@ package_rust() {
 
   # rustbuild always installs copies of the shared libraries to /usr/lib,
   # overwrite them with symlinks to the per-architecture versions
-  cd "$pkgdir"/usr/lib
-  ln -sf rustlib/$CARCH-unknown-linux-gnu/lib/*.so .
-
-  # move docs libs out of the way for splitting
-  mv "$pkgdir"/usr/share/doc "$srcdir"
+  ln -srft "$pkgdir"/usr/lib ${CHOST/powerpc64le-linux-gnu/powerpc64le-unknown-linux-gnu}/lib/*.so
 
   install -d "$pkgdir"/usr/share/bash-completion
   mv "$pkgdir"/etc/bash_completion.d/ "$pkgdir"/usr/share/bash-completion/completions/
@@ -79,13 +125,11 @@ package_rust() {
 package_rust-docs() {
   description=('Documentation for the Rust programming language')
 
-  install -d "$pkgdir"/usr/share/doc/
-  mv "$srcdir"/doc/* "$pkgdir"/usr/share/doc/rust/
-
   cd "rustc-$pkgver-src"
-  for license in APACHE MIT; do
-    install -Dm644 "LICENSE-$license" "$pkgdir/usr/share/licenses/$pkgname/LICENSE-$license"
-  done
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE*
+
+  install -d "$pkgdir"/usr/share/doc
+  mv dest-doc/* "$pkgdir"/usr/share/doc
 }
 
 # vim:set ts=2 sw=2 et:
