@@ -23,15 +23,18 @@ optdepends=('networkmanager: Location detection via available WiFi networks'
 options=(!emptydirs !makeflags)
 _repo=https://hg.mozilla.org/mozilla-unified
 source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-$pkgver.source.tar.xz{,.asc}
-        0001-Use-remoting-name-for-GDK-application-names.patch        
-        $pkgname.desktop firefox-symbolic.svg
-        rust-drop-dll-checksums.patch)
+        no-relinking.patch
+        0001-Update-bindgen.patch
+        0002-Bug-1212502-Switch-mozinfo-to-using-the-distro-packa.patch
+        0001-Use-remoting-name-for-GDK-application-names.patch
+        $pkgname.desktop)
 sha256sums=('f2e9bb26af7682b31e82fdfc3a4b3e04fd1caa8b004469ea608185d33e35691b'
             'SKIP'
+            '2dc9d1aa5eb7798c89f46478f254ae61e4122b4d1956d6044426288627d8a014'
+            '832d895c90d346fe4acf25b8b8ba9a62bea595fe5fcdeaf545c8e952393993fc'
+            '58890388e02af41055e1ec9797b7c094dee499a5219dc9c532c6cfccf2cce972'
             'ab07ab26617ff76fce68e07c66b8aa9b96c2d3e5b5517e51a3c3eac2edd88894'
-            '4a783dca1f88e003c72f32d22719a0915f3fa576adbc492240e7cc250246ce10'
-            '9a1a572dc88014882d54ba2d3079a1cf5b28fa03c5976ed2cb763c93dabbd797'
-            '0d896944d110b3b71f62c8fa5941e7d6e856015cc7ad8c98efde458ee0bedbf6')
+            'a9e5264257041c0b968425b5c97436ba48e8d294e1a0f02c59c35461ea245c33')
 validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
@@ -50,7 +53,16 @@ prepare() {
   mkdir -p mozbuild
   cd ${pkgname}-${pkgver} 
 
-  patch -Np1 -i ${srcdir}/0001-Use-remoting-name-for-GDK-application-names.patch
+  # Avoid relinking during buildsymbols
+  patch -Np1 -i ../no-relinking.patch
+         
+  # Make it compile with Rust 1.39 and Python 3.8
+  patch -Np1 -i ../0001-Update-bindgen.patch
+  patch -Np1 -i ../0002-Bug-1212502-Switch-mozinfo-to-using-the-distro-packa.patch
+  
+  # https://bugzilla.mozilla.org/show_bug.cgi?id=1530052
+  patch -Np1 -i ../0001-Use-remoting-name-for-GDK-application-names.patch
+
 
   echo -n "$_google_api_key" >google-api-key
   echo -n "$_mozilla_api_key" >mozilla-api-key
@@ -107,7 +119,42 @@ build() {
 
   # LTO needs more open files
   ulimit -n 4096
-  xvfb-run -a -n 97 -s "-screen 0 1600x1200x24" ./mach build
+  
+  # -fno-plt with cross-LTO causes obscure LLVM errors
+  # LLVM ERROR: Function Import: link error
+  CFLAGS="${CFLAGS/-fno-plt/}"
+  CXXFLAGS="${CXXFLAGS/-fno-plt/}"
+
+  # Do 3-tier PGO
+  msg2 "Building instrumented browser..."
+  cat >.mozconfig ../mozconfig - <<END
+ac_add_options --enable-profile-generate=cross
+END
+  ./mach build
+
+  msg2 "Profiling instrumented browser..."
+  ./mach package
+  LLVM_PROFDATA=llvm-profdata \
+    JARLOG_FILE="$PWD/jarlog" \
+    xvfb-run -a -n 92 -s "-screen 0 1600x1200x24" \
+   ./mach python build/pgo/profileserver.py
+
+  if ! compgen -G '*.profraw' >&2; then
+    error "No profile data produced."
+    return 1
+  fi
+ 
+  if [[ ! -s jarlog ]]; then
+    error "No jar log produced."
+    return 1
+  fi
+ 
+  msg2 "Removing instrumented browser..."
+  ./mach clobber
+
+  ./mach build
+      
+  msg2 "Building symbol archive..."
   ./mach buildsymbols
 }
 
