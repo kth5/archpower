@@ -7,7 +7,7 @@
 pkgname=('rust' 'rust-docs')
 epoch=1
 pkgver=1.39.0
-pkgrel=2
+pkgrel=3
 
 _llvm_ver=9.0.0
 
@@ -23,46 +23,55 @@ options=('!emptydirs')
 
 source=("https://static.rust-lang.org/dist/rustc-$pkgver-src.tar.gz"{,.asc}
         "http://releases.llvm.org/$_llvm_ver/compiler-rt-$_llvm_ver.src.tar.xz"{,.sig}
-        0001-Fix-C-aggregate-passing-ABI-on-powerpc.patch
-        0002-Fix-zero-sized-aggregate-ABI-on-powerpc.patch
+        0002-Fix-LLVM-build.patch
+        0004-Require-static-native-libraries-when-linking-static-.patch
+        0007-Fix-C-aggregate-passing-ABI-on-powerpc.patch
+        0008-Fix-zero-sized-aggregate-ABI-on-powerpc.patch
+        0011-test-use-extern-for-plugins-Don-t-assume-multilib.patch
+        0012-test-sysroot-crates-are-unstable-Fix-test-when-rpath.patch
+        0013-Ignore-broken-and-non-applicable-tests.patch
+        0014-Link-stage-2-tools-dynamically-to-libstd.patch
+        0015-Move-debugger-scripts-to-usr-share-rust.patch
+        0093-use-elfv2-everywhere.patch
+        0099-set-piclevel.patch
         0001-WIP-minimize-the-rust-std-component.patch
         0002-Hopefully-fix-rustdoc-build.patch)
-
 sha256sums=('b4a1f6b6a93931f270691aba4fc85eee032fecda973e6b9c774cd06857609357'
             'SKIP'
             '56e4cd96dd1d8c346b07b4d6b255f976570c6f2389697347a6c3dcb9e820d10e'
             'SKIP'
+            'e4e9b78053d59e96765b10e8cfaf9f5691e7ee2d922b46dc66a57ef4c4dca9d0'
+            '33dc2ffbf82527a3e48812874990be1390d20423a3941537f65f636210f6e5ff'
             '7b5f836151da746cbcf4081389cf5a6314834db7b2958fda0877ce7b19060b75'
             '25bae26372b8b0178c61ab553335d4569eec35000ffbee60956d46754b439e95'
+            '1fb2e02ae36b1e806f256b54e22c7b56ff8152fd32f1594e212e1c764bf0918d'
+            '3ab814b20aaa4227173cce3a03879c724b79cc56cbabcda5e55cd0c087e99f2f'
+            'e009e961a0e590eebd224b2e833ca488e16506f30120a684780bfbf17a4d9e72'
+            '4c25328439dea331e9f93d9018ca11940332f7b3a074d277e0b17658e2dc9a74'
+            'c3c2473c802a140f0954d0dabffbf402ebafac52ebfbae4c5238e1fffb7db71c'
+            'd9cb8e2cb78d73e0ef44dff2638d96187df9646af52a523a3057645e048c8e18'
+            '64a79bfa0d9a986ceb2eea553492ef2044cd84c2a8b62a86beee3d50be42d685'
             'a7e525eb4d937f569ff126db0c08ca8098d0d8fe6c26132992d2ac108885dbf3'
             'c376f987d55c65254522ce267956f68999d62bb86e3401e19ae0a092c943a7c3')
 validpgpkeys=('108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE'  # Rust Language (Tag and Release Signing Key) <rust-key@rust-lang.org>
               '474E22316ABF4785A88C6E8EA2C794A986419D8A'  # Tom Stellard <tstellar@redhat.com>
               'B6C8F98282B944E3B0D5C2530FC3042E345AD05D') # Hans Wennborg <hans@chromium.org>
 
+export CHOST="${CHOST/powerpc64le-linux-gnu/powerpc64le-unknown-linux-gnu}"
+
 prepare() {
   cd "rustc-$pkgver-src"
 
-_CHOST=${CHOST/powerpc64le-linux-gnu/powerpc64le-unknown-linux-gnu}
-
-  # For https://bugzilla.redhat.com/show_bug.cgi?id=1756487
-  # From https://src.fedoraproject.org/rpms/rust/tree/master
-  patch -Np1 -i ../0001-WIP-minimize-the-rust-std-component.patch
-
-  # For https://bugs.archlinux.org/task/64550
-  # From https://github.com/rust-lang/rust/issues/65795#issuecomment-551766737
-  patch -Np1 -i ../0002-Hopefully-fix-rustdoc-build.patch
-
-  # powerpc specific
-  patch -Np1 -i ../0001-Fix-C-aggregate-passing-ABI-on-powerpc.patch
-  patch -Np1 -i ../0002-Fix-zero-sized-aggregate-ABI-on-powerpc.patch
-
-  cat >config.toml <<END
+  for patch in ${srcdir}/*.patch; do
+    patch -sNp1 -i ${patch}
+  done
+ 
+  cat > config.toml <<- EOF
 [llvm]
 link-shared = true
 
 [build]
-target = ["${_CHOST}"]
+target = ["${CHOST}"]
 cargo = "/usr/bin/cargo"
 rustc = "/usr/bin/rustc"
 python = "/usr/bin/python"
@@ -80,22 +89,14 @@ prefix = "/usr"
 # http://blog.llvm.org/2019/09/closing-gap-cross-language-lto-between.html
 # https://github.com/rust-lang/rust/issues/54872
 codegen-units-std = 1
-
-debug-assertions = false
-debuginfo-level = 0 
-debuginfo-level-rustc = 0
-
+debuginfo-level = 2
 channel = "stable"
-
 rpath = false
-
-[dist]
-src-tarball = false
-
-[target.${_CHOST}]
+                                            
+[target.${CHOST}]
 llvm-config = "/usr/bin/llvm-config"
-crt-static = false
-END
+EOF
+
 }
 
 build() {
@@ -103,6 +104,7 @@ build() {
 
   export RUST_BACKTRACE=1
   export RUST_COMPILER_RT_ROOT="$srcdir/compiler-rt-$_llvm_ver.src"
+  export RUSTFLAGS=""
 
   python ./x.py dist ${MAKEFLAGS}
   DESTDIR="$PWD"/dest-rust python ./x.py install ${MAKEFLAGS}
@@ -118,18 +120,18 @@ package_rust() {
   replaces=('cargo' 'rustfmt')
 
   cd "rustc-$pkgver-src"
-
+      
   mv dest-rust/* "$pkgdir"
   install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE*
-
+            
   # delete unnecesary files, e.g. components and manifest files only used for the uninstall script
   cd "$pkgdir"/usr/lib/rustlib
   rm components install.log manifest-* rust-installer-version uninstall.sh
-
+                         
   # rustbuild always installs copies of the shared libraries to /usr/lib,
   # overwrite them with symlinks to the per-architecture versions
-  ln -srft "$pkgdir"/usr/lib ${CHOST/powerpc64le-linux-gnu/powerpc64le-unknown-linux-gnu}/lib/*.so
-
+  ln -srft "$pkgdir"/usr/lib ${CHOST}/lib/*.so
+                                      
   install -d "$pkgdir"/usr/share/bash-completion
   mv "$pkgdir"/etc/bash_completion.d/ "$pkgdir"/usr/share/bash-completion/completions/
 }
