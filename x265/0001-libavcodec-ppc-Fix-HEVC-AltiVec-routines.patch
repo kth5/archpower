@@ -1,0 +1,47 @@
+From c0f58c3d4da82aaf5774b1bc3a11b8a416664e18 Mon Sep 17 00:00:00 2001
+From: "A. Wilcox" <AWilcox@Wilcox-Tech.com>
+Date: Sat, 21 Jul 2018 00:42:00 -0500
+Subject: [PATCH] libavcodec/ppc: Fix HEVC AltiVec routines
+
+GCC requires the argument to vec_splat_u32 to be a literal.  The easiest
+way to accomplish this is to change 'shift' to be const in scale (as it
+is in the transform routine above), and convert both routines to be
+inline.  This way, GCC can coerce the values to literals.
+
+Tested on a 970 (Apple G5) and POWER9 (Talos II); passed fate and played
+a clip of Big Buck Bunny correctly.
+
+Signed-off-by: A. Wilcox <AWilcox@Wilcox-Tech.com>
+---
+ libavcodec/ppc/hevcdsp.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/libavcodec/ppc/hevcdsp.c b/libavcodec/ppc/hevcdsp.c
+index 4b1037d792..c8679c2de2 100644
+--- a/libavcodec/ppc/hevcdsp.c
++++ b/libavcodec/ppc/hevcdsp.c
+@@ -41,8 +41,9 @@ static const vec_u8 mask[2] = {
+     { 0x04, 0x05, 0x0C, 0x0D, 0x14, 0x15, 0x1C, 0x1D, 0x06, 0x07, 0x0E, 0x0F, 0x16, 0x17, 0x1E, 0x1F },
+ };
+ 
+-static void transform4x4(vec_s16 src_01, vec_s16 src_23, vec_s32 res[4],
+-                         const int shift, int16_t *coeffs)
++static av_always_inline void transform4x4(vec_s16 src_01, vec_s16 src_23,
++					  vec_s32 res[4], const int shift,
++					  int16_t *coeffs)
+ {
+     vec_s16 src_02, src_13;
+     vec_s32 zero = vec_splat_s32(0);
+@@ -67,7 +68,8 @@ static void transform4x4(vec_s16 src_01, vec_s16 src_23, vec_s32 res[4],
+     res[3] = vec_sub(e0, o0);
+ }
+ 
+-static void scale(vec_s32 res[4], vec_s16 res_packed[2], int shift)
++static av_always_inline void scale(vec_s32 res[4], vec_s16 res_packed[2],
++				   const int shift)
+ {
+     int i;
+     vec_u32 v_shift = vec_splat_u32(shift);
+-- 
+2.17.1
+
