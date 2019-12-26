@@ -1,23 +1,23 @@
---- mozilla-unified/security/nss/lib/freebl/mpi/mpcpucache.c.orig	2019-03-01 07:33:16.000000000 +0000
-+++ mozilla-unified/security/nss/lib/freebl/mpi/mpcpucache.c	2019-03-01 08:08:20.000000000 +0000
+--- security/nss/lib/freebl/mpi/mpcpucache.c.orig	2019-12-23 18:32:28.800055511 +0100
++++ security/nss/lib/freebl/mpi/mpcpucache.c	2019-12-23 18:33:00.886759880 +0100
 @@ -727,9 +727,12 @@
  dcbzl(char *array)
  {
      register char *a asm("r2") = array;
--    __asm__ __volatile__("dcbzl %0,r0"
+-    __asm__ __volatile__("dcbzl %0,0"
 -                         : "=r"(a)
 -                         : "0"(a));
 +    /* some older assemblers won't understand the dcbzl instruction
-+     * variant, so we directly emit the instruction ourselves */
-+     __asm__ __volatile__("mr 9, %0 ; .long 0x7C204FEC" /*dcbzl 0,9*/
-+                          : /*out*/
-+                          : "r" (a) /*in*/
-+                          : "memory", "r9" /*clobber*/);
++    * variant, so we directly emit the instruction ourselves */
++    __asm__ __volatile__("mr 9, %0 ; .long 0x7C204FEC" /*dcbzl 0,9*/
++                         : /*out*/
++                         : "r" (a) /*in*/
++                         : "memory", "r9" /*clobber*/);
  }
  
  #define PPC_DO_ALIGN(x, y) ((char *)((((long long)(x)) + ((y)-1)) & ~((y)-1)))
---- mozilla-unified/xpcom/reflect/xptcall/md/unix/xptcstubs_asm_ppc64_linux.S.orig	2019-03-18 11:00:03.847370287 +0000
-+++ mozilla-unified/xpcom/reflect/xptcall/md/unix/xptcstubs_asm_ppc64_linux.S	2019-03-18 11:07:58.285691290 +0000
+--- xpcom/reflect/xptcall/md/unix/xptcstubs_asm_ppc64_linux.S.orig	2019-12-23 18:34:18.188819500 +0100
++++ xpcom/reflect/xptcall/md/unix/xptcstubs_asm_ppc64_linux.S	2019-12-23 18:34:35.437047656 +0100
 @@ -58,35 +58,35 @@
  #endif
          mflr    r0
@@ -88,8 +88,8 @@
          mtlr    r0
          blr
  
---- mozilla-unified/xpcom/reflect/xptcall/md/unix/xptcinvoke_asm_ppc64_linux.S.orig	2019-04-14 16:45:21.610000000 +0000
-+++ mozilla-unified/xpcom/reflect/xptcall/md/unix/xptcinvoke_asm_ppc64_linux.S	2019-04-14 16:45:28.050000000 +0000
+--- xpcom/reflect/xptcall/md/unix/xptcinvoke_asm_ppc64_linux.S.orig	2019-12-23 18:35:17.732702582 +0100
++++ xpcom/reflect/xptcall/md/unix/xptcinvoke_asm_ppc64_linux.S	2019-12-23 18:35:23.742085209 +0100
 @@ -62,11 +62,11 @@
  .NS_InvokeByIndex:
  #endif
@@ -115,7 +115,7 @@
  
          # +stack frame, -unused stack params, +regs storage, +1 for alignment
          addi    r7,r5,((STACK_PARAMS/8)-7+7+13+3+1)
-@@ -105,55 +105,55 @@
+@@ -105,56 +105,56 @@
  
          # Set up to invoke function
  
@@ -192,15 +192,16 @@
 -        ld      r2,STACK_TOC(r1)        # Load our own TOC pointer
 -        ld      r1,0(r1)                # Revert stack frame
 -        ld      0,16(r1)                # Reload lr
--        ld      29,-24(r1)              # Restore NVGPRS
--        ld      30,-16(r1)
--        ld      31,-8(r1)
 +        ld      r2,STACK_TOC(%r1)        # Load our own TOC pointer
 +        ld      r1,0(%r1)                # Revert stack frame
 +        ld      0,16(%r1)                # Reload lr
+         mtlr    0
+-        ld      29,-24(r1)              # Restore NVGPRS
+-        ld      30,-16(r1)
+-        ld      31,-8(r1)
 +        ld      29,-24(%r1)              # Restore NVGPRS
 +        ld      30,-16(%r1)
 +        ld      31,-8(%r1)
-         mtlr    0
          blr
  
+ #if _CALL_ELF == 2
