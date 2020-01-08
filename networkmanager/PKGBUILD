@@ -7,8 +7,8 @@
 # Contributor: Valentine Sinitsyn <e_val@inbox.ru>
 
 pkgbase=networkmanager
-pkgname=(networkmanager libnm)
-pkgver=1.20.6
+pkgname=(networkmanager libnm nm-cloud-setup)
+pkgver=1.22.2
 pkgrel=1
 pkgdesc="Network connection manager and user applications"
 url="https://wiki.gnome.org/Projects/NetworkManager"
@@ -20,7 +20,7 @@ makedepends=(intltool dhclient iptables gobject-introspection gtk-doc "ppp=$_ppp
              libnewt libndp libteam vala perl-yaml python-gobject git vala jansson bluez-libs
              glib2-docs dhcpcd iwd dnsmasq systemd-resolvconf libpsl audit meson)
 checkdepends=(libx11 python-dbus)
-_commit=7910cdfe5a9ffe02cd0780d56fcc66500e292d09  # tags/1.20.6^0
+_commit=eacbbabd1360c710d767d5968af7ed76f2cc80d9  # tags/1.22.2^0
 source=("git+https://gitlab.freedesktop.org/NetworkManager/NetworkManager.git#commit=$_commit")
 sha256sums=('SKIP')
 
@@ -35,19 +35,29 @@ prepare() {
 
 build() {
   local meson_args=(
+    # system paths
     -D dbus_conf_dir=/usr/share/dbus-1/system.d
+
+    # platform
     -D dist_version="$pkgver-$pkgrel"
     -D session_tracking_consolekit=false
     -D suspend_resume=systemd
     -D modify_system=true
     -D polkit_agent=true
     -D selinux=false
+
+    # features
     -D iwd=true
     -D pppd_plugin_dir=/usr/lib/pppd/$_pppver
     -D teamdctl=true
+    -D nm_cloud_setup=true
     -D bluez5_dun=true
     -D ebpf=true
+
+    # configuration plugins
     -D config_plugins_default=keyfile
+
+    # miscellaneous
     -D vapi=true
     -D docs=true
     -D more_asserts=no
@@ -56,7 +66,7 @@ build() {
   )
 
   arch-meson NetworkManager build "${meson_args[@]}"
-  ninja -C build ${MAKEFLAGS}
+  ninja -C build
 }
 
 check() {
@@ -77,7 +87,7 @@ _pick() {
 
 package_networkmanager() {
   depends=(libnm iproute2 polkit wpa_supplicant libmm-glib libnewt libndp libteam curl
-           bluez-libs libpsl audit)
+           bluez-libs libpsl audit mobile-broadband-provider-info)
   optdepends=('dnsmasq: connection sharing'
               'bluez: Bluetooth support'
               'ppp: dialup connection support'
@@ -102,7 +112,8 @@ END
 uri=http://www.archlinux.org/check_network_status.txt
 END
 
-### Split libnm
+  shopt -s globstar
+
   _pick libnm "$pkgdir"/usr/include/libnm
   _pick libnm "$pkgdir"/usr/lib/girepository-1.0/NM-*
   _pick libnm "$pkgdir"/usr/lib/libnm.*
@@ -110,12 +121,23 @@ END
   _pick libnm "$pkgdir"/usr/share/gir-1.0/NM-*
   _pick libnm "$pkgdir"/usr/share/gtk-doc/html/libnm
   _pick libnm "$pkgdir"/usr/share/vala/vapi/libnm.*
+
+  _pick nm-cloud-setup "$pkgdir"/usr/lib/**/*nm-cloud-setup*
+
+  # Restore empty dir
+  mkdir "$pkgdir/usr/lib/NetworkManager/dispatcher.d/no-wait.d"
 }
 
 package_libnm() {
   pkgdesc="NetworkManager client library"
   depends=(glib2 nss libutil-linux jansson systemd-libs)
   mv libnm/* "$pkgdir"
+}
+
+package_nm-cloud-setup() {
+  pkgdesc="Automatically configure NetworkManager in cloud"
+  depends=(networkmanager)
+  mv nm-cloud-setup/* "$pkgdir"
 }
 
 # vim:set sw=2 et:
