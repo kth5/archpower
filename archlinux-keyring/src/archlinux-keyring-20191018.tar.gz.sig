@@ -1,1 +1,0 @@
-/mnt/caches/sources/archlinux-keyring-20191018.tar.gz.sig
