@@ -4,7 +4,7 @@
 
 pkgname=clang
 pkgver=9.0.1
-pkgrel=2
+pkgrel=3
 pkgdesc="C language family frontend for LLVM"
 arch=(x86_64 powerpc64le)
 url="https://clang.llvm.org/"
@@ -26,19 +26,27 @@ fi
 source=($_source_base/$pkgname-$pkgver.src.tar.xz{,.sig}
         $_source_base/clang-tools-extra-$pkgver.src.tar.xz{,.sig}
         $_source_base/llvm-$pkgver.src.tar.xz{,.sig}
-        enable-SSP-and-PIE-by-default.patch)
+        enable-SSP-and-PIE-by-default.patch
+        clang-001-fix-unwind-chain-inclusion.patch
+        clang-003-ppc64-dynamic-linker-path.patch)
 sha256sums=('5778512b2e065c204010f88777d44b95250671103e434f9dc7363ab2e3804253'
             'SKIP'
             'b26fd72a78bd7db998a26270ec9ec6a01346651d88fa87b4b323e13049fb6f07'
             'SKIP'
             '00a1ee1f389f81e9979f3a640a01c431b3021de0d42278f6508391a2f0b81c9a'
             'SKIP'
-            'fde58a4902bec3715bc3d0c9250fa4c5f241af90bfd1e46f7128fa1435c03026')
+            'fde58a4902bec3715bc3d0c9250fa4c5f241af90bfd1e46f7128fa1435c03026'
+            'b194d6a69450c20bdee3fe678e85288229ce169c770e2d7dc18a98527c461ef3'
+            'c6a1a95d23f9bf8f54ee9563ffe17b1de70ce1f6d0dd11f2594d95adaba2b66f')
 validpgpkeys+=('B6C8F98282B944E3B0D5C2530FC3042E345AD05D') # Hans Wennborg <hans@chromium.org>
 validpgpkeys+=('474E22316ABF4785A88C6E8EA2C794A986419D8A') # Tom Stellard <tstellar@redhat.com>
 
 prepare() {
   cd "$srcdir/$pkgname-$pkgver.src"
+
+  patch -Np1 -i ${srcdir}/clang-001-fix-unwind-chain-inclusion.patch
+  patch -Np1 -i ${srcdir}/clang-003-ppc64-dynamic-linker-path.patch
+
   mkdir -p build
   mv "$srcdir/clang-tools-extra-$pkgver.src" tools/extra
   patch -Np1 -i ../enable-SSP-and-PIE-by-default.patch
@@ -69,12 +77,12 @@ build() {
     -DSPHINX_WARNINGS_AS_ERRORS=OFF \
     -DLLVM_EXTERNAL_LIT=/usr/bin/lit \
     -DLLVM_MAIN_SRC_DIR="$srcdir/llvm-$pkgver.src"
-  ninja
+  ninja ${MAKEFLAGS}
 }
 
 check() {
   cd "$srcdir/$pkgname-$pkgver.src/build"
-  ninja check-clang{,-tools}
+  ninja check-clang{,-tools} ${MAKEFLAGS}
 }
 
 _python2_optimize() {
