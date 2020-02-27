@@ -7,14 +7,15 @@ pkgname=(qemu qemu-headless qemu-arch-extra qemu-headless-arch-extra
          qemu-block-{iscsi,rbd,gluster} qemu-guest-agent)
 pkgdesc="A generic and open source machine emulator and virtualizer"
 pkgver=4.2.0
-pkgrel=1
+pkgrel=2
 arch=(x86_64 powerpc64le)
 license=(GPL2 LGPL2.1)
 url="https://wiki.qemu.org/"
 _headlessdeps=(seabios gnutls libpng libaio numactl jemalloc xfsprogs libnfs
-               lzo snappy curl vde2 libcap-ng spice libcacard usbredir libslirp)
-depends=(virglrenderer sdl2 vte3 libpulse "${_headlessdeps[@]}")
-makedepends=(spice-protocol python ceph libiscsi glusterfs python-sphinx xorgproto)
+               lzo snappy curl vde2 libcap-ng spice libcacard usbredir libslirp
+               libssh)
+depends=(virglrenderer sdl2 vte3 libpulse brltty "${_headlessdeps[@]}")
+makedepends=(spice-protocol python ceph libiscsi glusterfs python-sphinx)
 source=(https://download.qemu.org/qemu-$pkgver.tar.xz{,.sig}
         qemu-ga.service
         65-kvm.rules)
@@ -25,16 +26,16 @@ sha512sums=('2a79973c2b07c53e8c57a808ea8add7b6b2cbca96488ed5d4b669ead8c9318907de
 validpgpkeys=('CEACC9E15534EBABB82D3FA03353C9CEF108B584')
 
 case $CARCH in
+  i?86) _corearch=i386 ;;
   x86_64) _corearch=x86_64 ;;
   powerpc64le) _corearch=ppc64 ;;
 esac
 
 prepare() {
-  mkdir -p build-{full,headless}
+  mkdir build-{full,headless}
   mkdir -p extra-arch-{full,headless}/usr/{bin,share/qemu}
 
   cd ${pkgname}-${pkgver}
-  sed -i 's/vte-2\.90/vte-2.91/g' configure
 }
 
 build() {
@@ -47,6 +48,7 @@ build() {
     --disable-sdl \
     --disable-gtk \
     --disable-vte \
+    --disable-brlapi \
     --disable-opengl \
     --disable-virglrenderer
 }
@@ -59,7 +61,7 @@ _build() (
 
   # http://permalink.gmane.org/gmane.comp.emulators.qemu/238740
   export CFLAGS+=" -fPIC"
-  
+
   ../${pkgname}-${pkgver}/configure \
     --prefix=/usr \
     --sysconfdir=/etc \
@@ -70,7 +72,6 @@ _build() (
     --enable-sdl \
     --enable-jemalloc \
     --enable-slirp=system \
-    --enable-spice \
     "${@:2}"
 
   make
@@ -154,9 +155,6 @@ _package() {
       # iPXE ROMs
       efi-*|pxe-*) continue ;;
 
-      # core blobs
-      #kvmvapic.bin|linuxboot*|multiboot.bin|sgabios.bin|vgabios*) continue ;;
-
       # POWER core blobs
       spapr-rtas.bin|slof.bin) continue ;;
 
@@ -212,7 +210,7 @@ package_qemu-block-gluster() {
 
 package_qemu-guest-agent() {
   pkgdesc="QEMU Guest Agent"
-  depends=(gcc-libs glib2)
+  depends=(gcc-libs glib2 libudev.so)
 
   install -D build-full/qemu-ga "$pkgdir/usr/bin/qemu-ga"
   install -Dm644 qemu-ga.service "$pkgdir/usr/lib/systemd/system/qemu-ga.service"
