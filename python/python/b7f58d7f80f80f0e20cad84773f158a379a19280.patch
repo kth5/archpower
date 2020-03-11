@@ -1,0 +1,72 @@
+From b7f58d7f80f80f0e20cad84773f158a379a19280 Mon Sep 17 00:00:00 2001
+From: "Miss Islington (bot)"
+ <31488909+miss-islington@users.noreply.github.com>
+Date: Mon, 17 Sep 2018 14:27:59 -0700
+Subject: [PATCH] bpo-34587, test_socket: remove RDSTest.testCongestion()
+ (GH-9277)
+
+The test tries to fill the receiver's socket buffer and expects an
+error. But the RDS protocol doesn't require that. Moreover, the Linux
+implementation of RDS expects that the producer of the messages
+reduces its rate, it's not the role of the receiver to trigger an
+error.
+
+The test fails on Fedora 28 by design, so remove it.
+(cherry picked from commit 7484bdfd1e2e33fdd2c44dd4ffa044aacd495337)
+
+Co-authored-by: Victor Stinner <vstinner@redhat.com>
+---
+ Lib/test/test_socket.py                       | 27 -------------------
+ .../2018-09-13-20-58-07.bpo-34587.rCcxp3.rst  |  5 ++++
+ 2 files changed, 5 insertions(+), 27 deletions(-)
+ create mode 100644 Misc/NEWS.d/next/Tests/2018-09-13-20-58-07.bpo-34587.rCcxp3.rst
+
+diff --git a/Lib/test/test_socket.py b/Lib/test/test_socket.py
+index 4f3c4774e40ff..f4d58ebf7157b 100644
+--- a/Lib/test/test_socket.py
++++ b/Lib/test/test_socket.py
+@@ -2054,33 +2054,6 @@ def _testSelect(self):
+         self.data = b'select'
+         self.cli.sendto(self.data, 0, (HOST, self.port))
+ 
+-    def testCongestion(self):
+-        # wait until the sender is done
+-        self.evt.wait()
+-
+-    def _testCongestion(self):
+-        # test the behavior in case of congestion
+-        self.data = b'fill'
+-        self.cli.setblocking(False)
+-        try:
+-            # try to lower the receiver's socket buffer size
+-            self.cli.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16384)
+-        except OSError:
+-            pass
+-        with self.assertRaises(OSError) as cm:
+-            try:
+-                # fill the receiver's socket buffer
+-                while True:
+-                    self.cli.sendto(self.data, 0, (HOST, self.port))
+-            finally:
+-                # signal the receiver we're done
+-                self.evt.set()
+-        # sendto() should have failed with ENOBUFS
+-        self.assertEqual(cm.exception.errno, errno.ENOBUFS)
+-        # and we should have received a congestion notification through poll
+-        r, w, x = select.select([self.serv], [], [], 3.0)
+-        self.assertIn(self.serv, r)
+-
+ 
+ @unittest.skipIf(fcntl is None, "need fcntl")
+ @unittest.skipUnless(HAVE_SOCKET_VSOCK,
+diff --git a/Misc/NEWS.d/next/Tests/2018-09-13-20-58-07.bpo-34587.rCcxp3.rst b/Misc/NEWS.d/next/Tests/2018-09-13-20-58-07.bpo-34587.rCcxp3.rst
+new file mode 100644
+index 0000000000000..8d45418aeab46
+--- /dev/null
++++ b/Misc/NEWS.d/next/Tests/2018-09-13-20-58-07.bpo-34587.rCcxp3.rst
+@@ -0,0 +1,5 @@
++test_socket: Remove RDSTest.testCongestion(). The test tries to fill the
++receiver's socket buffer and expects an error. But the RDS protocol doesn't
++require that. Moreover, the Linux implementation of RDS expects that the
++producer of the messages reduces its rate, it's not the role of the receiver to
++trigger an error. The test fails on Fedora 28 by design, so just remove it.
