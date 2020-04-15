@@ -2,9 +2,9 @@
 # Maintainer: Thomas Bächler <thomas@archlinux.org>
 
 pkgbase=linux-firmware
-pkgname=(linux-firmware)
-_commit=efcfa03ae6100dfe523ebf612e03c3a90fc4c794  # master
-pkgver=20200224.efcfa03
+pkgname=(linux-firmware amd-ucode)
+_commit=8eb0b281511d6455ca9151e52f694dc982193251  # master
+pkgver=20200316.8eb0b28
 pkgrel=1
 pkgdesc="Firmware files for Linux"
 makedepends=('git')
@@ -28,7 +28,18 @@ pkgver() {
 }
 
 build() {
-  return 0
+  mkdir -p kernel/x86/microcode
+  cat ${pkgbase}/amd-ucode/microcode_amd*.bin > kernel/x86/microcode/AuthenticAMD.bin
+
+  # Reproducibility: set the timestamp on the bin file
+  if [[ -n $SOURCE_DATE_EPOCH ]]; then 
+    touch -d @$SOURCE_DATE_EPOCH kernel/x86/microcode/AuthenticAMD.bin
+  fi
+
+  # Reproducibility: strip the inode and device numbers from the cpio archive
+  echo kernel/x86/microcode/AuthenticAMD.bin |
+    bsdtar --uid 0 --gid 0 -cnf - -T - |
+    bsdtar --null -cf - --format=newc @- > amd-ucode.img
 }
 
 package_linux-firmware() {
@@ -66,4 +77,12 @@ package_linux-firmware() {
   echo 'w /sys/devices/system/cpu/microcode/reload - - - - 1' |
     install -Dm644 /dev/stdin "${pkgdir}/usr/lib/tmpfiles.d/${pkgname}.conf"
 }
+
+package_amd-ucode() {
+  pkgdesc='Microcode update files for AMD CPUs'
+
+  install -Dt "${pkgdir}/boot" -m644 amd-ucode.img
+  install -Dm644 ${pkgbase}/LICENSE.amd-ucode "${pkgdir}/usr/share/licenses/$pkgname/LICENSE"
+}
+
 # vim:set ts=2 sw=2 et:
