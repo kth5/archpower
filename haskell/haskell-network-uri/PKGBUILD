@@ -3,22 +3,29 @@
 
 _hkgname=network-uri
 pkgname=haskell-network-uri
-pkgver=2.6.1.0
-pkgrel=19
+pkgver=2.6.3.0
+pkgrel=74
 pkgdesc="A library for client-side HTTP"
 url="https://hackage.haskell.org/package/${_hkgname}"
 license=('BSD')
 arch=(x86_64 powerpc64le)
 depends=('ghc-libs' 'sh')
-makedepends=('ghc')
+makedepends=('ghc' 'haskell-criterion' 'haskell-hunit' 'haskell-test-framework'
+             'haskell-test-framework-hunit' 'haskell-test-framework-quickcheck2')
 source=("https://hackage.haskell.org/packages/archive/${_hkgname}/${pkgver}/${_hkgname}-${pkgver}.tar.gz")
-sha512sums=('c1b6e516cd19875aab0da325dcb8f5c6b98d43c3952bda4f96bd9c798882357c724b2facbef09e2e98d29b696a9e5518a2de9463fb0af4c5df0734fe2654cc24')
+sha512sums=('15091367e4543de1e2af0d81973b8e456e2c5f5295dcd7a91b91f46c2e07a6a655c6ab4c0837ce7566b21b43bca3569c1b27bb7f437572b09d00e678c7b512f0')
 
 build() {
     cd $_hkgname-$pkgver
-    
+
+    if (( CHECKFUNC )); then
+        _opts=('--enable-tests')
+    else
+        _opts=('--disable-tests')
+    fi
+
     runhaskell Setup configure -O --enable-shared --enable-executable-dynamic --disable-library-vanilla \
-        --prefix=/usr --docdir=/usr/share/doc/$pkgname \
+        --prefix=/usr --docdir=/usr/share/doc/$pkgname "${_opts[@]}" \
         --dynlibdir=/usr/lib --libsubdir=\$compiler/site-local/\$pkgid
     runhaskell Setup build
     runhaskell Setup register --gen-script
@@ -27,12 +34,17 @@ build() {
     sed -i -r -e "s|ghc-pkg.*unregister[^ ]* |&'--force' |" unregister.sh
 }
 
+check() {
+    cd $_hkgname-$pkgver
+    runhaskell Setup test
+}
+
 package() {
     cd $_hkgname-$pkgver
     
     install -D -m744 register.sh "$pkgdir"/usr/share/haskell/register/$pkgname.sh
     install -D -m744 unregister.sh "$pkgdir"/usr/share/haskell/unregister/$pkgname.sh
     runhaskell Setup copy --destdir="$pkgdir"
-    install -D -m644 "LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
-    rm -f "${pkgdir}/usr/share/doc/${pkgname}/LICENSE"
+    install -D -m644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+    rm -f "$pkgdir"/usr/share/doc/$pkgname/LICENSE
 }
