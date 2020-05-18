@@ -1,53 +1,38 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 
-pkgbase=python-elasticsearch
-pkgname=('python-elasticsearch' 'python2-elasticsearch')
-pkgver=7.6.0
+pkgname=python-elasticsearch
+pkgver=7.7.0
 pkgrel=1
 arch=('any')
 pkgdesc='Python client for Elasticsearch'
 url='https://github.com/elastic/elasticsearch-py'
 license=('Apache')
-makedepends=('python-setuptools' 'python2-setuptools' 'python-urllib3' 'python2-urllib3')
-checkdepends=('python-nose' 'python2-nose' 'python-requests' 'python2-requests' 'python-coverage'
-              'python2-coverage' 'python-mock' 'python2-mock' 'python-pyaml' 'python2-pyaml'
-              'python-nosexcover' 'python2-nosexcover')
-source=("$pkgbase-$pkgver.tar.gz::https://github.com/elastic/elasticsearch-py/archive/$pkgver.tar.gz")
-sha512sums=('f8a54cd222af94d659087d654bcbe52da5ee90570ff04dbdd6793b870b8fd7e4b5b896620424f85057f2274ed3a16ecd97f53f704c2a97931b4876d246311ea9')
+depends=('python-urllib3')
+makedepends=('python-setuptools' 'git')
+checkdepends=('python-nose' 'python-requests' 'python-coverage' 'python-mock' 'python-pyaml'
+              'python-nosexcover' 'python-numpy' 'python-pandas')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/elastic/elasticsearch-py/archive/$pkgver.tar.gz"
+        git+https://github.com/elastic/elasticsearch.git)
+sha512sums=('6da382c5056f61dde2bf509c902a4ca33548ee937d037dc977e8c8864ebc09385f630b5c99ab8b24b69390773a241786495d1c01a5684ea3892d834e7a1550b1'
+            'SKIP')
 
 prepare() {
-  sed -i 's/urllib3<.*,>/urllib3>/' elasticsearch-py-$pkgver/setup.py
-  cp -a elasticsearch-py-$pkgver{,-py2}
+  sed -i 's/, "certifi"//' elasticsearch-py-$pkgver/setup.py
+  sed -i 's|CA_CERTS = None|CA_CERTS = "/etc/ssl/certs/ca-certificates.crt"|' elasticsearch-py-$pkgver/elasticsearch/connection/http_urllib3.py
 }
 
 build() {
-  cd "$srcdir"/elasticsearch-py-$pkgver
+  cd elasticsearch-py-$pkgver
   python setup.py build
-
-  cd "$srcdir"/elasticsearch-py-$pkgver-py2
-  python2 setup.py build
 }
 
 check() {
-  cd "$srcdir"/elasticsearch-py-$pkgver
-  # https://github.com/elastic/elasticsearch-py/issues/816
-  # python setup.py test
-
-  cd "$srcdir"/elasticsearch-py-$pkgver-py2
-  # python2 setup.py test
+  cd elasticsearch-py-$pkgver
+  TEST_ES_REPO="$srcdir"/elasticsearch python setup.py test
 }
 
-package_python-elasticsearch() {
-  depends=('python-urllib3')
-
+package() {
   cd elasticsearch-py-$pkgver
   python setup.py install --root "$pkgdir" --optimize=1
-}
-
-package_python2-elasticsearch() {
-  depends=('python2-urllib3')
-
-  cd elasticsearch-py-$pkgver-py2
-  python2 setup.py install --root "$pkgdir" --optimize=1
 }
