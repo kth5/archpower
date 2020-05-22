@@ -4,38 +4,45 @@
 # Contributor: tobias <tobias@archlinux.org>
 
 pkgname=ftgl
-_pkgver=2.4.0
-pkgver=${_pkgver/-/}
-pkgrel=10
+_pkgver=2.1.3-rc5
+pkgver=2.4.0
+pkgrel=2
 pkgdesc="OpenGL library to use arbitrary fonts"
 arch=(x86_64 powerpc64le)
-url="https://sourceforge.net/projects/ftgl/"
+url="https://github.com/frankheckenbach/ftgl"
 license=(MIT)
 depends=(freetype2 glu)
-makedepends=(doxygen mesa graphviz freetype2-demos)
-source=("http://ftp.de.debian.org/debian/pool/main/f/${pkgname}/${pkgname}_${_pkgver}.orig.tar.xz")
-sha256sums=('e3e07a4b4aa5db98d69c621887001dc21b0cfce607868c0e0e4e37bcc7558676')
+makedepends=(doxygen mesa graphviz git)
+_commit=483639219095ad080538e07ceb5996de901d4e74  # tags/v2.4.0
+source=("git+https://github.com/frankheckenbach/ftgl#commit=$_commit")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd $pkgname
+  git describe --tags | sed 's/^v//;s/-/+/g'
+}
 
 prepare() {
-  cd $pkgname-${_pkgver}
-  ./autogen.sh
-  sed -i '/^SUBDIRS =/s/demo//' Makefile.in
+  cd $pkgname
   printf '%s\n' >>docs/doxygen.cfg.in \
     HAVE_DOT=yes DOT_IMAGE_FORMAT=svg INTERACTIVE_SVG=yes
+  ./autogen.sh
 }
 
 build() {
-  cd $pkgname-${_pkgver/-/\~}
-  ./configure --build=$CHOST \
-	      --prefix=/usr \
-	      --with-pic \
-	      --disable-static
+  cd $pkgname
+  ./configure --prefix=/usr --with-pic --disable-static
   make
 }
 
 package() {
-  cd $pkgname-${_pkgver/-/\~}
+  cd $pkgname
   make DESTDIR="$pkgdir" install
 
-  install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  # FS#23283: install missing headers for OpenCascade
+  install -Dt "$pkgdir/usr/include/FTGL" -m644 src/FT{Face,Size}.h
+
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 COPYING
 }
+
+# vim:set sw=2 et:
