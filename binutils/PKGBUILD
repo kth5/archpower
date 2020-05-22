@@ -6,27 +6,31 @@
 
 pkgname=binutils
 pkgver=2.34
-pkgrel=4
+pkgrel=5
 pkgdesc='A set of programs to assemble and manipulate binary and object files'
 arch=(x86_64 powerpc64le)
 url='https://www.gnu.org/software/binutils/'
 license=(GPL)
 groups=(base-devel)
-depends=(glibc zlib)
-checkdepends=(dejagnu bc)
+depends=(glibc zlib elfutils)
+makedepends=(elfutils git)
 conflicts=(binutils-multilib)
 replaces=(binutils-multilib)
 options=(staticlibs !distcc !ccache)
-source=(https://ftp.gnu.org/gnu/binutils/binutils-$pkgver.tar.xz{,.sig})
+_commit=cb5f6a3e146cc70bc2d864989386df80acec5d3e
+source=(git+https://sourceware.org/git/binutils-gdb.git#commit=$_commit)
+#source=(https://ftp.gnu.org/gnu/binutils/binutils-$pkgver.tar.xz{,.sig})
+sha256sums=('SKIP')
 validpgpkeys=(3A24BC1E8FB409FA9F14371813FCEF89DD9E3C4F)
-sha256sums=('f00b0e8803dc9bab1e2165bd568528135be734df3fabf8d0161828cd56028952'
-            'SKIP')
 
 prepare() {
+  [[ ! -d binutils-gdb ]] && ln -s binutils-$pkgver binutils-gdb
   mkdir -p binutils-build
 
-  #cd binutils-gdb
-  cd binutils-$pkgver
+  cd binutils-gdb
+
+  # Turn off development mode (-Werror, gas run-time checks, date in sonames)
+  sed -i '/^development=/s/true/false/' bfd/development.sh
 
   # hack! - libiberty configure tests for header files using "$CPP $CPPFLAGS"
   sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" libiberty/configure
@@ -35,10 +39,11 @@ prepare() {
 build() {
   cd binutils-build
 
-  "$srcdir/binutils-$pkgver/configure" \
+  CFLAGS+=" -fcommon" \
+  "$srcdir/binutils-gdb/configure" \
     --prefix=/usr \
     --with-lib-path=/usr/lib:/usr/local/lib \
-    --with-bugurl=https://bugs.archlinux.org/ \
+    --with-bugurl=https://github.com/kth5/archpower/issues \
     --enable-deterministic-archives \
     --enable-gold \
     --enable-ld=default \
@@ -46,13 +51,13 @@ build() {
     --enable-plugins \
     --enable-relro \
     --enable-shared \
+    --enable-targets=${CHOST} \
     --enable-threads \
     --disable-gdb \
     --disable-werror \
+    --with-debuginfod \
     --with-pic \
-    --with-system-zlib \
-    --enable-targets=${CHOST} \
-    --host=${CHOST}
+    --with-system-zlib
 
   make configure-host
   make tooldir=/usr
@@ -81,5 +86,5 @@ package() {
   cd "$pkgdir"/usr/bin;
   for fn in addr2line ar as c++filt dwp elfedit gprof ld ld.bfd ld.gold nm objcopy objdump ranlib readelf size strings; do
     ln -sf /usr/bin/${fn} ${pkgdir}/usr/bin/${CHOST}-${fn}
-  done  
+  done
 }
