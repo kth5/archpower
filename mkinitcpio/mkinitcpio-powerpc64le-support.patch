@@ -1,6 +1,6 @@
-diff -ruN mkinitcpio-25.orig/functions mkinitcpio-25/functions
---- mkinitcpio-25.orig/functions	2019-04-09 14:51:19.128762944 +0000
-+++ mkinitcpio-25/functions	2019-04-09 14:51:24.908894498 +0000
+diff -ruN mkinitcpio-27.orig/functions mkinitcpio-27/functions
+--- mkinitcpio-27.orig/functions	2020-05-26 20:21:42.578174790 +0200
++++ mkinitcpio-27/functions	2020-05-26 20:22:59.219163737 +0200
 @@ -150,6 +150,9 @@
      read kver _ < \
          <(dd if="$1" bs=1 count=127 skip=$(( offset + 0x200 )) 2>/dev/null)
@@ -11,7 +11,22 @@ diff -ruN mkinitcpio-25.orig/functions mkinitcpio-25/functions
      [[ $kver =~ $re ]] || return 1
  
      printf '%s' "$kver"
-@@ -686,6 +689,10 @@
+@@ -378,9 +381,11 @@
+             filename)
+                 found=1
+                 module=${value##*/} module=${module%.ko*}
+-                quiet "adding module: %s" "$module"
+-                _modpaths["$value"]=1
+-                _addedmodules["${module//-/_}"]=1
++		if [ "${module}" != '(builtin)' ]; then
++                  quiet "adding module: %s" "$module"
++                  _modpaths["$value"]=1
++                  _addedmodules["${module//-/_}"]=1
++		fi
+                 ;;
+             depends)
+                 IFS=',' read -r -a deps <<< "$value"
+@@ -686,6 +691,10 @@
              ln -s "lib"     "$buildroot/usr/lib64"
              ln -s "usr/lib" "$buildroot/lib64"
              ;;
@@ -22,9 +37,863 @@ diff -ruN mkinitcpio-25.orig/functions mkinitcpio-25/functions
      esac
  
      # mkinitcpio version stamp
-diff -ruN mkinitcpio-25.orig/man/lsinitcpio.1.txt mkinitcpio-25/man/lsinitcpio.1.txt
---- mkinitcpio-25.orig/man/lsinitcpio.1.txt	2019-04-09 14:51:19.128762944 +0000
-+++ mkinitcpio-25/man/lsinitcpio.1.txt	2019-04-09 14:52:22.168222992 +0000
+diff -ruN mkinitcpio-27.orig/functions.orig mkinitcpio-27/functions.orig
+--- mkinitcpio-27.orig/functions.orig	1970-01-01 01:00:00.000000000 +0100
++++ mkinitcpio-27/functions.orig	2020-05-26 20:22:50.228103558 +0200
+@@ -0,0 +1,823 @@
++#!/bin/bash
++
++parseopts() {
++    local opt= optarg= i= shortopts=$1
++    local -a longopts=() unused_argv=()
++
++    shift
++    while [[ $1 && $1 != '--' ]]; do
++        longopts+=("$1")
++        shift
++    done
++    shift
++
++    longoptmatch() {
++        local o longmatch=()
++        for o in "${longopts[@]}"; do
++            if [[ ${o%:} = "$1" ]]; then
++                longmatch=("$o")
++                break
++            fi
++            [[ ${o%:} = "$1"* ]] && longmatch+=("$o")
++        done
++
++        case ${#longmatch[*]} in
++            1)
++                # success, override with opt and return arg req (0 == none, 1 == required)
++                opt=${longmatch%:}
++                if [[ $longmatch = *: ]]; then
++                    return 1
++                else
++                    return 0
++                fi ;;
++            0)
++                # fail, no match found
++                return 255 ;;
++            *)
++                # fail, ambiguous match
++                printf "%s: option '%s' is ambiguous; possibilities:%s\n" "${0##*/}" \
++                    "--$1" "$(printf " '%s'" "${longmatch[@]%:}")"
++                return 254 ;;
++        esac
++    }
++
++    while (( $# )); do
++        case $1 in
++            --) # explicit end of options
++                shift
++                break
++                ;;
++            -[!-]*) # short option
++                for (( i = 1; i < ${#1}; i++ )); do
++                    opt=${1:i:1}
++
++                    # option doesn't exist
++                    if [[ $shortopts != *$opt* ]]; then
++                        printf "%s: invalid option -- '%s'\n" "${0##*/}" "$opt"
++                        OPTRET=(--)
++                        return 1
++                    fi
++
++                    OPTRET+=("-$opt")
++                    # option requires optarg
++                    if [[ $shortopts = *$opt:* ]]; then
++                        # if we're not at the end of the option chunk, the rest is the optarg
++                        if (( i < ${#1} - 1 )); then
++                            OPTRET+=("${1:i+1}")
++                            break
++                        # if we're at the end, grab the the next positional, if it exists
++                        elif (( i == ${#1} - 1 )) && [[ $2 ]]; then
++                            OPTRET+=("$2")
++                            shift
++                            break
++                        # parse failure
++                        else
++                            printf "%s: option '%s' requires an argument\n" "${0##*/}" "-$opt"
++                            OPTRET=(--)
++                            return 1
++                        fi
++                    fi
++                done
++                ;;
++            --?*=*|--?*) # long option
++                IFS='=' read -r opt optarg <<< "${1#--}"
++                longoptmatch "$opt"
++                case $? in
++                    0)
++                        if [[ $optarg ]]; then
++                            printf "%s: option '--%s' doesn't allow an argument\n" "${0##*/}" "$opt"
++                            OPTRET=(--)
++                            return 1
++                        else
++                            OPTRET+=("--$opt")
++                        fi
++                        ;;
++                    1)
++                        # --longopt=optarg
++                        if [[ $optarg ]]; then
++                            OPTRET+=("--$opt" "$optarg")
++                        # --longopt optarg
++                        elif [[ $2 ]]; then
++                            OPTRET+=("--$opt" "$2" )
++                            shift
++                        else
++                            printf "%s: option '--%s' requires an argument\n" "${0##*/}" "$opt"
++                            OPTRET=(--)
++                            return 1
++                        fi
++                        ;;
++                    254)
++                        # ambiguous option -- error was reported for us by longoptmatch()
++                        OPTRET=(--)
++                        return 1
++                        ;;
++                    255)
++                        # parse failure
++                        printf "%s: unrecognized option '%s'\n" "${0##*/}" "--$opt"
++                        OPTRET=(--)
++                        return 1
++                        ;;
++                esac
++                ;;
++            *) # non-option arg encountered, add it as a parameter
++                unused_argv+=("$1")
++                ;;
++        esac
++        shift
++    done
++
++    # add end-of-opt terminator and any leftover positional parameters
++    OPTRET+=('--' "${unused_argv[@]}" "$@")
++    unset longoptmatch
++
++    return 0
++}
++
++kver() {
++    # this is intentionally very loose. only ensure that we're
++    # dealing with some sort of string that starts with something
++    # resembling dotted decimal notation. remember that there's no
++    # requirement for CONFIG_LOCALVERSION to be set.
++    local kver re='^[[:digit:]]+(\.[[:digit:]]+)+'
++
++    # scrape the version out of the kernel image. locate the offset
++    # to the version string by reading 2 bytes out of image at at
++    # address 0x20E. this leads us to a string of, at most, 128 bytes.
++    # read the first word from this string as the kernel version.
++    local offset=$(hexdump -s 526 -n 2 -e '"%0d"' "$1")
++    [[ $offset = +([0-9]) ]] || return 1
++
++    read kver _ < \
++        <(dd if="$1" bs=1 count=127 skip=$(( offset + 0x200 )) 2>/dev/null)
++
++    # very ugly hack but works
++    [[ -z $kver ]] && kver=$(strings "$1" | grep modversions | awk '{print $1}')
++
++    [[ $kver =~ $re ]] || return 1
++
++    printf '%s' "$kver"
++}
++
++plain() {
++    local mesg=$1; shift
++    printf "    $_color_bold$mesg$_color_none\n" "$@" >&1
++}
++
++quiet() {
++    (( _optquiet )) || plain "$@"
++}
++
++msg() {
++    local mesg=$1; shift
++    printf "$_color_green==>$_color_none $_color_bold$mesg$_color_none\n" "$@" >&1
++}
++
++msg2() {
++    local mesg=$1; shift
++    printf "  $_color_blue->$_color_none $_color_bold$mesg$_color_none\n" "$@" >&1
++}
++
++warning() {
++    local mesg=$1; shift
++    printf "$_color_yellow==> WARNING:$_color_none $_color_bold$mesg$_color_none\n" "$@" >&2
++}
++
++error() {
++    local mesg=$1; shift
++    printf "$_color_red==> ERROR:$_color_none $_color_bold$mesg$_color_none\n" "$@" >&2
++    return 1
++}
++
++die() {
++    error "$@"
++    cleanup 1
++}
++
++map() {
++    local r=0
++    for _ in "${@:2}"; do
++        "$1" "$_" || (( $# > 255 ? r=1 : ++r ))
++    done
++    return $r
++}
++
++arrayize_config() {
++    set -f
++    [[ ${MODULES@a} != *a* ]] && MODULES=($MODULES)
++    [[ ${BINARIES@a} != *a* ]] && BINARIES=($BINARIES)
++    [[ ${FILES@a} != *a* ]] && FILES=($FILES)
++    [[ ${HOOKS@a} != *a* ]] && HOOKS=($HOOKS)
++    [[ ${COMPRESSION_OPTIONS@a} != *a* ]] && COMPRESSION_OPTIONS=($COMPRESSION_OPTIONS)
++    set +f
++}
++
++in_array() {
++    # Search for an element in an array.
++    #   $1: needle
++    #   ${@:2}: haystack
++
++    local item= needle=$1; shift
++
++    for item in "$@"; do
++        [[ $item = $needle ]] && return 0 # Found
++    done
++    return 1 # Not Found
++}
++
++index_of() {
++    # get the array index of an item. sets the global var _idx with
++    # index and returns 0 if found, otherwise returns 1.
++    local item=$1; shift
++
++    for (( _idx=1; _idx <= $#; _idx++ )); do
++        if [[ $item = ${!_idx} ]]; then
++            (( --_idx ))
++            return 0
++        fi
++    done
++
++    # not found
++    unset _idx
++    return 1
++}
++
++funcgrep() {
++    awk -v funcmatch="$1" '
++        /^[[:space:]]*[[:alnum:]_]+[[:space:]]*\([[:space:]]*\)/ {
++            match($1, funcmatch)
++            print substr($1, RSTART, RLENGTH)
++        }' "$2"
++}
++
++list_hookpoints() {
++    local funcs script
++
++    script=$(PATH=$_d_hooks type -P "$1") || return 0
++
++    mapfile -t funcs < <(funcgrep '^run_[[:alnum:]_]+' "$script")
++
++    echo
++    msg "This hook has runtime scripts:"
++    in_array run_earlyhook "${funcs[@]}" && msg2 "early hook"
++    in_array run_hook "${funcs[@]}" && msg2 "pre-mount hook"
++    in_array run_latehook "${funcs[@]}" && msg2 "post-mount hook"
++    in_array run_cleanuphook "${funcs[@]}" && msg2 "cleanup hook"
++}
++
++modprobe() {
++    command modprobe -d "$_optmoduleroot" -S "$KERNELVERSION" "$@"
++}
++
++auto_modules() {
++    # Perform auto detection of modules via sysfs.
++
++    local mods=
++
++    mapfile -t mods < <(find /sys/devices -name uevent \
++        -exec sort -u {} + | awk -F= '$1 == "MODALIAS" && !_[$0]++')
++    mapfile -t mods < <(modprobe -qaR "${mods[@]#MODALIAS=}")
++
++    (( ${#mods[*]} )) && printf "%s\n" "${mods[@]//-/_}"
++}
++
++all_modules() {
++    # Add modules to the initcpio, filtered by grep.
++    #   $@: filter arguments to grep
++    #   -f FILTER: ERE to filter found modules
++
++    local -i count=0
++    local mod= OPTIND= OPTARG= filter=()
++
++    while getopts ':f:' flag; do
++        case $flag in f) filter+=("$OPTARG") ;; esac
++    done
++    shift $(( OPTIND - 1 ))
++
++    while read -r -d '' mod; do
++        (( ++count ))
++
++        for f in "${filter[@]}"; do
++            [[ $mod =~ $f ]] && continue 2
++        done
++
++        mod=${mod##*/}
++        mod="${mod%.ko*}"
++        printf '%s\n' "${mod//-/_}"
++    done < <(find "$_d_kmoduledir" -name '*.ko*' -print0 2>/dev/null | grep -EZz "$@")
++
++    (( count ))
++}
++
++add_all_modules() {
++    # Add modules to the initcpio.
++    #   $@: arguments to all_modules
++
++    local mod mods
++
++    mapfile -t mods < <(all_modules "$@")
++    map add_module "${mods[@]}"
++
++    return $(( !${#mods[*]} ))
++}
++
++add_checked_modules() {
++    # Add modules to the initcpio, filtered by the list of autodetected
++    # modules.
++    #   $@: arguments to all_modules
++
++    local mod mods
++
++    if (( ${#_autodetect_cache[*]} )); then
++        mapfile -t mods < <(all_modules "$@" | grep -xFf <(printf '%s\n' "${!_autodetect_cache[@]}"))
++    else
++        mapfile -t mods < <(all_modules "$@")
++    fi
++
++    map add_module "${mods[@]}"
++
++    return $(( !${#mods[*]} ))
++}
++
++add_firmware() {
++    # add a firmware file to the image.
++    #   $1: firmware path fragment
++
++    local fw fwpath r=1
++
++    for fw; do
++        for fwpath in "${_d_firmware[@]}"; do
++            if [[ -f $fwpath/$fw ]]; then
++                add_file "$fwpath/$fw" "$fwpath/$fw" 644 && r=0
++                break
++            fi
++        done
++    done
++
++    return $r
++}
++
++add_module() {
++    # Add a kernel module to the initcpio image. Dependencies will be
++    # discovered and added.
++    #   $1: module name
++
++    local target= module= softdeps= deps= field= value= firmware=()
++    local ign_errors=0 found=0
++
++    [[ $KERNELVERSION == none ]] && return 0
++
++    if [[ $1 = *\? ]]; then
++        ign_errors=1
++        set -- "${1%?}"
++    fi
++
++    target=${1%.ko*} target=${target//-/_}
++
++    # skip expensive stuff if this module has already been added
++    (( _addedmodules["$target"] == 1 )) && return
++
++    while IFS=':= ' read -r -d '' field value; do
++        case "$field" in
++            filename)
++                found=1
++                module=${value##*/} module=${module%.ko*}
++		if [ "${module}" != '(builtin)' ]; then
++                  quiet "adding module: %s" "$module"
++                  _modpaths["$value"]=1
++                  _addedmodules["${module//-/_}"]=1
++		fi
++                ;;
++            depends)
++                IFS=',' read -r -a deps <<< "$value"
++                map add_module "${deps[@]}"
++                ;;
++            firmware)
++                firmware+=("$value")
++                ;;
++            softdep)
++                read -ra softdeps <<<"$value"
++                for module in "${softdeps[@]}"; do
++                    [[ $module == *: ]] && continue
++                    add_module "$module?"
++                done
++                ;;
++        esac
++    done < <(modinfo -b "$_optmoduleroot" -k "$KERNELVERSION" -0 "$target" 2>/dev/null)
++
++    if (( !found )); then
++        (( ign_errors || _addedmodules["$target"] )) && return 0
++        error "module not found: \`%s'" "$target"
++        return 1
++    fi
++
++    if (( ${#firmware[*]} )); then
++        add_firmware "${firmware[@]}" ||
++            warning 'Possibly missing firmware for module: %s' "$target"
++    fi
++
++    # handle module quirks
++    case $target in
++        fat)
++            add_module "nls_cp437?"
++            add_module "nls_iso8859-1?"
++            ;;
++        ocfs2)
++            add_module "configfs?"
++            ;;
++        btrfs)
++            add_module "libcrc32c?"
++            ;;
++        f2fs)
++            add_module "crypto-crc32?"
++            ;;
++        ext4)
++            add_module "crypto-crc32c?"
++            ;;
++    esac
++}
++
++add_full_dir() {
++    # Add a directory and all its contents, recursively, to the initcpio image.
++    # No parsing is performed and the contents of the directory is added as is.
++    #   $1: path to directory
++    #   $2: glob pattern to filter file additions (optional)
++    #   $3: path prefix that will be stripped off from the image path (optional)
++
++    local f= filter=${2:-*} strip_prefix=$3
++
++    if [[ -n $1 && -d $1 ]]; then
++        add_dir "$1"
++
++        for f in "$1"/*; do
++            if [[ -L $f ]]; then
++                if [[ $f = $filter ]]; then
++                    add_symlink "${f#$strip_prefix}" "$(readlink "$f")"
++                fi
++            elif [[ -d $f ]]; then
++                add_full_dir "$f" "$filter" "$strip_prefix"
++            elif [[ -f $f ]]; then
++                if [[ $f = $filter ]]; then
++                    add_file "$f" "${f#$strip_prefix}"
++                fi
++            fi
++        done
++    fi
++}
++
++add_dir() {
++    # add a directory (with parents) to $BUILDROOT
++    #   $1: pathname on initcpio
++    #   $2: mode (optional)
++
++    if [[ -z $1 || $1 != /?* ]]; then
++        return 1
++    fi
++
++    local path=$1 mode=${2:-755}
++
++    if [[ -d $BUILDROOT$1 ]]; then
++        # ignore dir already exists
++        return 0
++    fi
++
++    quiet "adding dir: %s" "$path"
++    command install -dm$mode "$BUILDROOT$path"
++}
++
++add_symlink() {
++    # Add a symlink to the initcpio image. There is no checking done
++    # to ensure that the target of the symlink exists.
++    #   $1: pathname of symlink on image
++    #   $2: absolute path to target of symlink (optional, can be read from $1)
++
++    local name=$1 target=$2
++
++    (( $# == 1 || $# == 2 )) || return 1
++
++    if [[ -z $target ]]; then
++        target=$(readlink -f "$name")
++        if [[ -z $target ]]; then
++            error 'invalid symlink: %s' "$name"
++            return 1
++        fi
++    fi
++
++    add_dir "${name%/*}"
++
++    if [[ -L $BUILDROOT$1 ]]; then
++        quiet "overwriting symlink %s -> %s" "$name" "$target"
++    else
++        quiet "adding symlink: %s -> %s" "$name" "$target"
++    fi
++    ln -sfn "$target" "$BUILDROOT$name"
++}
++
++add_file() {
++    # Add a plain file to the initcpio image. No parsing is performed and only
++    # the singular file is added.
++    #   $1: path to file
++    #   $2: destination on initcpio (optional, defaults to same as source)
++    #   $3: mode
++
++    (( $# )) || return 1
++
++    # determine source and destination
++    local src=$1 dest=${2:-$1} mode=
++
++    if [[ ! -f $src ]]; then
++        error "file not found: \`%s'" "$src"
++        return 1
++    fi
++
++    mode=${3:-$(stat -c %a "$src")}
++    if [[ -z $mode ]]; then
++        error "failed to stat file: \`%s'." "$src"
++        return 1
++    fi
++
++    if [[ -e $BUILDROOT$dest ]]; then
++        quiet "overwriting file: %s" "$dest"
++    else
++        quiet "adding file: %s" "$dest"
++    fi
++    command install -Dm$mode "$src" "$BUILDROOT$dest"
++}
++
++add_runscript() {
++    # Adds a runtime script to the initcpio image. The name is derived from the
++    # script which calls it as the basename of the caller.
++
++    local funcs fn script hookname=${BASH_SOURCE[1]##*/}
++
++    if ! script=$(PATH=$_d_hooks type -P "$hookname"); then
++        error "runtime script for \`%s' not found" "$hookname"
++        return
++    fi
++
++    add_file "$script" "/hooks/$hookname" 755
++
++    mapfile -t funcs < <(funcgrep '^run_[[:alnum:]_]+' "$script")
++
++    for fn in "${funcs[@]}"; do
++        case $fn in
++            run_earlyhook)
++                _runhooks['early']+=" $hookname"
++                ;;
++            run_hook)
++                _runhooks['hooks']+=" $hookname"
++                ;;
++            run_latehook)
++                _runhooks['late']+=" $hookname"
++                ;;
++            run_cleanuphook)
++                _runhooks['cleanup']="$hookname ${_runhooks['cleanup']}"
++                ;;
++        esac
++    done
++}
++
++add_binary() {
++    # Add a binary file to the initcpio image. library dependencies will
++    # be discovered and added.
++    #   $1: path to binary
++    #   $2: destination on initcpio (optional, defaults to same as source)
++
++    local -a sodeps
++    local line= regex= binary= dest= mode= sodep= resolved=
++
++    if [[ ${1:0:1} != '/' ]]; then
++        binary=$(type -P "$1")
++    else
++        binary=$1
++    fi
++
++    if [[ ! -f $binary ]]; then
++        error "file not found: \`%s'" "$1"
++        return 1
++    fi
++
++    dest=${2:-$binary}
++    mode=$(stat -c %a "$binary")
++
++    # always add the binary itself
++    add_file "$binary" "$dest" "$mode"
++
++    # negate this so that the RETURN trap is not fired on non-binaries
++    ! lddout=$(ldd "$binary" 2>/dev/null) && return 0
++
++    # resolve sodeps
++    regex='^(|.+ )(/.+) \(0x[a-fA-F0-9]+\)'
++    while read -r line; do
++        if [[ $line =~ $regex ]]; then
++            sodep=${BASH_REMATCH[2]}
++        elif [[ $line = *'not found' ]]; then
++            error "binary dependency \`%s' not found for \`%s'" "${line%% *}" "$1"
++            (( ++_builderrors ))
++            continue
++        fi
++
++        if [[ -f $sodep && ! -e $BUILDROOT$sodep ]]; then
++            add_file "$sodep" "$sodep" "$(stat -Lc %a "$sodep")"
++        fi
++    done <<< "$lddout"
++
++    return 0
++}
++
++parse_config() {
++    # parse key global variables set by the config file.
++
++    map add_module "${MODULES[@]}"
++    map add_binary "${BINARIES[@]}"
++    map add_file "${FILES[@]}"
++
++    tee "$BUILDROOT/buildconfig" < "$1" | {
++        # When MODULES is not an array (but instead implicitly converted at
++        # startup), sourcing the config causes the string value of MODULES
++        # to be assigned as MODULES[0]. Avoid this by explicitly unsetting
++        # MODULES before re-sourcing the config.
++        unset MODULES
++
++        . /dev/stdin
++
++        # arrayize MODULES if necessary.
++        [[ ${MODULES@a} != *a* ]] && read -ra MODULES <<<"${MODULES//-/_}"
++
++        for mod in "${MODULES[@]%\?}"; do
++            mod=${mod//-/_}
++            # only add real modules (2 == builtin)
++            (( _addedmodules["$mod"] == 1 )) && add+=("$mod")
++        done
++        (( ${#add[*]} )) && printf 'MODULES="%s"\n' "${add[*]}"
++
++        printf '%s="%s"\n' \
++            'EARLYHOOKS' "${_runhooks['early']# }" \
++            'HOOKS' "${_runhooks['hooks']# }" \
++            'LATEHOOKS' "${_runhooks['late']# }" \
++            'CLEANUPHOOKS' "${_runhooks['cleanup']% }"
++    } >"$BUILDROOT/config"
++}
++
++initialize_buildroot() {
++    # creates a temporary directory for the buildroot and initialize it with a
++    # basic set of necessary directories and symlinks
++
++    local workdir= kernver=$1 arch=$(uname -m) buildroot
++
++    if ! workdir=$(mktemp -d --tmpdir mkinitcpio.XXXXXX); then
++        error 'Failed to create temporary working directory in %s' "${TMPDIR:-/tmp}"
++        return 1
++    fi
++    buildroot=${2:-$workdir/root}
++
++    if [[ ! -w ${2:-$workdir} ]]; then
++        error 'Unable to write to build root: %s' "$buildroot"
++        return 1
++    fi
++
++    # base directory structure
++    install -dm755 "$buildroot"/{new_root,proc,sys,dev,run,tmp,var,etc,usr/{local,lib,bin}}
++    ln -s "usr/lib" "$buildroot/lib"
++    ln -s "../lib"  "$buildroot/usr/local/lib"
++    ln -s "bin"     "$buildroot/usr/sbin"
++    ln -s "usr/bin" "$buildroot/bin"
++    ln -s "usr/bin" "$buildroot/sbin"
++    ln -s "../bin"  "$buildroot/usr/local/bin"
++    ln -s "../bin"  "$buildroot/usr/local/sbin"
++    ln -s "/run"    "$buildroot/var/run"
++
++    case $arch in
++        x86_64)
++            ln -s "lib"     "$buildroot/usr/lib64"
++            ln -s "usr/lib" "$buildroot/lib64"
++            ;;
++        ppc64le)
++            ln -s "lib"     "$buildroot/usr/lib64"
++            ln -s "usr/lib" "$buildroot/lib64"
++            ;;
++    esac
++
++    # mkinitcpio version stamp
++    printf '%s' "$version" >"$buildroot/VERSION"
++
++    # kernel module dir
++    [[ $kernver != none ]] && install -dm755 "$buildroot/usr/lib/modules/$kernver/kernel"
++
++    # mount tables
++    ln -s /proc/self/mounts "$buildroot/etc/mtab"
++    >"$buildroot/etc/fstab"
++
++    # indicate that this is an initramfs
++    >"$buildroot/etc/initrd-release"
++
++    # add a blank ld.so.conf to keep ldconfig happy
++    >"$buildroot/etc/ld.so.conf"
++
++    printf '%s' "$workdir"
++}
++
++run_build_hook() {
++    local hook=$1 script= resolved=
++    local MODULES=() BINARIES=() FILES=() SCRIPT=
++
++    # find script in install dirs
++    if ! script=$(PATH=$_d_install type -P "$hook"); then
++        error "Hook '$hook' cannot be found"
++        return 1
++    fi
++
++    # check for deprecation
++    if resolved=$(readlink "$script") && [[ ${script##*/} != "${resolved##*/}" ]]; then
++        warning "Hook '%s' is deprecated. Replace it with '%s' in your config" \
++            "${script##*/}" "${resolved##*/}"
++        script=$resolved
++    fi
++
++    # source
++    unset -f build
++    if ! . "$script"; then
++        error 'Failed to read %s' "$script"
++        return 1
++    fi
++
++    if ! declare -f build >/dev/null; then
++        error 'Hook '$script' has no build function'
++        return 1
++    fi
++
++    # run
++    if (( _optquiet )); then
++        msg2 "Running build hook: [%s]" "${script##*/}"
++    else
++        msg2 "Running build hook: [%s]" "$script"
++    fi
++    build
++
++    # if we made it this far, return successfully. Hooks can
++    # do their own error catching if it's severe enough, and
++    # we already capture errors from the add_* functions.
++    return 0
++}
++
++try_enable_color() {
++    local colors
++
++    if ! colors=$(tput colors 2>/dev/null); then
++        warning "Failed to enable color. Check your TERM environment variable"
++        return
++    fi
++
++    if (( colors > 0 )) && tput setaf 0 &>/dev/null; then
++        _color_none=$(tput sgr0)
++        _color_bold=$(tput bold)
++        _color_blue=$_color_bold$(tput setaf 4)
++        _color_green=$_color_bold$(tput setaf 2)
++        _color_red=$_color_bold$(tput setaf 1)
++        _color_yellow=$_color_bold$(tput setaf 3)
++    fi
++}
++
++install_modules() {
++    local m moduledest=$BUILDROOT/lib/modules/$KERNELVERSION
++    local -a xz_comp gz_comp
++
++    [[ $KERNELVERSION == none ]] && return 0
++
++    if (( $# == 0 )); then
++        warning "No modules were added to the image. This is probably not what you want."
++        return 0
++    fi
++
++    cp "$@" "$moduledest/kernel"
++
++    # unzip modules prior to recompression
++    for m in "$@"; do
++        case $m in
++            *.xz)
++                xz_comp+=("$moduledest/kernel/${m##*/}")
++                ;;
++            *.gz)
++                gz_comp+=("$moduledest/kernel/${m##*/}")
++                ;;
++        esac
++    done
++    (( ${#xz_comp[*]} )) && xz -d "${xz_comp[@]}"
++    (( ${#gz_comp[*]} )) && gzip -d "${gz_comp[@]}"
++
++    msg "Generating module dependencies"
++    install -m644 -t "$moduledest" "$_d_kmoduledir"/modules.builtin
++
++    # we install all modules into kernel/, making the .order file incorrect for
++    # the module tree. munge it, so that we have an accurate index. This avoids
++    # some rare and subtle issues with module loading choices when an alias
++    # resolves to multiple modules, only one of which can claim a device.
++    awk -F'/' '{ print "kernel/" $NF }' \
++        "$_d_kmoduledir"/modules.order >"$moduledest/modules.order"
++
++    depmod -b "$BUILDROOT" "$KERNELVERSION"
++
++    # remove all non-binary module.* files (except devname for on-demand module loading)
++    rm "$moduledest"/modules.!(*.bin|devname|softdep)
++}
++
++# vim: set ft=sh ts=4 sw=4 et:
+diff -ruN mkinitcpio-27.orig/functions.rej mkinitcpio-27/functions.rej
+--- mkinitcpio-27.orig/functions.rej	1970-01-01 01:00:00.000000000 +0100
++++ mkinitcpio-27/functions.rej	2020-05-26 20:22:50.226103767 +0200
+@@ -0,0 +1,23 @@
++--- functions	2019-04-09 14:51:19.128762944 +0000
+++++ functions	2019-04-09 14:51:24.908894498 +0000
++@@ -150,6 +150,9 @@
++     read kver _ < \
++         <(dd if="$1" bs=1 count=127 skip=$(( offset + 0x200 )) 2>/dev/null)
++ 
+++    # very ugly hack but works
+++    [[ -z $kver ]] && kver=$(strings "$1" | grep modversions | awk '{print $1}')
+++
++     [[ $kver =~ $re ]] || return 1
++ 
++     printf '%s' "$kver"
++@@ -686,6 +689,10 @@
++             ln -s "lib"     "$buildroot/usr/lib64"
++             ln -s "usr/lib" "$buildroot/lib64"
++             ;;
+++        ppc64le)
+++            ln -s "lib"     "$buildroot/usr/lib64"
+++            ln -s "usr/lib" "$buildroot/lib64"
+++            ;;
++     esac
++ 
++     # mkinitcpio version stamp
+diff -ruN mkinitcpio-27.orig/man/lsinitcpio.1.txt mkinitcpio-27/man/lsinitcpio.1.txt
+--- mkinitcpio-27.orig/man/lsinitcpio.1.txt	2020-05-26 20:21:42.580174581 +0200
++++ mkinitcpio-27/man/lsinitcpio.1.txt	2020-05-26 20:22:59.218163841 +0200
 @@ -53,7 +53,7 @@
  Bugs
  ----
@@ -34,10 +903,25 @@ diff -ruN mkinitcpio-25.orig/man/lsinitcpio.1.txt mkinitcpio-25/man/lsinitcpio.1
  
  See Also
  --------
-diff -ruN mkinitcpio-25.orig/man/mkinitcpio.8.txt mkinitcpio-25/man/mkinitcpio.8.txt
---- mkinitcpio-25.orig/man/mkinitcpio.8.txt	2019-04-09 14:51:19.128762944 +0000
-+++ mkinitcpio-25/man/mkinitcpio.8.txt	2019-04-09 14:52:05.810462741 +0000
-@@ -340,7 +340,7 @@
+diff -ruN mkinitcpio-27.orig/man/lsinitcpio.1.txt.rej mkinitcpio-27/man/lsinitcpio.1.txt.rej
+--- mkinitcpio-27.orig/man/lsinitcpio.1.txt.rej	1970-01-01 01:00:00.000000000 +0100
++++ mkinitcpio-27/man/lsinitcpio.1.txt.rej	2020-05-26 20:22:50.227103662 +0200
+@@ -0,0 +1,11 @@
++--- man/lsinitcpio.1.txt	2019-04-09 14:51:19.128762944 +0000
+++++ man/lsinitcpio.1.txt	2019-04-09 14:52:22.168222992 +0000
++@@ -53,7 +53,7 @@
++ Bugs
++ ----
++ Upon writing this manpage, there were no noticeable bugs present. Please visit
++-<http://bugs.archlinux.org/> for an up to date list.
+++<https://github.com/kth5/archpower/issues> for an up to date list.
++ 
++ See Also
++ --------
+diff -ruN mkinitcpio-27.orig/man/mkinitcpio.8.txt mkinitcpio-27/man/mkinitcpio.8.txt
+--- mkinitcpio-27.orig/man/mkinitcpio.8.txt	2020-05-26 20:21:42.580174581 +0200
++++ mkinitcpio-27/man/mkinitcpio.8.txt	2020-05-26 20:22:59.218163841 +0200
+@@ -359,7 +359,7 @@
  Bugs
  ----
  Upon writing this manpage, there were no noticeable bugs present. Please visit
@@ -46,10 +930,399 @@ diff -ruN mkinitcpio-25.orig/man/mkinitcpio.8.txt mkinitcpio-25/man/mkinitcpio.8
  
  Authors
  -------
-diff -ruN mkinitcpio-25.orig/mkinitcpio mkinitcpio-25/mkinitcpio
---- mkinitcpio-25.orig/mkinitcpio	2019-04-09 14:51:19.158763614 +0000
-+++ mkinitcpio-25/mkinitcpio	2019-04-09 14:51:24.908894498 +0000
-@@ -99,7 +99,7 @@
+diff -ruN mkinitcpio-27.orig/man/mkinitcpio.8.txt.orig mkinitcpio-27/man/mkinitcpio.8.txt.orig
+--- mkinitcpio-27.orig/man/mkinitcpio.8.txt.orig	1970-01-01 01:00:00.000000000 +0100
++++ mkinitcpio-27/man/mkinitcpio.8.txt.orig	2020-05-26 20:22:56.688428272 +0200
+@@ -0,0 +1,370 @@
++/////
++vim:set ts=4 sw=4 syntax=asciidoc noet:
++/////
++mkinitcpio(8)
++=============
++
++Name
++----
++mkinitcpio - Create an initial ramdisk environment
++
++Synopsis
++--------
++'mkinitcpio' [options]
++
++Description
++-----------
++Creates an initial ramdisk environment for booting the linux kernel. The
++initial ramdisk is in essence a very small environment (early userspace) which
++loads various kernel modules and sets up necessary things before handing over
++control to init. This makes it possible to have, for example, encrypted root
++filesystems and root filesystems on a software RAID array. mkinitcpio allows
++for easy extension with custom hooks, has autodetection at runtime, and many
++other features.
++
++Options
++-------
++*-A, \--addhooks* 'hooks'::
++	Add the additional 'hooks' to the image. These will be processed in order
++	after all other hooks from the config file. Multiple hooks should be
++	comma-separated. This option can be specified multiple times.
++
++*-c, \--config* 'config'::
++	Use 'config' file to generate the ramdisk. Default: /etc/mkinitcpio.conf
++
++*-d, \--generatedir* 'directory'::
++	Set 'directory' as the location where the initramfs is built. This might be
++	useful to generate a shutdown ramfs in '/run/initramfs'.
++
++*-D, \--hookdir* 'directory'::
++	Set 'directory' as the location where hooks will be searched for when
++	generating the image.
++
++*-g, \--generate* 'filename'::
++	Generate a CPIO image as 'filename'. Default: no; this means nothing will be
++	written to the filesystem unless this option is specified.
++
++*-H, \--hookhelp* 'hookname'::
++	Output help for hookname 'hookname'.
++
++*-h, \--help*::
++	Output a short overview of available command-line switches.
++
++*-k, \--kernel* 'kernelversion'::
++	Use 'kernelversion', instead of the current running kernel. This may be a
++	path to a kernel image (only supported for x86-based architectures), a specific
++	kernel version or the special keyword 'none'. In the latter case, no kernel
++	modules are added to the image.
++
++*-L, \--listhooks*::
++	List all available hooks.
++
++*-M, \--automods*::
++	Display modules found via autodetection. mkinitcpio will automatically try to
++	determine which kernel modules are needed to start your computer. This option
++	lists which modules were detected.
++
++*-n, \--nocolor*::
++	Disable color output.
++
++*-P, \--allpresets*::
++	Process all presets contained in '/etc/mkinitcpio.d'. See the '-p' option for
++	more detail about presets.
++
++*-p, \--preset* 'preset'::
++	Build initramfs image(s) according to specified 'preset'. This may be a file in
++	/etc/mkinitcpio.d (without the .preset extension) or a full, absolute path to a
++	file. This option may be specified multiple times to process multiple presets.
++
++*-r, \--moduleroot* 'root'::
++	Specifies the root directory to find modules in, defaulting to '/'.
++
++*-S, \--skiphooks* 'hooks'::
++	Skip 'hooks' when generating the image. Multiple hooks should be comma-separated.
++	This option can be specified multiple times.
++
++*-s, \--save*::
++	Saves the build directory for the initial ramdisk. Default: no; This means
++	the directory will not be retained if this option isn't specified. Useful for
++	debugging purposes.
++
++*-t, \--builddir* 'tmpdir'::
++	Use 'tmpdir' as the temporary build directory instead of /tmp. 'tmpdir'
++	must exist. The 'TMPDIR' environment variable is also honored to set this
++	location, but the command line option will take precedence.
++
++*-V, \--version*::
++	Display version information.
++
++*-v, \--verbose*::
++	Verbose output. Outputs more information about what's happening during
++	creation of the ramdisk.
++
++*-z, \--compress* 'compress'::
++	Override the compression method with the 'compress' program.
++
++About Presets
++-------------
++A preset is a pre-defined definition on how to create an initial ramdisk.
++Instead of specifying the configuration file and which output file, every time
++you generate a new initial ramdisk, you define a preset and use the -p switch
++to generate an initial ramdisk according to your preset. Presets are located in
++/etc/mkinitcpio.d
++
++About Install Hooks
++-------------------
++Install hooks are bash scripts which are sourced during mkinitcpio runtime in
++order to add modules, binaries, and other files to the image. A variety of
++functions exist to facilitate this.
++
++*add_module* 'modname'::
++
++	Adds the module specified by 'modname' to the image. Dependencies are derived
++	and added automatically.
++
++*add_binary* 'binary' [ 'destination' ] [ 'mode' ]::
++
++	Adds a binary to the image. The argument 'binary' need not be an absolute
++	path and, if needed, a lookup will be performed. If the binary is a dynamically
++	linked ELF binary, dependencies will be automatically added. Optionally, a
++	destination within the initramfs image as well as a file mode can be specified.
++	By default, the destintation and mode be taken from the source derived from
++	'binary'.
++
++*add_file* 'path' [ 'destination' ] [ 'mode' ]::
++
++	Adds a file and any needed parent directories to the image. Optionally, a
++	destination within the initramfs image as well as a file mode can be specified.
++	By default, the destination and mode will be taken from the source and mode of
++	the file specified by the 'path'.
++
++*add_dir* 'path'::
++
++	Adds a directory and its parents to the image.
++
++*add_full_dir* 'directory' [ 'glob' ] [ 'strip_prefix' ]::
++
++	Recursively adds a directory to the image by walking the given path and
++	calling *add_file*, *add_dir*, and *add_symlink* accordingly. This function
++	will not follow symlinks, nor will it add the targets of symlinks.
++
++	If the 'glob' argument is passed, only files and symlinks matching this glob
++	will be added.
++
++	If the 'strip_prefix' argument is passed, it will be used to strip the
++	destination path (path in the initramfs image) from the prefix specified by
++	the 'strip_prefix' argument. This can be useful when writing rootfs-overlay
++	hooks.
++
++*add_symlink* 'path' [ 'link-target' ]::
++
++	Adds a symlink to the image at the specified `path`, optionally pointing to
++	the specified `link-target`. If the `link-target` is not provided, it is assumed
++	that this symlink exists in the real filesystem, and the target will be read
++	using readlink. There is no checking done to ensure that the target of the
++	symlink exists, and symlinks will not be followed recursively.
++
++*add_all_modules* [ '-f filter' ] *pattern*::
++
++	Adds modules to the image, without regard for the autodetect whitelist. *pattern*
++	should be a subdirectory within the kernel tree describing a subset of modules to
++	be included. Further refinement can be provided via the -f flag with an extended
++	regular expression.
++
++*add_checked_modules* [ '-f filter' ] *pattern*::
++
++	Similar to *add_all_modules* with the constraint that only modules matching the
++	whitelist generated by the autodetect hook will be added to the image. If the
++	autodetect hook is not present in the image, this function is identical to
++	*add_all_modules*.
++
++*add_runscript*::
++
++	Adds a runtime hook to the image, which is a busybox ash compatible shell
++	script. The name of the script is guaranteed to match the name of the hook the
++	script is called from.
++
++About Runtime Hooks
++-------------------
++Runtime hooks added to the image via the *add_runscript* function from an
++install hook are able to provide extra functionality during early userspace.
++Specific functions in these files will run at different times. A hook can
++define one or more of these. At each hook point, hooks are run in the order
++that they are defined in the HOOKS variable, except for cleanup hooks which are
++run in reverse.
++
++*run_earlyhook*::
++
++	Functions of this name will be run once the API mounts have been setup and the
++	kernel command line has been parsed. Daemons needed for early userspace should
++	be started from this hook point.
++
++*run_hook*::
++
++	Functions of this name will be run after any early hooks, and after user
++	defined modules have been installed. This is the most common hook point, and
++	functionality such as scanning for LVM volumes and mapping encrypted volumes
++	should be performed here.
++
++*run_latehook*::
++
++	Functions of this name will be run after root has been mounted. This is generally
++	used for further necessary setup in the real root, such as mounting other system
++	partitions.
++
++*run_cleanuphook*::
++
++	Functions of this name are run as late as possible. Any daemons started
++	from a run_earlyhook function should be shut down here in preparation for
++	switching to the real root.
++
++Early Init Environment
++----------------------
++mkinitcpio gives special treatment to certain environment variables passed on
++the kernel command line:
++
++*break*['=<premount|postmount>']::
++	If specified, mkinitcpio will start a shell during early init. The optional
++	parameter controls when this occurs: when 'premount' or no parameter are
++	specified, the shell will be launched prior to mounting root. If 'postmount'
++	is specified, the shell will be launched after mounting root.
++
++*disablehooks=*'hooklist'::
++	This is a comma separated list of hooks which will be skipped during early
++	init.
++
++*earlymodules=*'modulelist'::
++	This is a comma separated list of modules which will be loaded prior to any
++	others. This is generally not needed, and usually points to a configuration
++	or kernel problem.
++
++*quiet*::
++	Causes mkinitcpio to output fewer messages during boot. Errors will not be
++	suppressed.
++
++*ro*::
++	Specifies that root should be mounted with readonly permissions. This is the
++	default behavior.
++
++*rw*::
++	Specifies that root should be mounted with readwrite permissions. This is
++	generally only useful if your initramfs uses the 'fsck' hook.
++
++*root=*'rootdevice'::
++	This variable describes the root partition which early init will mount
++	before passing control to the real init. mkinitcpio understands a variety of
++	formats, the most basic of which is the path to the block device, either
++	directly such as '/dev/sda2', or using a udev symlink such as
++	'/dev/disk/by-label/CorsairF80-root'. Support for identification by LABEL or
++	UUID tags are also supported, such as, 'LABEL=CorsairF80-root'. As of
++	util-linux 2.22, PARTUUID and PARTLABEL are also supported. Identification
++	via hex encoded major/minor device ID is supported for legacy reasons, but
++	should be avoided as it tends to be fragile.
++
++*rootdelay=*'seconds'::
++	Sets the delay, in seconds, that mkinitcpio is willing to wait for the root
++	device to show up, if it is not available immediately. This defaults to 10
++	seconds. If an invalid integer is passed, this variable will have no effect.
++
++*rootflags=*'flaglist'::
++	A comma-separated list of flags which will be passed onto the *mount*(8)
++	command when mounting the root filesystem. Acceptable values are filesystem
++	specific.
++
++*rootfstype=*'fstype'::
++	Overrides the type of filesystem being mounted as root. This should almost never
++	be needed as *mount*(8) usually detects this on its own.
++
++*rd.debug*::
++	Enables shell debug (xtrace). If 'rd.log' is not also a parameter on the kernel
++	command line, this parameter implies 'rd.log=console'.
++
++*rd.log*['=<console|file|kmsg|all>']::
++	Enables logging of early userspace messages. If specified, the optional
++	parameter describes where this information is logged. Multiple options can be
++	OR'd together using the pipe (|) character. Messages are always logged to
++	the console unless the 'quiet' parameter is passed. If the optional parameter
++	is not specified, 'kmsg|console' is assumed. If 'rd.log' is not present on the
++	kernel command line, no logging will take place.
++
++	*console*;;
++		Writes output to '/dev/console'.
++
++	*file*;;
++		Writes output to '/run/initramfs/init.log'.
++
++	*kmsg*;;
++		Writes output to the '/dev/kmsg' device (introduced in Linux 3.5). This
++		option is a no-op if your kernel lacks support for '/dev/kmsg'.
++
++	*all*;;
++		Writes output to all known log targets.
++
++These are only the variables that the core of mkinitcpio honor. Additional
++hooks may look for other environment variables and should be documented by the
++help output for the hook.
++
++Reproducibility
++---------------
++mkinitcpio aims to create reproducible initramfs images by default.
++
++This means that two subsequent runs of mkinitcpio should produce two files
++that are identical at the binary level.
++
++Timestamps within the initramfs are set to the Unix epoch of 1970-01-01.
++
++Note that in order for the build to be fully reproducible, the compressor
++specified (e.g. gzip, xz) must also produce reproducible archives. At the time
++of writing, as an inexhaustive example, the lzop compressor is incapable of
++producing reproducible archives due to the insertion of a runtime timestamp.
++
++More information can be found at https://reproducible-builds.org.
++
++Files
++-----
++'/etc/mkinitcpio.conf'::
++	Default configuration file for mkinitcpio.
++
++'/etc/mkinitcpio.d'::
++	Directory containing mkinitcpio presets.
++
++'/etc/initcpio/install'::
++'/usr/lib/initcpio/install'::
++	Search path for build time hooks.
++
++'/etc/initcpio/hooks'::
++'/usr/lib/initcpio/hooks'::
++	Search path for early userspace runtime hooks.
++
++Examples
++--------
++*mkinitcpio*::
++	Perform a 'dry-run'. This will generate an initial ramdisk but will not
++	write anything. Use -g to create the real image.
++
++*mkinitcpio -p linux*::
++	Create an initial ramdisk based on the 'linux' preset.
++
++*mkinitcpio -g /boot/initramfs-linux.img -k /boot/vmlinuz-linux*::
++	Create an initial ramdisk for the kernel at /boot/vmlinuz-linux. The
++	resulting image will be written to /boot/initramfs-linux.img.
++
++See also
++--------
++A more thorough article on configuring mkinitcpio:
++<http://wiki.archlinux.org/index.php/Mkinitcpio>
++
++*initrd*(4), *lsinitcpio*(1), *mkinitcpio.conf*(5), *bootparam*(7)
++
++Bugs
++----
++Upon writing this manpage, there were no noticeable bugs present. Please visit
++<http://bugs.archlinux.org/> for an up to date list.
++
++Authors
++-------
++mkinitcpio is created and maintained by the Arch Linux Developer community.
++
++Copyright
++---------
++Copyright (c) Arch Linux 2006-2019
+diff -ruN mkinitcpio-27.orig/man/mkinitcpio.8.txt.rej mkinitcpio-27/man/mkinitcpio.8.txt.rej
+--- mkinitcpio-27.orig/man/mkinitcpio.8.txt.rej	1970-01-01 01:00:00.000000000 +0100
++++ mkinitcpio-27/man/mkinitcpio.8.txt.rej	2020-05-26 20:22:50.227103662 +0200
+@@ -0,0 +1,11 @@
++--- man/mkinitcpio.8.txt	2019-04-09 14:51:19.128762944 +0000
+++++ man/mkinitcpio.8.txt	2019-04-09 14:52:05.810462741 +0000
++@@ -340,7 +340,7 @@
++ Bugs
++ ----
++ Upon writing this manpage, there were no noticeable bugs present. Please visit
++-<http://bugs.archlinux.org/> for an up to date list.
+++<https://github.com/kth5/archpower/issues> for an up to date list.
++ 
++ Authors
++ -------
+diff -ruN mkinitcpio-27.orig/mkinitcpio mkinitcpio-27/mkinitcpio
+--- mkinitcpio-27.orig/mkinitcpio	2020-05-26 20:21:42.581174476 +0200
++++ mkinitcpio-27/mkinitcpio	2020-05-26 20:22:59.219163737 +0200
+@@ -102,7 +102,7 @@
      fi
  
      arch=$(uname -m)
@@ -58,3 +1331,562 @@ diff -ruN mkinitcpio-25.orig/mkinitcpio mkinitcpio-25/mkinitcpio
          error "kernel version extraction from image not supported for \`%s' architecture" "$arch"
          return 1
      fi
+diff -ruN mkinitcpio-27.orig/mkinitcpio.orig mkinitcpio-27/mkinitcpio.orig
+--- mkinitcpio-27.orig/mkinitcpio.orig	1970-01-01 01:00:00.000000000 +0100
++++ mkinitcpio-27/mkinitcpio.orig	2020-05-26 20:22:56.689428167 +0200
+@@ -0,0 +1,540 @@
++#!/bin/bash
++#
++# mkinitcpio - modular tool for building an initramfs images
++#
++
++declare -r version=%VERSION%
++
++shopt -s extglob
++
++### globals within mkinitcpio, but not intended to be used by hooks
++
++# needed files/directories
++_f_functions=functions
++_f_config=mkinitcpio.conf
++_d_hooks="$PWD/hooks:/usr/lib/initcpio/hooks:/lib/initcpio/hooks"
++_d_install="$PWD/install:/usr/lib/initcpio/install:/lib/initcpio/install"
++_d_flag_hooks=
++_d_flag_install=
++_d_firmware=({/usr,}/lib/firmware/updates {/usr,}/lib/firmware)
++_d_presets=mkinitcpio.d
++
++# options and runtime data
++_optmoduleroot= _optgenimg=
++_optcompress= _opttargetdir=
++_optshowautomods=0 _optsavetree=0 _optshowmods=0
++_optquiet=1 _optcolor=1
++_optskiphooks=() _optaddhooks=() _hooks=()  _optpreset=()
++declare -A _runhooks _addedmodules _modpaths _autodetect_cache
++
++# export a sane PATH
++export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
++
++# Sanitize environment further
++# GREP_OPTIONS="--color=always" will break everything
++# CDPATH can affect cd and pushd
++# LIBMOUNT_* options can affect findmnt and other tools
++unset GREP_OPTIONS CDPATH "${!LIBMOUNT_@}"
++
++usage() {
++    cat <<EOF
++mkinitcpio $version
++usage: ${0##*/} [options]
++
++  Options:
++   -A, --addhooks <hooks>       Add specified hooks, comma separated, to image
++   -c, --config <config>        Use alternate config file. (default: /etc/mkinitcpio.conf)
++   -g, --generate <path>        Generate cpio image and write to specified path
++   -H, --hookhelp <hookname>    Display help for given hook and exit
++   -h, --help                   Display this message and exit
++   -k, --kernel <kernelver>     Use specified kernel version (default: $(uname -r))
++   -L, --listhooks              List all available hooks
++   -M, --automods               Display modules found via autodetection
++   -n, --nocolor                Disable colorized output messages
++   -p, --preset <file>          Build specified preset from /etc/mkinitcpio.d
++   -P, --allpresets             Process all preset files in /etc/mkinitcpio.d
++   -r, --moduleroot <dir>       Root directory for modules (default: /)
++   -S, --skiphooks <hooks>      Skip specified hooks, comma-separated, during build
++   -s, --save                   Save build directory. (default: no)
++   -d, --generatedir <dir>      Write generated image into <dir>
++   -t, --builddir <dir>         Use DIR as the temporary build directory
++   -D, --hookdir <dir>          Specify where to look for hooks.
++   -V, --version                Display version information and exit
++   -v, --verbose                Verbose output (default: no)
++   -z, --compress <program>     Use an alternate compressor on the image
++
++EOF
++}
++
++version() {
++    cat <<EOF
++mkinitcpio $version
++EOF
++}
++
++cleanup() {
++    local err=${1:-$?}
++
++    if [[ $_d_workdir ]]; then
++        # when _optpreset is set, we're in the main loop, not a worker process
++        if (( _optsavetree )) && [[ -z ${_optpreset[*]} ]]; then
++            printf '%s\n' "${!_autodetect_cache[@]}" > "$_d_workdir/autodetect_modules"
++            msg "build directory saved in %s" "$_d_workdir"
++        else
++            rm -rf "$_d_workdir"
++        fi
++    fi
++
++    exit "$err"
++}
++
++resolve_kernver() {
++    local kernel=$1 arch=
++
++    if [[ -z $kernel ]]; then
++        uname -r
++        return 0
++    fi
++
++    if [[ ${kernel:0:1} != / ]]; then
++        echo "$kernel"
++        return 0
++    fi
++
++    arch=$(uname -m)
++    if [[ $arch != @(i?86|x86_64) ]]; then
++        error "kernel version extraction from image not supported for \`%s' architecture" "$arch"
++        return 1
++    fi
++
++    if [[ ! -e $kernel ]]; then
++        error "specified kernel image does not exist: \`%s'" "$kernel"
++        return 1
++    fi
++
++    kver "$kernel" && return
++
++    error "invalid kernel specified: \`%s'" "$1"
++
++    return 1
++}
++
++hook_help() {
++    local resolved script=$(PATH=$_d_install type -p "$1")
++
++    # this will be true for broken symlinks as well
++    if [[ -z $script ]]; then
++        error "Hook '%s' not found" "$1"
++        return 1
++    fi
++
++    if resolved=$(readlink "$script") && [[ ${script##*/} != "${resolved##*/}" ]]; then
++        msg "This hook is deprecated. See the '%s' hook" "${resolved##*/}"
++        return 0
++    fi
++
++    . "$script"
++    if ! declare -f help >/dev/null; then
++        error "No help for hook $1"
++        return 1
++    fi
++
++    msg "Help for hook '$1':"
++    help
++
++    list_hookpoints "$1"
++}
++
++hook_list() {
++    local p hook resolved
++    local -a paths hooklist depr
++    local ss_ordinals=(¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹)
++
++    IFS=: read -ra paths <<<"$_d_install"
++
++    for path in "${paths[@]}"; do
++        for hook in "$path"/*; do
++            [[ -e $hook || -L $hook ]] || continue
++
++            # handle deprecated hooks and point to replacement
++            if resolved=$(readlink "$hook") && [[ ${hook##*/} != "${resolved##*/}" ]]; then
++                resolved=${resolved##*/}
++
++                if ! index_of "$resolved" "${depr[@]}"; then
++                    # deprecated hook
++                    depr+=("$resolved")
++                    _idx=$(( ${#depr[*]} - 1 ))
++                fi
++
++                hook+=${ss_ordinals[_idx]}
++            fi
++
++            hooklist+=("${hook##*/}")
++        done
++    done
++
++    msg "Available hooks"
++    printf '%s\n' "${hooklist[@]}" | sort -u | column -c"$(tput cols)"
++
++    if (( ${#depr[*]} )); then
++        echo
++        for p in "${!depr[@]}"; do
++            printf $'%s This hook is deprecated in favor of \'%s\'\n' \
++                "${ss_ordinals[p]}" "${depr[p]}"
++        done
++    fi
++}
++
++compute_hookset() {
++    local h
++
++    for h in "${HOOKS[@]}" "${_optaddhooks[@]}"; do
++        in_array "$h" "${_optskiphooks[@]}" && continue
++        _hooks+=("$h")
++    done
++}
++
++build_image() {
++    local out=$1 compress=$2 errmsg pipestatus
++
++    case $compress in
++        cat)
++            msg "Creating uncompressed initcpio image: %s" "$out"
++            unset COMPRESSION_OPTIONS
++            ;;
++        *)
++            msg "Creating %s-compressed initcpio image: %s" "$compress" "$out"
++            ;;&
++        xz)
++            COMPRESSION_OPTIONS+=('--check=crc32')
++            ;;
++        lz4)
++            COMPRESSION_OPTIONS+=('-l')
++            ;;
++    esac
++
++    pushd "$BUILDROOT" >/dev/null
++
++    # Reproducibility: set all timestamps to 0
++    find . -mindepth 1 -execdir touch -hcd "@0" "{}" +
++
++    # If this pipeline changes, |pipeprogs| below needs to be updated as well.
++    find . -mindepth 1 -printf '%P\0' |
++            sort -z |
++            LANG=C bsdtar --null -cnf - -T - |
++            LANG=C bsdtar --uid 0 --gid 0 --null -cf - --format=newc @- |
++            $compress "${COMPRESSION_OPTIONS[@]}" > "$out"
++
++    pipestatus=("${PIPESTATUS[@]}")
++    pipeprogs=('find' 'sort' 'bsdtar (step 1)' 'bsdtar (step 2)' "$compress")
++
++    popd >/dev/null
++
++    for (( i = 0; i < ${#pipestatus[*]}; ++i )); do
++        if (( pipestatus[i] )); then
++            errmsg="${pipeprogs[i]} reported an error"
++            break
++        fi
++    done
++
++    if (( _builderrors )); then
++        warning "errors were encountered during the build. The image may not be complete."
++    fi
++
++    if [[ $errmsg ]]; then
++        error "Image generation FAILED: %s" "$errmsg"
++    elif (( _builderrors == 0 )); then
++        msg "Image generation successful"
++    fi
++}
++
++process_preset() (
++    local preset=$1 preset_image= preset_options=
++    local -a preset_mkopts preset_cmd
++
++    if (( MKINITCPIO_PROCESS_PRESET )); then
++        error "You appear to be calling a preset from a preset. This is a configuration error."
++        cleanup 1
++    fi
++
++    # allow path to preset file, else resolve it in $_d_presets
++    if [[ $preset != */* ]]; then
++        printf -v preset '%s/%s.preset' "$_d_presets" "$preset"
++    fi
++
++    . "$preset" || die "Failed to load preset: \`%s'" "$preset"
++
++    # Use -m and -v options specified earlier
++    (( _optquiet )) || preset_mkopts+=(-v)
++    (( _optcolor )) || preset_mkopts+=(-n)
++
++    (( _optsavetree )) && preset_mkopts+=(-s)
++
++    ret=0
++    for p in "${PRESETS[@]}"; do
++        msg "Building image from preset: $preset: '$p'"
++        preset_cmd=("${preset_mkopts[@]}")
++
++        preset_kver=${p}_kver
++        if [[ ${!preset_kver:-$ALL_kver} ]]; then
++            preset_cmd+=(-k "${!preset_kver:-$ALL_kver}")
++        else
++            warning "No kernel version specified. Skipping image \`%s'" "$p"
++            continue
++        fi
++
++        preset_config=${p}_config
++        if [[ ${!preset_config:-$ALL_config} ]]; then
++            preset_cmd+=(-c "${!preset_config:-$ALL_config}")
++        else
++            warning "No configuration file specified. Skipping image \`%s'" "$p"
++            continue
++        fi
++
++        preset_image=${p}_image
++        if [[ ${!preset_image} ]]; then
++            preset_cmd+=(-g "${!preset_image}")
++        else
++            warning "No image file specified. Skipping image \`%s'" "$p"
++            continue
++        fi
++
++        preset_options=${p}_options
++        if [[ ${!preset_options} ]]; then
++            preset_cmd+=(${!preset_options}) # intentional word splitting
++        fi
++
++        msg2 "${preset_cmd[*]}"
++        MKINITCPIO_PROCESS_PRESET=1 "$0" "${preset_cmd[@]}"
++        (( $? )) && ret=1
++    done
++
++    exit $ret
++)
++
++. "$_f_functions"
++
++trap 'cleanup 130' INT
++trap 'cleanup 143' TERM
++
++_opt_short='A:c:D:g:H:hk:nLMPp:r:S:sd:t:Vvz:'
++_opt_long=('add:' 'addhooks:' 'config:' 'generate:' 'hookdir': 'hookhelp:' 'help'
++          'kernel:' 'listhooks' 'automods' 'moduleroot:' 'nocolor' 'allpresets'
++          'preset:' 'skiphooks:' 'save' 'generatedir:' 'builddir:' 'version' 'verbose' 'compress:')
++
++parseopts "$_opt_short" "${_opt_long[@]}" -- "$@" || exit 1
++set -- "${OPTRET[@]}"
++unset _opt_short _opt_long OPTRET
++
++while :; do
++    case $1 in
++        # --add remains for backwards compat
++        -A|--add|--addhooks)
++            shift
++            IFS=, read -r -a add <<< "$1"
++            _optaddhooks+=("${add[@]}")
++            unset add
++            ;;
++        -c|--config)
++            shift
++            _f_config=$1
++            ;;
++        -k|--kernel)
++            shift
++            KERNELVERSION=$1
++            ;;
++        -s|--save)
++            _optsavetree=1
++            ;;
++        -d|--generatedir)
++            shift
++            _opttargetdir=$1
++            ;;
++        -g|--generate)
++            shift
++            [[ -d $1 ]] && die "Invalid image path -- must not be a directory"
++            if ! _optgenimg=$(readlink -f "$1") || [[ ! -e ${_optgenimg%/*} ]]; then
++                die "Unable to write to path: \`%s'" "$1"
++            fi
++            ;;
++        -h|--help)
++            usage
++            cleanup 0
++            ;;
++        -V|--version)
++            version
++            cleanup 0
++            ;;
++        -p|--preset)
++            shift
++            _optpreset+=("$1")
++            ;;
++        -n|--nocolor)
++            _optcolor=0
++            ;;
++        -v|--verbose)
++            _optquiet=0
++            ;;
++        -S|--skiphooks)
++            shift
++            IFS=, read -r -a skip <<< "$1"
++            _optskiphooks+=("${skip[@]}")
++            unset skip
++            ;;
++        -H|--hookhelp)
++            shift
++            hook_help "$1"
++            exit
++            ;;
++        -L|--listhooks)
++            hook_list
++            exit 0
++            ;;
++        -M|--automods)
++            _optshowautomods=1
++            ;;
++        -P|--allpresets)
++            _optpreset=("$_d_presets"/*.preset)
++            [[ -e ${_optpreset[0]} ]] || die "No presets found in $_d_presets"
++            ;;
++        -t|--builddir)
++            shift
++            export TMPDIR=$1
++            ;;
++        -z|--compress)
++            shift
++            _optcompress=$1
++            ;;
++        -r|--moduleroot)
++            shift
++            _optmoduleroot=$1
++            ;;
++        -D|--hookdir)
++            shift
++            _d_flag_hooks+="$1/hooks:"
++            _d_flag_install+="$1/install:"
++            ;;
++        --)
++            shift
++            break 2
++            ;;
++    esac
++    shift
++done
++
++if [[ -t 1 ]] && (( _optcolor )); then
++    try_enable_color
++fi
++
++if [[ -n $_d_flag_hooks && -n $_d_flag_install ]]; then
++    _d_hooks=${_d_flag_hooks%:}
++    _d_install=${_d_flag_install%:}
++fi
++
++# insist that /proc and /dev be mounted (important for chroots)
++# NOTE: avoid using mountpoint for this -- look for the paths that we actually
++# use in mkinitcpio. Avoids issues like FS#26344.
++[[ -e /proc/self/mountinfo ]] || die "/proc must be mounted!"
++[[ -e /dev/fd ]] || die "/dev must be mounted!"
++
++# use preset $_optpreset (exits after processing)
++if (( ${#_optpreset[*]} )); then
++    map process_preset "${_optpreset[@]}"
++    exit
++fi
++
++if [[ $KERNELVERSION != 'none' ]]; then
++    KERNELVERSION=$(resolve_kernver "$KERNELVERSION") || cleanup 1
++    _d_kmoduledir=$_optmoduleroot/lib/modules/$KERNELVERSION
++    [[ -d $_d_kmoduledir ]] || die "'$_d_kmoduledir' is not a valid kernel module directory"
++fi
++
++_d_workdir=$(initialize_buildroot "$KERNELVERSION" "$_opttargetdir") || cleanup 1
++BUILDROOT=${_opttargetdir:-$_d_workdir/root}
++
++. "$_f_config" || die "Failed to read configuration \`%s'" "$_f_config"
++
++arrayize_config
++
++# after returning, hooks are populated into the array '_hooks'
++# HOOKS should not be referenced from here on
++compute_hookset
++
++if (( ${#_hooks[*]} == 0 )); then
++    die "Invalid config: No hooks found"
++fi
++
++if (( _optshowautomods )); then
++    msg "Modules autodetected"
++    PATH=$_d_install . 'autodetect'
++    build
++    printf '%s\n' "${!_autodetect_cache[@]}" | sort
++    cleanup 0
++fi
++
++if [[ $_optgenimg ]]; then
++    # check for permissions. if the image doesn't already exist,
++    # then check the directory
++    if [[ ( -e $_optgenimg && ! -w $_optgenimg ) ||
++            ( ! -d ${_optgenimg%/*} || ! -w ${_optgenimg%/*} ) ]]; then
++        die 'Unable to write to %s' "$_optgenimg"
++    fi
++
++    _optcompress=${_optcompress:-${COMPRESSION:-gzip}}
++    if ! type -P "$_optcompress" >/dev/null; then
++        warning "Unable to locate compression method: %s" "$_optcompress"
++        _optcompress=cat
++    fi
++
++    msg "Starting build: %s" "$KERNELVERSION"
++elif [[ $_opttargetdir ]]; then
++    msg "Starting build: %s" "$KERNELVERSION"
++else
++    msg "Starting dry run: %s" "$KERNELVERSION"
++fi
++
++# set functrace and trap to catch errors in add_* functions
++declare -i _builderrors=0
++set -o functrace
++trap '(( $? )) && [[ $FUNCNAME = add_* ]] && (( ++_builderrors ))' RETURN
++
++# prime the _addedmodules list with the builtins for this kernel
++if [[ -r $_d_kmoduledir/modules.builtin ]]; then
++    while IFS=/ read -a path; do
++        modname=${path[-1]%.ko}
++        _addedmodules["${modname//-/_}"]=2
++    done <"$_d_kmoduledir/modules.builtin"
++    unset modname path
++fi
++
++map run_build_hook "${_hooks[@]}" || (( ++_builderrors ))
++
++# process config file
++parse_config "$_f_config"
++
++# switch out the error handler to catch all errors
++trap -- RETURN
++trap '(( ++_builderrors ))' ERR
++set -o errtrace
++
++install_modules "${!_modpaths[@]}"
++
++# unset errtrace and trap
++set +o functrace
++set +o errtrace
++trap -- ERR
++
++# this is simply a nice-to-have -- it doesn't matter if it fails.
++ldconfig -r "$BUILDROOT" &>/dev/null
++
++if [[ $_optgenimg ]]; then
++    build_image "$_optgenimg" "$_optcompress"
++elif [[ $_opttargetdir ]]; then
++    msg "Build complete."
++else
++    msg "Dry run complete, use -g IMAGE to generate a real image"
++fi
++
++cleanup $(( !!_builderrors ))
++
++# vim: set ft=sh ts=4 sw=4 et:
+diff -ruN mkinitcpio-27.orig/mkinitcpio.rej mkinitcpio-27/mkinitcpio.rej
+--- mkinitcpio-27.orig/mkinitcpio.rej	1970-01-01 01:00:00.000000000 +0100
++++ mkinitcpio-27/mkinitcpio.rej	2020-05-26 20:22:50.227103662 +0200
+@@ -0,0 +1,11 @@
++--- mkinitcpio	2019-04-09 14:51:19.158763614 +0000
+++++ mkinitcpio	2019-04-09 14:51:24.908894498 +0000
++@@ -99,7 +99,7 @@
++     fi
++ 
++     arch=$(uname -m)
++-    if [[ $arch != @(i?86|x86_64) ]]; then
+++    if [[ $arch != @(i?86|x86_64|ppc64le) ]]; then
++         error "kernel version extraction from image not supported for \`%s' architecture" "$arch"
++         return 1
++     fi
