@@ -1,6 +1,6 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 pkgname=ungoogled-chromium
-pkgver=81.0.4044.138
+pkgver=83.0.4103.61
 pkgrel=1
 pkgdesc="Google Chromium, sans integration with Google - PPC64LE FORK"
 arch=(x86_64 powerpc64le)
@@ -12,12 +12,35 @@ replaces=('ungoogled-chromium-archlinux')
 depends=('llvm-libs' 'glib2' 'libcups' 'nss' 'openssl' 'pango' 'dbus' 'atk' 'gtk3'
 	 'krb5' 'pulseaudio' 'libxss' 're2c' 'curl' 'alsa-lib' 'gperf' 'mesa' 'at-spi2-atk'
 	 'libgnome-keyring' 'libva' 'pciutils')
-makedepends=('git' 'llvm' 'clang' 'pkgconf' 'python' 'python2' 'cmake' 'bison' 'nodejs' 'gn' 'ninja' 'xorgproto' 'lld')
-commit="724c24e21f66b7bb27a9e52faa0ecf1d0eead3ae"
+makedepends=('git' 'llvm' 'clang' 'pkgconf' 'python' 'python2' 'cmake' 'bison' 'nodejs' 'gn' 'ninja' 'xorgproto' 'lld'
+	     'python-setuptools' 'python2-setuptools')
+commit="29744a4e706f81e1852dd762ff4456876fc8b7df"
 source=("git+https://github.com/leo-lb/ungoogled-chromium.git#commit=${commit}"
-	'recent-python-ffmpeg.patch')
+	'recent-python-ffmpeg.patch'
+        'vdpau-support.patch'
+        'fix-intel-vaapi-wayland.patch'
+        'clean-up-a-call-to-set_utf8.patch'
+        'iwyu-std-numeric_limits-is-defined-in-limits.patch'
+        'add-missing-algorithm-header-in-crx_install_error.cc.patch'
+        'libstdc-fix-incomplete-type-in-AXTree-for-NodeSetSiz.patch'
+        'include-memory-header-to-get-the-definition-of-std-u.patch'
+        'make-some-of-blink-custom-iterators-STL-compatible.patch'
+        'avoid-double-destruction-of-ServiceWorkerObjectHost.patch'
+        'chromium-83-gcc-10.patch'
+        'chromium-skia-harmony.patch')
 sha256sums=('SKIP'
-	    '97b21f30e380e2c7137075bc9e2defa0cbd38b66028aab7361d3ed3fe39fd7fc')
+            '97b21f30e380e2c7137075bc9e2defa0cbd38b66028aab7361d3ed3fe39fd7fc'
+            '0ec6ee49113cc8cc5036fa008519b94137df6987bf1f9fbffb2d42d298af868a'
+            'f6335d1e14e4ed865f37695d67df18008c8664778620e698bb46c35b88a8b4c2'
+            '58c41713eb6fb33b6eef120f4324fa1fb8123b1fbc4ecbe5662f1f9779b9b6af'
+            '675fb3d6276cce569a641436465f58d5709d1d4a5f62b7052989479fd4aaea24'
+            '0e2a78e4aa7272ab0ff4a4c467750e01bad692a026ad9828aaf06d2a9418b9d8'
+            '50687079426094f2056d1f4806dc30fc8d6bad16190520e57ba087ec5db1d778'
+            '071326135bc25226aa165639dff80a03670a17548f2d2ff5cc4f40982b39c52a'
+            '3d7f20e1d2ee7d73ed25e708c0d59a0cb215fcce10a379e3d48a856533c4b0b7'
+            'd793842e9584bf75e3779918297ba0ffa6dd05394ef5b2bf5fb73aa9c86a7e2f'
+            '3e5ba8c0a70a4bc673deec0c61eb2b58f05a4c784cbdb7c8118be1eb6580db6d'
+            '771292942c0901092a402cc60ee883877a99fb804cb54d568c8c6c94565a48e1')
 
 pkgver() {
 	cat "$srcdir/${pkgname}"/chromium_version.txt
@@ -28,15 +51,9 @@ prepare() {
 	[ ! -z "${SRCDEST}" ] && _cache_dir=${SRCDEST}/ungoogled-chrome
 	msg2 "Using ${_cache_dir} for download cache"
 
+	msg2 "Updating GIT submdules..."
 	cd "$srcdir/${pkgname}"
 	git submodule update --init
-
-	# to avoid rewriting shebangs, we'll just link the two pythons
-	# as it is expected by the build system 
-	mkdir -p ${srcdir}/python
-	ln -sf /usr/bin/python ${srcdir}/python/python3
-	ln -sf /usr/bin/python2 ${srcdir}/python/python
-	export PATH=${srcdir}/python:${PATH}
 
 	mkdir -p ${_cache_dir} build/src 
 	msg2 'Downloading and extracting chrome...'
@@ -53,16 +70,64 @@ prepare() {
 
 	msg2 'Applying domain substituions...'
 	./utils/domain_substitution.py apply -r domain_regex.list -f domain_substitution.list -c build/domsubcache.tar.gz build/src
+
+	cd build/src
+
+	msg2 'Apply our patches (thx AUR)'
+        # https://chromium-review.googlesource.com/c/chromium/src/+/2145261
+        patch -Np1 -i ${srcdir}/clean-up-a-call-to-set_utf8.patch
+
+        # https://chromium-review.googlesource.com/c/chromium/src/+/2153111
+        patch -Np1 -F3 -i ${srcdir}/iwyu-std-numeric_limits-is-defined-in-limits.patch
+
+        # https://chromium-review.googlesource.com/c/chromium/src/+/2152333
+        patch -Np1 -i ${srcdir}/add-missing-algorithm-header-in-crx_install_error.cc.patch
+
+        # https://chromium-review.googlesource.com/c/chromium/src/+/2132403
+        patch -Np1 -i ${srcdir}/libstdc-fix-incomplete-type-in-AXTree-for-NodeSetSiz.patch
+
+        # https://chromium-review.googlesource.com/c/chromium/src/+/2164645
+        patch -Np1 -i ${srcdir}/include-memory-header-to-get-the-definition-of-std-u.patch
+
+        # https://chromium-review.googlesource.com/c/chromium/src/+/2174199
+        patch -Np1 -i ${srcdir}/make-some-of-blink-custom-iterators-STL-compatible.patch
+
+        # https://chromium-review.googlesource.com/c/chromium/src/+/2094496
+        patch -Np1 -i ${srcdir}/avoid-double-destruction-of-ServiceWorkerObjectHost.patch
+
+        # https://crbug.com/skia/6663#c10
+        patch -Np0 -i ${srcdir}/chromium-skia-harmony.patch
+
+        # Fixes from Gentoo
+        patch -Np1 -i ${srcdir}/chromium-83-gcc-10.patch
+
+        # Fix VA-API on Nvidia
+        patch -Np1 -i ${srcdir}/vdpau-support.patch
+
+        # Fix VA-API on Intel on Wayland
+        patch -Np1 -i ${srcdir}/fix-intel-vaapi-wayland.patch
+
+	msg2 'Use system nodejs'
+        mkdir -p third_party/node/linux/node-linux-ppc64/bin
+        ln -s /usr/bin/node third_party/node/linux/node-linux-ppc64/bin/
+
+
+        msg2 'Fix up Python2/3 the lean way'
+	mkdir -p ${srcdir}/python
+        ln -sf /usr/bin/python ${srcdir}/python/python3
+        ln -sf /usr/bin/python2 ${srcdir}/python/python
+        export PATH=${srcdir}/python:${PATH}
 }
 
 build() {
 	cd "$srcdir/${pkgname}"/build/src
-	export PATH=${srcdir}/python:${PATH}
 
 	if check_buildoption ccache y; then
 	  # Avoid falling back to preprocessor mode when sources contain time macros
 	  export CCACHE_SLOPPINESS=time_macros
 	fi
+
+	export PATH=${srcdir}/python:${PATH}
 
 	export CC=clang
 	export CXX=clang++
