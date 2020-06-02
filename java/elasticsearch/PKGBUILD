@@ -1,0 +1,92 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
+# Contributor: Marcello "mererghost" Rocha <https://github.com/mereghost>
+# Refactored by Blaž "Speed" Hrastnik <https://github.com/archSeer>
+
+pkgname=elasticsearch
+pkgver=7.6.2
+pkgrel=1
+pkgdesc="Distributed RESTful search engine built on top of Lucene"
+arch=(x86_64 powerpc64le)
+url="https://www.elastic.co/products/elasticsearch"
+license=('Apache')
+depends=('java-runtime-headless>=13' 'systemd' 'jna.jar')
+makedepends=('jdk-openjdk>=13' 'jdk-openjdk<14' 'ant')
+docker_priv=1
+source=(
+  "${pkgname}-${pkgver}.tar.gz::https://github.com/elastic/elasticsearch/archive/v${pkgver}.tar.gz"
+  elasticsearch-env
+  elasticsearch.service
+  elasticsearch@.service
+  elasticsearch-keystore.service
+  elasticsearch-keystore@.service
+  elasticsearch-sysctl.conf
+  elasticsearch-user.conf
+  elasticsearch-tmpfile.conf
+  elasticsearch.default
+)
+sha256sums=('6ff4871dcae6954e13680aefc196da574a59a36418d06a7e095550ce81a370f8'
+            'cf5a7723e029a1dea0e7c5891dd0694d4ec46b36525a1fdaa0be61b7d0ae40f5'
+            '9e1f68ff275ef2b5f2b93d2823efc5cc9643da696fcbe09a3ea7520ada35ffba'
+            '8a76ad9a44a34eca8d6cb7ec9d8f1b01d46c114765b0a76094de8d72f0477351'
+            'bac40d87acaa5bee209ceb6dfa253009a072e9243fe3b94be42fb5cd44727d6f'
+            '22a78a165a810608188faea6f2b0b381f27b1e9d60126c3b3e729124540589a8'
+            'b3feb1e9c7e7ce6b33cea6c727728ed700332aae942ca475c3bcc1d56b9f113c'
+            '815f6a39db6f54bb40750c382ffbdc298d2c4c187ee8ea7e2f855923e2ff354b'
+            'f4905dbc58de6ff008c0dc12443911f5cc0f0592a58fa6745ea58c96b7b5a7a7'
+            'bb74e5fb8bc28f2125e015395ab05bea117b72bfc6dadbca827694b362ee0bf8')
+backup=('etc/elasticsearch/elasticsearch.yml'
+        'etc/elasticsearch/log4j2.properties'
+        'etc/elasticsearch/jvm.options'
+        'etc/default/elasticsearch')
+
+prepare() {
+  cd ${pkgname}-${pkgver}
+  sed -i '/ARCHITECTURES = Collections.unmodifiableMap(m);/ i \ \ \ \ \ \ \ \ m.put("ppc64le", new Arch(0xC0000015, 0xFFFFFFFF, 2, 189, 11, 362, 358));' server/src/main/java/org/elasticsearch/bootstrap/SystemCallFilter.java
+  sed -i '$ a\'"buildDeb.enabled=false \n buildOssDeb.enabled=false" ./distribution/packages/build.gradle
+  sed -i -e "s/import java.nio.file.Path/import java.nio.file.Path\n\/\/ Detecting the architecture\n String arch = System.getProperty('os.arch', '');/g" -e "s/archiveClassifier = 'linux-x86_64'/archiveClassifier = 'linux-'+ arch/g" distribution/archives/build.gradle
+  sed -i -e "s/apply plugin: 'elasticsearch.test.fixtures'/apply plugin: 'elasticsearch.test.fixtures'\n\/\/ Detecting the architecture\nString arch = System.getProperty('os.arch', '');/g" -e "s/final String classifier = 'linux-x86_64'/final String classifier = 'linux-' + arch/g" distribution/docker/build.gradle
+  sed -i 's/if (project.file("\/proc\/cpuinfo").exists()) {/if ("ppc64le".equals(System.getProperty("os.arch"))) { \n  \/\/ Ask ppc64le to count physical CPUs for us \n ByteArrayOutputStream stdout = new ByteArrayOutputStream(); \n \t project.exec{  \n\t executable "nproc" \n\t args "--all\"  \n\t standardOutput = stdout\n}\n return Integer.parseInt(stdout.toString("UTF-8").trim())\n } else if (project.file("\/proc\/cpuinfo").exists()) {/g' buildSrc/src/main/groovy/org/elasticsearch/gradle/BuildPlugin.groovy
+}
+
+build() {
+  cd ${pkgname}-${pkgver}
+  ./gradlew -p distribution/archives/oss-linux-tar assemble --parallel
+}
+
+package() {
+  cd ${pkgname}-${pkgver}
+  install -dm755 ${pkgdir}/etc/elasticsearch
+  install -dm750 ${pkgdir}/etc/elasticsearch/{scripts,jvm.options.d}
+  install -dm755 ${pkgdir}/{usr/share,var/lib,var/log}/elasticsearch
+  install -dm755 ${pkgdir}/usr/bin
+
+  tar --strip-components=1 -xzv -C ${pkgdir}/usr/share/elasticsearch -f \
+	     distribution/archives/oss-linux-tar/build/distributions/elasticsearch-oss-${pkgver}-SNAPSHOT-linux-ppc64le.tar.gz
+
+  install -m644 -v ${pkgdir}/usr/share/elasticsearch/config/* \
+	${pkgdir}/etc/elasticsearch/
+
+  rm -rv ${pkgdir}/usr/share/elasticsearch/{config,jdk,logs}
+
+  cd ${pkgdir}/usr/share/elasticsearch
+  find bin/ -type f -name elasticsearch-\* ! -name elasticsearch-cli -exec \
+    ln -s /usr/share/elasticsearch/{} "$pkgdir"/usr/{} \;
+
+  ln -s /var/lib/elasticsearch ${pkgdir}/usr/share/elasticsearch/data
+  ln -s /var/log/elasticsearch ${pkgdir}/usr/share/elasticsearch/logs
+
+  cd "$pkgdir"
+  install -Dm644 "$srcdir"/elasticsearch-env usr/share/elasticsearch/bin/elasticsearch-env
+  install -Dm644 "$srcdir"/elasticsearch.service usr/lib/systemd/system/elasticsearch.service
+  install -Dm644 "$srcdir"/elasticsearch@.service usr/lib/systemd/system/elasticsearch@.service
+  install -Dm644 "$srcdir"/elasticsearch-keystore.service usr/lib/systemd/system/elasticsearch-keystore.service
+  install -Dm644 "$srcdir"/elasticsearch-keystore@.service usr/lib/systemd/system/elasticsearch-keystore@.service
+  install -Dm644 "$srcdir"/elasticsearch-user.conf usr/lib/sysusers.d/elasticsearch.conf
+  install -Dm644 "$srcdir"/elasticsearch-tmpfile.conf usr/lib/tmpfiles.d/elasticsearch.conf
+  install -Dm644 "$srcdir"/elasticsearch-sysctl.conf usr/lib/sysctl.d/elasticsearch.conf
+  install -Dm644 "$srcdir"/elasticsearch.default etc/default/elasticsearch
+
+  #FIXME: we probably shouldn't do this
+  ln -sf /usr/share/java/jna-4.5.1.jar ${pkgdir}/usr/share/elasticsearch/lib/jna-4.5.1.jar
+}
