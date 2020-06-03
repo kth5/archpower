@@ -5,7 +5,7 @@
 
 pkgname=elasticsearch
 pkgver=7.6.2
-pkgrel=1
+pkgrel=2
 pkgdesc="Distributed RESTful search engine built on top of Lucene"
 arch=(x86_64 powerpc64le)
 url="https://www.elastic.co/products/elasticsearch"
@@ -24,6 +24,7 @@ source=(
   elasticsearch-user.conf
   elasticsearch-tmpfile.conf
   elasticsearch.default
+  0001-systemd-force-packaged-distribution.patch
 )
 sha256sums=('6ff4871dcae6954e13680aefc196da574a59a36418d06a7e095550ce81a370f8'
             'cf5a7723e029a1dea0e7c5891dd0694d4ec46b36525a1fdaa0be61b7d0ae40f5'
@@ -34,7 +35,8 @@ sha256sums=('6ff4871dcae6954e13680aefc196da574a59a36418d06a7e095550ce81a370f8'
             'b3feb1e9c7e7ce6b33cea6c727728ed700332aae942ca475c3bcc1d56b9f113c'
             '815f6a39db6f54bb40750c382ffbdc298d2c4c187ee8ea7e2f855923e2ff354b'
             'f4905dbc58de6ff008c0dc12443911f5cc0f0592a58fa6745ea58c96b7b5a7a7'
-            'bb74e5fb8bc28f2125e015395ab05bea117b72bfc6dadbca827694b362ee0bf8')
+            'bb74e5fb8bc28f2125e015395ab05bea117b72bfc6dadbca827694b362ee0bf8'
+            '32a4335995cebfb885ef40a3824375b7158f8e7351d502ffcba5c583b2a8312c')
 backup=('etc/elasticsearch/elasticsearch.yml'
         'etc/elasticsearch/log4j2.properties'
         'etc/elasticsearch/jvm.options'
@@ -42,6 +44,12 @@ backup=('etc/elasticsearch/elasticsearch.yml'
 
 prepare() {
   cd ${pkgname}-${pkgver}
+
+  # systemd support is only enabled in packaged distributions which we can't
+  # build on Arch POWER without major changes. Primarily this is needed for
+  # elasticsearch to notify systemd during startup
+  patch -Np1 -i ${srcdir}/0001-systemd-force-packaged-distribution.patch
+
   sed -i '/ARCHITECTURES = Collections.unmodifiableMap(m);/ i \ \ \ \ \ \ \ \ m.put("ppc64le", new Arch(0xC0000015, 0xFFFFFFFF, 2, 189, 11, 362, 358));' server/src/main/java/org/elasticsearch/bootstrap/SystemCallFilter.java
   sed -i '$ a\'"buildDeb.enabled=false \n buildOssDeb.enabled=false" ./distribution/packages/build.gradle
   sed -i -e "s/import java.nio.file.Path/import java.nio.file.Path\n\/\/ Detecting the architecture\n String arch = System.getProperty('os.arch', '');/g" -e "s/archiveClassifier = 'linux-x86_64'/archiveClassifier = 'linux-'+ arch/g" distribution/archives/build.gradle
@@ -77,15 +85,15 @@ package() {
   ln -s /var/log/elasticsearch ${pkgdir}/usr/share/elasticsearch/logs
 
   cd "$pkgdir"
-  install -Dm644 "$srcdir"/elasticsearch-env usr/share/elasticsearch/bin/elasticsearch-env
-  install -Dm644 "$srcdir"/elasticsearch.service usr/lib/systemd/system/elasticsearch.service
-  install -Dm644 "$srcdir"/elasticsearch@.service usr/lib/systemd/system/elasticsearch@.service
-  install -Dm644 "$srcdir"/elasticsearch-keystore.service usr/lib/systemd/system/elasticsearch-keystore.service
-  install -Dm644 "$srcdir"/elasticsearch-keystore@.service usr/lib/systemd/system/elasticsearch-keystore@.service
-  install -Dm644 "$srcdir"/elasticsearch-user.conf usr/lib/sysusers.d/elasticsearch.conf
-  install -Dm644 "$srcdir"/elasticsearch-tmpfile.conf usr/lib/tmpfiles.d/elasticsearch.conf
-  install -Dm644 "$srcdir"/elasticsearch-sysctl.conf usr/lib/sysctl.d/elasticsearch.conf
-  install -Dm644 "$srcdir"/elasticsearch.default etc/default/elasticsearch
+  install -Dm644 "${srcdir}"/elasticsearch-env usr/share/elasticsearch/bin/elasticsearch-env
+  install -Dm644 "${srcdir}"/elasticsearch.service usr/lib/systemd/system/elasticsearch.service
+  install -Dm644 "${srcdir}"/elasticsearch@.service usr/lib/systemd/system/elasticsearch@.service
+  install -Dm644 "${srcdir}"/elasticsearch-keystore.service usr/lib/systemd/system/elasticsearch-keystore.service
+  install -Dm644 "${srcdir}"/elasticsearch-keystore@.service usr/lib/systemd/system/elasticsearch-keystore@.service
+  install -Dm644 "${srcdir}"/elasticsearch-user.conf usr/lib/sysusers.d/elasticsearch.conf
+  install -Dm644 "${srcdir}"/elasticsearch-tmpfile.conf usr/lib/tmpfiles.d/elasticsearch.conf
+  install -Dm644 "${srcdir}"/elasticsearch-sysctl.conf usr/lib/sysctl.d/elasticsearch.conf
+  install -Dm644 "${srcdir}"/elasticsearch.default etc/default/elasticsearch
 
   #FIXME: we probably shouldn't do this
   ln -sf /usr/share/java/jna-4.5.1.jar ${pkgdir}/usr/share/elasticsearch/lib/jna-4.5.1.jar
