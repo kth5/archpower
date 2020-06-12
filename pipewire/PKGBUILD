@@ -1,10 +1,10 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Maintainer: Jan de Groot <jgc@archlinux.org>
 
 pkgbase=pipewire
-pkgname=(pipewire pipewire-docs pipewire-jack pipewire-pulse)
-pkgver=0.3.2
+pkgname=(pipewire pipewire-docs pipewire-jack pipewire-pulse pipewire-alsa)
+pkgver=0.3.6
 pkgrel=1
 pkgdesc="Server and user space API to deal with multimedia pipelines"
 url="https://pipewire.org"
@@ -13,7 +13,7 @@ arch=(x86_64 powerpc64le)
 makedepends=(git meson doxygen graphviz xmltoman valgrind jack2 libpulse
              alsa-lib gstreamer gst-plugins-base sbc rtkit vulkan-icd-loader
              dbus libsndfile bluez-libs vulkan-headers)
-_commit=f0f3a0a66032cf693a979dae6187cac07fa353ee  # tags/0.3.2
+_commit=b04552b2522a2cdae9a246be6ed77bb5ae31cda3  # tags/0.3.6
 source=("git+https://github.com/PipeWire/pipewire#commit=$_commit")
 sha256sums=('SKIP')
 
@@ -27,14 +27,11 @@ prepare() {
 }
 
 build() {
-  # warning: ‘-Wformat-security’ ignored without ‘-Wformat’ [-Wformat-security]
-  CFLAGS+=" -Wformat"
-
   arch-meson $pkgbase build \
     -D docs=true \
     -D man=true
 
-  ninja -C build ${MAKEFLAGS}
+  meson compile -C build
 }
 
 check() {
@@ -51,13 +48,16 @@ _pick() {
   done
 }
 
+_ver=${pkgver:0:3}
+
 package_pipewire() {
   depends=(gstreamer gst-plugins-base sbc rtkit vulkan-icd-loader bluez-libs
-           libdbus-1.so libsndfile.so)
+           libdbus-1.so libsndfile.so libudev.so libasound.so libsystemd.so
+           libglib-2.0.so libgobject-2.0.so)
   optdepends=('pipewire-docs: Documentation'
               'pipewire-jack: JACK support'
               'pipewire-pulse: PulseAudio support')
-  provides=(libpipewire-${pkgver:0:3}.so)
+  provides=(libpipewire-$_ver.so)
   backup=(etc/pipewire/pipewire.conf)
   install=pipewire.install
 
@@ -65,12 +65,15 @@ package_pipewire() {
 
   cd "$pkgdir"
 
+  mkdir -p etc/alsa/conf.d
+  ln -st etc/alsa/conf.d /usr/share/alsa/alsa.conf.d/50-pipewire.conf 
+
   _pick docs usr/share/doc
 
-  _pick pulse usr/lib/libpulse*
+  _pick pulse usr/bin/pw-pulse usr/lib/pipewire-$_ver/pulse
 
+  _pick jack usr/bin/pw-jack usr/lib/pipewire-$_ver/jack
   _pick jack usr/lib/spa-0.2/jack
-  _pick jack usr/lib/libjack*
 }
 
 package_pipewire-docs() {
@@ -80,14 +83,20 @@ package_pipewire-docs() {
 
 package_pipewire-jack() {
   pkgdesc+=" (JACK support)"
-  depends=(libpipewire-${pkgver:0:3}.so libjack.so)
-  provides=(libjack-pw.so)
+  depends=(libpipewire-$_ver.so libjack.so)
   mv jack/* "$pkgdir"
 }
 
 package_pipewire-pulse() {
   pkgdesc+=" (PulseAudio support)"
-  depends=(libpipewire-${pkgver:0:3}.so libpulse.so libglib-2.0.so)
-  provides=(libpulse{,-simple,-mainloop-glib}-pw.so)
+  depends=(libpipewire-$_ver.so libglib-2.0.so)
   mv pulse/* "$pkgdir"
+}
+
+package_pipewire-alsa() {
+  pkgdesc="ALSA Configuration for PipeWire"
+  depends=(libpipewire-$_ver.so)
+
+  mkdir -p "$pkgdir/etc/alsa/conf.d"
+  ln -st "$pkgdir/etc/alsa/conf.d" /usr/share/alsa/alsa.conf.d/99-pipewire-default.conf
 }
