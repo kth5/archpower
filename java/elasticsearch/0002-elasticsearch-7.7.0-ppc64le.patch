@@ -1,0 +1,147 @@
+--- elasticsearch-7.7.0.orig/buildSrc/src/main/java/org/elasticsearch/gradle/Jdk.java	2020-06-03 02:08:40.979378758 +0200
++++ elasticsearch-7.7.0/buildSrc/src/main/java/org/elasticsearch/gradle/Jdk.java	2020-06-03 02:08:54.136023669 +0200
+@@ -35,7 +35,7 @@
+ 
+ public class Jdk implements Buildable, Iterable<File> {
+ 
+-    private static final List<String> ALLOWED_ARCHITECTURES = Collections.unmodifiableList(Arrays.asList("aarch64", "x64"));
++    private static final List<String> ALLOWED_ARCHITECTURES = Collections.unmodifiableList(Arrays.asList("aarch64", "x64", "ppc64le"));
+     private static final List<String> ALLOWED_VENDORS = Collections.unmodifiableList(Arrays.asList("adoptopenjdk", "openjdk"));
+     private static final List<String> ALLOWED_PLATFORMS = Collections.unmodifiableList(Arrays.asList("darwin", "linux", "windows", "mac"));
+     private static final Pattern VERSION_PATTERN = Pattern.compile("(\\d+)(\\.\\d+\\.\\d+)?\\+(\\d+(?:\\.\\d+)?)(@([a-f0-9]{32}))?");
+--- elasticsearch-7.7.0.orig/buildSrc/src/main/java/org/elasticsearch/gradle/Architecture.java	2020-06-03 02:36:05.806211345 +0200
++++ elasticsearch-7.7.0/buildSrc/src/main/java/org/elasticsearch/gradle/Architecture.java	2020-06-03 02:36:36.131096478 +0200
+@@ -22,7 +22,8 @@
+ public enum Architecture {
+ 
+     X64,
+-    AARCH64;
++    AARCH64,
++    PPC64LE;
+ 
+     public static Architecture current() {
+         final String architecture = System.getProperty("os.arch", "");
+@@ -32,6 +33,8 @@
+                 return X64;
+             case "aarch64":
+                 return AARCH64;
++            case "ppc64le":
++		return PPC64LE;
+             default:
+                 throw new IllegalArgumentException("can not determine architecture from [" + architecture + "]");
+         }
+--- elasticsearch-7.7.0.orig/buildSrc/build.gradle	2020-06-03 02:54:45.834207634 +0200
++++ elasticsearch-7.7.0/buildSrc/build.gradle	2020-06-03 02:56:12.700291459 +0200
+@@ -191,9 +191,11 @@
+     distribution project(':distribution:archives:darwin-tar')
+     distribution project(':distribution:archives:oss-darwin-tar')
+     distribution project(':distribution:archives:linux-aarch64-tar')
++    distribution project(':distribution:archives:linux-ppc64le-tar')
+     distribution project(':distribution:archives:linux-tar')
+     distribution project(':distribution:archives:oss-linux-tar')
+     distribution project(':distribution:archives:oss-linux-aarch64-tar')
++    distribution project(':distribution:archives:oss-linux-ppc64le-tar')
+   }
+ 
+   // for external projects we want to remove the marker file indicating we are running the Elasticsearch project
+--- elasticsearch-7.0.0.orig/distribution/archives/linux-ppc64le-tar/build.gradle	1970-01-01 01:00:00.000000000 +0100
++++ elasticsearch-7.7.0/distribution/archives/linux-ppc64le-tar/build.gradle	2020-06-03 03:00:22.782621848 +0200
+@@ -0,0 +1,2 @@
++// This file is intentionally blank. All configuration of the
++// distribution is done in the parent project.
+--- elasticsearch-7.0.0.orig/distribution/archives/oss-linux-ppc64le-tar/build.gradle	1970-01-01 01:00:00.000000000 +0100
++++ elasticsearch-7.7.0/distribution/archives/oss-linux-ppc64le-tar/build.gradle	2020-06-03 03:00:08.512087056 +0200
+@@ -0,0 +1,2 @@
++// This file is intentionally blank. All configuration of the
++// distribution is done in the parent project.
+--- elasticsearch-7.7.0/distribution/build.gradle.orig	2020-06-03 03:07:49.773732112 +0200
++++ elasticsearch-7.7.0/distribution/build.gradle	2020-06-03 03:08:19.162715222 +0200
+@@ -249,7 +249,7 @@
+   // Setup all required JDKs
+   project.jdks {
+     ['darwin', 'windows', 'linux'].each { platform ->
+-      (platform == 'linux' ? ['x64', 'aarch64'] : ['x64']).each { architecture ->
++      (platform == 'linux' ? ['x64', 'aarch64', 'ppc64le'] : ['x64']).each { architecture ->
+         "bundled_${platform}_${architecture}" {
+           it.platform = platform
+           it.version = VersionProperties.getBundledJdk(platform)
+@@ -619,6 +619,7 @@
+ ['archives:windows-zip', 'archives:oss-windows-zip',
+   'archives:darwin-tar', 'archives:oss-darwin-tar',
+   'archives:linux-aarch64-tar', 'archives:oss-linux-aarch64-tar',
++  'archives:linux-ppc64le-tar', 'archives:oss-linux-ppc64le-tar',
+   'archives:linux-tar', 'archives:oss-linux-tar',
+   'archives:integ-test-zip',
+   'packages:rpm', 'packages:deb',
+--- elasticsearch-7.7.0.orig/settings.gradle	2020-06-03 03:17:47.775351487 +0200
++++ elasticsearch-7.7.0/settings.gradle	2020-06-03 03:18:26.218406025 +0200
+@@ -28,8 +28,10 @@
+   'distribution:archives:oss-no-jdk-darwin-tar',
+   'distribution:archives:no-jdk-darwin-tar',
+   'distribution:archives:oss-linux-aarch64-tar',
++  'distribution:archives:oss-linux-ppc64le-tar',
+   'distribution:archives:oss-linux-tar',
+   'distribution:archives:linux-aarch64-tar',
++  'distribution:archives:linux-ppc64le-tar',
+   'distribution:archives:linux-tar',
+   'distribution:archives:oss-no-jdk-linux-tar',
+   'distribution:archives:no-jdk-linux-tar',
+--- elasticsearch-7.7.0.orig/distribution/archives/build.gradle	2020-06-03 03:21:27.894761016 +0200
++++ elasticsearch-7.7.0/distribution/archives/build.gradle	2020-06-03 03:22:03.601096690 +0200
+@@ -185,6 +185,12 @@
+   with archiveFiles(modulesFiles(false, 'linux'), 'tar', 'linux', 'aarch64', false, true)
+ }
+ 
++tasks.register('buildLinuxPpc64leTar', SymbolicLinkPreservingTar) {
++  configure(commonTarConfig)
++  archiveClassifier = 'linux-ppc64le'
++  with archiveFiles(modulesFiles(false, 'linux'), 'tar', 'linux', 'ppc64le', false, true)
++}
++
+ tasks.register('buildLinuxTar', SymbolicLinkPreservingTar) {
+   configure(commonTarConfig)
+   archiveClassifier = 'linux-'+ arch
+@@ -197,6 +203,12 @@
+   with archiveFiles(modulesFiles(true, 'linux'), 'tar', 'linux', 'aarch64', true, true)
+ }
+ 
++tasks.register('buildOssLinuxPpc64leTar', SymbolicLinkPreservingTar) {
++  configure(commonTarConfig)
++  archiveClassifier = 'linux-ppc64le'
++  with archiveFiles(modulesFiles(true, 'linux'), 'tar', 'linux', 'ppc64le', true, true)
++}
++
+ tasks.register('buildOssLinuxTar', SymbolicLinkPreservingTar) {
+   configure(commonTarConfig)
+   archiveClassifier = 'linux-'+ arch
+--- elasticsearch-7.7.0.orig/distribution/docker/build.gradle	2020-06-03 03:26:05.523270748 +0200
++++ elasticsearch-7.7.0/distribution/docker/build.gradle	2020-06-03 03:29:18.493469528 +0200
+@@ -39,13 +42,18 @@
+       tini_arch = "arm64"
+       classifier = "linux-aarch64"
+       break;
++    case "ppc64le":
++      base_image = "ppc64le/centos:7"
++      tini_arch = "ppc64le"
++      classifier = "linux-ppc64le"
++      break;
+     case "x64":
+       base_image = "amd64/centos:7"
+       tini_arch = "amd64"
+       classifier = "linux-x86_64"
+       break;
+     default:
+-      throw new IllegalArgumentException("unrecongized architecture [" + architecture + "], must be one of (aarch64|x64)")
++      throw new IllegalArgumentException("unrecongized architecture [" + architecture + "], must be one of (aarch64|ppc64le|x64)")
+   }
+   final String elasticsearch = oss ? "elasticsearch-oss-${VersionProperties.elasticsearch}-${classifier}.tar.gz" : "elasticsearch-${VersionProperties.elasticsearch}-${classifier}.tar.gz"
+   return [
+@@ -209,7 +217,7 @@
+   assemble.dependsOn(buildDockerImageTask)
+ }
+ 
+-for (final String architecture : ["aarch64", "x64"]) {
++for (final String architecture : ["aarch64", "ppc64le", "x64"]) {
+   for (final boolean oss : [false, true]) {
+     addCopyDockerContextTask(architecture, oss)
+     addBuildDockerImage(architecture, oss)
