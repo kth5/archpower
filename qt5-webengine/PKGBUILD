@@ -3,9 +3,9 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=qt5-webengine
-_qtver=5.14.2
+_qtver=5.15.0
 pkgver=${_qtver/-/}
-pkgrel=3
+pkgrel=2
 arch=(x86_64 powerpc64le)
 url='https://www.qt.io'
 license=('LGPL3' 'LGPL2.1' 'BSD')
@@ -16,31 +16,33 @@ makedepends=('python2' 'gperf' 'jsoncpp' 'ninja' 'qt5-tools' 'poppler')
 groups=('qt' 'qt5')
 _pkgfqn="${pkgname/5-/}-everywhere-src-${_qtver}"
 source=("https://download.qt.io/official_releases/qt/${pkgver%.*}/${_qtver}/submodules/${_pkgfqn}.tar.xz"
-	0015-yasm-nls.patch
+        icu67.patch
+        qt5-webengine-gcc10.patch
+        dark-mode-crash.patch::"https://code.qt.io/cgit/qt/qtwebengine-chromium.git/patch/?id=4e8ca195"
         0018-sandbox-membarrier.patch
         0020-msgvec-push_back.patch
         0021-sandbox-sched_getparam.patch
         0089-enable-ppc64.patch
-        0090-chromium-ppc64le.patch
-        icu67.patch)
-sha256sums=('e169d6a75d8c397e04f843bc1b9585950fb9a001255cd18d6293f66fa8a6c947'
-            '4bfaa7b33740fcc3b767a36e6f2298d64f0c3e044968b2c705c185e7a1a3eb5a'
+        0090-chromium-ppc64le.patch)
+sha256sums=('c38e2fda7ed1b7d5a90f26abf231ec0715d78a5bc39a94673d8e39d75f04c5df'
+            '5315977307e69d20b3e856d3f8724835b08e02085a4444a5c5cefea83fd7d006'
+            '8d73112da8bb95ae9b1c84e403e08563a5dbf3dc02f79cd931e1b0ac15a3be37'
+            '7ea054a95045635fcee9ee50a6a28e9aedf182ca97a76cc6dd680fb1a91748e1'
             'da58d2214d1c50a7b784e18a97473c9086657d5f43e8640675e98451859307d1'
             'd13e6ad37d36834867d57e23c339b73053983dafa76c7377999ff2a5b17332c3'
             '99e072514245a17a23eda5c89169a207c1266b137dae979e8fac423a0bbb79b7'
             '83dec2057fc6e8d2924be5d9dcf31f3f75c829a7fdc9251e126417236e674312'
-            '9eaf7ed2cddeaec038ecc6106dd0313085888376df946973495c0f102769a3e3'
-            '5315977307e69d20b3e856d3f8724835b08e02085a4444a5c5cefea83fd7d006')
+            '9eaf7ed2cddeaec038ecc6106dd0313085888376df946973495c0f102769a3e3')
 
 prepare() {
   mkdir -p build
 
-  sed -e 's|7-9|7-9\|10|' -i $_pkgfqn/configure.pri # Support ninja 1.10
-
-  patch -Np3 -d ${_pkgfqn}/src/3rdparty/chromium/v8 < ${srcdir}/icu67.patch
-
   cd $_pkgfqn
-  patch -Np1 -i ${srcdir}/0015-yasm-nls.patch
+  patch -Np3 -d src/3rdparty/chromium/v8 < ../icu67.patch # Fix build with ICU 67
+  cd src/3rdparty/chromium
+  patch -p1 -i "$srcdir"/qt5-webengine-gcc10.patch
+  patch -p2 -i "$srcdir"/dark-mode-crash.patch # Fix crash in qutebrowser when using dark mode
+
   patch -Np1 -i ${srcdir}/0018-sandbox-membarrier.patch
   patch -Np1 -i ${srcdir}/0020-msgvec-push_back.patch
   patch -Np1 -i ${srcdir}/0021-sandbox-sched_getparam.patch
@@ -50,7 +52,6 @@ prepare() {
 
 build() {
   cd build
-
   qmake ../${_pkgfqn} -- \
     -proprietary-codecs \
     -system-ffmpeg \
@@ -58,7 +59,7 @@ build() {
     -spellchecker \
     -webengine-icu \
     -webengine-kerberos
-  NINJAFLAGS="${MAKEFLAGS}" make
+  make
 }
 
 package() {
