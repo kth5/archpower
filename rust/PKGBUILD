@@ -6,7 +6,7 @@
 
 pkgname=('rust' 'rust-docs')
 epoch=1
-pkgver=1.44.1
+pkgver=1.45.0
 pkgrel=1
 
 _llvm_ver=10.0.0
@@ -19,11 +19,11 @@ license=('MIT' 'Apache')
 makedepends=('rust' "llvm=$_llvm_ver" 'libffi' 'perl' 'python' 'curl' 'cmake')
 checkdepends=('procps-ng' 'gdb')
 
-options=('!emptydirs')
+options=('!emptydirs' '!strip')
 
 source=("https://static.rust-lang.org/dist/rustc-$pkgver-src.tar.gz"{,.asc}
         "https://github.com/llvm/llvm-project/releases/download/llvmorg-$_llvm_ver/compiler-rt-$_llvm_ver.src.tar.xz"{,.sig})
-sha256sums=('7e2e64cb298dd5d5aea52eafe943ba0458fa82f2987fdcda1ff6f537b6f88473'
+sha256sums=('ba0495f12c7d4e8735f3fa9e036bfafd1ae58c26910393201e95b9d13c80cd7c'
             'SKIP'
             '6a7da64d3a0a7320577b68b9ca4933bdcab676e898b759850e827333c3282c75'
             'SKIP')
@@ -40,6 +40,7 @@ link-shared = true
 
 [build]
 target = ["${CHOST}"]
+tools = ["cargo", "rls", "clippy", "miri", "rustfmt", "analysis", "src"]
 cargo = "/usr/bin/cargo"
 rustc = "/usr/bin/rustc"
 python = "/usr/bin/python"
@@ -58,7 +59,7 @@ prefix = "/usr"
 # https://github.com/rust-lang/rust/issues/54872
 codegen-units-std = 1
 
-debuginfo-level = 2
+debuginfo-level-std = 2
 
 channel = "stable"
 
@@ -77,6 +78,18 @@ build() {
 
   python ./x.py dist -j "$(nproc)"
   DESTDIR="$PWD"/dest-rust python ./x.py install -j "$(nproc)"
+
+  # Remove analysis data for libs that weren't installed
+  # TODO: Find out where these come from
+  local file lib
+  while read -rd '' file; do
+    lib="${file%.json}.rlib"
+    lib="${lib/\/analysis\///lib/}"
+    if [[ ! -e $lib ]]; then
+      echo "missing '$lib'"
+      rm -v "$file"
+    fi
+  done < <(find "dest-rust/usr/lib/rustlib"  -path '*/analysis/*.json' -print0)
 
   # move docs out of the way for splitting
   mv dest-rust/usr/share/doc dest-doc
