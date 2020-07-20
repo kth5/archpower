@@ -5,49 +5,63 @@
 pkgname=qt5-webengine
 _qtver=5.15.0
 pkgver=${_qtver/-/}
-pkgrel=2
+pkgrel=5
 arch=(x86_64 powerpc64le)
 url='https://www.qt.io'
 license=('LGPL3' 'LGPL2.1' 'BSD')
 pkgdesc='Provides support for web applications using the Chromium browser project'
 depends=('qt5-webchannel' 'qt5-location' 'libxcomposite' 'libxrandr' 'pciutils' 'libxss' 
          'libevent' 'snappy' 'nss' 'libxslt' 'minizip' 'ffmpeg' 're2' 'libvpx' 'krb5' 'ttf-font')
-makedepends=('python2' 'gperf' 'jsoncpp' 'ninja' 'qt5-tools' 'poppler')
+makedepends=('python2' 'gperf' 'jsoncpp' 'ninja' 'qt5-tools' 'poppler' 'libpipewire02')
+optdepends=('libpipewire02: WebRTC desktop sharing under Wayland')
 groups=('qt' 'qt5')
 _pkgfqn="${pkgname/5-/}-everywhere-src-${_qtver}"
 source=("https://download.qt.io/official_releases/qt/${pkgver%.*}/${_qtver}/submodules/${_pkgfqn}.tar.xz"
-        icu67.patch
+        qt5-webengine-icu67.patch::"https://code.qt.io/cgit/qt/qtwebengine-chromium.git/patch/?id=e941f2bd"
         qt5-webengine-gcc10.patch
         dark-mode-crash.patch::"https://code.qt.io/cgit/qt/qtwebengine-chromium.git/patch/?id=4e8ca195"
-        0018-sandbox-membarrier.patch
-        0020-msgvec-push_back.patch
-        0021-sandbox-sched_getparam.patch
-        0089-enable-ppc64.patch
-        0090-chromium-ppc64le.patch)
+        qtbug-85119.patch::"https://code.qt.io/cgit/qt/qtwebengine-chromium.git/patch/?id=c91f4d20"
+        qtbug-85120.patch::"https://code.qt.io/cgit/qt/qtwebengine-chromium.git/patch/?id=242802ab"
+        qtbug-85118.patch::"https://code.qt.io/cgit/qt/qtwebengine.git/patch/?id=e42ccdad"
+        qtbug-62957.patch::"https://code.qt.io/cgit/qt/qtwebengine.git/patch/?id=f341988f"
+        qtbug-62957-pre.patch::"https://code.qt.io/cgit/qt/qtwebengine.git/patch?id=75412200"
+        qt5-webengine-pipewire.patch
+	0089-enable-ppc64.patch
+	0090-chromium-ppc64le.patch
+        0099-qt5-webengine-size_t.patch
+        )
 sha256sums=('c38e2fda7ed1b7d5a90f26abf231ec0715d78a5bc39a94673d8e39d75f04c5df'
-            '5315977307e69d20b3e856d3f8724835b08e02085a4444a5c5cefea83fd7d006'
-            '8d73112da8bb95ae9b1c84e403e08563a5dbf3dc02f79cd931e1b0ac15a3be37'
+            '22a2265c81bc73dba6843279407ccaec9f192d0987c54a0d9533be7c49b37f29'
+            '8a6e0c41f708d6a8f1febb751157642ab985b58c07ada1447b73b71cd31b4d99'
             '7ea054a95045635fcee9ee50a6a28e9aedf182ca97a76cc6dd680fb1a91748e1'
-            'da58d2214d1c50a7b784e18a97473c9086657d5f43e8640675e98451859307d1'
-            'd13e6ad37d36834867d57e23c339b73053983dafa76c7377999ff2a5b17332c3'
-            '99e072514245a17a23eda5c89169a207c1266b137dae979e8fac423a0bbb79b7'
+            '758561a5bd52feca16751c37def8e7cd3388073bf5bd072eb0862830c174decc'
+            '4bb12a72d40e69052946a6b66fff621f28e40c3d3c11ddeec155133a9204f352'
+            'fc976a6a7198121a4c1b6026318098de278412d73634db31b1815a3cc7502657'
+            '1a07ab59daa9552ad1a70abd03b00d40e542d9dd64fa6d7404d31c9a51e5eeba'
+            'd47ec2111c9713312158f800c01ca9358400b4e11273e470d57a53c36b7565c0'
+            '34cd6fdcdf7d20f9a32d4ad066535edad61735a83a895e9503edab247fee5542'
             '83dec2057fc6e8d2924be5d9dcf31f3f75c829a7fdc9251e126417236e674312'
-            '9eaf7ed2cddeaec038ecc6106dd0313085888376df946973495c0f102769a3e3')
+            'ef7d691d70cfe69b4138377235672338bf1bad64d44720cfb04c89a19ea8eaa1'
+            '9e591e03d23d578121ebebd13693fb10de13fd1fb59217ded2dba9c33118f39c')
 
 prepare() {
   mkdir -p build
 
   cd $_pkgfqn
-  patch -Np3 -d src/3rdparty/chromium/v8 < ../icu67.patch # Fix build with ICU 67
-  cd src/3rdparty/chromium
-  patch -p1 -i "$srcdir"/qt5-webengine-gcc10.patch
-  patch -p2 -i "$srcdir"/dark-mode-crash.patch # Fix crash in qutebrowser when using dark mode
+  patch -d src/3rdparty -p1 -i "$srcdir"/qt5-webengine-icu67.patch # Fix build with ICU 67
+  patch -d src/3rdparty -p1 -i "$srcdir"/qt5-webengine-gcc10.patch
+  patch -d src/3rdparty -p1 -i "$srcdir"/dark-mode-crash.patch # Fix crash in qutebrowser when using dark mode
+  patch -d src/3rdparty -p1 -i "$srcdir"/qtbug-85119.patch # Extend url library for WebEngine custom schemes
+  patch -d src/3rdparty -p1 -i "$srcdir"/qtbug-85120.patch # Make XScrnSaver optional
 
-  patch -Np1 -i ${srcdir}/0018-sandbox-membarrier.patch
-  patch -Np1 -i ${srcdir}/0020-msgvec-push_back.patch
-  patch -Np1 -i ${srcdir}/0021-sandbox-sched_getparam.patch
-  patch -Np1 -i ${srcdir}/0089-enable-ppc64.patch
-  patch -Np1 -i ${srcdir}/0090-chromium-ppc64le.patch
+  patch -p1 -i ../qtbug-85118.patch # Fix recentlyAudible signal
+  patch -p1 -i ../qtbug-62957-pre.patch # Avoid the network context reset during http cache clear
+  patch -p1 -i ../qtbug-62957.patch # Return valid path in Profile::GetPath() for incognito profiles
+  patch -p1 -i ../qt5-webengine-pipewire.patch # Add screen sharing support on wayland via pipewire
+
+  patch -p1 -i ../0089-enable-ppc64.patch
+  patch -p1 -i ../0090-chromium-ppc64le.patch
+  patch -p1 -i ../0099-qt5-webengine-size_t.patch
 }
 
 build() {
@@ -58,7 +72,8 @@ build() {
     -webp \
     -spellchecker \
     -webengine-icu \
-    -webengine-kerberos
+    -webengine-kerberos \
+    -webengine-webrtc-pipewire
   make
 }
 
