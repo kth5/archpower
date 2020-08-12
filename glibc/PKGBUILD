@@ -6,29 +6,34 @@
 # NOTE: valgrind requires rebuilt with each major glibc version
 
 pkgname=glibc
-pkgver=2.31
-pkgrel=7
+pkgver=2.32
+pkgrel=1
 arch=(powerpc64le)
 groups=(base)
 url='https://www.gnu.org/software/libc'
 pkgdesc='GNU C Library'
 license=(GPL LGPL)
-depends=(linux-api-headers tzdata filesystem systemtap)
+depends=(linux-api-headers tzdata filesystem)
 makedepends=(git gd python gperf)
+conflicts=(systemtap)
+provides=(systemtap)
 options=(!strip staticlibs)
 docker_priv=1
-#source=(https://ftp.gnu.org/gnu/glibc/glibc-$pkgver.tar.xz{,.sig}
-_commit=18fdba553dd9b907e9812b90d2cea593f776058f
-source=(git+https://sourceware.org/git/glibc.git#commit=$_commit
-        locale.gen.txt
-        locale-gen
-	bz20338.patch)
+#_commit=18fdba553dd9b907e9812b90d2cea593f776058f
+#source=(git+https://sourceware.org/git/glibc.git#commit=$_commit
+source=(https://ftp.gnu.org/gnu/glibc/glibc-$pkgver.tar.xz{,.sig}
+	locale.gen.txt
+	locale-gen
+        sdt-config.h
+        sdt.h)
 validpgpkeys=(7273542B39962DF7B299931416792B4EA25340F8 # Carlos O'Donell
               BC7C7372637EC10C57D7AA6579C43DFBF1CF2187) # Siddhesh Poyarekar
-md5sums=('SKIP'
-         '07ac979b6ab5eeb778d55f041529d623'
-         '476e9113489f93b348b21e144b6a8fcf'
-	 '430673eccc78e52c249aa4b0f1786450')
+sha256sums=('1627ea54f5a1a8467032563393e0901077626dc66f37f10ee6363bb722222836'
+            'SKIP'
+            'd42648cea552ba5353a32e264686e992263289d5cc86207314dffc54ab514981'
+            '83f108f915863c7ed0338e2d3e8f2e071a531a090ef8f8b2eb3a956a3c4f04d7'
+            'cdc234959c6fdb43f000d3bb7d1080b0103f4080f5e67bcfe8ae1aaf477812f0'
+            '774061aff612a377714a509918a9e0e0aafce708b87d2d7e06b1bd1f6542fe70')
 
 optdepends=('gd: for memusagestat')
 install=glibc.install
@@ -71,7 +76,6 @@ build() {
 	--with-headers=/usr/include
 	--enable-multi-arch
 	--with-cpu=power8
-	--enable-systemtap
 	--disable-profile
 	--disable-werror
   )
@@ -157,4 +161,12 @@ package() {
       -not -name 'libthread_db-*.so' \
       -name '*-*.so' -type f -exec strip $STRIP_SHARED {} + 2> /dev/null || true
   fi
+
+  # Provide tracing probes to libstdc++ for exceptions, possibly for other
+  # libraries too. Useful for gdb's catch command.
+  install -Dm644 "$srcdir/sdt.h" "$pkgdir/usr/include/sys/sdt.h"
+  install -Dm644 "$srcdir/sdt-config.h" "$pkgdir/usr/include/sys/sdt-config.h"
+
+  # Provided by libxcrypt; keep the old shared library for backwards compatibility
+  rm -f "$pkgdir"/usr/include/crypt.h "$pkgdir"/usr/lib/libcrypt.a
 }
