@@ -12,7 +12,7 @@ _majorver=${pkgver%%.*}
 _islver=0.21
 pkgrel=4
 pkgdesc='The GNU Compiler Collection'
-arch=(x86_64 powerpc64le)
+arch=(x86_64 powerpc64le powerpc)
 license=(GPL LGPL FDL custom)
 url='https://gcc.gnu.org'
 makedepends=(binutils libmpc gcc-ada doxygen python git libxcrypt)
@@ -105,7 +105,7 @@ build() {
       --disable-werror \
       --with-abi=elfv2 \
       --enable-secureplt \
-      gdc_include_dir=/usr/include/dlang/gdc
+      gdc_include_dir=/usr/include/dlang/gdc acx_cv_cc_gcc_supports_ada=yes
 
   make
 
@@ -129,23 +129,27 @@ package_gcc-libs() {
   depends=('glibc>=2.27')
   options+=(!strip)
   provides=($pkgname-multilib libgo.so libgfortran.so libgphobos.so
-            libubsan.so libasan.so libtsan.so liblsan.so)
+            libubsan.so libasan.so liblsan.so)
+  [ "${CARCH}" != 'powerpc' ] && depends+=(libtsan.so)
   replaces=($pkgname-multilib libgphobos)
 
   cd gcc-build
   make -C $CHOST/libgcc DESTDIR="$pkgdir" install-shared
   rm -f "$pkgdir/$_libdir/libgcc_eh.a"
 
+  
   for lib in libatomic \
              libgfortran \
              libgo \
              libgomp \
              libitm \
              libquadmath \
-             libsanitizer/{a,l,ub,t}san \
+	     libsanitizer/{a,l,ub}san \
              libstdc++-v3/src; do
     make -C $CHOST/$lib DESTDIR="$pkgdir" install-toolexeclibLTLIBRARIES
   done
+
+  [ "${CARCH}" != 'powerpc' ] && make -C $CHOST/libsanitizer/tsan DESTDIR="$pkgdir" install-toolexeclibLTLIBRARIES
 
   make -C $CHOST/libobjc DESTDIR="$pkgdir" install-libs
   make -C $CHOST/libstdc++-v3/po DESTDIR="$pkgdir" install
@@ -159,9 +163,6 @@ package_gcc-libs() {
              libquadmath; do
     make -C $CHOST/$lib DESTDIR="$pkgdir" install-info
   done
-
-  # remove files provided by lib32-gcc-libs
-  rm -rf "$pkgdir"/usr/lib32/
 
   # Install Runtime Library Exception
   install -Dm644 "$srcdir/gcc/COPYING.RUNTIME" \
@@ -211,7 +212,7 @@ package_gcc() {
   make -C $CHOST/libquadmath DESTDIR="$pkgdir" install-nodist_libsubincludeHEADERS
   make -C $CHOST/libsanitizer DESTDIR="$pkgdir" install-nodist_{saninclude,toolexeclib}HEADERS
   make -C $CHOST/libsanitizer/asan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
-  make -C $CHOST/libsanitizer/tsan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
+  [ "${CARCH}" != 'powerpc' ] && make -C $CHOST/libsanitizer/tsan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
   make -C $CHOST/libsanitizer/lsan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
 
   make -C libiberty DESTDIR="$pkgdir" install
@@ -233,9 +234,6 @@ package_gcc() {
 
   # install the libstdc++ man pages
   make -C $CHOST/libstdc++-v3/doc DESTDIR="$pkgdir" doc-install-man
-
-  # remove files provided by lib32-gcc-libs
-  rm -f "$pkgdir"/usr/lib32/lib{stdc++,gcc_s}.so
 
   # byte-compile python libraries
   python -m compileall "$pkgdir/usr/share/gcc-${pkgver%%+*}/"
@@ -350,7 +348,6 @@ package_gcc-d() {
 
   make -C $CHOST/libphobos DESTDIR="$pkgdir" install
   rm -f "$pkgdir/usr/lib/"lib{gphobos,gdruntime}.so*
-  rm -f "$pkgdir/usr/lib32/"lib{gphobos,gdruntime}.so*
 
   install -d "$pkgdir"/usr/include/dlang
   ln -s /"${_libdir}"/include/d "$pkgdir"/usr/include/dlang/gdc
