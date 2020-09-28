@@ -5,7 +5,7 @@
 
 pkgname=firefox
 pkgver=81.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Standalone web browser from mozilla.org"
 arch=(x86_64 powerpc64le)
 license=(MPL GPL LGPL)
@@ -23,12 +23,16 @@ options=(!emptydirs !makeflags !strip)
 source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-$pkgver.source.tar.xz{,.asc}
         $pkgname.desktop
         0001-Use-remoting-name-for-GDK-application-names.patch
+        0002-Bug-1660901-Support-the-fstat-like-subset-of-fstatat.patch
+        0003-Bug-1660901-ignore-AT_NO_AUTOMOUNT-in-fstatat-system.patch
         firefox-powerpc-clang.patch
         sandbox-fork.patch)
 sha256sums=('9328745012178aee5a4f47c833539f7872cc6e0f20a853568a313e60cabd1ec8'
             'SKIP'
             'a9e5264257041c0b968425b5c97436ba48e8d294e1a0f02c59c35461ea245c33'
-            '3bb7463471fb43b2163a705a79a13a3003d70fff4bbe44f467807ca056de9a75'
+            'e0eaec8ddd24bbebf4956563ebc6d7a56f8dada5835975ee4d320dd3d0c9c442'
+            'c2489a4ad3bfb65c064e07180a1de9a2fbc3b1b72d6bc4cd3985484d1b6b7b29'
+            '52cc26cda4117f79fae1a0ad59e1404b299191a1c53d38027ceb178dab91f3dc'
             'ad83c0c6195ab742848941be1d9c8f32c1d4a8bc019d8887b42256bafaefb541'
             '5cb47ef1c404d5777c9502fc0fa7f990ed5be408178a890e5c1b923f63c09abb')
 validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
@@ -58,6 +62,11 @@ prepare() {
   # sourced from Voidlinux thanks!
   patch -Np0 -i ${srcdir}/sandbox-fork.patch
 
+  # https://bugs.archlinux.org/task/67978
+  # https://bugzilla.mozilla.org/show_bug.cgi?id=1660901
+  patch -Np1 -i ../0002-Bug-1660901-Support-the-fstat-like-subset-of-fstatat.patch
+  patch -Np1 -i ../0003-Bug-1660901-ignore-AT_NO_AUTOMOUNT-in-fstatat-system.patch
+
   sed -i 's/\("files":{\)[^}]*/\1/' third_party/rust/num-traits/.cargo-checksum.json
 
   echo -n "$_google_api_key" >$srcdir/google-api-key
@@ -71,15 +80,10 @@ ac_add_options --enable-release
 ac_add_options --enable-hardening
 ac_add_options --enable-optimize
 ac_add_options --enable-rust-simd
+export RUSTC_OPT_LEVEL=2
 ac_add_options --enable-jemalloc
-
-ac_add_options --enable-linker=lld
-#export CC="clang --target=${CHOST}"
-#export CXX="clang++ --target=${CHOST}"
-#export AR=llvm-ar
-#export NM=llvm-nm
-#export RANLIB=llvm-ranlib
-
+ac_add_options --enable-lto=full
+ac_add_options --enable-linker=bfd
 export CC=gcc
 export CXX=g++
 export LDFLAGS="${LDFLAGS} -Wl,-rpath=/usr/lib/firefox"
