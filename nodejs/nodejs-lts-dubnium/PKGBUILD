@@ -2,19 +2,21 @@
 # Maintainer: Bruno Pagani <archange@archlinux.org>
 
 pkgname=nodejs-lts-dubnium
-pkgver=10.22.0
+pkgver=10.22.1
 pkgrel=1
 pkgdesc="Evented I/O for V8 javascript (LTS release: Dubnium)"
-arch=(x86_64 powerpc64le)
+arch=( x86_64 powerpc64le powerpc )
 url="https://nodejs.org/"
 license=(MIT)
 depends=(openssl zlib icu libuv http-parser c-ares libnghttp2)
 makedepends=(python2 procps-ng)
 provides=("nodejs=$pkgver" 'npm')
 conflicts=(nodejs)
-source=("${url}/dist/v${pkgver}/node-v${pkgver}.tar.xz")
+source=("${url}/dist/v${pkgver}/node-v${pkgver}.tar.xz"
+	ppc32.patch)
 # https://nodejs.org/download/release/latest-dubnium/SHASUMS256.txt.asc
-sha256sums=(e07575455cbb6670e3f30d2f846d3078ef2c181255ff0932089182529443e1db)
+sha256sums=('f47f4725dcae137b26f8e2a7d0ab2c2c7f1f47e4f96834e6a9242f157132255f'
+	    'c96ef869268f4404df5606f86585faf3b8e86873967ed7a85e1cfc9ba067cf8d')
 validpgpkeys=(C4F0DFFF4E8C1A8236409D08E73BC641CC11F4C8  # Myles Borins <mylesborins@google.com>
               77984A986EBC2AA786BC0F66B01FBB92821C587A  # Gibson Fahnestock <gibfahn@gmail.com>
               B9AE9905FFD7803F25714661B63B535A4C206CA9  # Evan Lucas <evanlucas@me.com> 
@@ -24,6 +26,8 @@ validpgpkeys=(C4F0DFFF4E8C1A8236409D08E73BC641CC11F4C8  # Myles Borins <mylesbor
 
 prepare() {
   cd node-v${pkgver}
+
+  patch -Np0 -i ${srcdir}/ppc32.patch
 
   echo 'Fixing for python2 name'
   find -type f -exec sed \
@@ -39,8 +43,15 @@ prepare() {
 build() {
   cd node-v${pkgver}
 
+  case "${CARCH}" in
+    powerpc) CPU=ppc ; LDFLAGS+=" -latomic";;
+    powerpc64le) CPU=ppc64 ;;
+    x86_64) CPU=x64 ;;
+  esac
+
   export PYTHON=python2
   ./configure \
+    --dest-cpu=${CPU} \
     --prefix=/usr \
     --with-intl=system-icu \
     --shared-openssl \
