@@ -4,16 +4,16 @@
 # Contributor: Jakub Schmidtke <sjakub@gmail.com>
 
 pkgname=firefox
-pkgver=81.0
-pkgrel=2
+pkgver=81.0.1
+pkgrel=1
 pkgdesc="Standalone web browser from mozilla.org"
-arch=(x86_64 powerpc64le)
+arch=( x86_64 powerpc64le powerpc )
 license=(MPL GPL LGPL)
 url="https://www.mozilla.org/firefox/"
 depends=(gtk3 libxt mime-types dbus-glib ffmpeg nss ttf-font libpulse jemalloc)
 makedepends=(unzip zip diffutils mesa imake inetutils xorg-server-xvfb
              autoconf2.13 rust clang llvm jack gtk2 nodejs cbindgen
-             python-setuptools python-psutil lld)
+             python-setuptools python-psutil)
 optdepends=('networkmanager: Location detection via available WiFi networks'
             'libnotify: Notification integration'
             'pulseaudio: Audio support'
@@ -26,15 +26,25 @@ source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-
         0002-Bug-1660901-Support-the-fstat-like-subset-of-fstatat.patch
         0003-Bug-1660901-ignore-AT_NO_AUTOMOUNT-in-fstatat-system.patch
         firefox-powerpc-clang.patch
-        sandbox-fork.patch)
-sha256sums=('9328745012178aee5a4f47c833539f7872cc6e0f20a853568a313e60cabd1ec8'
+        sandbox-fork.patch
+        ppc32-fix-build.patch
+        big-endian-image-decoders.patch
+        skia-sucks{1,2,3}.patch
+        "${pkgname}-${pkgver}-ppc32-async-logger.patch::https://hg.mozilla.org/integration/autoland/raw-rev/a7dec549998f")
+sha256sums=('7eac8d3eaaf580e0f30e9bd79d798c3138aaa5fa2737616fa08c588b730e8fff'
             'SKIP'
             'a9e5264257041c0b968425b5c97436ba48e8d294e1a0f02c59c35461ea245c33'
             'e0eaec8ddd24bbebf4956563ebc6d7a56f8dada5835975ee4d320dd3d0c9c442'
             'c2489a4ad3bfb65c064e07180a1de9a2fbc3b1b72d6bc4cd3985484d1b6b7b29'
             '52cc26cda4117f79fae1a0ad59e1404b299191a1c53d38027ceb178dab91f3dc'
             'ad83c0c6195ab742848941be1d9c8f32c1d4a8bc019d8887b42256bafaefb541'
-            '5cb47ef1c404d5777c9502fc0fa7f990ed5be408178a890e5c1b923f63c09abb')
+            '5cb47ef1c404d5777c9502fc0fa7f990ed5be408178a890e5c1b923f63c09abb'
+            'cc24b6b95ff11ebf3bb29e0270f357169c7fff00c2a6f33e6c2b701096e7da9e'
+            '0df637d44218524e213814d15d623f27724d8e405390173f6cc385e145110bfe'
+            '9cdffb3f91e0956f4147c8556c80b97bcae448b84ce0d0a0e009a231a9915396'
+            'd98af26b723a8b590822a3d1ab925841b99882c158d3dec7514288c968f2428e'
+            '851503764a3068d36659b9231c9aaa40fe8a15680f7d0a378e9009ae1a776dae'
+            '11c147391bdcb4c42a41b4a9001400cc90c09ab275131a025b1bc0c424ad3d60')
 validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
@@ -67,6 +77,15 @@ prepare() {
   patch -Np1 -i ../0002-Bug-1660901-Support-the-fstat-like-subset-of-fstatat.patch
   patch -Np1 -i ../0003-Bug-1660901-ignore-AT_NO_AUTOMOUNT-in-fstatat-system.patch
 
+  patch -Np0 -i ../ppc32-fix-build.patch
+  patch -Np0 -i ../big-endian-image-decoders.patch
+  patch -Np0 -i ../skia-sucks1.patch
+  patch -Np0 -i ../skia-sucks2.patch
+  patch -Np0 -i ../skia-sucks3.patch
+
+
+  patch -Np1 -i ../${pkgname}-${pkgver}-ppc32-async-logger.patch
+
   sed -i 's/\("files":{\)[^}]*/\1/' third_party/rust/num-traits/.cargo-checksum.json
 
   echo -n "$_google_api_key" >$srcdir/google-api-key
@@ -79,10 +98,7 @@ ac_add_options --prefix=/usr
 ac_add_options --enable-release
 ac_add_options --enable-hardening
 ac_add_options --enable-optimize
-ac_add_options --enable-rust-simd
-export RUSTC_OPT_LEVEL=2
 ac_add_options --enable-jemalloc
-ac_add_options --enable-lto=full
 ac_add_options --enable-linker=bfd
 export CC=gcc
 export CXX=g++
@@ -114,6 +130,21 @@ ac_add_options --disable-crashreporter
 ac_add_options --disable-updater
 ac_add_options --disable-tests
 END
+
+  case "${CARCH}" in
+    powerpc)
+      echo "ac_add_options --disable-webrtc" >> ${srcdir}/mozconfig 
+      echo "export LDFLAGS+=' -latomic -Wl,--no-keep-memory'" >> ${srcdir}/mozconfig 
+      # patch the rust debug level, this is hardcoded
+      sed -i "s/debug_info = '2'/debug_info = '1'/" \
+        build/moz.configure/toolchain.configure
+    ;;
+    *)
+      echo "ac_add_options --enable-rust-simd" >> ${srcdir}/mozconfig
+      echo "export RUSTC_OPT_LEVEL=2" >> ${srcdir}/mozconfig
+      echo "ac_add_options --enable-lto=full" >> ${srcdir}/mozconfig
+    ;;
+  esac
 }
 
 build() {
