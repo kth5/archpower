@@ -3,10 +3,10 @@
 # Contributor: Eric Bélanger <eric@archlinux.org>
 
 pkgname=webkit2gtk
-pkgver=2.28.4
+pkgver=2.30.1
 pkgrel=1
 pkgdesc="GTK+ Web content engine library"
-arch=(x86_64 powerpc64le)
+arch=( x86_64 powerpc64le powerpc )
 url="https://webkitgtk.org/"
 license=(custom)
 depends=(libxt libxslt enchant gst-plugins-base-libs libsecret libwebp openjpeg2
@@ -18,20 +18,45 @@ optdepends=('geoclue: Geolocation support'
             'gst-plugins-good: media decoding'
             'gst-plugins-bad: media decoding'
             'gst-libav: nonfree media decoding')
-source=(https://webkitgtk.org/releases/webkitgtk-${pkgver}.tar.xz{,.asc})
-sha256sums=('821952e8c9303ed752f1fb1d4283f612c25249d00d705d2b79c2db1bc49c9464'
-            'SKIP')
+source=(https://webkitgtk.org/releases/webkitgtk-${pkgver}.tar.xz{,.asc}
+        ppc-llint.patch
+        be-typedarray.patch)
+sha256sums=('17c59dfdadb7377192e9b59bc56c8a029c9fad4f38ed732b652bf33d0bd5d6b1'
+            'SKIP'
+            'f2252e888ad8bde3472f0d567fcd29fe2b6872b8b5e83c0fda63b16bf7a2aead'
+            '369d046fa1e8cd9eed5902ea08b24574b92d04577141cdb3a69a0cfc818cca87')
 validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'
               '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B')
 
 prepare() {
   cd webkitgtk-$pkgver
+  patch -Np0 -i ${srcdir}/ppc-llint.patch
+  patch -Np0 -i ${srcdir}/be-typedarray.patch
 }
 
 build() {
   CFLAGS+=" $CPPFLAGS"
   CXXFLAGS+=" $CPPFLAGS"
-  cmake -Hwebkitgtk-$pkgver -Bbuild -G Ninja \
+
+  case "${CARCH}" in
+    powerpc)
+      LD_FLAGS+=' -Wl,--no-keep-memory'
+      CFLAGS="${CFLAGS/-O2/-Os}"
+      CXXFLAGS="${CXXFLAGS/-O2/-Os}"
+      EXTRA_CMAKE_FLAGS="-DENABLE_JIT=OFF 
+                         -DUSE_SYSTEMD=OFF
+                         -DPORT=GTK -DUSE_LD_GOLD=OFF
+                         -DCMAKE_CXX_FLAGS_RELEASE=-DNDEBUG
+                         -DCMAKE_CXX_FLAGS_DEBUG=-DNDEBUG
+                         -DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-DNDEBUG
+                         -DCMAKE_C_FLAGS_RELEASE=-DNDEBUG
+                         -DCMAKE_C_FLAGS_DEBUG=-DNDEBUG
+                         -DCMAKE_C_FLAGS_RELWITHDEBINFO=-DNDEBUG
+                         -DCMAKE_LINKER=${CHOST}-gcc"
+    ;;
+  esac
+
+  cmake -S webkitgtk-$pkgver -B build -G Ninja \
     -DPORT=GTK \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
@@ -39,8 +64,8 @@ build() {
     -DENABLE_GTKDOC=ON \
     -DENABLE_MINIBROWSER=ON \
     -DLIBEXEC_INSTALL_DIR=/usr/lib \
-    -DLIB_INSTALL_DIR=/usr/lib
-  cmake --build build
+    -DLIB_INSTALL_DIR=/usr/lib ${EXTRA_CMAKE_FLAGS}
+  cmake --build build ${MAKEFLAGS}
 }
 
 check() {
@@ -51,7 +76,7 @@ package() {
   depends+=(libwpe-1.0.so libWPEBackend-fdo-1.0.so)
   provides+=(libjavascriptcoregtk-4.0.so libwebkit2gtk-4.0.so)
 
-  DESTDIR="$pkgdir" cmake --build build --target install
+  DESTDIR="$pkgdir" cmake --install build
 
   cd webkitgtk-$pkgver
   find Source -name 'COPYING*' -or -name 'LICENSE*' -print0 | sort -z |
