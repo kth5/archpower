@@ -1,0 +1,253 @@
+diff --git a/COPYING b/COPYING
+index d60c31a..9a4871a 100644
+--- a/COPYING
++++ b/COPYING
+@@ -2,7 +2,7 @@
+ 		       Version 2, June 1991
+ 
+  Copyright (C) 1989, 1991 Free Software Foundation, Inc.
+-     59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++     51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+  Everyone is permitted to copy and distribute verbatim copies
+  of this license document, but changing it is not allowed.
+ 
+diff --git a/Config b/Config
+index 0d03fa0..683e1e9 100644
+--- a/Config
++++ b/Config
+@@ -23,7 +23,7 @@ CONFIG_FS_XFS 		:=	y
+ 
+ # Enable ReiserFS
+ #
+-CONFIG_FS_REISERFS 	:=	y
++CONFIG_FS_REISERFS 	:=	n
+ 
+ # Local Variables:
+ # mode: makefile
+diff --git a/Makefile b/Makefile
+index 4ca7c56..1e6c1d1 100644
+--- a/Makefile
++++ b/Makefile
+@@ -35,13 +35,13 @@ STRIP		:= $(CROSS)strip
+ 
+ # The flags for the yaboot binary.
+ #
+-YBCFLAGS = -Os -m32 $(CFLAGS) -nostdinc -Wall -isystem `$(CC) -m32 -print-file-name=include` -fsigned-char
++YBCFLAGS = -Os -m32 $(CFLAGS) -fcommon -nostdinc -Wall -isystem `$(CC) -m32 -print-file-name=include` -fsigned-char
+ YBCFLAGS += -DVERSION="\"${VERSION}${VERSIONEXTRA}\""
+ YBCFLAGS += -DTEXTADDR=$(TEXTADDR) -DDEBUG=$(DEBUG)
+ YBCFLAGS += -DMALLOCADDR=$(MALLOCADDR) -DMALLOCSIZE=$(MALLOCSIZE)
+ YBCFLAGS += -DKERNELADDR=$(KERNELADDR)
+ YBCFLAGS += -I ./include
+-YBCFLAGS += -fno-strict-aliasing
++YBCFLAGS += -fno-strict-aliasing -fno-stack-protector
+ 
+ ifeq ($(CONFIG_COLOR_TEXT),y)
+ YBCFLAGS += -DCONFIG_COLOR_TEXT
+@@ -69,7 +69,7 @@ LFLAGS = -Ttext $(TEXTADDR) -Bstatic -melf32ppclinux
+ 
+ # Libraries
+ #
+-LLIBS = -lext2fs
++LLIBS = -lext2fs -L.
+ 
+ # For compiling userland utils
+ #
+diff --git a/include/ext2fs/bitops.h b/include/ext2fs/bitops.h
+index 72c8945..80cef2c 100644
+--- a/include/ext2fs/bitops.h
++++ b/include/ext2fs/bitops.h
+@@ -464,18 +464,6 @@ extern int ext2fs_mark_generic_bitmap(ext2fs_generic_bitmap bitmap,
+ 					 __u32 bitno);
+ extern int ext2fs_unmark_generic_bitmap(ext2fs_generic_bitmap bitmap,
+ 					   blk_t bitno);
+-_INLINE_ int ext2fs_test_generic_bitmap(ext2fs_generic_bitmap bitmap,
+-					blk_t bitno);
+-
+-_INLINE_ int ext2fs_test_generic_bitmap(ext2fs_generic_bitmap bitmap,
+-					blk_t bitno)
+-{
+-	if ((bitno < bitmap->start) || (bitno > bitmap->end)) {
+-		ext2fs_warn_bitmap2(bitmap, EXT2FS_TEST_ERROR, bitno);
+-		return 0;
+-	}
+-	return ext2fs_test_bit(bitno - bitmap->start, bitmap->bitmap);
+-}
+ 
+ _INLINE_ int ext2fs_mark_block_bitmap(ext2fs_block_bitmap bitmap,
+ 				       blk_t block)
+@@ -618,23 +606,6 @@ _INLINE_ ext2_ino_t ext2fs_get_inode_bitmap_end(ext2fs_inode_bitmap bitmap)
+ 	return bitmap->end;
+ }
+ 
+-_INLINE_ int ext2fs_test_block_bitmap_range(ext2fs_block_bitmap bitmap,
+-					    blk_t block, int num)
+-{
+-	int	i;
+-
+-	if ((block < bitmap->start) || (block+num-1 > bitmap->end)) {
+-		ext2fs_warn_bitmap(EXT2_ET_BAD_BLOCK_TEST,
+-				   block, bitmap->description);
+-		return 0;
+-	}
+-	for (i=0; i < num; i++) {
+-		if (ext2fs_fast_test_block_bitmap(bitmap, block+i))
+-			return 0;
+-	}
+-	return 1;
+-}
+-
+ _INLINE_ int ext2fs_fast_test_block_bitmap_range(ext2fs_block_bitmap bitmap,
+ 						 blk_t block, int num)
+ {
+@@ -654,20 +625,6 @@ _INLINE_ int ext2fs_fast_test_block_bitmap_range(ext2fs_block_bitmap bitmap,
+ 	return 1;
+ }
+ 
+-_INLINE_ void ext2fs_mark_block_bitmap_range(ext2fs_block_bitmap bitmap,
+-					     blk_t block, int num)
+-{
+-	int	i;
+-
+-	if ((block < bitmap->start) || (block+num-1 > bitmap->end)) {
+-		ext2fs_warn_bitmap(EXT2_ET_BAD_BLOCK_MARK, block,
+-				   bitmap->description);
+-		return;
+-	}
+-	for (i=0; i < num; i++)
+-		ext2fs_set_bit(block + i - bitmap->start, bitmap->bitmap);
+-}
+-
+ _INLINE_ void ext2fs_fast_mark_block_bitmap_range(ext2fs_block_bitmap bitmap,
+ 						  blk_t block, int num)
+ {
+@@ -684,20 +641,6 @@ _INLINE_ void ext2fs_fast_mark_block_bitmap_range(ext2fs_block_bitmap bitmap,
+ 		ext2fs_set_bit(block + i - bitmap->start, bitmap->bitmap);
+ }
+ 
+-_INLINE_ void ext2fs_unmark_block_bitmap_range(ext2fs_block_bitmap bitmap,
+-					       blk_t block, int num)
+-{
+-	int	i;
+-
+-	if ((block < bitmap->start) || (block+num-1 > bitmap->end)) {
+-		ext2fs_warn_bitmap(EXT2_ET_BAD_BLOCK_UNMARK, block,
+-				   bitmap->description);
+-		return;
+-	}
+-	for (i=0; i < num; i++)
+-		ext2fs_clear_bit(block + i - bitmap->start, bitmap->bitmap);
+-}
+-
+ _INLINE_ void ext2fs_fast_unmark_block_bitmap_range(ext2fs_block_bitmap bitmap,
+ 						    blk_t block, int num)
+ {
+diff --git a/second/cfg.c b/second/cfg.c
+index 2787558..118c3c9 100644
+--- a/second/cfg.c
++++ b/second/cfg.c
+@@ -132,7 +132,7 @@ void cfg_warn (char *msg,...)
+      prom_printf (" near line %d in file %s\n", line_num, file_name);
+ }
+ 
+-inline int getc ()
++int getc ()
+ {
+      if (currp == endp)
+ 	  return EOF;
+diff --git a/second/fs_xfs.c b/second/fs_xfs.c
+index 7891068..1115405 100644
+--- a/second/fs_xfs.c
++++ b/second/fs_xfs.c
+@@ -661,8 +661,6 @@ xfs_read_data (char *buf, int len)
+ 
+ 	startpos = xfs_file->pos;
+ 	endpos = xfs_file->pos + len;
+-	if (endpos > xfs_file->len)
+-		endpos = xfs_file->len;
+ 	endofprev = (xfs_fileoff_t)-1;
+ 	init_extents ();
+ 	while (len > 0 && (xad = next_extent ())) {
+diff --git a/second/prom.c b/second/prom.c
+index a991884..383c058 100644
+--- a/second/prom.c
++++ b/second/prom.c
+@@ -216,7 +216,7 @@ prom_get_devtype (char *device)
+      else if (!strcmp(tmp, "network"))
+ 	  return FILE_DEVICE_NET;
+      else {
+-	  prom_printf("Unkown device type <%s>\n", tmp);
++	  prom_printf("Unknown device type <%s>\n", tmp);
+ 	  return FILE_ERR_BADDEV;
+      }
+ }
+diff --git a/ybin/yabootconfig b/ybin/yabootconfig
+index 04a513c..4629e10 100755
+--- a/ybin/yabootconfig
++++ b/ybin/yabootconfig
+@@ -27,7 +27,7 @@ if [ -n "$PATH_PREFIX" ] ; then
+     PATH="${PATH}:${PATH_PREFIX}/sbin:${PATH_PREFIX}/bin:${PATH_PREFIX}/usr/sbin:${PATH_PREFIX}/usr/bin:${PATH_PREFIX}/usr/local/sbin:${PATH_PREFIX}/usr/local/bin"
+ fi
+ PRG="${0##*/}"
+-VERSION=1.0.8
++VERSION=1.0.8+debian2
+ CHROOT=/
+ ## $CONFIG is relative to $CHROOT
+ CONFIG=etc/yaboot.conf
+@@ -732,6 +732,27 @@ if [ -n "$INITRDIMG" ] ; then
+     INITRDIMGS="\tinitrd=$INITRDIMG\n\tinitrd-size=8192\n"
+ fi
+ 
++## Get a symlink which always points to the correct block device.
++## If it does not exist, give the unix block device name back.
++devsymlink() {
++  [ "$2" != "nobyid" ] && BYID="/dev/disk/by-id/scsi* /dev/disk/by-id/*"
++  for SYMLINK in $BYID /dev/disk/by-uuid/* /dev/disk/by-label/*; do
++    [ "`readlink -f "$SYMLINK"`" = "$1" ] && {
++      echo $SYMLINK
++      return
++    }
++  done
++  echo $1
++}
++
++## Get UUID= or LABEL= for the given unix partition block device.
++## If it could not be determined, give the unix partition block device back.
++uuidlabel() {
++  echo `devsymlink "$1" nobyid` \
++  | sed -e "s,/dev/disk/by-uuid/,UUID=," \
++        -e "s,/dev/disk/by-label/,LABEL=,"
++}
++
+ ## generate global section of yaboot.conf
+ GLOBAL="## yaboot.conf generated by $PRG $VERSION
+ ##
+@@ -739,9 +760,9 @@ GLOBAL="## yaboot.conf generated by $PRG $VERSION
+ ${HEADER}##
+ ## For a dual-boot menu, add one or more of:
+ ## bsd=/dev/hdaX, macos=/dev/hdaY, macosx=/dev/hdaZ\n
+-boot=${BOOT}${DEVICE:-}
++boot=\"`devsymlink "${BOOT}"`\"${DEVICE:-}
+ partition=$PARTITION
+-root=$ROOT
++root=\"`uuidlabel "${ROOT}"`\"
+ timeout=30
+ install=${INSTALL}${OFBOOT:-}\n"
+ 
+diff --git a/ybin/ybin b/ybin/ybin
+index 70c0bcb..a7243fd 100755
+--- a/ybin/ybin
++++ b/ybin/ybin
+@@ -1647,6 +1647,12 @@ if [ "$boot" = unconfigured ] ; then
+     exit 1
+ fi
+ 
++## also accept quoted symlink names
++for v in boot bsd macos macosx darwin ; do
++  eval $v="\`echo \$$v | tr -d '\"'\`"
++  eval [ -h \"\$$v\" ] \&\& $v="\`readlink -f \$$v\`"
++done
++
+ ## if there is still no config file use the automatic generation to make a
+ ## generic yaboot.conf. do this before the confcheck to avoid wierd errors.
+ if [ "$bootconf" = /dev/null ] ; then
