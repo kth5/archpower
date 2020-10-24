@@ -1,6 +1,6 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 pkgname=ungoogled-chromium
-pkgver=84.0.4147.135
+pkgver=86.0.4240.80
 pkgrel=1
 pkgdesc="Google Chromium, sans integration with Google - PPC64LE FORK"
 arch=(x86_64 powerpc64le)
@@ -21,24 +21,14 @@ optdepends=('libpipewire02: WebRTC desktop sharing under Wayland'
             'org.freedesktop.secrets: password storage backend on GNOME / Xfce'
             'kwallet: for storing passwords in KWallet on KDE desktops')
 _gcc_patchset=3
-commit='798f0a4e5ae6849d6609d3fae8d48764e881fc06'
+commit='2ba5e69882130eaf4f6a373839dcfc4ea7c24871'
 source=("git+https://github.com/leo-lb/ungoogled-chromium.git#commit=${commit}"
   https://github.com/stha09/chromium-patches/releases/download/chromium-${pkgver%%.*}-patchset-$_gcc_patchset/chromium-${pkgver%%.*}-patchset-$_gcc_patchset.tar.xz
-  remove-NotifyError-calls-and-just-send-a-normal-message.patch
-  avoid-calling-DeleteForCurrentDocument-from-destructor.patch
-  force-mp3-files-to-have-a-start-time-of-zero.patch
-  remove-macos-webrtc.patch
-  chromium-ffmpeg-4.3.patch
-  chromium-fix-vaapi-on-intel.patch
+  check-for-enable-accelerated-video-decode-on-Linux.patch
   chromium-skia-harmony.patch)
 sha256sums=('SKIP'
-            'f77088dd59b170b767ba91c6b410abb778ff2e68553433b24124d398fa4d3ce7'
-            '3b10917f646f88ae988ca18be9cbef82025abb6a6e5cb00b77a11077192ce32c'
-            '4e41cb637e96bcef98c119ed052ba1aeab45fca5b89d65955583dab002de783e'
-            'abc3fad113408332c3b187b083bf33eba59eb5c87fa3ce859023984b5804623c'
-            '3852f711cddfcfc6480d586be7c4570b63f7a5390e70763abb4b683d76b9a8f0'
-	    '5390304b5f544868985ce00a3ec082d4ece2dacb1c73cdb35dd4facfea12449a'
-            'e495f2477091557b15bff2c99831e0a3db64ea2ebde7dcb22857a6469c944b9a'
+            '93420e4d5a061604cda4cf7fdd576489a8327b3a2bbc9aa8216a479d81b9c7be'
+            '03d03a39b2afa40083eb8ccb9616a51619f71da92348effc8ee289cbda10128b'
             '771292942c0901092a402cc60ee883877a99fb804cb54d568c8c6c94565a48e1')
 
 # Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
@@ -53,11 +43,12 @@ declare -gA _system_libs=(
   [libdrm]=
   [libjpeg]=libjpeg
   [libpng]=libpng
-  [libvpx]=libvpx
+  #[libvpx]=libvpx
   [libwebp]=libwebp
   [libxml]=libxml2
   [libxslt]=libxslt
   [opus]=opus
+  [re2]=re2
   [snappy]=snappy
   [zlib]=minizip
 )
@@ -106,35 +97,14 @@ prepare() {
     third_party/blink/renderer/core/xml/parser/xml_document_parser.cc \
     third_party/libxml/chromium/*.cc
 
-  # https://chromium-review.googlesource.com/c/chromium/src/+/2223010
-  patch -Np1 -i ${srcdir}/remove-NotifyError-calls-and-just-send-a-normal-message.patch
-
-  # https://chromium-review.googlesource.com/c/chromium/src/+/2224737
-  patch -Np1 -i ${srcdir}/avoid-calling-DeleteForCurrentDocument-from-destructor.patch
-
-  # https://chromium-review.googlesource.com/c/chromium/src/+/2268221
-  patch -Np1 -i ${srcdir}/force-mp3-files-to-have-a-start-time-of-zero.patch
+  # Upstream fixes
+  patch -Np1 -i ${srcdir}/check-for-enable-accelerated-video-decode-on-Linux.patch
 
   # Fixes for building with libstdc++ instead of libc++
-  patch -Np1 -i ${srcdir}/patches/chromium-84-AXObject-stl-iterator.patch
-  patch -Np1 -i ${srcdir}/patches/chromium-84-ListContainerHelper-include-cstring.patch
-  patch -Np1 -i ${srcdir}/patches/chromium-84-crashpad-include-cstring.patch
-  patch -Np1 -i ${srcdir}/patches/chromium-84-gcc-10-include-stddef.patch
-  patch -Np1 -i ${srcdir}/patches/chromium-84-gcc-10-webrtc-include-stddef.patch
-  patch -Np1 -i ${srcdir}/patches/chromium-84-gcc-DCHECK_EQ-unique_ptr.patch
-  patch -Np1 -i ${srcdir}/patches/chromium-84-std-vector-const.patch
-
-  # https://crbug.com/1095962
-  patch -Np1 -i ${srcdir}/chromium-ffmpeg-4.3.patch
-
-  # Patch from rpmfusion: chromium-freeworld
-  patch -Np1 -i ${srcdir}/chromium-fix-vaapi-on-intel.patch
+  patch -Np1 -i ${srcdir}/patches/chromium-86-nearby-include.patch
 
   # https://crbug.com/skia/6663#c10
   patch -Np0 -i ${srcdir}/chromium-skia-harmony.patch
-
-  # seriously
-  patch -Np0 -i ${srcdir}/remove-macos-webrtc.patch
 
   # Force script incompatible with Python 3 to use /usr/bin/python2
   sed -i '1s|python$|&2|' third_party/dom_distiller_js/protoc_plugins/*.py
@@ -204,7 +174,7 @@ build() {
     'safe_browsing_mode=0'
     'use_official_google_api_keys=false'
     'use_unofficial_version_number=false'
-    'closure_compile=false'
+    'enable_js_type_check=false'
     'use_lld=true'
     'use_thin_lto=true'
     'thin_lto_enable_optimizations=true'
@@ -228,6 +198,11 @@ build() {
   CFLAGS+='   -Wno-unknown-warning-option'
   CXXFLAGS+=' -Wno-unknown-warning-option'
   
+  cd third_party/libvpx
+  mkdir -p source/config/linux/ppc64
+  ./generate_gni.sh
+  cd ../../
+
   cd third_party/dav1d
   ./generate_configs.py
   ./generate_source.py
