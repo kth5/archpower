@@ -7,4 +7,4 @@ cd obj-powerpc64le-unknown-linux-gnu/instrumented || exit
 tar cvf $where `find . -name '*.gcda' -print`
 cd ..
 tar xvf $where
-#rm -f $where 
+rm -f $where 
