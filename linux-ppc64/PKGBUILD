@@ -2,7 +2,7 @@
 # Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
 
 pkgbase=linux-ppc64
-pkgver=5.8.10.arch1
+pkgver=5.9.14.arch1
 pkgrel=1
 pkgdesc='Linux'
 _srctag=v${pkgver%.*}-${pkgver##*.}
@@ -11,6 +11,7 @@ arch=(any)
 license=(GPL2)
 makedepends=(
   bc kmod libelf pahole git
+  powerpc64-linux-gnu-gcc
 )
 options=('!strip')
 _srcname=archlinux-linux
@@ -24,7 +25,7 @@ validpgpkeys=(
   'A2FF3A36AAA56654109064AB19802F8B0D70FC30'  # Jan Alexander Steffens (heftig)
 )
 sha256sums=('SKIP'
-            'd5b8101bbffa1f9e0478e458c7d2ff6d752874e5057b525a700fb375934dc119')
+            '077bbd94b50b4675537dbbbcf9eb4262e6ea97126286e3c3b5d26176700539d6')
 
 export KBUILD_BUILD_HOST=archpower
 export KBUILD_BUILD_USER=$pkgbase
@@ -54,15 +55,15 @@ prepare() {
 
   echo "Setting config..."
   cp ../config .config
-  make olddefconfig
+  ARCH=${MYARCH} CROSS_COMPILE=powerpc64-linux-gnu- make oldconfig
 
-  make -s kernelrelease > version
+  ARCH=${MYARCH} CROSS_COMPILE=powerpc64-linux-gnu- make -s kernelrelease > version
   echo "Prepared $pkgbase version $(<version)"
 }
 
 build() {
   cd $_srcname
-  make all
+  ARCH=${MYARCH} CROSS_COMPILE=powerpc64-linux-gnu- make all
 }
 
 _package() {
@@ -70,8 +71,8 @@ _package() {
   depends=(coreutils kmod initramfs)
   optdepends=('crda: to set the correct wireless channels of your country'
               'linux-firmware: firmware images needed for some devices')
-  provides=(VIRTUALBOX-GUEST-MODULES WIREGUARD-MODULE)
-  replaces=(virtualbox-guest-modules-arch wireguard-arch)
+  provides=(WIREGUARD-MODULE)
+  replaces=(wireguard-arch)
 
   cd $_srcname
   local kernver="$(<version)"
@@ -80,13 +81,13 @@ _package() {
   echo "Installing boot image..."
   # systemd expects to find the kernel here to allow hibernation
   # https://github.com/systemd/systemd/commit/edda44605f06a41fb86b7ab8128dcf99161d2344
-  install -Dm644 "$(make -s image_name)" "$modulesdir/vmlinuz"
+  install -Dm644 "$(ARCH=${MYARCH} CROSS_COMPILE=powerpc64-linux-gnu- make -s image_name)" "$modulesdir/vmlinuz"
 
   # Used by mkinitcpio to name the kernel
   echo "$pkgbase" | install -Dm644 /dev/stdin "$modulesdir/pkgbase"
 
   echo "Installing modules..."
-  make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 modules_install
+  ARCH=${MYARCH} CROSS_COMPILE=powerpc64-linux-gnu- make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 modules_install
 
   # remove build and source links
   rm "$modulesdir"/{source,build}
@@ -173,7 +174,7 @@ _package-headers() {
   ln -sr "$builddir" "$pkgdir/usr/src/$pkgbase"
 }
 
-pkgname=("$pkgbase" "$pkgbase-headers" "$pkgbase-docs")
+pkgname=("$pkgbase" "$pkgbase-headers")
 for _p in "${pkgname[@]}"; do
   eval "package_$_p() {
     $(declare -f "_package${_p#$pkgbase}")
