@@ -4,8 +4,8 @@
 # Contributor: Jakub Schmidtke <sjakub@gmail.com>
 
 pkgname=firefox
-pkgver=81.0.1
-pkgrel=1
+pkgver=82.0.2
+pkgrel=2
 pkgdesc="Standalone web browser from mozilla.org"
 arch=( x86_64 powerpc64le powerpc )
 license=(MPL GPL LGPL)
@@ -19,7 +19,7 @@ optdepends=('networkmanager: Location detection via available WiFi networks'
             'pulseaudio: Audio support'
             'speech-dispatcher: Text-to-Speech'
             'hunspell-en_US: Spell checking, American English')
-options=(!emptydirs !makeflags !strip)
+options=(!emptydirs !makeflags strip)
 source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-$pkgver.source.tar.xz{,.asc}
         $pkgname.desktop
         0001-Use-remoting-name-for-GDK-application-names.patch
@@ -30,21 +30,29 @@ source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-
         ppc32-fix-build.patch
         big-endian-image-decoders.patch
         skia-sucks{1,2,3}.patch
-        "${pkgname}-${pkgver}-ppc32-async-logger.patch::https://hg.mozilla.org/integration/autoland/raw-rev/a7dec549998f")
-sha256sums=('7eac8d3eaaf580e0f30e9bd79d798c3138aaa5fa2737616fa08c588b730e8fff'
+        "${pkgname}-${pkgver}-ppc32-async-logger.patch::https://hg.mozilla.org/integration/autoland/raw-rev/a7dec549998f"
+        avoid-redefinition.patch
+        big-endian-image-decoders.patch
+        fix-image-format-warning.patch
+        rust-has-i128.patch
+        sndio.patch
+        firefox82-lto-pgo.diff
+        gccpgostub.sh)
+sha256sums=('8851cae2df9923844c3dc97a4f77f6f3c86cc6f298b888b38949fbf74fcf2ca9'
             'SKIP'
             'a9e5264257041c0b968425b5c97436ba48e8d294e1a0f02c59c35461ea245c33'
-            'e0eaec8ddd24bbebf4956563ebc6d7a56f8dada5835975ee4d320dd3d0c9c442'
-            'c2489a4ad3bfb65c064e07180a1de9a2fbc3b1b72d6bc4cd3985484d1b6b7b29'
-            '52cc26cda4117f79fae1a0ad59e1404b299191a1c53d38027ceb178dab91f3dc'
             'ad83c0c6195ab742848941be1d9c8f32c1d4a8bc019d8887b42256bafaefb541'
-            '5cb47ef1c404d5777c9502fc0fa7f990ed5be408178a890e5c1b923f63c09abb'
-            'cc24b6b95ff11ebf3bb29e0270f357169c7fff00c2a6f33e6c2b701096e7da9e'
+            '10ec0cd241c0d0ff901444e42ddb15e5c397302fd442fb63de8ee13b12751579'
             '0df637d44218524e213814d15d623f27724d8e405390173f6cc385e145110bfe'
+            '958cf5016e9845b6ee6e2ed05ad96cc2fc6f74bebbb338a7b7ce29bffd2be716'
+            'cc24b6b95ff11ebf3bb29e0270f357169c7fff00c2a6f33e6c2b701096e7da9e'
+            'f64a00a8ab599fd06adb6e896c25b91401c4caffb0e6d4da276a8f6992b9004a'
+            'b8b97721f60a6df8e388d7ccc921b913f254b8eed0905a088df6cf96e6023b8f'
             '9cdffb3f91e0956f4147c8556c80b97bcae448b84ce0d0a0e009a231a9915396'
             'd98af26b723a8b590822a3d1ab925841b99882c158d3dec7514288c968f2428e'
             '851503764a3068d36659b9231c9aaa40fe8a15680f7d0a378e9009ae1a776dae'
-            '11c147391bdcb4c42a41b4a9001400cc90c09ab275131a025b1bc0c424ad3d60')
+            'd05adb25f4838ce0a55ed027ce50de3103d535758291b9e669f3bfc2486550fc'
+            '3c4dc9cb927b1925715eede000947e96da6806506a7de6b6e5f5977a5a277a11')
 validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
@@ -59,6 +67,9 @@ _google_api_key=AIzaSyDgkw4O3LM0Jnr2N7Wq2NG7iUVzRU5sBaA
 # more information.
 _mozilla_api_key=de0473f2-d53f-46da-956c-6aff61bda3ab
 
+
+export PATH=${PATH}:${srcdir}
+
 prepare() {
   mkdir -p mozbuild
 
@@ -66,11 +77,23 @@ prepare() {
 
   patch -Np0 -i ${srcdir}/firefox-powerpc-clang.patch
 
-  # https://bugzilla.mozilla.org/show_bug.cgi?id=1530052
-  patch -Np1 -i ../0001-Use-remoting-name-for-GDK-application-names.patch
-
   # sourced from Voidlinux thanks!
-  patch -Np0 -i ${srcdir}/sandbox-fork.patch
+  patch -Np0 -i ${srcdir}/avoid-redefinition.patch
+  patch -Np0 -i ${srcdir}/big-endian-image-decoders.patch
+  patch -Np0 -i ${srcdir}/fix-image-format-warning.patch
+  patch -Np0 -i ${srcdir}/ppc32-fix-build.patch
+  patch -Np0 -i ${srcdir}/rust-has-i128.patch
+  patch -Np0 -i ${srcdir}/sndio.patch
+  patch -Np0 -i ${srcdir}/skia-sucks1.patch
+  patch -Np0 -i ${srcdir}/skia-sucks2.patch
+  patch -Np0 -i ${srcdir}/skia-sucks3.patch
+
+  case "${CARCH}" in
+    powerpc64le)
+      # talospace's hack to get PGO going
+      patch -Np1 -i ${srcdir}/firefox82-lto-pgo.diff
+      ;;
+  esac
 
   # https://bugs.archlinux.org/task/67978
   # https://bugzilla.mozilla.org/show_bug.cgi?id=1660901
@@ -143,6 +166,7 @@ END
       echo "ac_add_options --enable-rust-simd" >> ${srcdir}/mozconfig
       echo "export RUSTC_OPT_LEVEL=2" >> ${srcdir}/mozconfig
       echo "ac_add_options --enable-lto=full" >> ${srcdir}/mozconfig
+      echo "ac_add_options MOZ_PGO=1" >> ${srcdir}/mozconfig
     ;;
   esac
 }
@@ -163,9 +187,11 @@ build() {
   ulimit -n 4096
 
   rm -f old-configure
+  xvfb-run -s "-screen 0 1920x1080x24 -nolisten local" \
   ./mach build
 
   echo "Building symbol archive..."
+  xvfb-run -s "-screen 0 1920x1080x24 -nolisten local" \
   ./mach buildsymbols
 
 }

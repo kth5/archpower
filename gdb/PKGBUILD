@@ -8,15 +8,18 @@ pkgbase=gdb
 # gdb-common is a package that contains files common for all cross compiled versions
 # of gdb (for arm/avr/...)
 pkgname=(gdb gdb-common)
-pkgver=9.2
-pkgrel=2
+pkgver=10.1
+pkgrel=1
 pkgdesc='The GNU Debugger'
 arch=(x86_64 powerpc64le powerpc)
 url='https://www.gnu.org/software/gdb/'
 license=(GPL3)
-makedepends=(texinfo python guile ncurses expat xz mpfr) #source-highlight)
+makedepends=(glibc gcc-libs texinfo python guile ncurses expat xz mpfr source-highlight
+             readline)
 source=(https://ftp.gnu.org/gnu/gdb/${pkgname}-${pkgver}.tar.xz{,.sig})
-b2sums=('e83468f2d2fdcf4a7eb2943564750c7e9e9fa19b00bd832a9c149ad06b199cc7d6e7b8808d552e5f0e9e4f701a9262faf6b0b46ed4e0b4ecd3a0303d873d6d9a'
+sha1sums=('c625efd87116525fb3bbeca7eaa1028ee62c0e7d'
+          'SKIP')
+b2sums=('69d79cd667ecb6e936b41a03817ade5dd9b761f97bc123d668b5f968d123c37d048fc8ec1289151e989f01bb01a43cc3d8b5b54f1807f1e3eb5f43e6bf0aa55b'
         'SKIP')
 validpgpkeys=('F40ADB902B24264AA42E50BF92EDB04BFF325CF3') # Joel Brobecker
 
@@ -31,7 +34,6 @@ build() {
   cd gdb-$pkgver
 
   mkdir -p build && cd build
-  CFLAGS+=" -fcommon" \
   ../configure \
     --prefix=/usr \
     --disable-nls \
@@ -39,6 +41,7 @@ build() {
     --enable-tui \
     --with-system-readline \
     --with-python=/usr/bin/python \
+    --with-guile=guile-2.2 \
     --with-system-gdbinit=/etc/gdb/gdbinit
   make
 }
@@ -47,34 +50,24 @@ package_gdb-common() {
   depends=(python guile)
 
   cd gdb-$pkgver/build
-
-  make DESTDIR="$pkgdir" install
-  # resolve conflicts with binutils
-  rm "$pkgdir"/usr/include/{ansidecl,bfd,bfdlink,dis-asm,plugin-api,symcat,ctf,ctf-api,bfd_stdint,diagnostics}.h
-  rm "$pkgdir"/usr/share/info/bfd.info
-  rm "$pkgdir"/usr/lib/{libbfd,libopcodes,libctf,libctf-nobfd}.a
-
-  rm -r "$pkgdir"/usr/{bin,include,lib,share/info,share/man}
+  make -C gdb/data-directory DESTDIR="$pkgdir" install
 }
 
 package_gdb() {
+<<<<<<< HEAD
   depends=(ncurses expat xz mpfr gdb-common=$pkgver)
+=======
+  depends=(glibc ncurses libncursesw.so gcc-libs expat xz mpfr source-highlight gdb-common=$pkgver
+           readline libreadline.so guile python libelf)
+>>>>>>> d8d1bddc2815a588de7fce4fb2cbcb106cf836f2
   backup=(etc/gdb/gdbinit)
 
   cd gdb-$pkgver/build
-  make DESTDIR="$pkgdir" install
-
-  # resolve conflicts with binutils
-  rm "$pkgdir"/usr/include/{ansidecl,bfd,bfdlink,dis-asm,plugin-api,symcat,ctf,ctf-api,bfd_stdint,diagnostics}.h
-  rm "$pkgdir"/usr/share/info/bfd.info
-  rm "$pkgdir"/usr/lib/{libbfd,libopcodes,libctf,libctf-nobfd}.a
+  make -C gdb DESTDIR="$pkgdir" install
 
   # install "custom" system gdbinit
   install -dm 755 "$pkgdir/etc/gdb"
   touch "$pkgdir/etc/gdb/gdbinit"
-
-  # fix conflict with binutils
-  mv "$pkgdir/usr/bin/run" "$pkgdir/usr/bin/gdb-run"
 
   # comes from gdb-common
   rm -r "$pkgdir/usr/share/gdb/"
