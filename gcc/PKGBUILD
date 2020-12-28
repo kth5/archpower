@@ -10,7 +10,7 @@ pkgname=(gcc gcc-libs gcc-fortran gcc-objc gcc-ada gcc-go gcc-d)
 pkgver=10.2.0
 _majorver=${pkgver%%.*}
 _islver=0.21
-pkgrel=4
+pkgrel=5
 pkgdesc='The GNU Compiler Collection'
 arch=(x86_64 powerpc64le powerpc)
 license=(GPL LGPL FDL custom)
@@ -26,6 +26,8 @@ source=(https://sourceware.org/pub/gcc/releases/gcc-${pkgver}/gcc-${pkgver}.tar.
         c89 c99
         gdc_phobos_path.patch
         fs64270.patch
+        ipa-fix-bit-CPP-when-combined-with-IPA-bit-CP.patch
+        ipa-fix-ICE-in-get_default_value.patch
 )
 validpgpkeys=(F3691687D867B81B51CE07D9BBE43771487328A9  # bpiotrowski@archlinux.org
               86CFFCA918CF3AF47147588051E8B148A9999C34  # evangelos@foutrelis.com
@@ -37,7 +39,9 @@ sha256sums=('b8dd4368bb9c7f0b98188317ee0254dd8cc99d1e3a18d0ff146c855fe16c1d8c'
             'de48736f6e4153f03d0a5d38ceb6c6fdb7f054e8f47ddd6af0a3dbf14f27b931'
             '2513c6d9984dd0a2058557bf00f06d8d5181734e41dcfe07be7ed86f2959622a'
             'c86372c207d174c0918d4aedf1cb79f7fc093649eb1ad8d9450dccc46849d308'
-            '1ef190ed4562c4db8c1196952616cd201cfdd788b65f302ac2cc4dabb4d72cee')
+            '1ef190ed4562c4db8c1196952616cd201cfdd788b65f302ac2cc4dabb4d72cee'
+            'fcb11c9bcea320afd202b031b48f8750aeaedaa4b0c5dddcd2c0a16381e927e4'
+            '42865f2af3f48140580c4ae70b6ea03b5bdca0f29654773ef0d42ce00d60ea16')
 
 prepare() {
   [[ ! -d gcc ]] && ln -s gcc-${pkgver/+/-} gcc
@@ -62,6 +66,11 @@ prepare() {
   # Turn off SSP for nostdlib|nodefaultlibs|ffreestanding
   # https://bugs.archlinux.org/task/64270
   patch -p1 -i "$srcdir/fs64270.patch"
+  # Fix a crash in mpv when mesa 20.2 is compiled with LTO
+  # https://gitlab.freedesktop.org/mesa/mesa/-/issues/3239
+  # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=96482
+  patch -Np1 -i ../ipa-fix-bit-CPP-when-combined-with-IPA-bit-CP.patch
+  patch -Np1 -i ../ipa-fix-ICE-in-get_default_value.patch
 
   mkdir -p "$srcdir/gcc-build"
 }
@@ -105,7 +114,7 @@ build() {
       --disable-werror \
       --with-abi=elfv2 \
       --enable-secureplt \
-      gdc_include_dir=/usr/include/dlang/gdc acx_cv_cc_gcc_supports_ada=yes
+      gdc_include_dir=/usr/include/dlang/gdc
 
   make
 
@@ -137,14 +146,13 @@ package_gcc-libs() {
   make -C $CHOST/libgcc DESTDIR="$pkgdir" install-shared
   rm -f "$pkgdir/$_libdir/libgcc_eh.a"
 
-  
   for lib in libatomic \
              libgfortran \
              libgo \
              libgomp \
              libitm \
              libquadmath \
-	     libsanitizer/{a,l,ub}san \
+             libsanitizer/{a,l,ub}san \
              libstdc++-v3/src; do
     make -C $CHOST/$lib DESTDIR="$pkgdir" install-toolexeclibLTLIBRARIES
   done
@@ -163,6 +171,9 @@ package_gcc-libs() {
              libquadmath; do
     make -C $CHOST/$lib DESTDIR="$pkgdir" install-info
   done
+
+  # remove files provided by lib32-gcc-libs
+  rm -rf "$pkgdir"/usr/lib32/
 
   # Install Runtime Library Exception
   install -Dm644 "$srcdir/gcc/COPYING.RUNTIME" \
@@ -234,6 +245,9 @@ package_gcc() {
 
   # install the libstdc++ man pages
   make -C $CHOST/libstdc++-v3/doc DESTDIR="$pkgdir" doc-install-man
+
+  # remove files provided by lib32-gcc-libs
+  rm -f "$pkgdir"/usr/lib32/lib{stdc++,gcc_s}.so
 
   # byte-compile python libraries
   python -m compileall "$pkgdir/usr/share/gcc-${pkgver%%+*}/"
@@ -348,6 +362,7 @@ package_gcc-d() {
 
   make -C $CHOST/libphobos DESTDIR="$pkgdir" install
   rm -f "$pkgdir/usr/lib/"lib{gphobos,gdruntime}.so*
+  rm -f "$pkgdir/usr/lib32/"lib{gphobos,gdruntime}.so*
 
   install -d "$pkgdir"/usr/include/dlang
   ln -s /"${_libdir}"/include/d "$pkgdir"/usr/include/dlang/gdc
