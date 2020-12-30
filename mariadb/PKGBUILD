@@ -5,26 +5,27 @@
 pkgbase=mariadb
 pkgname=('mariadb-libs' 'mariadb-clients' 'mariadb' 'mytop')
 pkgdesc='Fast SQL database server, derived from MySQL'
-pkgver=10.5.5
-pkgrel=2
-arch=( x86_64 powerpc64le powerpc )
+pkgver=10.5.8
+pkgrel=1
+arch=(x86_64 powerpc64le powerpc)
 license=('GPL')
 url='https://mariadb.org/'
-makedepends=('rsync' 'boost' 'bzip2' 'cmake' 'jemalloc' 'libaio' 'libxcrypt'
+makedepends=('boost' 'bzip2' 'cmake' 'jemalloc' 'libaio' 'libxcrypt'
              'libxml2' 'lz4' 'lzo' 'openssl' 'systemd' 'zlib' 'zstd' 'curl'
-             'krb5')
+             'krb5' 'cracklib')
+[ "${CARCH}" == 'powerpc' ] && makedepends+=('libatomic_ops')
 validpgpkeys=('199369E5404BD5FC7D2FE43BCBCB082A1BB943DB') # MariaDB Package Signing Key <package-signing-key@mariadb.org>
 # The default links with mirror redirection fail for signatures, specific
 # mirrors may be out of date every now and then. Let's use the upstream
-# rsync source and hope it does not hurt them too much.
+# rsync source via https and hope it does not hurt them too much.
 # https://mariadb.com/kb/en/library/mirror-sites-for-mariadb/
-source=("rsync://rsync.osuosl.org/mariadb/mariadb-${pkgver}/source/mariadb-${pkgver}.tar.gz"{,.asc}
-	'0001-arch-specific.patch'
+source=("https://rsync.osuosl.org/pub/mariadb/mariadb-${pkgver}/source/mariadb-${pkgver}.tar.gz"{,.asc}
+        '0001-arch-specific.patch'
 	'0002-cmake-Link-with-libatomic-to-enable-C11-atomics-supp.patch')
-sha256sums=('cf6b2c061754c07bbb1d20b29ae111bf2d098297c9b8c321b810638a179088a4'
+sha256sums=('eb4824f6f2c532cd3fc6a6bce7bf78ea7c6b949f8bdd07656b2c84344e757be8'
             'SKIP'
             '3289efb3452d199aec872115f35da3f1d6fd4ce774615076690e9bc8afae1460'
-            '87cab337bc4a76bb8f98ca86ec659e2c752e37b50960ceaa4294a95ce7954832')
+            '41bd1bc27b523712a8d37dcf7a3710860aecf6ee1301e06bb0580a13e1d3ff68')
 
 prepare() {
   cd $pkgbase-$pkgver/
@@ -35,7 +36,6 @@ prepare() {
   #  * make systemd-tmpfiles create MYSQL_DATADIR
   patch -Np1 < ../0001-arch-specific.patch
 
-  # Thanks Gentoo!
   patch -Np1 < ../0002-cmake-Link-with-libatomic-to-enable-C11-atomics-supp.patch
 }
 
@@ -93,7 +93,7 @@ build() {
     -DWITH_ZLIB=system
   )
 
-  mkdir -p build
+  mkdir build
   cd build
 
   cmake ../"$pkgbase-$pkgver" "${_cmake_options[@]}"
@@ -115,6 +115,8 @@ package_mariadb-libs() {
   conflicts=('libmysqlclient' 'libmariadbclient' 'mariadb-connector-c')
   provides=('libmariadbclient' 'mariadb-connector-c' 'libmariadb.so' 'libmariadbd.so')
   replaces=('libmariadbclient')
+
+  [ "${CARCH}" == 'powerpc' ] && depends+=('libatomic_ops')
 
   cd build
 
@@ -161,11 +163,12 @@ package_mariadb() {
           'etc/my.cnf.d/spider.cnf'
           'etc/security/user_map.conf')
   install=mariadb.install
-  depends=("mariadb-clients=${pkgver}" 'inetutils' 'systemd-libs' 'libxml2' 'zstd')
-  optdepends=('curl: for ha_s3 plugin'
+  depends=("mariadb-clients=${pkgver}" 'systemd-libs' 'libxml2' 'zstd')
+  optdepends=('cracklib: for cracklib plugin'
+              'curl: for ha_s3 plugin'
               'galera: for MariaDB cluster with Galera WSREP'
               'mysql-python: for myrocks_hotbackup'
-              'perl-dbd-mysql: for mysqlhotcopy, mysql_convert_table_format and mysql_setpermission')
+              'perl-dbd-mariadb: for mariadb-hotcopy, mariadb-convert-table-format and mariadb-setpermission')
   conflicts=('mysql')
   provides=("mysql=$pkgver")
   options=('emptydirs')
@@ -222,9 +225,7 @@ package_mariadb() {
 
 package_mytop() {
   pkgdesc='Top clone for MariaDB'
-  depends=('perl' 'perl-dbd-mysql' 'perl-term-readkey')
+  depends=('perl' 'perl-dbd-mariadb' 'perl-term-readkey')
 
-  cd build
-
-  install -D -m0755 scripts/mytop "$pkgdir"/usr/bin/mytop
+  install -D -m0755 build/scripts/mytop "$pkgdir"/usr/bin/mytop
 }

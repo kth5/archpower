@@ -5,8 +5,8 @@
 
 pkgbase=systemd
 pkgname=('systemd' 'systemd-libs' 'systemd-resolvconf' 'systemd-sysvcompat')
-_tag='b5ca06f13739f6fae3b73ccfc89d1e4d152329a2' # git rev-parse v${pkgver}
-pkgver=246.6
+_tag='8dff57da7abcb15e69936a8af9780475eb961a73' # git rev-parse v${pkgver}
+pkgver=247.2
 pkgrel=1
 arch=(x86_64 powerpc64le powerpc)
 url='https://www.github.com/systemd/systemd'
@@ -16,6 +16,7 @@ makedepends=('acl' 'cryptsetup' 'docbook-xsl' 'gperf' 'lz4' 'xz' 'pam' 'libelf'
              'python-lxml' 'quota-tools' 'shadow' 'git'
              'meson' 'libseccomp' 'pcre2' 'audit' 'kexec-tools' 'libxkbcommon'
              'bash-completion' 'p11-kit' 'systemd')
+[ "${CARCH}" == 'x86_64' ] && makedepends+=('gnu-efi-libs')
 options=('strip')
 validpgpkeys=('63CDA1E5D3FC22B998D20DD6327F26951A015CC4'  # Lennart Poettering <lennart@poettering.net>
               '5C251B5FC54EB2F80F407AAAC54CA336CFEB557E') # Zbigniew Jędrzejewski-Szmek <zbyszek@in.waw.pl>
@@ -43,7 +44,7 @@ sha512sums=('SKIP'
             'SKIP'
             'e38c7c422c82953f9c2476a5ab8009d614cbec839e4088bff5db7698ddc84e3d8ed64f32ed323f57b1913c5c9703546f794996cb415ed7cdda930b627962a3c4'
             'f0d933e8c6064ed830dec54049b0a01e27be87203208f6ae982f10fb4eddc7258cb2919d594cbfb9a33e74c3510cfd682f3416ba8e804387ab87d1a217eb4b73'
-            'f1f0bc599eb73b96f81e5413a55617ab82978d057dc0cabf226d225bb836a967fe13b84c4f24f64c074b6568026ab81d457512ff20a5918892c47a3a603eaa6e'
+            '8e76f8334b95ce7fee9190f4a1016b16109f3a75b68635fc227b2b4791cf8179ef09b532b66b4ed885ddf98ed76befed3106f3c3088f1819ed8cdf4c13e0805a'
             'a25b28af2e8c516c3a2eec4e64b8c7f70c21f974af4a955a4a9d45fd3e3ff0d2a98b4419fe425d47152d5acae77d64e69d8d014a7209524b75a81b0edb10bf3a'
             '61032d29241b74a0f28446f8cf1be0e8ec46d0847a61dadb2a4f096e8686d5f57fe5c72bcf386003f6520bc4b5856c32d63bf3efe7eb0bc0deefc9f68159e648'
             'c416e2121df83067376bcaacb58c05b01990f4614ad9de657d74b6da3efa441af251d13bf21e3f0f71ddcb4c9ea658b81da3d915667dc5c309c87ec32a1cb5a5'
@@ -61,6 +62,14 @@ sha512sums=('SKIP'
             '825b9dd0167c072ba62cabe0677e7cd20f2b4b850328022540f122689d8b25315005fa98ce867cf6e7460b2b26df16b88bb3b5c9ebf721746dce4e2271af7b97')
 
 _backports=(
+  # set: introduce set_strjoin()
+  '4dbce717873000cff7b56f89266d1d2fe53f9284'
+  # sd-device: use set_strjoin()
+  '6f3ac0d51766b0b9101676cefe5c4ba81feba436'
+  # sd-device: keep escaped strings in DEVLINK= property
+  '31063db0b4842a452c6eadde5b969aaee2a0516a'
+  # test: add tests for device_new_from_nulstr()
+  'e6f882871568e4a331ac473871ee8a884f6e48d6'
 )
 
 _reverts=(
@@ -104,6 +113,7 @@ build() {
 
   local _meson_options=(
     -Dversion-tag="${pkgver}-${pkgrel}-arch"
+    -Dmode=release
 
     -Dgnu-efi=false
     -Dima=false
@@ -129,6 +139,8 @@ build() {
     -Dsysvrcnd-path=
   )
 
+  [ "${CARCH}" == 'x86_64' ] && _meson_options+=(-Dgnu-efi=true)
+
   arch-meson "$pkgbase-stable" build "${_meson_options[@]}"
 
   ninja -C build
@@ -143,7 +155,7 @@ package_systemd() {
   license=('GPL2' 'LGPL2.1')
   depends=('acl' 'libacl.so' 'bash' 'cryptsetup' 'libcryptsetup.so' 'dbus'
            'iptables' 'kbd' 'kmod' 'libkmod.so' 'hwids' 'libcap' 'libcap.so'
-           'libgcrypt' 'libxcrypt' 'libcrypt.so' 'systemd-libs' 'libidn2' 'libidn2.so' 'lz4' 'pam'
+           'libgcrypt' 'libxcrypt' 'libcrypt.so' 'systemd-libs' 'libidn2' 'lz4' 'pam'
            'libelf' 'libseccomp' 'libseccomp.so' 'util-linux' 'libblkid.so'
            'libmount.so' 'xz' 'pcre2' 'audit' 'libaudit.so' 'libp11-kit'
            'libp11-kit.so' 'openssl')
@@ -157,11 +169,13 @@ package_systemd() {
               'curl: machinectl pull-tar and pull-raw')
   backup=(etc/pam.d/systemd-user
           etc/systemd/coredump.conf
+          etc/systemd/homed.conf
           etc/systemd/journald.conf
           etc/systemd/journal-remote.conf
           etc/systemd/journal-upload.conf
           etc/systemd/logind.conf
           etc/systemd/networkd.conf
+          etc/systemd/pstore.conf
           etc/systemd/resolved.conf
           etc/systemd/sleep.conf
           etc/systemd/system.conf
