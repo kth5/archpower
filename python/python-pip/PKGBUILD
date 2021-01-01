@@ -4,24 +4,32 @@
 # Contributor: Sebastien Binet <binet@lblbox>
 
 pkgname=('python-pip' 'python2-pip')
-pkgver=20.1.1
+pkgver=20.2.2
 pkgrel=1
 pkgdesc="The PyPA recommended tool for installing Python packages"
 url="https://pip.pypa.io/"
 arch=('any')
 license=('MIT')
 _deps=('appdirs' 'cachecontrol' 'colorama' 'contextlib2' 'distlib' 'distro' 'html5lib'
-       'packaging' 'pep517' 'progress' 'requests' 'retrying' 'resolvelib' 'setuptools' 'six' 'toml')
+       'packaging' 'pep517' 'progress' 'requests' 'retrying' 'resolvelib' 'setuptools' 'six' 'toml'
+       # add these until https://github.com/pypa/pip/issues/5354#issuecomment-672678167 is resolved
+       'pyopenssl')
 makedepends=("${_deps[@]/#/python-}" "${_deps[@]/#/python2-}" 'python2-ipaddress' 'python-sphinx')
 checkdepends=('python-pytest-runner' 'python-scripttest' 'python-virtualenv' 'python-pretend'
               'python-yaml' 'python-mock' 'python-freezegun' 'python-cryptography' 'python-pip'
               'python-wheel' 'python-werkzeug' 'python-csv23' 'git' 'subversion')
-source=("pip-${pkgver}.tar.gz::https://github.com/pypa/pip/archive/${pkgver}.tar.gz")
-sha512sums=('ee7b0345c08fbe0215811d07b4c57c1ceece826871842f6d1c174d82e8eee0ad810aa5413d6763ecd5a513e151792a53c36623ab99d2049555ef2542d32d1658')
+source=("pip-${pkgver}.tar.gz::https://github.com/pypa/pip/archive/${pkgver}.tar.gz"
+        pip-fix-unbundle.patch::https://github.com/pypa/pip/commit/b215120b5ab1315c963ee409b720753ac690c7f6.patch
+        pip-packaging-xfail.patch::https://github.com/pypa/pip/commit/68713c0a26395e68240445fae62940091cb45519.patch)
+sha512sums=('0b000977f169900eebd4afeabfc7bd59b104246bbb048ce5b4db7f701e20ef1caef22c7ca2311843eafc4a37abbb81a74beddddf655eeaf2e33e3949d5a811e6'
+            '36a41a80a205258740b7a192e7cc0df96cb66ff82f6263705355246ae9eda04b79f75c9953623129e12eb45c99e8a911dfa134870e6fff357c3f57ee6f38d337'
+            '08e9bbef95f0d725244d04eee4b5b329fddac2471e9c0bf68f8155d2154a40f50ef3bb62a75cfbe138fb2356056ecedeed6ea93f90e2a928324cca7fdb2fffbf')
 
 shopt -s extglob
 prepare() {
   cd "$srcdir/pip-$pkgver"
+  patch -p1 -i ../pip-fix-unbundle.patch
+  patch -p1 -i ../pip-packaging-xfail.patch
 
   # Remove certifi usage
   sed -i 's|from pip._vendor.certifi import where|where = lambda: "/etc/ssl/certs/ca-certificates.crt"|' src/pip/_internal/commands/debug.py
@@ -38,6 +46,7 @@ build() {
   python2 setup.py build
 
   cd docs/
+  PYTHONPATH="$srcdir/pip-$pkgver/src/" python pip_sphinxext.py
   PYTHONPATH="$srcdir/pip-$pkgver/src/" sphinx-build -W -b man -d build/doctrees/man man build/man -c html
   mkdir -p build/man-pip2
   cd build/man
@@ -53,7 +62,7 @@ check() {
   # appdirs: https://github.com/pypa/pip/issues/7784
   # build_env: TODO weird looking errors
   # virtualenv: https://github.com/pypa/pip/issues/8273
-  PYTHONPATH="$PWD/tmp_install/usr/lib/python3.8/site-packages" PATH="$PWD/tmp_install/usr/bin:$PATH" \
+  PYTHONPATH="$PWD/tmp_install/usr/lib/python3.9/site-packages" PATH="$PWD/tmp_install/usr/bin:$PATH" \
     python -m pytest -m unit --junit-xml=junit/unit-test.xml --deselect tests/unit/test_appdirs.py::TestSiteConfigDirs::test_site_config_dirs_linux \
                                                              --deselect tests/unit/test_appdirs.py::TestSiteConfigDirs::test_site_config_dirs_linux_override \
                                                              --deselect tests/unit/test_appdirs.py::TestSiteConfigDirs::test_site_config_dirs_linux_empty \
@@ -80,9 +89,9 @@ package_python-pip() {
 
   install -Dm644 -t "$pkgdir"/usr/share/man/man1 docs/build/man/*
 
-  PYTHONPATH="$pkgdir"/usr/lib/python3.8/site-packages "$pkgdir"/usr/bin/pip completion --bash \
+  PYTHONPATH="$pkgdir"/usr/lib/python3.9/site-packages "$pkgdir"/usr/bin/pip completion --bash \
     | install -Dm644 /dev/stdin "$pkgdir"/usr/share/bash-completion/completions/pip
-  PYTHONPATH="$pkgdir"/usr/lib/python3.8/site-packages "$pkgdir"/usr/bin/pip completion --fish \
+  PYTHONPATH="$pkgdir"/usr/lib/python3.9/site-packages "$pkgdir"/usr/bin/pip completion --fish \
     | install -Dm644 /dev/stdin "$pkgdir"/usr/share/fish/vendor_completions.d/pip.fish
 }
 
