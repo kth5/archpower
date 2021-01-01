@@ -4,24 +4,27 @@
 # Contributor: Jakub Schmidtke <sjakub@gmail.com>
 
 pkgname=firefox
-pkgver=84.0.1
+pkgver=81.0.2
 pkgrel=1
 pkgdesc="Standalone web browser from mozilla.org"
-arch=( x86_64 powerpc64le powerpc )
+arch=(x86_64 powerpc64le)
 license=(MPL GPL LGPL)
 url="https://www.mozilla.org/firefox/"
 depends=(gtk3 libxt mime-types dbus-glib ffmpeg nss ttf-font libpulse jemalloc)
 makedepends=(unzip zip diffutils mesa imake inetutils xorg-server-xvfb
              autoconf2.13 rust clang llvm jack gtk2 nodejs cbindgen
-             python-setuptools python-psutil)
+             python-setuptools python-psutil lld)
 optdepends=('networkmanager: Location detection via available WiFi networks'
             'libnotify: Notification integration'
             'pulseaudio: Audio support'
             'speech-dispatcher: Text-to-Speech'
             'hunspell-en_US: Spell checking, American English')
-options=(!emptydirs !makeflags strip)
+options=(!emptydirs !makeflags !strip)
 source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-$pkgver.source.tar.xz{,.asc}
         $pkgname.desktop
+        0001-Use-remoting-name-for-GDK-application-names.patch
+        0002-Bug-1660901-Support-the-fstat-like-subset-of-fstatat.patch
+        0003-Bug-1660901-ignore-AT_NO_AUTOMOUNT-in-fstatat-system.patch
         firefox-powerpc-clang.patch
         big-endian-image-decoders.patch
         fix-image-format-warning.patch
@@ -33,6 +36,9 @@ source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-
 sha256sums=('ae5500d270a199f9a10674fbd4ba7a6beac1f260a4c009bbca8ea39967592243'
             'SKIP'
             'a9e5264257041c0b968425b5c97436ba48e8d294e1a0f02c59c35461ea245c33'
+            'e0eaec8ddd24bbebf4956563ebc6d7a56f8dada5835975ee4d320dd3d0c9c442'
+            'c2489a4ad3bfb65c064e07180a1de9a2fbc3b1b72d6bc4cd3985484d1b6b7b29'
+            '52cc26cda4117f79fae1a0ad59e1404b299191a1c53d38027ceb178dab91f3dc'
             'ad83c0c6195ab742848941be1d9c8f32c1d4a8bc019d8887b42256bafaefb541'
             '0df637d44218524e213814d15d623f27724d8e405390173f6cc385e145110bfe'
             '958cf5016e9845b6ee6e2ed05ad96cc2fc6f74bebbb338a7b7ce29bffd2be716'
@@ -57,15 +63,15 @@ _google_api_key=AIzaSyDgkw4O3LM0Jnr2N7Wq2NG7iUVzRU5sBaA
 # more information.
 _mozilla_api_key=de0473f2-d53f-46da-956c-6aff61bda3ab
 
-
-export PATH=${PATH}:${srcdir}
-
 prepare() {
   mkdir -p mozbuild
 
   cd ${srcdir}/firefox-$pkgver
 
   patch -Np0 -i ${srcdir}/firefox-powerpc-clang.patch
+
+  # https://bugzilla.mozilla.org/show_bug.cgi?id=1530052
+  patch -Np1 -i ../0001-Use-remoting-name-for-GDK-application-names.patch
 
   # sourced from Voidlinux thanks!
   patch -Np0 -i ${srcdir}/big-endian-image-decoders.patch
@@ -95,7 +101,10 @@ ac_add_options --prefix=/usr
 ac_add_options --enable-release
 ac_add_options --enable-hardening
 ac_add_options --enable-optimize
+ac_add_options --enable-rust-simd
+export RUSTC_OPT_LEVEL=2
 ac_add_options --enable-jemalloc
+ac_add_options --enable-lto=full
 ac_add_options --enable-linker=bfd
 export CC=gcc
 export CXX=g++
@@ -117,8 +126,8 @@ ac_add_options --with-google-location-service-api-keyfile=${srcdir}/google-api-k
 ac_add_options --with-google-safebrowsing-api-keyfile=${srcdir}/google-api-key
 ac_add_options --with-mozilla-api-keyfile=${srcdir}/mozilla-api-key
 
-ac_add_options --with-system-nspr
-ac_add_options --with-system-nss
+#ac_add_options --without-system-nspr
+#ac_add_options --without-system-nss
 
 # Features
 ac_add_options --enable-alsa
@@ -127,22 +136,6 @@ ac_add_options --disable-crashreporter
 ac_add_options --disable-updater
 ac_add_options --disable-tests
 END
-
-  case "${CARCH}" in
-    powerpc)
-      echo "ac_add_options --disable-webrtc" >> ${srcdir}/mozconfig 
-      echo "export LDFLAGS+=' -latomic -Wl,--no-keep-memory'" >> ${srcdir}/mozconfig 
-      # patch the rust debug level, this is hardcoded
-      sed -i "s/debug_info = '2'/debug_info = '1'/" \
-        build/moz.configure/toolchain.configure
-    ;;
-    *)
-      echo "ac_add_options --enable-rust-simd" >> ${srcdir}/mozconfig
-      echo "export RUSTC_OPT_LEVEL=2" >> ${srcdir}/mozconfig
-      echo "ac_add_options --enable-lto=full" >> ${srcdir}/mozconfig
-      echo "ac_add_options MOZ_PGO=1" >> ${srcdir}/mozconfig
-    ;;
-  esac
 }
 
 build() {
@@ -161,11 +154,9 @@ build() {
   ulimit -n 4096
 
   rm -f old-configure
-  xvfb-run -s "-screen 0 1920x1080x24 -nolisten local" \
   ./mach build
 
   echo "Building symbol archive..."
-  xvfb-run -s "-screen 0 1920x1080x24 -nolisten local" \
   ./mach buildsymbols
 
 }
