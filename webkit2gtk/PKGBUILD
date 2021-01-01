@@ -6,12 +6,12 @@ pkgname=webkit2gtk
 pkgver=2.30.4
 pkgrel=1
 pkgdesc="GTK+ Web content engine library"
-arch=(x86_64 powerpc64le)
+arch=( x86_64 powerpc64le powerpc )
 url="https://webkitgtk.org/"
 license=(custom)
 depends=(libxt libxslt enchant gst-plugins-base-libs libsecret libwebp openjpeg2
-         harfbuzz-icu gtk3 libnotify hyphen woff2 libwpe wpebackend-fdo
-         bubblewrap xdg-dbus-proxy)
+         harfbuzz-icu gtk3 libnotify hyphen woff2 bubblewrap xdg-dbus-proxy
+         libwpe wpebackend-fdo)
 makedepends=(gperf gobject-introspection ruby gtk-doc cmake python geoclue
              gst-plugins-bad ninja)
 optdepends=('geoclue: Geolocation support'
@@ -26,11 +26,33 @@ validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'
 
 prepare() {
   cd webkitgtk-$pkgver
+  patch -Np0 -i ${srcdir}/ppc-llint.patch
+  patch -Np0 -i ${srcdir}/be-typedarray.patch
+  patch -Np0 -i ${srcdir}/fix-eglmesaext_h.patch
 }
 
 build() {
   CFLAGS+=" $CPPFLAGS"
   CXXFLAGS+=" $CPPFLAGS"
+
+  case "${CARCH}" in
+    powerpc)
+      LD_FLAGS+=' -Wl,--no-keep-memory'
+      CFLAGS="${CFLAGS/-O2/-Os}"
+      CXXFLAGS="${CXXFLAGS/-O2/-Os}"
+      EXTRA_CMAKE_FLAGS="-DENABLE_JIT=OFF
+                         -DUSE_SYSTEMD=OFF
+                         -DPORT=GTK -DUSE_LD_GOLD=OFF
+                         -DCMAKE_CXX_FLAGS_RELEASE=-DNDEBUG
+                         -DCMAKE_CXX_FLAGS_DEBUG=-DNDEBUG
+                         -DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-DNDEBUG
+                         -DCMAKE_C_FLAGS_RELEASE=-DNDEBUG
+                         -DCMAKE_C_FLAGS_DEBUG=-DNDEBUG
+                         -DCMAKE_C_FLAGS_RELWITHDEBINFO=-DNDEBUG
+                         -DCMAKE_LINKER=${CHOST}-gcc"
+    ;;
+  esac
+
   cmake -S webkitgtk-$pkgver -B build -G Ninja \
     -DPORT=GTK \
     -DCMAKE_BUILD_TYPE=Release \
@@ -39,8 +61,8 @@ build() {
     -DENABLE_GTKDOC=ON \
     -DENABLE_MINIBROWSER=ON \
     -DLIBEXEC_INSTALL_DIR=/usr/lib \
-    -DLIB_INSTALL_DIR=/usr/lib
-  cmake --build build
+    -DLIB_INSTALL_DIR=/usr/lib  ${EXTRA_CMAKE_FLAGS}
+  cmake --build build ${MAKEFLAGS}
 }
 
 check() {
