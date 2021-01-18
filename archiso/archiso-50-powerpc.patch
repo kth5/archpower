@@ -1,0 +1,96 @@
+diff --git a/archiso/initcpio/install/archiso_kms b/archiso/initcpio/install/archiso_kms
+index 8129127..cbfbbf7 100644
+--- a/archiso/initcpio/install/archiso_kms
++++ b/archiso/initcpio/install/archiso_kms
+@@ -6,11 +6,15 @@ build() {
+     add_module "amdgpu"
+     add_module "radeon"
+     add_module "nouveau"
+-    add_module "i915"
+-    add_module "mgag200"
+-    add_module "via-agp"
+-    add_module "sis-agp"
+-    add_module "intel-agp"
++
++
++    if [ $(uname -m) == x86_64 -o $(uname -m) == i686 ]; then
++        add_module "i915"
++        add_module "mgag200"
++        add_module "via-agp"
++        add_module "sis-agp"
++        add_module "intel-agp"
++    fi
+ 
+     if [[ $(uname -m) == i686 ]]; then
+         add_module "amd64-agp"
+diff --git a/archiso/mkarchiso b/archiso/mkarchiso
+index 4ab6bed..a06ef73 100755
+--- a/archiso/mkarchiso
++++ b/archiso/mkarchiso
+@@ -412,6 +412,20 @@ _make_bootmode_bios.syslinux.mbr() {
+     _msg_info "Done! SYSLINUX set up for BIOS booting from a disk successfully."
+ }
+ 
++_make_bootmode_openpower.grub() {
++    _msg_info "Preparing kernel and intramfs for booting via Grub on OpenPOWER..."
++    install -d -m 0755 -- "${isofs_dir}/boot/grub/"
++    install -m 0644 configs/grub/grub.cfg "${isofs_dir}/boot/grub/grub.cfg"
++    sed "s@archisolabel=.*@archisolabel=${iso_label}@g" -i "${isofs_dir}/boot/grub/grub.cfg"
++    sed "s@#ARCH#@${arch}@g" -i "${isofs_dir}/boot/grub/grub.cfg"
++    install -d -m 0755 -- "${isofs_dir}/${install_dir}/boot/${arch}"
++    install -m 0644 -- "${airootfs_dir}/boot/initramfs-"*".img" "${isofs_dir}/${install_dir}/boot/${arch}/"
++    install -m 0644 -- "${airootfs_dir}/boot/vmlinuz-"* "${isofs_dir}/${install_dir}/boot/${arch}/"
++
++    rm -v "${airootfs_dir}/boot/vmlinuz-"* \
++	  "${airootfs_dir}/boot/initramfs-"*
++}
++
+ # Prepare /syslinux for El-Torito booting
+ _make_bootmode_bios.syslinux.eltorito() {
+     _msg_info "Setting up SYSLINUX for BIOS booting from an optical disc..."
+@@ -527,6 +541,10 @@ _make_bootmode_uefi-x64.systemd-boot.eltorito() {
+     _run_once _make_efi_dir_on_iso9660
+ }
+ 
++_validate_requirements_bootmode_openpower.grub() {
++    return 0
++}
++
+ _validate_requirements_bootmode_bios.syslinux.mbr() {
+     # bios.syslinux.mbr requires bios.syslinux.eltorito
+     # shellcheck disable=SC2076
+@@ -733,7 +751,20 @@ _build_iso() {
+     done
+ 
+     _msg_info "Creating ISO image..."
+-    xorriso -as mkisofs \
++
++    case "$(uname -m)" in
++      ppc|ppc64|ppc64le)
++        mkdir -p "${isofs_dir}/boot/grub"
++	grub-mkrescue \
++            -d /usr/lib/grub/powerpc-ieee1275 \
++            -o ${out_dir}/${img_name} \
++            -volid "${iso_label}" \
++            -appid "${iso_application}" \
++            -publisher "${iso_publisher}" \
++            "${isofs_dir}/"
++        ;;
++      *)
++        xorriso -as mkisofs \
+             -iso-level 3 \
+             -full-iso9660-filenames \
+             -joliet \
+@@ -746,6 +777,12 @@ _build_iso() {
+             "${xorrisofs_options[@]}" \
+             -output "${out_dir}/${img_name}" \
+             "${isofs_dir}/"
++        ;;
++    esac
++
++
++
++
+     _msg_info "Done!"
+     du -h -- "${out_dir}/${img_name}"
+ }
