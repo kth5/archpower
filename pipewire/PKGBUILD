@@ -4,18 +4,21 @@
 
 pkgbase=pipewire
 pkgname=(pipewire pipewire-docs pipewire-jack pipewire-pulse pipewire-alsa
-         gst-plugin-pipewire)
-pkgver=0.3.18
+         gst-plugin-pipewire alsa-card-profiles)
+pkgver=0.3.20
 pkgrel=1
+epoch=1
 pkgdesc="Server and user space API to deal with multimedia pipelines"
 url="https://pipewire.org"
-license=(LGPL2.1)
-arch=(x86_64 powerpc64le powerpc)
+license=(LGPL)
+arch=(x86_64 powerpc64le)
 makedepends=(git meson doxygen graphviz xmltoman valgrind jack2 libpulse
-             alsa-lib gst-plugins-base sbc rtkit vulkan-icd-loader dbus
-             libsndfile bluez-libs vulkan-headers libopenaptx)
+             alsa-lib gst-plugins-base sbc rtkit vulkan-icd-loader dbus sdl2
+             ncurses libsndfile bluez-libs vulkan-headers libopenaptx
+             libfdk-aac)
 [ "${CARCH}" != 'powerpc' ] && makedepends+=(libldac)
-_commit=e7dffd64ebff76e2388d6e694de96d6693a6ed7d  # tags/0.3.18
+checkdepends=(desktop-file-utils)
+_commit=aee694fb8260914b6dd6b12cb95e78dece204535  # tags/0.3.20
 source=("git+https://github.com/PipeWire/pipewire#commit=$_commit")
 sha256sums=('SKIP')
 
@@ -26,9 +29,6 @@ pkgver() {
 
 prepare() {
   cd $pkgbase
-
-  # fix kwin
-  git cherry-pick -n fc2b0b20ad4271b0c6f258451a82311b792b7a57
 }
 
 build() {
@@ -56,14 +56,16 @@ _ver=${pkgver:0:3}
 
 package_pipewire() {
   depends=(sbc rtkit vulkan-icd-loader bluez-libs alsa-card-profiles
-           libdbus-1.so libsndfile.so libudev.so libasound.so libsystemd.so
-           libopenaptx.so)
+           libdbus-1.so libncursesw.so libsndfile.so libudev.so libasound.so
+           libsystemd.so libldacBT_enc.so libopenaptx.so libfdk-aac.so)
   [ "${CARCH}" != 'powerpc' ] && depends+=(libldacBT_enc.so)
   optdepends=('pipewire-docs: Documentation'
               'pipewire-jack: JACK support'
               'pipewire-pulse: PulseAudio support')
   provides=(libpipewire-$_ver.so)
-  backup=(etc/pipewire/pipewire.conf)
+  backup=(etc/pipewire/pipewire.conf
+          etc/pipewire/media-session.d/media-session.conf
+          etc/pipewire/media-session.d/{alsa,bluez,v4l2}-monitor.conf)
   install=pipewire.install
 
   DESTDIR="$pkgdir" meson install -C build
@@ -84,8 +86,8 @@ package_pipewire() {
 
   _pick gst usr/lib/gstreamer-1.0
 
-  # Use alsa-card-profiles built with Pulseaudio
-  rm -rv "$pkgdir"/usr/share/alsa-card-profile
+  _pick acp usr/lib/udev
+  _pick acp usr/share/alsa-card-profile
 }
 
 package_pipewire-docs() {
@@ -113,8 +115,9 @@ package_pipewire-alsa() {
   depends=(pipewire libpipewire-$_ver.so)
   provides=(pulseaudio-alsa)
 
-  mkdir -p "$pkgdir/etc/alsa/conf.d"
+  mkdir -p "$pkgdir"/etc/{alsa/conf.d,pipewire/media-session.d}
   ln -st "$pkgdir/etc/alsa/conf.d" /usr/share/alsa/alsa.conf.d/99-pipewire-default.conf
+  touch "$pkgdir/etc/pipewire/media-session.d/with-alsa"
 }
 
 package_gst-plugin-pipewire() {
@@ -122,3 +125,11 @@ package_gst-plugin-pipewire() {
   depends=(pipewire libpipewire-$_ver.so gst-plugins-base-libs)
   mv gst/* "$pkgdir"
 }
+
+package_alsa-card-profiles() {
+  pkgdesc="ALSA card profiles shared by PipeWire"
+  depends=()
+  mv acp/* "$pkgdir"
+}
+
+# vim:set sw=2 et:
