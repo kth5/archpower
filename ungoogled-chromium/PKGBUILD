@@ -1,7 +1,7 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 pkgname=ungoogled-chromium
 pkgver=87.0.4280.141
-pkgrel=1
+pkgrel=2
 pkgdesc="Google Chromium, sans integration with Google - PPC64LE FORK"
 arch=(x86_64 powerpc64le)
 url="https://github.com/leo-lb/ungoogled-chromium/tree/master"
@@ -25,11 +25,13 @@ commit='ceca11d53907f1b0ba5128435c5fbb3f26f5f69e'
 source=("git+https://github.com/leo-lb/ungoogled-chromium.git#commit=${commit}"
   https://github.com/stha09/chromium-patches/releases/download/chromium-${pkgver%%.*}-patchset-$_gcc_patchset/chromium-${pkgver%%.*}-patchset-$_gcc_patchset.tar.xz
   chromium-icu68.patch
-  subpixel-anti-aliasing-in-FreeType-2.8.1.patch)
+  subpixel-anti-aliasing-in-FreeType-2.8.1.patch
+ chromium-glibc-2.33.patch)
 sha256sums=('SKIP'
             'c99934bcd2f3ae8ea9620f5f59a94338b2cf739647f04c28c8a551d9083fa7e9'
             '02cfa7fc75f4df44044efb35aeeb0dba85b250e5cabe991fd381221862b2e5d7'
-            '1e2913e21c491d546e05f9b4edf5a6c7a22d89ed0b36ef692ca6272bcd5faec6')
+            '1e2913e21c491d546e05f9b4edf5a6c7a22d89ed0b36ef692ca6272bcd5faec6'
+            '2fccecdcd4509d4c36af873988ca9dbcba7fdb95122894a9fdf502c33a1d7a4b')
 
 # Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
 # Keys are the names in the above script; values are the dependencies in Arch
@@ -97,6 +99,9 @@ prepare() {
     third_party/blink/renderer/core/xml/parser/xml_document_parser.cc \
     third_party/libxml/chromium/*.cc
 
+  # https://crbug.com/1164975
+  patch -Np1 -i ${srcdir}/chromium-glibc-2.33.patch
+
   # Upstream fixes
   patch -Np1 -d third_party/skia <${srcdir}/subpixel-anti-aliasing-in-FreeType-2.8.1.patch
 
@@ -150,6 +155,10 @@ build() {
   export AR=llvm-ar
   export NM=llvm-nm
 
+  export CFLAGS=${CFLAGS/-flto=auto/}
+  export CXXFLAGS=${CXXFLAGS/-flto=auto/}
+  export LDFLAGS=${LDFLAGS/-flto=auto/}
+
   local _flags=(
     'custom_toolchain="//build/toolchain/linux/unbundle:default"'
     'host_toolchain="//build/toolchain/linux/unbundle:default"'
@@ -199,6 +208,10 @@ build() {
   CFLAGS+='   -Wno-unknown-warning-option'
   CXXFLAGS+=' -Wno-unknown-warning-option'
   
+  mkdir -p out/Default
+  ./tools/gn/bootstrap/bootstrap.py --skip-generate-buildfiles -j$(nproc) -o out/Default/gn
+  export PATH="${PWD}/out/Default:${PATH}"
+
   cd third_party/libvpx
   mkdir -p source/config/linux/ppc64
   ./generate_gni.sh
