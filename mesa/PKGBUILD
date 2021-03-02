@@ -5,11 +5,11 @@
 # Contributor: Andreas Radke <andyrtr@archlinux.org>
 
 pkgbase=mesa
-pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-mesa' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
+pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=20.3.3
-pkgrel=1
-arch=(powerpc64le powerpc)
+pkgver=20.3.4
+pkgrel=3
+arch=(x86_64 powerpc64le powerpc)
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd' 'elfutils' 'llvm'
              'libomxil-bellagio' 'libclc' 'clang' 'libglvnd' 'libunwind' 'lm_sensors' 'libxrandr'
@@ -17,10 +17,12 @@ makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence
 url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
-        LICENSE)
-sha512sums=('77735462f4ccbe865d0cf7e9db47c42f8bc2600b9a030dca11066d29e43f73c18ca0422e6356129fc14ac1b1018ed752ae4ee45bd31ae706fea58f573a14d346'
+        LICENSE
+        0001-vulkan-device_select-Stop-using-device-properties-2.patch)
+sha512sums=('81c4d032213b4aef842f1594e0e89bc0045f7ca7ce5f267b62a0f8236eb12ab09c1f780d8b3776b3072f37cd0bd8829f8a1330a749ccf462471b262ef8097477'
             'SKIP'
-            'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
+            'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
+            '73a923dac10616ab46b825cd45f73ca849ddad69432dbf680c1129cc9a92004218affa33bd1a6ee185fa0143ccd3d3622ba40512ec049a160a61cc13fe92da0a')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
               'E3E8F480C52ADD73B278EE78E1ECBE07D7D70895'  # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>
@@ -30,13 +32,12 @@ validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l
 
 prepare() {
   cd mesa-$pkgver
+
+  # FS#69744
+  patch -Np1 -i ../0001-vulkan-device_select-Stop-using-device-properties-2.patch
 }
 
 build() {
-  case ${CARCH} in
-    powerpc64le) EXTRA_FLAGS='-D power8=true';;
-  esac
-
   arch-meson mesa-$pkgver build \
     -D b_lto=true \
     -D b_ndebug=true \
@@ -62,12 +63,12 @@ build() {
     -D gles2=enabled \
     -D glvnd=true \
     -D glx=dri \
-    -D libunwind=true \
-    -D llvm=true \
-    -D lmsensors=true \
+    -D libunwind=enabled \
+    -D llvm=enabled \
+    -D lmsensors=enabled \
     -D osmesa=gallium \
-    -D shared-glapi=true \
-    -D valgrind=true ${EXTRA_FLAGS}
+    -D shared-glapi=enabled \
+    -D valgrind=enabled
 
   # Print config
   meson configure build
@@ -131,10 +132,12 @@ package_vulkan-radeon() {
   install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
 }
 
-package_vulkan-mesa() {
-  pkgdesc="Vulkan swrast driver"
+package_vulkan-swrast() {
+  pkgdesc="Vulkan software rasteriser driver"
   depends=('wayland' 'libx11' 'libxshmfence' 'libdrm' 'zstd' 'llvm-libs')
   optdepends=('vulkan-mesa-layers: additional vulkan layers')
+  conflicts=('vulkan-mesa')
+  replaces=('vulkan-mesa')
   provides=('vulkan-driver')
 
   _install fakeinstall/usr/share/vulkan/icd.d/lvp_icd*.json
@@ -146,6 +149,7 @@ package_vulkan-mesa() {
 package_libva-mesa-driver() {
   pkgdesc="VA-API implementation for gallium"
   depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'libelf' 'libxshmfence')
+  depends+=('libexpat.so')
 
   _install fakeinstall/usr/lib/dri/*_drv_video.so
 
@@ -155,6 +159,7 @@ package_libva-mesa-driver() {
 package_mesa-vdpau() {
   pkgdesc="Mesa VDPAU drivers"
   depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'libelf' 'libxshmfence')
+  depends+=('libexpat.so')
 
   _install fakeinstall/usr/lib/vdpau
 
@@ -165,6 +170,7 @@ package_mesa() {
   depends=('libdrm' 'wayland' 'libxxf86vm' 'libxdamage' 'libxshmfence' 'libelf'
            'libomxil-bellagio' 'libunwind' 'llvm-libs' 'lm_sensors' 'libglvnd'
            'zstd' 'vulkan-icd-loader')
+  depends+=('libsensors.so' 'libexpat.so' 'libvulkan.so')
   optdepends=('opengl-man-pages: for the OpenGL API man pages'
               'mesa-vdpau: for accelerated video playback'
               'libva-mesa-driver: for accelerated video playback')
@@ -185,7 +191,7 @@ package_mesa() {
   _install fakeinstall/usr/lib/libxatracker.so*
 
   # in vulkan-headers
-  rm -rfv fakeinstall/usr/include/vulkan
+  rm -rvf fakeinstall/usr/include/vulkan
 
   _install fakeinstall/usr/include
   _install fakeinstall/usr/lib/pkgconfig
