@@ -6,11 +6,11 @@
 # Contributor: Paul Mattal <paul@archlinux.org>
 
 pkgname=ffmpeg
-pkgver=4.3.1
+pkgver=4.3.2
 pkgrel=3
 epoch=2
 pkgdesc='Complete solution to record, convert and stream audio and video'
-arch=( x86_64 powerpc64le powerpc )
+arch=(x86_64 powerpc64le powerpc)
 url=https://ffmpeg.org/
 license=(GPL3)
 depends=(
@@ -32,8 +32,8 @@ depends=(
   libfreetype.so
   libiec61883
   libmodplug
-  libomxil-bellagio
   libpulse
+  librav1e.so
   libraw1394
   libsoxr
   libssh
@@ -55,10 +55,10 @@ depends=(
   libxml2
   libxv
   libxvidcore.so
+  libzimg.so
   opencore-amr
   openjpeg2
   opus
-  rav1e
   sdl2
   speex
   srt
@@ -67,15 +67,22 @@ depends=(
   zlib
 )
 makedepends=(
-  ffnvcodec-headers
+  clang
   git
   ladspa
 )
+
+
 optdepends=(
-  'intel-media-sdk: Intel QuickSync support'
   'ladspa: LADSPA filters'
-  'nvidia-utils: Nvidia NVDEC/NVENC support'
 )
+if [ "${CFLAGS}" == 'x86_64' ]; then
+  depends+=(libmfx vmaf)
+  makedepends+=(nasm avisynthplus amf-headers ffnvcodec-headers)
+  optdepends+=('avisynthplus: AviSynthPlus support'
+               'intel-media-sdk: Intel QuickSync support'
+               'nvidia-utils: Nvidia NVDEC/NVENC support')
+fi
 provides=(
   libavcodec.so
   libavdevice.so
@@ -86,14 +93,14 @@ provides=(
   libswresample.so
   libswscale.so
 )
-_tag=6b6b9e593dd4d3aaf75f48d40a13ef03bdef9fdb
+_tag=f719f869907764e6412a6af6e178c46e5f915d25
 source=(
   git+https://git.ffmpeg.org/ffmpeg.git#tag=${_tag}
-  ffmpeg-srt-1.4.2.patch
+  vmaf-model-path.patch
 )
 sha256sums=(
   SKIP
-  'f119a8160520735c50d711411436fdea54c0b8520da40aabf41543688ddb21e3'
+  8dff51f84a5f7460f8893f0514812f5d2bd668c3276ef7ab7713c99b71d7bd8d
 )
 
 pkgver() {
@@ -104,7 +111,9 @@ pkgver() {
 
 prepare() {
   cd ffmpeg
-  patch -Np1 -i ${srcdir}/ffmpeg-srt-1.4.2.patch
+
+  git cherry-pick -n 7c59e1b0f285cd7c7b35fcd71f49c5fd52cf9315 # fix build against libsrt 1.4.2
+  patch -Np1 -i "${srcdir}"/vmaf-model-path.patch
 }
 
 build() {
@@ -113,7 +122,8 @@ build() {
   case "${CARCH}" in
     powerpc64le) EXTRA_CONFIGURE_FLAGS="--enable-vsx --enable-altivec --enable-power8" ;;
     powerpc) EXTRA_CONFIGURE_FLAGS="--disable-altivec" ;;
-  esac 
+    x86_64) EXTRA_CONFIGURE_FLAGS="--enable-amf --enable-avisynth --enable-libmfx --enable-cuda-llvm --enable-libvmaf --enable-nvdec --enable-nvenc"
+  esac
 
   ./configure \
     --prefix=/usr \
@@ -143,6 +153,7 @@ build() {
     --enable-libopenjpeg \
     --enable-libopus \
     --enable-libpulse \
+    --enable-librav1e \
     --enable-libsoxr \
     --enable-libspeex \
     --enable-libsrt \
@@ -158,10 +169,7 @@ build() {
     --enable-libxcb \
     --enable-libxml2 \
     --enable-libxvid \
-    --disable-nvdec \
-    --disable-nvenc \
-    --enable-omx \
-    --enable-librav1e \
+    --enable-libzimg \
     --enable-shared \
     --enable-version3 ${EXTRA_CONFIGURE_FLAGS}
 
