@@ -1,48 +1,53 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Evgeniy Alekseev <arcanis at archlinux dot org>
-# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
-# Maintainer: Geoffroy Carrier <geoffroy@archlinux.org>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Contributor: Evgeniy Alekseev <arcanis at archlinux dot org>
+# Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: Geoffroy Carrier <geoffroy@archlinux.org>
 # Contributor: William Rea <sillywilly@gmail.com>
 # Contributor: Robert Emil Berge <filoktetes@linuxophic.org>
 
 pkgname=lilypond
-pkgver=2.21.4
-pkgrel=1
-pkgdesc="An automated music engraving system"
-arch=( x86_64 powerpc64le powerpc )
-url="http://lilypond.org"
-license=('GPL')
-depends=('fontconfig' 'freetype2' 'guile' 'ghostscript' 'glib2' 'pango')
-optdepends=('python2: for lilypond-book and other scripts')
-makedepends=('flex' 'bison' 'gettext' 'mftrace' 'texinfo' 'fontforge' 't1utils'
-             'gsfonts' 'texi2html' 'dblatex' 'texlive-langcyrillic' 'imagemagick'
-             'zip' 'rsync' 'netpbm' 'texlive-core' 'tex-gyre-fonts' 'python2')
-options=('emptydirs')
-source=("http://lilypond.org/downloads/sources/v${pkgver%.*}/$pkgname-$pkgver.tar.gz"
-	lilyfontsize.patch)
-sha256sums=('db57981fc27d75025efa769a20465ca20b0889b7ae562bbb199886bf986a05f2'
-            '17b86b7a0b09b73cb5cf8751464571cf6a785c0b1a23db425cc828855a9d8ae6')
+pkgver=2.22.0
+pkgrel=2
+pkgdesc="Music engraving program, devoted to producing the highest-quality sheet music possible"
+arch=(x86_64 powerpc64le powerpc)
+url="https://lilypond.org"
+license=('FDL1.3' 'GPL3' 'custom:OFL')
+groups=('pro-audio')
+depends=('gcc-libs' 'ghostscript' 'glibc' 'gsfonts' 'guile')
+makedepends=('fontconfig' 'fontforge' 'freetype2' 'glib2' 'imagemagick' 'pango'
+'python' 'rsync' 't1utils' 'texinfo' 'texlive-core' 'tex-gyre-fonts'
+'texlive-langcyrillic' 'zip')
+optdepends=(
+  'python: for lilypond-book and other scripts'
+  'tex-gyre-fonts: for extra fonts'
+  'ttf-dejavu: for extra fonts'
+)
+source=("https://lilypond.org/downloads/sources/v${pkgver%.*}/$pkgname-$pkgver.tar.gz")
+sha512sums=('4dcc4da1bd1aa1d10ca802acbe29f2256587cd8e2643651b6d2e42cfce0b9572d0eb1139fbc59cec98ad6b86b86e7a6910becb6be7a4350ee0adfe366daa0a65')
+b2sums=('a7512629be43680c6e6bda1404c9b8e4a9bfb0b65ad565aede9dba983ae8e5fb350e8a53250cd01314b4d032d1bbe7b391bb3acd411dc6665868f4cd04f15011')
 
 prepare() {
-  cd "$srcdir/$pkgname-$pkgver"
-
-  sed -e 's|1.82, 1.82|1.82|g' -i configure.ac # Remove version constraint on texi2html
-
-  patch -p1 -i "$srcdir/lilyfontsize.patch"
-
-  ./autogen.sh --noconf
+  cd "$pkgname-$pkgver"
+  autoconf --force --verbose
 }
 
 build() {
-  cd "$srcdir/$pkgname-$pkgver"
-  ./configure \
-    --prefix=/usr \
-    --build=${CHOST}
+  cd "$pkgname-$pkgver"
+  ./configure --prefix=/usr \
+              --disable-texi2html \
+	      --build=${CHOST}
   make
 }
 
 package() {
-  cd "$srcdir/$pkgname-$pkgver"
+  depends+=('libfontconfig.so' 'libfreetype.so' 'libglib-2.0.so'
+  'libgobject-2.0.so' 'libpangoft2-1.0.so' 'libpango-1.0.so')
+  cd "$pkgname-$pkgver"
   make DESTDIR="$pkgdir" vimdir="/usr/share/vim/vimfiles" install
+  install -vDm 644 LICENSE.OFL -t "${pkgdir}/usr/share/licenses/${pkgname}/"
+  install -vDm 644 {AUTHORS,NEWS}.txt README.md \
+    -t "${pkgdir}/usr/share/doc/${pkgname}/"
+  # delete copied fonts, they are relied upon as optdepends
+  rm "${pkgdir}/usr/share/lilypond/${pkgver}/fonts/otf/"{C059,Nimbus,texgyre}*.otf
 }
-
