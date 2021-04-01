@@ -4,22 +4,26 @@
 # Contributor: Victor Aurélio Santos <victoraur.santos@gmail.com>
 
 pkgbase='grpc'
-pkgname=('grpc' 'python-grpcio' 'php-grpc' 'grpc-cli')
-pkgver=1.34.0
+pkgname=('grpc' 'python-grpcio' 'php-grpc' 'php7-grpc' 'grpc-cli')
+pkgver=1.36.2
 _gtestver=c9ccac7cb7345901884aabf5d1a786cfa6e2f397
 _abseilcppver=20200923.2
-pkgrel=4
+pkgrel=1
 pkgdesc="High performance, open source, general RPC framework that puts mobile and HTTP/2 first."
-arch=(x86_64 powerpc64le)
+arch=(x86_64 powerpc64le powerpc)
 url='https://grpc.io'
 license=('BSD')
-makedepends=('re2' 're2c' 'protobuf' 'php' 'c-ares' 'openssl' 'chrpath' 'cython' 'cmake' 'benchmark')
+makedepends=('re2' 're2c' 'protobuf' 'php' 'php7' 'c-ares' 'openssl' 'chrpath' 'cython'
+             'cmake' 'benchmark' 'python-setuptools')
+[ "${CARCH}" == 'powerpc' ] && makedepends+=('libatomic_ops')
 source=("https://github.com/grpc/grpc/archive/v$pkgver/$pkgbase-$pkgver.tar.gz"
         "https://github.com/google/googletest/archive/$_gtestver/googletest-$_gtestver.tar.gz"
-        "https://github.com/abseil/abseil-cpp/archive/$_abseilcppver/abseil-cpp-$_abseilcppver.tar.gz")
-sha256sums=('7372a881122cd85a7224435a1d58bc5e11c88d4fb98a64b83f36f3d1c2f16d39'
+        "https://github.com/abseil/abseil-cpp/archive/$_abseilcppver/abseil-cpp-$_abseilcppver.tar.gz"
+        "abseil-cpp-pr-898.patch::https://patch-diff.githubusercontent.com/raw/abseil/abseil-cpp/pull/898.patch")
+sha256sums=('51403542b19e9ed5d3b6551ce4a828e17883a1593d4ca408b098f04b0767d202'
             '443d383db648ebb8e391382c0ab63263b7091d03197f304390baac10f178a468'
-            'bf3f13b13a0095d926b25640e060f7e13881bd8a792705dd9e161f3c2b9aa976')
+            'bf3f13b13a0095d926b25640e060f7e13881bd8a792705dd9e161f3c2b9aa976'
+            '18ce65262d5644bb64f1e176f87e180afa274929458c6cbb9490c0aac226617c')
 
 prepare() {
   cd "$srcdir/$pkgbase-$pkgver"
@@ -29,13 +33,21 @@ prepare() {
 
   rm -rf third_party/abseil-cpp
   ln -s "$srcdir/abseil-cpp-$_abseilcppver/" third_party/abseil-cpp
+  patch -d third_party/abseil-cpp -Np1 -i ${srcdir}/abseil-cpp-pr-898.patch
 
-  mkdir build
+  #patch -Np0 -i ${srcdir}/google-sucks.patch
+
+  mkdir -p build
+
+  cp -a src/php{,7}
 }
 
 build() {
   cd "$srcdir/$pkgbase-$pkgver/build"
-  cmake \
+  
+  [ "${CARCH}" == 'powerpc' ] && EXTRA_CMAKE_FLAGS="-DCMAKE_CXX_STANDARD_LIBRARIES=-latomic"
+
+  cmake ${EXTRA_CMAKE_FLAGS} \
     -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_CXX_FLAGS="${CXXFLAGS} -DNDEBUG" \
     -DgRPC_INSTALL=ON \
@@ -59,6 +71,12 @@ build() {
   ./configure --enable-grpc="$srcdir/$pkgbase-$pkgver"
   make
 
+  # PHP7
+  cd "$srcdir/$pkgbase-$pkgver/src/php7/ext/$pkgbase"
+  phpize7
+  ./configure --enable-grpc="$srcdir/$pkgbase-$pkgver"
+  make
+
   # Python
   cd "$srcdir/$pkgbase-$pkgver"
   GRPC_PYTHON_BUILD_WITH_CYTHON=1 \
@@ -72,6 +90,7 @@ build() {
 
 package_grpc() {
   depends=('c-ares' 'protobuf' 'openssl' 're2')
+  [ "${CARCH}" == 'power' ] && depends+=('libatomic_ops')
   provides=(
     'libupb.so'
     'libgrpcpp_channelz.so'
@@ -118,6 +137,23 @@ package_php-grpc() {
   install -Dm644 grpc.ini "$pkgdir/etc/php/conf.d/grpc.ini"
 }
 
+package_php7-grpc() {
+  pkgdesc='gRPC module for PHP'
+  depends=('grpc' 'php7')
+  backup=('etc/php7/conf.d/grpc.ini')
+
+  # Install PHP extension.
+  cd "$srcdir/$pkgbase-$pkgver/src/php7/ext/$pkgbase"
+  make install "INSTALL_ROOT=$pkgdir"
+  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+
+  # Remove RPATH
+  chrpath -d "$pkgdir/usr/lib/php7/modules/grpc.so"
+
+  echo ';extension=grpc.so' >grpc.ini
+  install -Dm644 grpc.ini "$pkgdir/etc/php7/conf.d/grpc.ini"
+}
+
 package_grpc-cli() {
   pkgdesc='gRPC protocol buffers cli'
   depends=('grpc')
@@ -125,6 +161,11 @@ package_grpc-cli() {
   cd "$srcdir/$pkgbase-$pkgver"
   install -dm0755 "$pkgdir/usr/lib"
   cp -a build/libgrpc++_test_config.so* "$pkgdir/usr/lib/"
+
+  for solib in build/third_party/abseil-cpp/absl/flags/*.so; do
+    install -t "$pkgdir/usr/lib" "$solib"
+  done
+
   install -Dm0755 build/grpc_cli "$pkgdir/usr/bin/grpc_cli"
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
