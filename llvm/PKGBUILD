@@ -6,7 +6,7 @@ pkgname=('llvm' 'llvm-libs' 'llvm-ocaml')
 pkgver=11.1.0
 pkgrel=1
 _ocaml_ver=4.11.1
-arch=( x86_64 powerpc64le powerpc )
+arch=(x86_64 powerpc64le powerpc)
 url="https://llvm.org/"
 license=('custom:Apache 2.0 with LLVM Exception')
 makedepends=('cmake' 'ninja' 'libffi' 'libedit' 'ncurses' 'libxml2'
@@ -18,35 +18,35 @@ _source_base=https://github.com/llvm/llvm-project/releases/download/llvmorg-$pkg
 source=($_source_base/$pkgname-$pkgver.src.tar.xz{,.sig}
         amdgpu-avoid-an-illegal-operand-in-si-shrink-instr.patch
         llvm-config.h
-        llvm-004-override-opt.patch
-        llvm-005-ppc-bigpic.patch)
+        llvm-001-ppc-secureplt.patch
+        llvm-002-ppc-bigpic.patch
+        llvm-003-clean-up-exported-values-so.patch)
 sha256sums=('ce8508e318a01a63d4e8b3090ab2ded3c598a50258cc49e2625b9120d4c03ea5'
             'SKIP'
             '85b6977005899bc76fcc548e0b6501cae5f50a8ad03060b9f58d03d775323327'
             '597dc5968c695bbdbb0eac9e8eb5117fcd2773bc91edf5ec103ecffffab8bc48'
-            '876dd496500c43010b2ab0c678cc843ee46df7294a4eb176d3e696a9e625ddb4'
-            'e55508953b61ac8c391ca1babd821eb2144c017b2a86c79f1f008ec95964608b')
+            '950035220d464b28e0b6f9b8a4f4b48cf991c42130268377ea38b370fca81e4d'
+            'e55508953b61ac8c391ca1babd821eb2144c017b2a86c79f1f008ec95964608b'
+            '1f1c474c223020199ee86ac589b1497faaca86f23a9f1dd1bdcc69e3b1357e96')
 validpgpkeys+=('B6C8F98282B944E3B0D5C2530FC3042E345AD05D') # Hans Wennborg <hans@chromium.org>
 validpgpkeys+=('474E22316ABF4785A88C6E8EA2C794A986419D8A') # Tom Stellard <tstellar@redhat.com>
 
-export CFLAGS=${CFLAGS/-flto=auto/}
-export CXXFLAGS=${CXXFLAGS/-flto=auto/}
-export LDFLAGS=${LDFLAGS/-flto=auto/}
-
 prepare() {
   cd "$srcdir/llvm-$pkgver.src"
+  mkdir -p build
+
   # https://gitlab.freedesktop.org/mesa/mesa/-/issues/4107
   # https://bugs.llvm.org/show_bug.cgi?id=48921#c2
-  patch -Np2 -i ../amdgpu-avoid-an-illegal-operand-in-si-shrink-instr.patch
+  patch -Np2 -i ${srcdir}/amdgpu-avoid-an-illegal-operand-in-si-shrink-instr.patch
 
-  patch -Np1 -i ${srcdir}/llvm-004-override-opt.patch
-  patch -Np1 -i ${srcdir}/llvm-005-ppc-bigpic.patch
-
-  mkdir -p build
+  patch -Np1 -i ${srcdir}/llvm-001-ppc-secureplt.patch
+  patch -Np1 -i ${srcdir}/llvm-002-ppc-bigpic.patch
+  patch -Np1 -i ${srcdir}/llvm-003-clean-up-exported-values-so.patch
 }
 
 build() {
   cd "$srcdir/llvm-$pkgver.src/build"
+
 
   cmake .. -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
@@ -62,7 +62,8 @@ build() {
     -DLLVM_ENABLE_SPHINX=ON \
     -DLLVM_ENABLE_DOXYGEN=OFF \
     -DSPHINX_WARNINGS_AS_ERRORS=OFF \
-    -DLLVM_BINUTILS_INCDIR=/usr/include
+    -DLLVM_BINUTILS_INCDIR=/usr/include \
+    -DLLVM_APPEND_VC_REV=OFF
   ninja all ocaml_doc
 }
 
