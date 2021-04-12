@@ -3,13 +3,14 @@
 # Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
 
 pkgname=clang
-pkgver=11.0.0
-pkgrel=3
+pkgver=11.1.0
+pkgrel=1
 pkgdesc="C language family frontend for LLVM"
-arch=( x86_64 powerpc64le powerpc )
+arch=(x86_64 powerpc64le powerpc)
 url="https://clang.llvm.org/"
 license=('custom:Apache 2.0 with LLVM Exception')
-depends=('llvm-libs' 'gcc' 'compiler-rt')
+depends=('llvm-libs' 'gcc')
+depends_x86_64=('compiler-rt')
 makedepends=('llvm' 'cmake' 'ninja' 'python-sphinx' 'python2')
 optdepends=('openmp: OpenMP support in clang with -fopenmp'
             'python: for scan-view and git-clang-format'
@@ -21,14 +22,20 @@ _source_base=https://github.com/llvm/llvm-project/releases/download/llvmorg-$pkg
 source=($_source_base/$pkgname-$pkgver.src.tar.xz{,.sig}
         $_source_base/clang-tools-extra-$pkgver.src.tar.xz{,.sig}
         $_source_base/llvm-$pkgver.src.tar.xz{,.sig}
-        enable-SSP-and-PIE-by-default.patch)
-sha256sums=('0f96acace1e8326b39f220ba19e055ba99b0ab21c2475042dbc6a482649c5209'
+        enable-SSP-and-PIE-by-default.patch
+        llvm-001-ppc-secureplt.patch
+        llvm-002-ppc-bigpic.patch
+        llvm-003-clean-up-exported-values-so.patch)
+sha256sums=('0a8288f065d1f57cb6d96da4d2965cbea32edc572aa972e466e954d17148558b'
             'SKIP'
-            'fed318f75d560d0e0ae728e2fb8abce71e9d0c60dd120c9baac118522ce76c09'
+            '76707c249de7a9cde3456b960c9a36ed9bbde8e3642c01f0ef61a43d61e0c1a2'
             'SKIP'
-            '913f68c898dfb4a03b397c5e11c6a2f39d0f22ed7665c9cefa87a34423a72469'
+            'ce8508e318a01a63d4e8b3090ab2ded3c598a50258cc49e2625b9120d4c03ea5'
             'SKIP'
-            '248a0e8609b00689e82ce5e05e1de58b7c8ae09a35bbb9625e9069e1f13d2fec')
+            '248a0e8609b00689e82ce5e05e1de58b7c8ae09a35bbb9625e9069e1f13d2fec'
+            '950035220d464b28e0b6f9b8a4f4b48cf991c42130268377ea38b370fca81e4d'
+            'e55508953b61ac8c391ca1babd821eb2144c017b2a86c79f1f008ec95964608b'
+            '1f1c474c223020199ee86ac589b1497faaca86f23a9f1dd1bdcc69e3b1357e96')
 validpgpkeys+=('B6C8F98282B944E3B0D5C2530FC3042E345AD05D') # Hans Wennborg <hans@chromium.org>
 validpgpkeys+=('474E22316ABF4785A88C6E8EA2C794A986419D8A') # Tom Stellard <tstellar@redhat.com>
 
@@ -58,17 +65,28 @@ prepare() {
   cd "$srcdir/$pkgname-$pkgver.src"
   mkdir build
   mv "$srcdir/clang-tools-extra-$pkgver.src" tools/extra
+
   patch -Np2 -i ../enable-SSP-and-PIE-by-default.patch
+
+  cd "$srcdir/llvm-$pkgver.src"
+  patch -Np1 -i ${srcdir}/llvm-001-ppc-secureplt.patch
+  patch -Np1 -i ${srcdir}/llvm-002-ppc-bigpic.patch
+  patch -Np1 -i ${srcdir}/llvm-003-clean-up-exported-values-so.patch
 }
 
 build() {
   cd "$srcdir/$pkgname-$pkgver.src/build"
 
+  case "${CARCH}" in
+    powerpc)
+      LDFLAGS+=' -Wl,--no-keep-memory'
+      ;;
+  esac
+
   local cmake_args=(
     -G Ninja
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_INSTALL_PREFIX=/usr
-    -DPYTHON_EXECUTABLE=/usr/bin/python
     -DLLVM_LINK_LLVM_DYLIB=ON
     -DCLANG_LINK_CLANG_DYLIB=ON
     -DLLVM_ENABLE_RTTI=ON
@@ -138,3 +156,4 @@ package() {
 }
 
 # vim:set ts=2 sw=2 et:
+
