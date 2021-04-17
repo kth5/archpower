@@ -12,21 +12,32 @@ shopt -s extglob
 
 pkgbase=ghc
 pkgname=(ghc-libs ghc ghc-static)
-pkgver=8.10.2
+pkgver=8.10.4
 pkgrel=1
 pkgdesc='The Glasgow Haskell Compiler'
-arch=(x86_64 powerpc64le)
+arch=(x86_64 powerpc64le powerpc)
 url='https://www.haskell.org/ghc/'
 license=('custom')
-makedepends=('ghc-static' 'perl' 'libxslt' 'docbook-xsl' 'python-sphinx' 'haskell-hscolour'
-             'texlive-bin' 'texlive-latexextra' 'ttf-dejavu' 'alex' 'happy' 'time')
+makedepends=('perl' 'libxslt' 'docbook-xsl' 'python-sphinx'
+             'texlive-bin' 'texlive-latexextra' 'ttf-dejavu' 'time')
+[ "${CARCH}" == 'powerpc' ] && makedepends+=('libatomic_ops')
 source=("https://downloads.haskell.org/~ghc/$pkgver/$pkgbase-${pkgver}-src.tar.xz"
-        ghc-rebuild-doc-index.hook ghc-register.hook ghc-unregister.hook)
+        ghc-rebuild-doc-index.hook ghc-register.hook ghc-unregister.hook
+        3c12355ece0fa14e534c71a9f7327eda9773fad9.patch
+        fix-big-endian-ffi.patch
+        fix-build-using-unregisterised-v8.6.orig
+        no-atomic-64-on-32bit.patch
+        libffi-autogen.patch)
 noextract=("$pkgbase-${pkgver}-src.tar.xz")
-sha512sums=('6c3f1311feab3665419a301b17fcb09d303ec822f8eb8c4021edfacff00d9b52e71895bed0e58f11d8f7970415bd8c6f95ffde1294afe795e15607199b20cefc'
+sha512sums=('9bb078cb72535a352243b83b671c871392564efd09e478549f27ae58fc6f46e337a0782f5500d26d5704ad96eace22e77bb36031a1fe9b7e175f265b0b9c028b'
             'd69e5222d1169c4224a2b69a13e57fdd574cb1b5932b15f4bc6c7d269a9658dd87acb1be81f52fbcf3cb64f96978b9943d10cee2c21bff0565aaa93a5d35fcae'
             '5f659651d8e562a4dcaae0f821d272d6e9c648b645b1d6ab1af61e4dd690dc5a4b9c6846753b7f935963f001bb1ae1f40cd77731b71ef5a8dbc079a360aa3f8f'
-            '3bdbd05c4a2c4fce4adf6802ff99b1088bdfad63da9ebfc470af9e271c3dd796f86fba1cf319d8f4078054d85c6d9e6a01f79994559f24cc77ee1a25724af2e6')
+            '3bdbd05c4a2c4fce4adf6802ff99b1088bdfad63da9ebfc470af9e271c3dd796f86fba1cf319d8f4078054d85c6d9e6a01f79994559f24cc77ee1a25724af2e6'
+            '49724af599f26277c02e453f269c0a851506a0911a15bb5242cc10b3e3be6ddb513d8687cf7ae5e1d80a5e4817598daed4b618227064f8374f4da69f53a962a6'
+            'ec0f0d1fbaac59e08e4e0ac5a4012e2be476e14dcfe724bbe1a6d731a12b82d4aeec72aa922a852b7593dcc9c9d4570277eeea00374b5b49c10c733c974e54cb'
+            '5a1269692a6981052489c800e77c3dc903041075e7d2bac12d5f48df72e27efecd431e89c4ba087370d7a135185f5019b44fadb6b71e04faf8716aa7cceab43d'
+            '95057de580c2a3103a0f6b0a32f56ca0a642e66b008f3f0c067f63c81b2334b8e1dda482af758164bafc216b7cff263731b68ff39e4b55ac23b6cd6e764f5437'
+            '1c48a39c9ec8aade2bd6a6f05216983616f69aef8c2a7ae153366d6a4a284b1eaeee28cdcc8b7f29b3102dfcf8509168661e2b33e30f5a609721256a21bc5167')
 
 prepare() {
   # Need to extract this tarball with a UTF-8 locale instead of a chroot's "C"
@@ -36,6 +47,13 @@ prepare() {
 
   cd ghc-$pkgver
 
+  patch -Np1 -i ${srcdir}/3c12355ece0fa14e534c71a9f7327eda9773fad9.patch
+  patch -Np1 -i ${srcdir}/fix-big-endian-ffi.patch
+  #patch -Np1 -i ${srcdir}/fix-build-using-unregisterised-v8.6.orig
+  patch -Np1 -i ${srcdir}/no-atomic-64-on-32bit.patch
+  patch -Np1 -i ${srcdir}/libffi-autogen.patch
+
+
   cp mk/build.mk{.sample,}
   sed -i '1iBuildFlavour = perf' mk/build.mk
 }
@@ -43,7 +61,17 @@ prepare() {
 build() {
   cd ghc-$pkgver
 
+  case "${CARCH}" in 
+    powerpc)
+      LDFLAGS+=' -latomic_ops'
+      EXTRA_CONFIGURE_FLAGS="--enable-unregistered"
+      ;;
+  esac
+
   ./configure \
+    --build=${CHOST} \
+    --host=${CHOST} \
+    --target=${CHOST} \
     --prefix=/usr \
     --docdir=/usr/share/doc/ghc \
     --with-system-libffi \
@@ -79,7 +107,6 @@ package_ghc() {
             'haskell-hp2ps'
             'haskell-hpc-bin'
             'haskell-hsc2hs')
-
   provides+=("haskell-ghc=$pkgver")
   replaces+=("haskell-ghc")
 
@@ -105,25 +132,27 @@ package_ghc-libs() {
   pkgdesc='The Glasgow Haskell Compiler - Dynamic Libraries'
   install='ghc.install'
   depends=('gmp' 'libffi' 'perl')
-  provides=('haskell-array=0.5.4.0'
+  [ "${CARCH}" == 'powerpc' ] && depends+=('libatomic_ops')
+  provides=('haskell-cabal=3.2.1.0'
+            'haskell-array=0.5.4.0'
             'haskell-base=4.14.1.0'
             'haskell-binary=0.8.8.0'
-            'haskell-bytestring=0.10.10.0'
-            'haskell-cabal=3.2.0.0'
+            'haskell-bytestring=0.10.12.0'
             'haskell-containers=0.6.2.1'
             'haskell-deepseq=1.4.4.0'
             'haskell-directory=1.3.6.0'
             'haskell-exceptions=0.10.4'
             'haskell-filepath=1.4.2.1'
-            'haskell-ghc-boot=8.10.2'
-            'haskell-ghc-boot-th=8.10.2'
+            'haskell-ghc-boot-th=8.10.4'
+            'haskell-ghc-boot=8.10.4'
             'haskell-ghc-compact=0.1.0.0'
-            'haskell-ghc-heap=8.10.2'
+            'haskell-ghc-heap=8.10.4'
             'haskell-ghc-prim=0.6.1'
+            'haskell-ghci=8.10.4'
             'haskell-haskeline=0.8.0.1'
             'haskell-hpc=0.6.1.0'
             'haskell-integer-gmp=1.0.3.0'
-            'haskell-libiserv=8.10.2'
+            'haskell-libiserv=8.10.4'
             'haskell-mtl=2.2.2'
             'haskell-parsec=3.1.14.0'
             'haskell-pretty=1.1.3.6'
@@ -131,27 +160,29 @@ package_ghc-libs() {
             'haskell-stm=2.5.0.0'
             'haskell-template-haskell=2.16.0.0'
             'haskell-terminfo=0.4.1.4'
-            'haskell-text=1.2.3.2'
+            'haskell-text=1.2.4.1'
             'haskell-time=1.9.3'
             'haskell-transformers=0.5.6.2'
             'haskell-unix=2.7.2.2'
             'haskell-xhtml=3000.2.2.1'
+            'haskell-ghc-pkg=6.9'
             'haskell-ghc-pkg=6.9')
-  replaces=('haskell-array'
+  replaces=('haskell-cabal'
+            'haskell-array'
             'haskell-base'
             'haskell-binary'
             'haskell-bytestring'
-            'haskell-cabal'
             'haskell-containers'
             'haskell-deepseq'
             'haskell-directory'
             'haskell-exceptions'
             'haskell-filepath'
-            'haskell-ghc-boot'
             'haskell-ghc-boot-th'
+            'haskell-ghc-boot'
             'haskell-ghc-compact'
             'haskell-ghc-heap'
             'haskell-ghc-prim'
+            'haskell-ghci'
             'haskell-haskeline'
             'haskell-hpc'
             'haskell-integer-gmp'
@@ -168,8 +199,8 @@ package_ghc-libs() {
             'haskell-transformers'
             'haskell-unix'
             'haskell-xhtml'
+            'haskell-ghc-pkg'
             'haskell-ghc-pkg')
-
   provides+=("haskell-ghci=$pkgver")
   conflicts+=('haskell-ghci')
 
