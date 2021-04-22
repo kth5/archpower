@@ -1,7 +1,7 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 pkgname=ungoogled-chromium
-pkgver=87.0.4280.141
-pkgrel=2
+pkgver=89.0.4389.90
+pkgrel=1
 pkgdesc="Google Chromium, sans integration with Google - PPC64LE FORK"
 arch=(x86_64 powerpc64le)
 url="https://github.com/leo-lb/ungoogled-chromium/tree/master"
@@ -11,7 +11,7 @@ provides=('chromium')
 replaces=('ungoogled-chromium-archlinux')
 depends=('gtk3' 'nss' 'alsa-lib' 'xdg-utils' 'libxss' 'libcups' 'libgcrypt'
          'ttf-liberation' 'systemd' 'dbus' 'libpulse' 'pciutils' 'json-glib'
-         'desktop-file-utils' 'hicolor-icon-theme')
+         'desktop-file-utils' 'hicolor-icon-theme' 'pipewire')
 makedepends=('python' 'python2' 'gperf' 'mesa' 'ninja' 'nodejs' 'git' 'libva'
              'libpipewire02' 'clang' 'llvm' 'lld' 'gn' 'java-runtime-headless'
              'python2-setuptools' 'meson')
@@ -20,18 +20,18 @@ optdepends=('libpipewire02: WebRTC desktop sharing under Wayland'
             'kdialog: needed for file dialogs in KDE'
             'org.freedesktop.secrets: password storage backend on GNOME / Xfce'
             'kwallet: for storing passwords in KWallet on KDE desktops')
-_gcc_patchset=9
-commit='ceca11d53907f1b0ba5128435c5fbb3f26f5f69e'
+_gcc_patchset=7
+commit='f8ed009f1afe5ee57b8bd49a2c57b270a24d715c'
 source=("git+https://github.com/leo-lb/ungoogled-chromium.git#commit=${commit}"
   https://github.com/stha09/chromium-patches/releases/download/chromium-${pkgver%%.*}-patchset-$_gcc_patchset/chromium-${pkgver%%.*}-patchset-$_gcc_patchset.tar.xz
-  chromium-icu68.patch
-  subpixel-anti-aliasing-in-FreeType-2.8.1.patch
- chromium-glibc-2.33.patch)
+  chromium-glibc-2.33.patch
+  xxx-ppc64le-libvpx.patch
+  xxx-ppc64le-support.patch)
 sha256sums=('SKIP'
-            'c99934bcd2f3ae8ea9620f5f59a94338b2cf739647f04c28c8a551d9083fa7e9'
-            '02cfa7fc75f4df44044efb35aeeb0dba85b250e5cabe991fd381221862b2e5d7'
-            '1e2913e21c491d546e05f9b4edf5a6c7a22d89ed0b36ef692ca6272bcd5faec6'
-            '2fccecdcd4509d4c36af873988ca9dbcba7fdb95122894a9fdf502c33a1d7a4b')
+            'f8b1558f6c87b33423da854d42f0f69d47885a96d6bf6ce7f26373e93d47442f'
+            '2fccecdcd4509d4c36af873988ca9dbcba7fdb95122894a9fdf502c33a1d7a4b'
+            '9af5aad8554c966542550f7467bb86d3a02d101aded4407f0a14ad289e47ee62'
+	    'eea60ec32cc6a4c249ad2d483b64000d94a060b94d90015943a647c7adc4a4fd')
 
 # Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
 # Keys are the names in the above script; values are the dependencies in Arch
@@ -102,25 +102,21 @@ prepare() {
   # https://crbug.com/1164975
   patch -Np1 -i ${srcdir}/chromium-glibc-2.33.patch
 
-  # Upstream fixes
-  patch -Np1 -d third_party/skia <${srcdir}/subpixel-anti-aliasing-in-FreeType-2.8.1.patch
-
-  # Fixes for building with libstdc++ instead of libc++
-  patch -Np1 -i ${srcdir}/patches/chromium-87-ServiceWorkerContainerHost-crash.patch
-  patch -Np1 -i ${srcdir}/patches/chromium-87-openscreen-include.patch
-
-  # fix for icu 68
-  patch -Np2 -i ${srcdir}/chromium-icu68.patch
+  # Thanks Voidlinux!
+  patch -Np0 -i ${srcdir}/xxx-ppc64le-libvpx.patch
+  patch -Np0 -i ${srcdir}/xxx-ppc64le-support.patch
 
   # Force script incompatible with Python 3 to use /usr/bin/python2
   sed -i '1s|python$|&2|' third_party/dom_distiller_js/protoc_plugins/*.py
 
-  # Make xcbgen available to ui/gfx/x/gen_xproto.py running under Python 2
-  ln -sf /usr/lib/python3.*/site-packages/xcbgen "$srcdir/"
+  mkdir -p third_party/node/linux/node-linux-ppc64le/bin
+  ln -s /usr/bin/node third_party/node/linux/node-linux-ppc64le/bin/
 
-  msg2 'Use system nodejs'
-  mkdir -p third_party/node/linux/node-linux-ppc64/bin
-  ln -s /usr/bin/node third_party/node/linux/node-linux-ppc64/bin/
+  pushd third_party/libvpx
+  mkdir -p source/config/linux/ppc64
+  # need PATH to find gn
+  PATH="${wrksrc}/out/Release:$PATH" ./generate_gni.sh
+  popd
 
   # Remove bundled libraries for which we will use the system copies; this
   # *should* do what the remove_bundled_libraries.py script does, with the
@@ -128,14 +124,14 @@ prepare() {
   local _lib
   for _lib in ${_unwanted_bundled_libs[@]}; do
     find "third_party/$_lib" -type f \
-    \! -path "third_party/$_lib/chromium/*" \
-    \! -path "third_party/$_lib/google/*" \
-    \! -path "third_party/harfbuzz-ng/utils/hb_scoped.h" \
-    \! -regex '.*\.\(gn\|gni\|isolate\)' \
-    -delete
+      \! -path "third_party/$_lib/chromium/*" \
+      \! -path "third_party/$_lib/google/*" \
+      \! -path "third_party/harfbuzz-ng/utils/hb_scoped.h" \
+      \! -regex '.*\.\(gn\|gni\|isolate\)' \
+      -delete
   done
 
-  python2 build/linux/unbundle/replace_gn_files.py \
+  ./build/linux/unbundle/replace_gn_files.py \
     --system-libraries "${!_system_libs[@]}"
 }
 
@@ -147,48 +143,30 @@ build() {
     export CCACHE_SLOPPINESS=time_macros
   fi
 
-  # ui/gfx/x/gen_xproto.py needs xcbgen
-  export PYTHONPATH=$srcdir
-
   export CC=clang
   export CXX=clang++
-  export AR=llvm-ar
-  export NM=llvm-nm
-
-  export CFLAGS=${CFLAGS/-flto=auto/}
-  export CXXFLAGS=${CXXFLAGS/-flto=auto/}
-  export LDFLAGS=${LDFLAGS/-flto=auto/}
+  export AR=ar
+  export NM=nm
 
   local _flags=(
     'custom_toolchain="//build/toolchain/linux/unbundle:default"'
     'host_toolchain="//build/toolchain/linux/unbundle:default"'
     'clang_use_chrome_plugins=false'
     'is_official_build=true' # implies is_cfi=true on x86_64
+    'chrome_pgo_phase=0' # unsupported instrumentation profile format version
     'treat_warnings_as_errors=false'
     'fieldtrial_testing_like_official_build=true'
     'ffmpeg_branding="Chrome"'
     'proprietary_codecs=true'
     'rtc_use_pipewire=true'
+    'rtc_pipewire_version="0.3"' # will be the default in Chromium 90
     'link_pulseaudio=true'
     'use_gnome_keyring=false'
     'use_sysroot=false'
     'use_custom_libcxx=false'
-    'enable_hangout_services_extension=false'
-    'enable_one_click_signin=false'
+    'enable_hangout_services_extension=true'
     'enable_widevine=true'
-    'use_vaapi=true'
     'enable_nacl=false'
-    "google_api_key=\"\""
-    "google_default_client_id=\"\""
-    "google_default_client_secret=\"\""
-    'safe_browsing_mode=0'
-    'use_official_google_api_keys=false'
-    'use_unofficial_version_number=false'
-    'enable_js_type_check=false'
-    'use_lld=true'
-    'use_thin_lto=true'
-    'thin_lto_enable_optimizations=true'
-    'concurrent_links=2'
   )
 
   if [[ -n ${_system_libs[icu]+set} ]]; then
@@ -198,7 +176,7 @@ build() {
   if check_option strip y; then
     _flags+=('symbol_level=0')
   fi
-  
+
   # Facilitate deterministic builds (taken from build/config/compiler/BUILD.gn)
   CFLAGS+='   -Wno-builtin-macro-redefined'
   CXXFLAGS+=' -Wno-builtin-macro-redefined'
@@ -207,23 +185,10 @@ build() {
   # Do not warn about unknown warning options
   CFLAGS+='   -Wno-unknown-warning-option'
   CXXFLAGS+=' -Wno-unknown-warning-option'
-  
-  mkdir -p out/Default
-  ./tools/gn/bootstrap/bootstrap.py --skip-generate-buildfiles -j$(nproc) -o out/Default/gn
-  export PATH="${PWD}/out/Default:${PATH}"
 
-  cd third_party/libvpx
-  mkdir -p source/config/linux/ppc64
-  ./generate_gni.sh
-  cd ../../
+  gn gen out/Release --args="${_flags[*]}"
+  ninja -C out/Release chrome chrome_sandbox chromedriver
 
-  cd third_party/dav1d
-  ./generate_configs.py
-  ./generate_source.py
-  cd ../../
-
-  gn gen out/Default --args="${_flags[*]}" --script-executable=/usr/bin/python2
-  ninja ${MAKEFLAGS} -C out/Default chrome chrome_sandbox chromedriver	
 }
 
 package() {
