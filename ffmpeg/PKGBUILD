@@ -6,11 +6,11 @@
 # Contributor: Paul Mattal <paul@archlinux.org>
 
 pkgname=ffmpeg
-pkgver=4.3.2
-pkgrel=3
+pkgver=4.4
+pkgrel=2
 epoch=2
 pkgdesc='Complete solution to record, convert and stream audio and video'
-arch=(x86_64 powerpc64le)
+arch=(x86_64 powerpc64le powerpc)
 url=https://ffmpeg.org/
 license=(GPL3)
 depends=(
@@ -35,6 +35,7 @@ depends=(
   libpulse
   librav1e.so
   libraw1394
+  librsvg-2.so
   libsoxr
   libssh
   libtheora
@@ -72,17 +73,15 @@ makedepends=(
   ladspa
 )
 
-
 optdepends=(
   'ladspa: LADSPA filters'
 )
-if [ "${CFLAGS}" == 'x86_64' ]; then
-  depends+=(libmfx vmaf)
-  makedepends+=(nasm avisynthplus amf-headers ffnvcodec-headers)
-  optdepends+=('avisynthplus: AviSynthPlus support'
-               'intel-media-sdk: Intel QuickSync support'
-               'nvidia-utils: Nvidia NVDEC/NVENC support')
-fi
+depends_powerpc=(libatomic_ops)
+depends_x86_64+=(libmfx vmaf)
+makedepends_x86_64=(nasm avisynthplus amf-headers ffnvcodec-headers)
+optdepends_x86_64=('avisynthplus: AviSynthPlus support'
+                   'intel-media-sdk: Intel QuickSync support'
+                   'nvidia-utils: Nvidia NVDEC/NVENC support')
 provides=(
   libavcodec.so
   libavdevice.so
@@ -93,14 +92,16 @@ provides=(
   libswresample.so
   libswscale.so
 )
-_tag=f719f869907764e6412a6af6e178c46e5f915d25
+_tag=dc91b913b6260e85e1304c74ff7bb3c22a8c9fb1
 source=(
   git+https://git.ffmpeg.org/ffmpeg.git#tag=${_tag}
   vmaf-model-path.patch
+  powerpc-altivec.patch
 )
 sha256sums=(
   SKIP
   8dff51f84a5f7460f8893f0514812f5d2bd668c3276ef7ab7713c99b71d7bd8d
+  116119f9a9f3207c20b848f7fcfad0f8c01961dc5a2a7b4e82909c9371c0470d
 )
 
 pkgver() {
@@ -120,11 +121,25 @@ build() {
   cd ffmpeg
 
   case "${CARCH}" in
-    powerpc64le) EXTRA_CONFIGURE_FLAGS="--enable-vsx --enable-altivec --enable-power8" ;;
-    powerpc) EXTRA_CONFIGURE_FLAGS="--disable-altivec" ;;
-    x86_64) EXTRA_CONFIGURE_FLAGS="--enable-amf --enable-avisynth --enable-libmfx --enable-cuda-llvm --enable-libvmaf --enable-nvdec --enable-nvenc"
+    powerpc64le)
+      EXTRA_CONFIGURE_FLAGS=(
+        --enable-vsx
+        --enable-altivec
+        --enable-power8
+      )
+      ;;
+    powerpc)
+      EXTRA_CONFIGURE_FLAGS=(
+        --disable-altivec
+        --extra-libs="-latomic"
+      )
+      patch -Np1 -i ${srcdir}/powerpc-altivec.patch
+      ;;
+    x86_64)
+      EXTRA_CONFIGURE_FLAGS='--enable-amf --enable-avisynth --enable-libmfx --enable-cuda-llvm --enable-libvmaf --enable-nvdec --enable-nvenc'
+      ;;
   esac
-
+  
   ./configure \
     --prefix=/usr \
     --disable-debug \
@@ -171,7 +186,7 @@ build() {
     --enable-libxvid \
     --enable-libzimg \
     --enable-shared \
-    --enable-version3 ${EXTRA_CONFIGURE_FLAGS}
+    --enable-version3 ${EXTRA_CONFIGURE_FLAGS[@]}
 
   make
   make tools/qt-faststart
