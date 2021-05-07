@@ -5,7 +5,7 @@
 pkgbase=gst-plugins-bad
 pkgname=(gst-plugins-bad-libs gst-plugins-bad gst-plugin-opencv gst-plugin-wpe)
 pkgver=1.18.4
-pkgrel=2
+pkgrel=6
 pkgdesc="Multimedia graph framework - bad plugins"
 url="https://gstreamer.freedesktop.org/"
 arch=(x86_64 powerpc64le powerpc)
@@ -22,22 +22,32 @@ makedepends=(mjpegtools curl chromaprint libmms faad2 libdca libdvdnav
              gobject-introspection vulkan-headers vulkan-validation-layers
              wayland-protocols gtk3 meson shaderc libavtp libmicrodns
              zxing-cpp opencv libva wpewebkit)
+makedepends_x86_64=(svthevcenc svt-hevc)
 checkdepends=(xorg-server-xvfb)
 options=(!emptydirs)
 _commit=8cb03bdf01ca6ad8c87f951bcd7962c3ca9f6860  # tags/1.18.4^0
-source=("git+https://gitlab.freedesktop.org/gstreamer/gst-plugins-bad.git#commit=$_commit")
-sha256sums=('SKIP')
+source=("git+https://gitlab.freedesktop.org/gstreamer/gst-plugins-bad.git#commit=$_commit"
+	gst-plugins-bad-openexr3.patch)
+sha256sums=('SKIP'
+            '6bf2b72021586efa41b35507beedb939e952cfd612ce50f5f9e704cf1bd1d876')
 
 pkgver() {
   cd $pkgbase
+
   git describe --tags | sed 's/-/+/g'
 }
 
 prepare() {
   cd $pkgbase
+  patch -Np1 -i ${srcdir}/gst-plugins-bad-openexr3.patch
 }
 
 build() {
+  case "${CARCH}" in
+    x86_64) EXTRA_MESON_FLAGS="-D svthevcenc=enabled" ;;
+    *) EXTRA_MESON_FLAGS="-D svthevcenc=disabled" ;;
+  esac
+
   arch-meson $pkgbase build \
     -D directfb=disabled \
     -D doc=disabled \
@@ -57,10 +67,9 @@ build() {
     -D wasapi=disabled \
     -D nvdec=disabled \
     -D nvenc=disabled \
-    -D svthevcenc=disabled \
     -D gobject-cast-checks=disabled \
     -D package-name="GStreamer Bad Plugins (Arch POWER)" \
-    -D package-origin="https://www.archlinuxpower.org/"
+    -D package-origin="https://www.archlinuxpower.org/" ${EXTRA_MESON_FLAGS}
   meson compile -C build
 }
 
@@ -115,7 +124,7 @@ package_gst-plugins-bad() {
            libsrtp zvbi vulkan-icd-loader libxcb wayland libwebp libnice
            webrtc-audio-processing wildmidi x265 zbar libavtp
            libmicrodns zxing-cpp libva)
-  [ "${CARCH}" == 'x86_64' ] && depends+=(svt-hevc)
+  depends_x86_64=(svthevcenc svt-hevc)
   optdepends=('nvidia-utils: nvcodec plugin')
 
   mv ext "$pkgdir/usr"
