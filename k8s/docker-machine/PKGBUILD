@@ -1,0 +1,45 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Dmitry Chusovitin <dchusovitin@gmail.com>
+
+pkgname=docker-machine
+pkgver=0.16.2
+pkgrel=5
+pkgdesc='Machine management for a container-centric world'
+arch=(x86_64 powerpc64le)
+url='https://github.com/docker/machine'
+license=('Apache')
+depends=('glibc')
+optdepends=('net-tools: for VirtualBox support')
+makedepends=('go')
+optdepends=('net-tools: required for VirtualBox driver')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/docker/machine/archive/v$pkgver.tar.gz")
+sha512sums=('92408c18be23cee040e96412dafeff16415834c3141b0a9c1f82cb9d6b1e0700344a158a44ffac24fed2c244d3fa5c531d9f13ffffaa4be1f4fcbd79104f899e')
+
+prepare() {
+  mkdir -p build/src
+  mv machine-$pkgver/vendor/* build/src/
+  mkdir -p build/src/github.com/docker
+  ln -s "$srcdir"/machine-$pkgver build/src/github.com/docker/machine
+}
+
+build() {
+  export GOPATH="$srcdir/build"
+  export CGO_CPPFLAGS="${CPPFLAGS}"
+  export CGO_CFLAGS="${CFLAGS}"
+  export CGO_CXXFLAGS="${CXXFLAGS}"
+  export CGO_LDFLAGS="${LDFLAGS}"
+  export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
+  export GO111MODULE=off
+
+  cd machine-$pkgver
+  go build -o bin/docker-machine cmd/docker-machine/machine.go # -gccgoflags "$CFLAGS $LDFLAGS"
+}
+
+package() {
+  cd machine-$pkgver
+  install -Dm755 bin/docker-machine "$pkgdir"/usr/bin/docker-machine
+  install -Dm644 contrib/completion/bash/docker-machine.bash "$pkgdir"/usr/share/bash-completion/completions/docker-machine
+  install -Dm644 contrib/completion/zsh/_docker-machine "$pkgdir"/usr/share/zsh/site-functions/_docker-machine
+  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
