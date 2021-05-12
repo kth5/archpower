@@ -1,0 +1,50 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Christian Rebischke <chris.rebischke@archlinux.org>
+# Contributor: Ivan Shapovalov <intelfx@intelfx.name>
+
+pkgname=minikube
+pkgver=1.19.0
+_minikube_commit=15cede53bdc5fe242228853e737333b09d4336b5
+pkgrel=1
+pkgdesc="A tool that makes it easy to run Kubernetes locally"
+url="https://github.com/kubernetes/minikube"
+license=('Apache')
+arch=(x86_64 powerpc64le)
+optdepends=(
+  'kubectl: to manage the cluster'
+)
+optdepends_x86_64=(
+  'virtualbox: to use --vm-driver=virtualbox'
+)
+makedepends=('git' 'go' 'go-bindata')
+depends=('glibc')
+source=("git+https://github.com/kubernetes/minikube.git#commit=${_minikube_commit}")
+sha512sums=('SKIP')
+changelog=CHANGELOG.md
+
+prepare() {
+  rm -rf "$srcdir/src"
+  mkdir -p "$srcdir/src/k8s.io"
+  mv -T "$srcdir/minikube" "$srcdir/src/k8s.io/minikube"
+  export GOPATH="$srcdir"
+  cd "$GOPATH/src/k8s.io/minikube"
+  sed -i '/^MINIKUBE_LDFLAGS/ s/$/ -linkmode=external/' Makefile
+}
+
+build() {
+  export GOPATH="$srcdir"
+  cd "$GOPATH/src/k8s.io/minikube"
+  export CGO_CPPFLAGS="${CPPFLAGS}"
+  export CGO_CFLAGS="${CFLAGS}"
+  export CGO_CXXFLAGS="${CXXFLAGS}"
+  export CGO_LDFLAGS="${LDFLAGS}"
+  export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw -ldflags=-linkmode=external"
+  make
+}
+
+package() {
+  install -Dm755 "$srcdir/src/k8s.io/minikube/out/minikube" -t "$pkgdir/usr/bin"
+
+  "$pkgdir/usr/bin/minikube" completion bash | install -Dm644 /dev/stdin "$pkgdir/usr/share/bash-completion/completions/minikube"
+  "$pkgdir/usr/bin/minikube" completion zsh | install -Dm644 /dev/stdin "$pkgdir/usr/share/zsh/site-functions/_minikube"
+}
