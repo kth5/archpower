@@ -4,22 +4,24 @@
 # Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
 # Contributor: Jonathan Wiersma <archaur at jonw dot org>
 
-pkgname=(libvirt libvirt-storage-gluster libvirt-storage-iscsi-direct libvirt-storage-rbd)
+pkgname=(libvirt libvirt-storage-gluster libvirt-storage-iscsi-direct)
+[ "${CARCH}" != 'powerpc' ] && pkgname+=(libvirt-storage-rbd)
 epoch=1
-pkgver=7.0.0
-pkgrel=3
+pkgver=7.3.0
+pkgrel=1
 pkgdesc="API for controlling virtualization engines (openvz,kvm,qemu,virtualbox,xen,etc)"
 arch=(x86_64 powerpc64le powerpc)
 url="https://libvirt.org/"
 license=('LGPL' 'GPL3') #libvirt_parthelper links to libparted which is GPL3 only
 install=libvirt.install
 depends=('libpciaccess' 'yajl' 'fuse2' 'gnutls' 'parted' 'libssh' 'libxml2' 'numactl' 'polkit')
-makedepends=('meson' 'libxslt' 'python-docutils' 'lvm2' 'open-iscsi' 'libiscsi' 'ceph-libs' 'glusterfs'
+makedepends=('meson' 'libxslt' 'python-docutils' 'lvm2' 'open-iscsi' 'libiscsi' 'glusterfs'
              'bash-completion' 'rpcsvc-proto' 'dnsmasq' 'iproute2' 'qemu-headless')
+makedepends_powerpc64le=('ceph-libs')
+makedepends_x86_64=('ceph-libs')
 checkdepends=('ebtables')
 optdepends=('libvirt-storage-gluster: Gluster storage backend'
             'libvirt-storage-iscsi-direct: iSCSI-direct storage backend'
-            'libvirt-storage-rbd: RBD storage backend'
             'gettext: required for libvirt-guests.service'
             'openbsd-netcat: for remote management over ssh'
             'dmidecode: DMI system info support'
@@ -29,6 +31,8 @@ optdepends=('libvirt-storage-gluster: Gluster storage backend'
             'qemu: QEMU/KVM support'
             'lvm2: Logical Volume Manager support'
             'open-iscsi: iSCSI support via iscsiadm')
+optdepends_powerpc64le=('libvirt-storage-rbd: RBD storage backend')
+optdepends_x86_64=('libvirt-storage-rbd: RBD storage backend')
 backup=(
   'etc/conf.d/libvirtd'
   'etc/conf.d/libvirt-guests'
@@ -95,7 +99,7 @@ backup=(
 )
 source=("https://libvirt.org/sources/$pkgname-$pkgver.tar.xz"{,.asc}
         "find_programs.ini")
-sha256sums=('ca3833844d08c22867f1d1a46edc36bda7d6fe1a4f267e7d77100b79fc9ddd89'
+sha256sums=('27bdbb85c0301475ab1f2ecd185c629ea0bfd5512bef3f6f1817b6c55d1dc1be'
             'SKIP'
             '735ac805fbf06021418f82297845babf481d5681bd939a6994fbdf36fe1661e4')
 validpgpkeys=('453B65310595562855471199CA68BE8010084C9C') # Jiří Denemark <jdenemar@redhat.com>
@@ -118,6 +122,11 @@ prepare() {
 build() {
   cd "$pkgname-$pkgver"
 
+  case "${CARCH}" in
+    powerpc) EXTRA_MESON_FLAGS="-Dstorage_rbd=disabled" ;;
+    *) EXTRA_MESON_FLAGS="-Dstorage_rbd=enabled" ;;
+  esac
+
   arch-meson build \
     --libexecdir=lib/libvirt \
     --native-file "$srcdir"/find_programs.ini \
@@ -138,8 +147,7 @@ build() {
     -Dstorage_vstorage=disabled \
     -Ddtrace=disabled \
     -Dnumad=disabled \
-    -Dstorage_zfs=enabled \
-    -Dstorage_rbd=enabled
+    -Dstorage_zfs=enabled ${EXTRA_MESON_FLAGS}
 
   ninja -C build
 }
@@ -177,7 +185,8 @@ package_libvirt() {
   rm -f "$pkgdir/etc/libvirt/qemu/networks/autostart/default.xml"
 
   # move split modules
-  mv "$pkgdir"/usr/lib/libvirt/storage-backend/libvirt_storage_backend_{rbd,gluster}.so "$pkgdir/../"
+  mv "$pkgdir"/usr/lib/libvirt/storage-backend/libvirt_storage_backend_gluster.so "$pkgdir/../"
+  [ "${CARCH}" != 'powerpc' ] && mv "$pkgdir"/usr/lib/libvirt/storage-backend/libvirt_storage_backend_rbd.so "$pkgdir/../"
   mv "$pkgdir/usr/lib/libvirt/storage-backend/libvirt_storage_backend_iscsi-direct.so" "$pkgdir/../"
   mv "$pkgdir/usr/lib/libvirt/storage-file/libvirt_storage_file_gluster.so" "$pkgdir/../"
 }
