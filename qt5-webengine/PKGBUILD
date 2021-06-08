@@ -3,10 +3,9 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=qt5-webengine
-_qtver=5.15.3
+_qtver=5.15.4
 pkgver=${_qtver/-/}
-pkgrel=4
-_commit=a059e7404a6db799f4da0ad696e65ae9c854b4b0
+pkgrel=3
 # Upstream won't tag releases, because potatoes https://lists.qt-project.org/pipermail/interest/2021-March/036386.html
 arch=(x86_64 powerpc64le)
 url='https://www.qt.io'
@@ -14,28 +13,32 @@ license=('LGPL3' 'LGPL2.1' 'BSD')
 pkgdesc='Provides support for web applications using the Chromium browser project'
 depends=('qt5-webchannel' 'qt5-location' 'libxcomposite' 'libxrandr' 'pciutils' 'libxss' 
          'libevent' 'snappy' 'nss' 'libxslt' 'minizip' 'ffmpeg' 're2' 'libvpx' 'libxtst' 'ttf-font')
-makedepends=('git' 'python2' 'python' 'gperf' 'jsoncpp' 'ninja' 'qt5-tools' 'poppler' 'libpipewire02' 'nodejs-lts-dubnium')
+makedepends=('git' 'python2' 'python' 'gperf' 'jsoncpp' 'ninja' 'qt5-tools' 'poppler' 'libpipewire02' 'nodejs-lts-dubnium' 'clang' 'gn')
 optdepends=('libpipewire02: WebRTC desktop sharing under Wayland')
 groups=('qt' 'qt5')
 _pkgfqn=qtwebengine
-source=(git+https://code.qt.io/qt/qtwebengine.git#commit=$_commit
-        git+https://code.qt.io/qt/qtwebengine-chromium.git
+source=(git+https://code.qt.io/qt/qtwebengine.git#tag=v$pkgver-lts
+        git+https://code.qt.io/qt/qtwebengine-chromium.git#branch=87-based
+	qtbug-91773.patch
+	qtbug-93802.patch
         0018-sandbox-membarrier.patch
         0020-msgvec-push_back.patch
         0021-sandbox-sched_getparam.patch
         0089-enable-ppc64.patch
         0090-qtwebengine-ppc64.patch
         qt5-webengine-glibc-2.33.patch
-        v8-call-new-ListFormatter-createInstance.patch)
+        xxx-ppc64le-libvpx.patch)
 sha256sums=('SKIP'
             'SKIP'
+            '02009c7f87a216131ab96418c9ddb21e697e61668a970b972242f0015b36ba4c'
+            '38a99bb2839e93f17826af53b8a4dc5e845b5d09cbfdf92a4a5d55bb939f01dc'
             'da58d2214d1c50a7b784e18a97473c9086657d5f43e8640675e98451859307d1'
             'd13e6ad37d36834867d57e23c339b73053983dafa76c7377999ff2a5b17332c3'
             '7fd108dfbf67f6fbda59a74bdc0d63b443e1beb98238f5401d01bd0233122944'
             '6a859d37d2971bee39792f6a0e69ed1fed986400070c1f795c147d89c7ad948e'
             '76d99f3ed901581c756bb8b5c74513ab944840e680ac310e5463116d3cf4551e'
             '2294e5390c869963fc58f7bf1ee0a254a3f7fce3ed00c04e34a5f03e2b31b624'
-            '44ebcff050a1c849819d66399c14bd711801d0eb64f518d292d3d6efedce3b3a')
+            '9af5aad8554c966542550f7467bb86d3a02d101aded4407f0a14ad289e47ee62')
 
 prepare() {
   mkdir -p build
@@ -51,8 +54,9 @@ prepare() {
 
   git cherry-pick -n 199ea00a9eea13315a652c62778738629185b059 # Fix crashes with some locales
 
-
-  patch -p1 -d src/3rdparty/chromium/v8 -i "$srcdir"/v8-call-new-ListFormatter-createInstance.patch # Fix build with ICU 69
+  patch -p1 < "$srcdir"/qtbug-91773.patch # Fix load signals 4d4fc9cd120376f30ce0630b1e8c7bf174d44fae
+  patch -p1 < "$srcdir"/qtbug-93802.patch # Fix scrolling with touchpad
+  #patch -p1 -d src/3rdparty/chromium/v8 -i "$srcdir"/v8-call-new-ListFormatter-createInstance.patch # Fix build with ICU 69
 
   # thanks Voidlinux!
   #patch -Np1 -i ${srcdir}/0001-Use-_fpstate-instead-of-_libc_fpstate-on-linux.patch
@@ -61,11 +65,23 @@ prepare() {
   patch -Np1 -i ${srcdir}/0089-enable-ppc64.patch
   patch -Np1 -i ${srcdir}/0090-qtwebengine-ppc64.patch
 
-
-  patch -Np1 -i ${srcdir}/qt5-webengine-glibc-2.33.patch
+  # thanks Gentoo!
+  patch -Np0 -d src/3rdparty/chromium -i ${srcdir}/xxx-ppc64le-libvpx.patch
+  
+  cd src/3rdparty
+  git cherry-pick -n b498f4ce3f542882767238ea9f01eb85de6c6fda # Fix build with GCC 11
+  git cherry-pick -n 12ecfd11e326219ef185e7fdd6d967985fc57599 # Fix crashes due to old cached data  
+  git cherry-pick -n e67c7b49247c8b9646790c718b85d8ba75b68945 # Fix build with ICU 69
 }
 
 build() {
+  pushd ${srcdir}/qtwebengine/src/3rdparty/chromium/third_party/libvpx
+  mkdir -p source/config/linux/ppc64
+  mkdir -p source/libvpx/test
+  touch source/libvpx/test/test.mk
+  ./generate_gni.sh
+  popd
+
   cd build
   qmake ../${_pkgfqn} -- \
     -proprietary-codecs \
