@@ -1,15 +1,16 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Evangelos Foutras <evangelos@foutrelis.com>
 # Contributor: Pierre Schmitz <pierre@archlinux.de>
 # Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
 # Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
 
 pkgname=chromium
-pkgver=90.0.4430.212
-pkgrel=1
+pkgver=91.0.4472.77
+pkgrel=2
 _launcher_ver=7
-_gcc_patchset=6
+_gcc_patchset=5
 pkgdesc="A web browser built for speed, simplicity, and security"
-arch=(powerpc64le)
+arch=(x86_64 powerpc64le)
 url="https://www.chromium.org/Home"
 license=('BSD')
 depends=('gtk3' 'nss' 'alsa-lib' 'xdg-utils' 'libxss' 'libcups' 'libgcrypt'
@@ -18,27 +19,30 @@ depends=('gtk3' 'nss' 'alsa-lib' 'xdg-utils' 'libxss' 'libcups' 'libgcrypt'
 makedepends=('python' 'gn' 'ninja' 'clang' 'lld' 'gperf' 'nodejs-lts-dubnium' 'pipewire'
              'java-runtime-headless' 'python2' 'python2-setuptools')
 optdepends=('pipewire: WebRTC desktop sharing under Wayland'
-            'kdialog: needed for file dialogs in KDE'
+            'kdialog: support for native dialogs in Plasma'
             'org.freedesktop.secrets: password storage backend on GNOME / Xfce'
-            'kwallet: for storing passwords in KWallet on KDE desktops')
+            'kwallet: support for storing passwords in KWallet on Plasma')
 source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgname-$pkgver.tar.xz
         https://github.com/foutrelis/chromium-launcher/archive/v$_launcher_ver/chromium-launcher-$_launcher_ver.tar.gz
         https://github.com/stha09/chromium-patches/releases/download/chromium-${pkgver%%.*}-patchset-$_gcc_patchset/chromium-${pkgver%%.*}-patchset-$_gcc_patchset.tar.xz
-        add-clang-nomerge-attribute-to-CheckError.patch
+        fix-crash-in-ThemeService.patch
+        unbundle-use-char16_t-as-UCHAR_TYPE.patch
+        extend-enable-accelerated-video-decode-flag.patch
+        sql-make-VirtualCursor-standard-layout-type.patch
         chromium-glibc-2.33.patch
         use-oauth2-client-switches-as-default.patch
         xxx-ppc64le-libvpx.patch
         xxx-ppc64le-support.patch
         xxx-ppc64le-swiftshader.patch)
-sha256sums=('abe11d0cb1ff21278aad2eec1a1e279d59176b15331804d7df1807446786d59e'
+sha256sums=('45d5a43ef798d20313c78fa8a075be0c22055e39c8481eb53eabda81df901b31'
             '86859c11cfc8ba106a3826479c0bc759324a62150b271dd35d1a0f96e890f52f'
-            '3eb9580ea35a96789e02815270498226fa33726f4210a5ee36f3868af2ffae1f'
-            '5e22afcb91b5402bc09e80630c5323d61013c3fccb0bbd9b23d1e79a400b00d0'
+            '171525009003a9ed1182cfcb6f407d7169d9a731a474304e263029376719f55a'
+            '3cfe46e181cb9d337c454b5b5adbf5297052f29cd617cdee4380eeb1943825d8'
+            '59a59a60a08b335fe8647fdf0f9d2288d236ebf2cc9626396d0c4d032fd2b25d'
+            '66db9132d6f5e06aa26e5de0924f814224a76a9bdf4b61afce161fb1d7643b22'
+            'dd317f85e5abfdcfc89c6f23f4c8edbcdebdd5e083dcec770e5da49ee647d150'
             '2fccecdcd4509d4c36af873988ca9dbcba7fdb95122894a9fdf502c33a1d7a4b'
-            'e393174d7695d0bafed69e868c5fbfecf07aa6969f3b64596d0bae8b067e1711'
-            '9af5aad8554c966542550f7467bb86d3a02d101aded4407f0a14ad289e47ee62'
-            '19069a244638991df835b1eb2dfe7e00f04599bbafcdc8778c23a51ca524157b'
-            '92af4ffbfeb72964ec9bd4ab0f0565e942178aff2cb8bcd488d800912b235ba2')
+            'e393174d7695d0bafed69e868c5fbfecf07aa6969f3b64596d0bae8b067e1711')
 
 # Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
 # Keys are the names in the above script; values are the dependencies in Arch
@@ -66,6 +70,14 @@ _unwanted_bundled_libs=(
 )
 depends+=(${_system_libs[@]})
 
+# Google API keys (see https://www.chromium.org/developers/how-tos/api-keys)
+# Note: These are for Arch Linux use ONLY. For your own distribution, please
+# get your own set of keys.
+#
+# Starting with Chromium 89 (2021-03-02) the OAuth2 credentials have been left
+# out: https://archlinux.org/news/chromium-losing-sync-support-in-early-march/
+_google_api_key=AIzaSyDwr302FpOSkGRpLlUpPThNTDPbXcIn_FM
+
 prepare() {
   cd "$srcdir/$pkgname-$pkgver"
 
@@ -87,12 +99,16 @@ prepare() {
   # https://crbug.com/1164975
   patch -Np1 -i ../chromium-glibc-2.33.patch
 
-  # Revert addition of [[clang::nomerge]] attribute; not supported by clang 11
-  patch -Rp1 -d base <../add-clang-nomerge-attribute-to-CheckError.patch
+  # Upstream fixes
+  patch -Np1 -i ../fix-crash-in-ThemeService.patch
+  patch -Np1 -i ../unbundle-use-char16_t-as-UCHAR_TYPE.patch
+  patch -Np1 -i ../extend-enable-accelerated-video-decode-flag.patch
+
+  # https://chromium-review.googlesource.com/c/chromium/src/+/2862724
+  patch -Np1 -i ../sql-make-VirtualCursor-standard-layout-type.patch
 
   # Fixes for building with libstdc++ instead of libc++
-  patch -Np1 -i ../patches/chromium-90-quantization_utils-include.patch
-  patch -Np1 -i ../patches/chromium-90-TokenizedOutput-include.patch
+  patch -Np1 -i ../patches/chromium-90-ruy-include.patch
 
   patch -Np0 -i ${srcdir}/xxx-ppc64le-libvpx.patch
   patch -Np0 -i ${srcdir}/xxx-ppc64le-support.patch
@@ -101,9 +117,11 @@ prepare() {
   # Force script incompatible with Python 3 to use /usr/bin/python2
   sed -i '1s|python$|&2|' third_party/dom_distiller_js/protoc_plugins/*.py
 
-  mkdir -p third_party/node/linux/node-linux-{ppc64le,x64}/bin
-  ln -s /usr/bin/node third_party/node/linux/node-linux-ppc64le/bin/node
-  ln -s /usr/bin/node third_party/node/linux/node-linux-x64/bin/node
+  # Link to system tools required by the build
+  mkdir -p third_party/node/linux/node-linux-{x64,ppc64le}/bin
+  ln -s /usr/bin/node third_party/node/linux/node-linux-ppc64le/bin/
+  ln -s /usr/bin/node third_party/node/linux/node-linux-x64/bin/
+  ln -s /usr/bin/java third_party/jdk/current/bin/
 
   pushd third_party/libvpx
   mkdir -p source/config/linux/ppc64
@@ -133,28 +151,22 @@ build() {
 
   cd "$srcdir/$pkgname-$pkgver"
 
-  if check_buildoption ccache y; then
-    # Avoid falling back to preprocessor mode when sources contain time macros
-    export CCACHE_SLOPPINESS=time_macros
-  fi
-
   export CC=clang
   export CXX=clang++
   export AR=ar
   export NM=nm
+  export LD=lld
 
   local _flags=(
     'custom_toolchain="//build/toolchain/linux/unbundle:default"'
     'host_toolchain="//build/toolchain/linux/unbundle:default"'
     'clang_use_chrome_plugins=false'
     'is_official_build=true' # implies is_cfi=true on x86_64
-    'chrome_pgo_phase=0' # unsupported instrumentation profile format version
     'treat_warnings_as_errors=false'
     'fieldtrial_testing_like_official_build=true'
     'ffmpeg_branding="Chrome"'
     'proprietary_codecs=true'
     'rtc_use_pipewire=true'
-    'rtc_pipewire_version="0.3"' # will be the default in Chromium 90
     'link_pulseaudio=true'
     'use_gnome_keyring=false'
     'use_sysroot=false'
@@ -162,6 +174,9 @@ build() {
     'enable_hangout_services_extension=true'
     'enable_widevine=true'
     'enable_nacl=false'
+    'enable_jxl_decoder=false'
+    'use_lld=true'
+    "google_api_key=\"$_google_api_key\""
   )
 
   if [[ -n ${_system_libs[icu]+set} ]]; then
@@ -182,7 +197,7 @@ build() {
   CXXFLAGS+=' -Wno-unknown-warning-option'
 
   gn gen out/Release --args="${_flags[*]}"
-  ninja ${MAKEFLAGS} -C out/Release chrome chrome_sandbox chromedriver
+  ninja -C out/Release chrome chrome_sandbox chromedriver
 }
 
 package() {
@@ -252,3 +267,15 @@ package() {
 }
 
 # vim:set ts=2 sw=2 et:
+sha256sums=('45d5a43ef798d20313c78fa8a075be0c22055e39c8481eb53eabda81df901b31'
+            '86859c11cfc8ba106a3826479c0bc759324a62150b271dd35d1a0f96e890f52f'
+            '171525009003a9ed1182cfcb6f407d7169d9a731a474304e263029376719f55a'
+            '3cfe46e181cb9d337c454b5b5adbf5297052f29cd617cdee4380eeb1943825d8'
+            '59a59a60a08b335fe8647fdf0f9d2288d236ebf2cc9626396d0c4d032fd2b25d'
+            '66db9132d6f5e06aa26e5de0924f814224a76a9bdf4b61afce161fb1d7643b22'
+            'dd317f85e5abfdcfc89c6f23f4c8edbcdebdd5e083dcec770e5da49ee647d150'
+            '2fccecdcd4509d4c36af873988ca9dbcba7fdb95122894a9fdf502c33a1d7a4b'
+            'e393174d7695d0bafed69e868c5fbfecf07aa6969f3b64596d0bae8b067e1711'
+            '9af5aad8554c966542550f7467bb86d3a02d101aded4407f0a14ad289e47ee62'
+            'f43bcbb768072233d90f1e31ce5b7bed571dce985b23fc822f5bed9ab4bc9c81'
+            '92af4ffbfeb72964ec9bd4ab0f0565e942178aff2cb8bcd488d800912b235ba2')
