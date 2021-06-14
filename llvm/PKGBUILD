@@ -3,10 +3,10 @@
 # Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
 
 pkgname=('llvm' 'llvm-libs' 'llvm-ocaml')
-pkgver=11.1.0
+pkgver=12.0.0
 pkgrel=1
 _ocaml_ver=4.11.1
-arch=( x86_64 powerpc64le powerpc )
+arch=(x86_64 powerpc64le powerpc)
 url="https://llvm.org/"
 license=('custom:Apache 2.0 with LLVM Exception')
 makedepends=('cmake' 'ninja' 'libffi' 'libedit' 'ncurses' 'libxml2'
@@ -16,37 +16,48 @@ makedepends=('cmake' 'ninja' 'libffi' 'libedit' 'ncurses' 'libxml2'
 options=('staticlibs')
 _source_base=https://github.com/llvm/llvm-project/releases/download/llvmorg-$pkgver
 source=($_source_base/$pkgname-$pkgver.src.tar.xz{,.sig}
-        amdgpu-avoid-an-illegal-operand-in-si-shrink-instr.patch
+        force-visibility-of-llvm-Any-to-external.patch
+        llvm-link-with-Bsymbolic-functions.patch
+        add-fno-semantic-interposition.patch
         llvm-config.h
-        llvm-004-override-opt.patch
-        llvm-005-ppc-bigpic.patch)
-sha256sums=('ce8508e318a01a63d4e8b3090ab2ded3c598a50258cc49e2625b9120d4c03ea5'
+        llvm-001-ppc-secureplt.patch
+        llvm-002-override-opt.patch
+        llvm-003-ppc-bigpic.patch)
+sha256sums=('49dc47c8697a1a0abd4ee51629a696d7bfe803662f2a7252a3b16fc75f3a8b50'
             'SKIP'
-            '85b6977005899bc76fcc548e0b6501cae5f50a8ad03060b9f58d03d775323327'
+            '98721af5a36af2a8e88c14a81b16d3929b12515d7d2d1ba385eb243dca3c32cb'
+            '560ce1e206c19f4b86f4c583b743db0ad47a610418999350710aafd60ae50fcd'
+            'fc8c64267a5d179e9fc24fb2bc6150edef2598c83f5b2d138d14e05ce9f4e345'
             '597dc5968c695bbdbb0eac9e8eb5117fcd2773bc91edf5ec103ecffffab8bc48'
-            '876dd496500c43010b2ab0c678cc843ee46df7294a4eb176d3e696a9e625ddb4'
-            'e55508953b61ac8c391ca1babd821eb2144c017b2a86c79f1f008ec95964608b')
+            '3a0eca893749223088645fee0cc1b238bd0b90d2474ed5202d181c7fd9101af3'
+            '93a9f83235762742da0324b3084955ca47d50978606f92db5c6deedbe12f6404'
+            '5a7f75f4a8488fd2e71c618b4a56a46653250369547564881972474d7d7ad290')
 validpgpkeys+=('B6C8F98282B944E3B0D5C2530FC3042E345AD05D') # Hans Wennborg <hans@chromium.org>
 validpgpkeys+=('474E22316ABF4785A88C6E8EA2C794A986419D8A') # Tom Stellard <tstellar@redhat.com>
 
-export CFLAGS=${CFLAGS/-flto=auto/}
-export CXXFLAGS=${CXXFLAGS/-flto=auto/}
-export LDFLAGS=${LDFLAGS/-flto=auto/}
-
 prepare() {
   cd "$srcdir/llvm-$pkgver.src"
-  # https://gitlab.freedesktop.org/mesa/mesa/-/issues/4107
-  # https://bugs.llvm.org/show_bug.cgi?id=48921#c2
-  patch -Np2 -i ../amdgpu-avoid-an-illegal-operand-in-si-shrink-instr.patch
+  mkdir build
 
-  patch -Np1 -i ${srcdir}/llvm-004-override-opt.patch
-  patch -Np1 -i ${srcdir}/llvm-005-ppc-bigpic.patch
+  # https://bugs.llvm.org/show_bug.cgi?id=48992
+  patch -Np2 -i ../force-visibility-of-llvm-Any-to-external.patch
 
-  mkdir -p build
+  # https://bugs.archlinux.org/task/70697
+  patch -Np2 -i ../llvm-link-with-Bsymbolic-functions.patch
+  # https://reviews.llvm.org/D102453
+  patch -Np2 -i ../add-fno-semantic-interposition.patch
+
+  patch -Np1 -i ${srcdir}/llvm-001-ppc-secureplt.patch
+  patch -Np1 -i ${srcdir}/llvm-002-override-opt.patch
+  patch -Np1 -i ${srcdir}/llvm-003-ppc-bigpic.patch
 }
 
 build() {
   cd "$srcdir/llvm-$pkgver.src/build"
+
+  case "${CARCH}" in
+    powerpc) EXTRA_CMAKE_FLAGS="-DVOID_CXX_OPT_FLAGS=-Os" ;;
+  esac
 
   cmake .. -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
@@ -62,7 +73,7 @@ build() {
     -DLLVM_ENABLE_SPHINX=ON \
     -DLLVM_ENABLE_DOXYGEN=OFF \
     -DSPHINX_WARNINGS_AS_ERRORS=OFF \
-    -DLLVM_BINUTILS_INCDIR=/usr/include
+    -DLLVM_BINUTILS_INCDIR=/usr/include ${EXTRA_CMAKE_FLAGS}
   ninja all ocaml_doc
 }
 

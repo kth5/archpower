@@ -8,7 +8,7 @@
 
 pkgbase=thunderbird
 pkgname=(thunderbird)
-pkgver=78.10.1
+pkgver=78.10.2
 pkgrel=1
 pkgdesc='Standalone mail and news reader from mozilla.org'
 url='https://www.mozilla.org/thunderbird/'
@@ -30,26 +30,39 @@ makedepends=(
   inetutils xorg-server-xvfb autoconf2.13 rust clang llvm gtk2 cbindgen nodejs-lts-dubnium
   gawk perl findutils libotr
 )
-makedepends_x86_64=(nasm yasm)
+makedepends_x86_64=(yasm nasm)
 options=(!emptydirs !makeflags)
 source=(https://ftp.mozilla.org/pub/mozilla.org/thunderbird/releases/$pkgver/source/thunderbird-$pkgver.source.tar.xz{,.asc}
         thunderbird.desktop
         vendor-prefs.js
         distribution.ini
+        mozconfig.cfg
         configure-fix-passing-system-bzip2-ldflags.patch
-        mozconfig.cfg.{powerpc,powerpc64le,x86_64}
-        https://dev.gentoo.org/~whissi/mozilla/patchsets/firefox-78esr-patches-12.tar.xz)
+        thunderbird-78.5-rust-1.48.patch
+        mozconfig.cfg.powerpc64le
+        mozconfig.cfg.powerpc
+        fix-fortify-inline.patch
+        fix-image-format-warning.patch
+        fix-webrtc-glibcisms.patch
+        rust-has-i128.patch
+        rust-configure.patch
+        skia-sucks1.patch
+        skia-sucks2.patch
+        skia-sucks3.patch
+        sandbox-largefile.patch
+        sandbox-fork.patch
+        firefox-78esr-combo.patch)
 validpgpkeys=(14F26682D0916CDD81E37B6D61B7B526D98F0353) # Mozilla Software Releases <release@mozilla.com>
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
-# Note: These are for Arch Linux POWER use ONLY. For your own distribution, please
-# get your own set of keys. Feel free to contact alex.bldck@gmail.com for
+# Note: These are for Arch POWER use ONLY. For your own distribution, please
+# get your own set of keys. Feel free to contact foutrelis@archlinux.org for
 # more information.
 _google_api_key=AIzaSyDgkw4O3LM0Jnr2N7Wq2NG7iUVzRU5sBaA
 
 # Mozilla API keys (see https://location.services.mozilla.com/api)
-# Note: These are for Arch Linux POWER use ONLY. For your own distribution, please
-# get your own set of keys. Feel free to contact alex.bldck@gmail.com for
+# Note: These are for Arch POWER use ONLY. For your own distribution, please
+# get your own set of keys. Feel free to contact heftig@archlinux.org for
 # more information.
 _mozilla_api_key=de0473f2-d53f-46da-956c-6aff61bda3ab
 
@@ -67,25 +80,21 @@ prepare() {
     patch -Np1 < "../$src"
   done
 
-  for patch in ${srcdir}/firefox-patches/*.patch; do
-    patch -Np1 -i ${patch}
+  for _name in audio_thread_priority num-traits glslopt; do
+    sed -i 's/\("files":{\)[^}]*/\1/' third_party/rust/${_name}/.cargo-checksum.json
   done
 
   printf "%s" "$_google_api_key" >google-api-key
   printf "%s" "$_mozilla_api_key" >mozilla-api-key
-  cp ../mozconfig.cfg.${CARCH} .mozconfig
+  cp ../mozconfig.cfg .mozconfig
+  case "${CARCH}" in
+   powerpc64le) cp ../mozconfig.cfg.powerpc64le .mozconfig ;;
+   powerpc) cp ../mozconfig.cfg.powerpc .mozconfig ;;
+  esac
   sed "s|@PWD@|${PWD@Q}|g" -i .mozconfig
 
-  cat >>${srcdir}/.mozconfig <<END 
-mk_add_options MOZ_MAKE_FLAGS="${MAKEFLAGS}"
-END
-
-
-  mkdir -p third_party/rust/libloading/.deps
-
-  for component in audio_thread_priority num-traits glslopt; do
-    sed -i 's/\("files":{\)[^}]*/\1/' third_party/rust/${component}/.cargo-checksum.json
-  done
+  # remove pre-built binaries
+  find third_party -type f \( -name '*.so' -o -name '*.o' \) -print -delete || die
 }
 
 build() {
@@ -93,6 +102,11 @@ build() {
   if [[ -n "${SOURCE_DATE_EPOCH}" ]]; then
     export MOZ_BUILD_DATE=$(date --date "@${SOURCE_DATE_EPOCH}" "+%Y%m%d%H%M%S")
   fi
+
+  export MOZ_MAKE_FLAGS="${MAKEFLAGS}"
+  export MOZ_NOSPAM=1
+  export LC_ALL=C
+
   ./mach configure
   ./mach build
   ./mach buildsymbols
@@ -138,15 +152,15 @@ _package_i18n() {
     "$pkgdir/usr/lib/thunderbird/extensions/langpack-$1@thunderbird.mozilla.org.xpi"
 }
 
-# downloads x86_64 binaries... really? SKIP IT!
-if [ "${CARCH}" == 'x86_64' ]; then
 _languages=(
+  'af     "Afrikaans"'
   'ar     "Arabic"'
   'ast    "Asturian"'
   'be     "Belarusian"'
   'bg     "Bulgarian"'
   'br     "Breton"'
   'ca     "Catalan"'
+  'cak    "Kaqchikel"'
   'cs     "Czech"'
   'cy     "Welsh"'
   'da     "Danish"'
@@ -159,6 +173,7 @@ _languages=(
   'es-ES  "Spanish (Spain)"'
   'et     "Estonian"'
   'eu     "Basque"'
+  'fa     "Persian"'
   'fi     "Finnish"'
   'fr     "French"'
   'fy-NL  "Frisian"'
@@ -174,11 +189,16 @@ _languages=(
   'is     "Icelandic"'
   'it     "Italian"'
   'ja     "Japanese"'
+  'ka     "Georgian"'
+  'kab    "Kabyle"'
+  'kk     "Kazakh"'
   'ko     "Korean"'
   'lt     "Lithuanian"'
+  'ms     "Malay"'
   'nb-NO  "Norwegian (Bokmål)"'
   'nl     "Dutch"'
   'nn-NO  "Norwegian (Nynorsk)"'
+  'pa-IN  "Punjabi (India)"'
   'pl     "Polish"'
   'pt-BR  "Portuguese (Brazilian)"'
   'pt-PT  "Portuguese (Portugal)"'
@@ -191,13 +211,17 @@ _languages=(
   'sq     "Albanian"'
   'sr     "Serbian"'
   'sv-SE  "Swedish"'
+  'th     "Thai"'
   'tr     "Turkish"'
   'uk     "Ukrainian"'
+  'uz     "Uzbek"'
   'vi     "Vietnamese"'
   'zh-CN  "Chinese (Simplified)"'
   'zh-TW  "Chinese (Traditional)"'
 )
 _url=https://ftp.mozilla.org/pub/mozilla.org/thunderbird/releases/$pkgver/linux-x86_64/xpi
+
+[ "${CARCH}" != 'x86_64' ] && _languages=()
 
 for _lang in "${_languages[@]}"; do
   _locale=${_lang%% *}
@@ -218,89 +242,25 @@ for _src in "${source[@]%%::*}"; do
     esac
 done
 
-sha512sums=('89c8bc9f76335093f7a43c9980da3f4436c1fa0ed3ffd9c0a2d9648749ad7ab427e2aede2b20ee9143748c828bdd417b5b6cf06e73597dee3a745ef28143ee2d'
+sha512sums=('b938580055b8b935a37cd7b7aea9b654f5dc42b0a5d459ccb95d10fbde49405c5fad3ebf450ecd1077289aef008801d1dbbb7d5be56bb238616df14a7658c3f4'
             'SKIP'
             'a0061fcb2a7f66061e336a8d95948592f56f4752e56467f14ba63846720ebf845cce7511d1a2637e3b80d5a1ffdaa2fb783fa37195103425ef65222d45372012'
             '6918c0de63deeddc6f53b9ba331390556c12e0d649cf54587dfaabb98b32d6a597b63cf02809c7c58b15501720455a724d527375a8fb9d757ccca57460320734'
-            '5cd3ac4c94ef6dcce72fba02bc18b771a2f67906ff795e0e3d71ce7db6d8a41165bd5443908470915bdbdb98dddd9cf3f837c4ba3a36413f55ec570e6efdbb9f'
+            '5d622d208e62b512e1af7ef8fd5de76c02e209d6b569041ad9047132a1bff093162f4ebce1450d92dfa0b0405d3cd24501604629e97cfae00457afbf4b615b72'
             'e44fd608fb4975914479b4a1a5aa44e87f125564fb812fb46c0ee07d503dfdcdb444d7335efe90436caecc7be502aae6b558c585013ee924e618e6213988ae99'
             'e3ed2708b8354015cb3d2c81048d1ce4932d1effbe2b40efa7cf9b45c1b923b9fd708645e2f8aa0136a485a3f7ce6b396b85721aaf535a4a764fd5005fb7e222'
             'bbb8b0e7b9c67372eb22e1d6b6b5758fe504ded84c40a076d4a064374a1bf34ac12d5b514b328ac9ca984d976b9e0fbde81e68a66bec915c997d6be0c0917584'
-            '821288d7ee96bed704965a9bf13515d6dc0521975b67d31bccf2fba4b0b1cbc9fe67a5cc6f778d8fc7b598971af689d605535bcb7d684d5ac25542522b96f0b5'
-            'd1e16ff04e348cd86c8cef7e289625d62578bdfa3c2addc957d7e2848aa239112ebdea0fb85efb46313bb1795a43cb91d58cce9e6a99d7e257d77321ba196b9e'
-            '836c2301d11a0969395c3dc8dfdb42488afc0f49c3cd72fdabc2036c10c68a968dd58d2977112388a5abdff815b698dcd770acdbdb9fa30644fe6cc444df4ed4'
-            'b659b51f1bb0c7154f3ac9ac19aed22d302c5d1f00ede474ae09c84f8ae233a65400fe30777f6a187407d8b9616398e4264d1da796932f069a7e5e8f8ccd948c'
-            '65010403c0c9e5ff903473f8cc9ee7ecd3f3835f14a585c8116a36813db008980e686c8a3abcfc495f5c52c40019f2cb03a3c06ca4b7a17cd6c30379a9a43eff'
-            '3b331a2c0fb7c4f87d73c8e601c31f669c084eb36432958e91c8cbee06a6027a7d7a440b1e6b27cfed57d21cf484e031f15ea3216abab7d958e6a8ec2ed9f116'
-            '9d92ceb2ffeed545b4372dc8ffce09b4ca9ab91613b7bdc15f45dfd6ab817a53eecde8164cd2b7c98043fb208d29ca8c126a5cb7494c92aeb2d7d19a08264831'
-            'f3f7e8ae17f607370eadb9e16c68767ead858f427bfa5f560bed44c34c652fcd05056eb186f6b6a963e764d6fa385ea82b663c583cf41ffb85357d6046608cf7'
-            'c51e1e9d344336f221a132ec23550b76379fd96135555058d0c19c88d7ecb4b401cb54a795aa2a8b612d326b2d286139bdeaeb237f6726da0f87b6d6b7115ffc'
-            '259d83f86a32b2eb2aa026da28e158ca56ae02c29aaaf907e6fb144a4927ac67ecaf194d428d05c89a9cc471c7d7e45fd261448ff17f5420986622666dc16d36'
-            'd36d133063e1b3e9c8e2d6fea125301f07d4c1c43d05c655f8f1826ba189909f73c7eead1cb381bf17a408c4edb353846db3d77e6543318d0b8475acf07250da'
-            '2899af9cee4360b9084496ed099115680fb4a23353ad00ad5f3cf54fb1bbfd9facccf63d7f35ee61f7c8614526cabd549effabc77212c5efb6f1621a78d64466'
-            'bf0d5ed14b6b7f3f36c668919af0932fd4d526682a7c0874badea67a0720b64da2ed81965834510e0bc27c4d6e25913aa357733b6bae6798a38e7d6ed69025fd'
-            '2571253fb57d552e2269b14878d72968328e92822d35bdca434463faa27ff4dff635a232e981a2d00f1a1647b584dd660ed030fe5aff168aecf3ef34cad574e1'
-            'fd9479b513ada61820aa0f9ca321ff04ffe5cf309c7068cd8efd143215f90234137aaf0f7a4eb01898c579feae757994c4c340da0a41eb938d95c07632782804'
-            '631c9c2fdf7fa8710418c8c1bb872a89fb973cea5a939380fac64b4668e2bee2b84d5aaab97bbf37aed5b5da045d666dbc2a11826791fbccea94a20e80e52fc0'
-            '708204df6ceab6f52dfd047056d76b4181088bf43636fcb7834a90bb5410b00ed9a3949d8691e15b733fc8724d6d62419986f72a813ddd8bce0e188abba59169'
-            '250448121f80c6719a1449e00c4e91a7754767853502f11f0aa38ae3014ab90aa6e0d2fb4d4150e29da5a0ca5488e1a7992f83f6820dde18cffc3936d9c2464e'
-            '85c795b898b4a89e516b9a0055b6edf2802be090be9df5cd0899121cf561acdcbe7af11f2769c2e99eb1149cff02e517edc3b157a8f356fb66bb36221ac6db1e'
-            '578c9b5c92f392b5349d0114872f33a63f25ddc24e08a1ebdbe0fe384a4d08af6836c5b4566f7d803e1367ed112fc4c6f0d086096f4f331acf673d0860990ef6'
-            'fc55f90eb4ed1b347dee710b23189714d1333cff57b41770f9b35d485813b7e10d0110085d407f16611c2428225bbe927a3fc865fecb69a15ca65e208fdc1c70'
-            'ce0bc7103fcbe7e1d6ce14c482350b4e2f7a2776b1458087717bb85ca1e9d9eddaf9d4e7a4524d0d283aeffc35f177306c7a7ba39a9931408d99a86db799d02b'
-            '8621c5f47271158fc80944cc0162f1103f0d4ddc9cfc222f4bd6f00b85126677dd7f10c45630ada994932b326f734ab3822d204b43e59e4ec5c3f4f178adbf14'
-            '5d790a9a6171b47fb9a103451e66e7a64fa3b7bdaafcfc9289eea81724fe00f48576476b21ec9f0e77bd4077d868a5e865e69320fac609d91f78904607738630'
-            '155c7166ac22a1a278f35dba8cd63feb57fb5361df8950d1df6f208eb0bf50215ccde5141308e4989412836733e5c37db224a30e01b2f9d2fab52d286b35b268'
-            '0455c75a62a08fda3face543f1291844af61e931912c74235f5b14109fae30ff7d67aa6e7d36087304ad0c4f27a9d741c32a94ffcd54a89a28a365896316a218'
-            '8c1d047be3876f58f877b4da7fc4a0309019b7d1cdc591e2207c08a811569da5928c1b9ad365971b16c51e44e46acb82357f9a5a4e5e14e6dd31c01a37ace1e9'
-            '6b7b7c184a0def75e4c1f81f1fe6c7ef0637facbdb2f68c5541b4d3b95b548fe4d613cf7e804df268cdc68a9443304ac19fc26867dc59ac9bffdae6f81786dfa'
-            'f02d9d28185683bf3d1e27f952f661d19b9b65de932d1e77e9cf50203964f859e4de650027d170912d730203dfdbd9658ecd0060a8b776c9bf2feea412f652d5'
-            '13fa52ff3a3a619ae5e1e44581b25c291610b74196c3e580fb154ad21a5778611d5a78dcda78e04f0de834d4edcdd964b5ef49182723e32a8706ec01ecb62acd'
-            'fc830e3eb327cabec0ea4ed71bc51db465f073f2c7d7832f3c1176c066b37f6d1ab82fd1a342bc2d884b774c5896812e25e0184951ed3bbf68880136aeee969e'
-            'b0303def5df18fe698f89b9a1e94c9e6e4265ac957cbcb8bc6ebadfcedd6a871a6516d7095d8b1ddf4e0f1f0b1cd672407a7e6a45aa13a4fce5f99030c1e21bb'
-            '4718d0e322d3eacb9871c8a5e12bd8a0dfd3183895b205fdf0bde9a4203baa59d1b0715a48b5441966a400df2c7e5020403d4c65d925df403c01689a32d14262'
-            '28eb102f038d0a4ffe52c9d658282156f9b0bca185cff5d5ac43224f739e4e898f22e2d5ad5ed3288eb6534e0834bc71b03f4a23a30aa21d33599a66f75855c7'
-            '6a31824bad43c17c2f8b543f59bc095475c8ab8d3999d2324fbb74a4b1300530d79968827cd2a5733fc8f085f9b4cf2d8a3ff6a16ecbaca7c2b654b9aa7940c3'
-            '5c8b553c4b10f0626e5e7f6be2aa2ed0baf32f1d1f607c5f97db6f86c539786d1b9d9fab7d7d821092f86b1460cea598f4f234a98e0324c56c02311d252f46b2'
-            '365ce4fb3ca26fc27303a9210da3a5fefa334282b12400d5752ac026c4104c33c39c95edb7c0ffa77c230c625edc183313f9bc8e24b2868c47b66eab97391265'
-            '3b267a8eb4d651f0f1f04aa79504116fabdeee1be79394830b8f209c88f1e6bb74038b0c91002f616cfea8dae8d5a6ab5390033c50826f81e608e5946d46ff7c'
-            '4d3485d91cd713f6424149029075168d31fa2f47fe008734a61337e998d2aa956bcf2c459a378a21fee2aede3845de78302c1b47696cdfebc7ab2910e9f28c31'
-            '1d7f8fcdd45407ab4a577a2bb75c857bc4fcca1d2a58db527f6ab224fcecac9c771100a5c6e9dfb6787bcddca37b8eb56fe4918c0e80eac05cb776a4b0d62447'
-            'e5b3e88d5d5ef590ddcde3d21fa54ff6c865c4ff9451246552693c8a37f1af94bd6a52a8db218556d9cf41722aa76abe8cb888814aa547c2957ac6d9a35b5cbf'
-            '263e23d0b98fae98439e73720a21980e4b6c37b3b5819ff8db19a2a601f3ebebd5cdc8633b73a7b1f1599910985f25bf790c1ab4b24122f34fd1b557c9d6dc88'
-            '6bf626f584ab755a31ed9cb35fb3e57181b0f0c3f2fae710e611dd9444354622e95a10c408331dada36ffa5373b85d6c131fb955332cb2522fc50c514cbd15db'
-            '53ae14cb551c4d6d238f0a38d3cd6dee8505ec57ea0b3ec847495c69c76052788042ab28c34a2bea9c293df1972277ffb625f4860ada695f381de213dd96405c'
-            'b1f39bb5c83eb2fc53aea164277cccee19c1077bda40b02a8cd9e9fd57e03e42f0bb534cc386b36101e868b9f55fee50bc900e82db2aecde6436fa5e6b209194'
-            '967ae35146e6e91c159f902e24d769fa30cc9a8067550e21e263b67f0b041c41683bc45204a92cbb9b32ccd947ab0b42f969354b51e34c4995f819f797faa669'
-            '41c74a9c6bbb1000f1328292a9fe74c17c07a407fbd2d5a74e4ce5f3213700a7ecc41e64cc0e809e799fd6aa2a169479c06f135415fa3824029787f2e3597f8b'
-            '275ac5185fced3828d31c8f178bc73ce5c406baff2af5b79b376af30403a33543bc2aa1f741f9fe25a0a6b3f8eaf816b931e544130c0d5a172eae486cbbd9287'
-            '45bc9d57694ae500474b02853a272a5a880fb831c0f26537698383370eb942be7a9062eea08e832bb5dd54b0dec20461f99c76a6249fb2fbde9c0af1a7b7170b'
-            '17ddf55f2a1eee7d8ad4e6d755db1922e35250bf0b3b7a2ac6d0f5275ba5b1ca7c65f29a01e5c7360516df40eee1a4ffd58bc312e7d7e59ae98fe1b236f17590'
-            'ac12e7581ca8819b4638d02993b46a4091e3bad265d7a43f714939546ba1bf1c825fdf2ec792aceb779cd919a850ffb3859b3141ced7610515006b2735dfeb30'
-            '187f52982c7047e85988f877325b52533cb905d75e5f050e8db4f0bae3532dec032e3b7ac520679ae893b57a83dc56ea557beade2a22ebe6dcacd48d1b217721'
-            'ace32746050a4f7b1e55cc6c858ec090deedbbd4dfdf8dfa949517057fd88d5eeb3f8498754d7875395006b605adcc4d612d291357caa647ad00f3e4b3052117'
-            'a3ac82eca9b7586f8940b313712482404e0a9d502a85f124cb46b7c32e86362e6ec2236de857d62da5fc88a9f092311237398e039980665f62966dbd5b87f107'
-            'd783f5bfe68a3c4ce6471c57b34b3a4fd6bc20f41951195cd07df46f2e1a93b62bdc9faec338e972eadd453409b4d6aecd049f322d18f850e5d4f44576d3b78c'
-            'ec11ccb87a4f2c2c6fac7352f10a1d1165c0c6128b218c86f78f9f5d2c3bff7493dd7bd4edd372118e062d18e10843922918297879c61d2a3fb4a262c4c5d239'
-            'c1d4304d85af76618dcc894c3ddd6c0811f22117c6057a84dfa4d5882a2dcd356748bc55e4bd0005ab76fff3e75da328d8f74713d75ee272ed8682722b84f852'
-            '8e248a0e92d6e274a5535c5f0a10ebb5de2251c95f6de7a6acffb0aa78fcd7f29ecd62db083380dc51057a20de4abc1e41f74867413e32a63f9cfe6b29aee409'
-            'a53c5ba7f0f11fdd90ba1bc25a823efa02f539981dd3d23e9ac499f94df07771cc66df66e5e86dd41d883d95881062c53f4a33034ce31e003298e2adfd2409c9'
-            'd302634bb6405b018d128fab87c107336fcf4b90cf2e60e576f3b991e36abac2d9b4d7ebb1cf71d1a7a42c1219309276e00e88ce7ca68b180311259a062a3e21'
-            'ccc7d1ec0e8d040b7299ea3ffa3f64da838656e7c48c9a39dc7665e2c2cd9c0aced89272a676500a3da2d95779e3753450d992a2083265eead4afd2234a405b2'
-            'b090dd30644c8c54898f1857c00e3e35f8d9e28705534d60b10039ccb102986353ad38501bd59150f870012194de274f933113b583098acf47389bb16fc99b55'
-            'a4ada20993753092e39a473cca575d32b1d4fbe87547199930486fc3f8ae8fba7727030f91a7e04970a887280aba3508e5e834cdbf89b7040c3b35b148d89093')
-else
-sha512sums=('fffae4bcf2411834a86b5d1fd7c3fa8dbc32763061de4afef44ec95d55a8c4ab94576f54bd8b8c9aef22e0c4a09b48a381ba2ddafc31be60ef79b81e6835e4db'
-            'SKIP'
-            'a0061fcb2a7f66061e336a8d95948592f56f4752e56467f14ba63846720ebf845cce7511d1a2637e3b80d5a1ffdaa2fb783fa37195103425ef65222d45372012'
-            '6918c0de63deeddc6f53b9ba331390556c12e0d649cf54587dfaabb98b32d6a597b63cf02809c7c58b15501720455a724d527375a8fb9d757ccca57460320734'
-            '5cd3ac4c94ef6dcce72fba02bc18b771a2f67906ff795e0e3d71ce7db6d8a41165bd5443908470915bdbdb98dddd9cf3f837c4ba3a36413f55ec570e6efdbb9f'
-            'e3ed2708b8354015cb3d2c81048d1ce4932d1effbe2b40efa7cf9b45c1b923b9fd708645e2f8aa0136a485a3f7ce6b396b85721aaf535a4a764fd5005fb7e222'
+            '8ae2dd8973b7f6d6e0bb58a19adf8f7350eeea838391147d49549c9f3ca93150e9a311cb965986dc3080e747b9da9b3968a44c314b82c83a7d6fb33248b64299'
             '03c5c19f933cc22ce00d454b4fa430b162b1f59aa7d6479cc48570fe5033aec51c1561b89a3023e7b251bcf3035c8aa0a8c97505fce3449439f325d26c135bb3'
-            '29768cb64863627fc13512f10a7af950affac975e2e2a2843b27a1db809232fcecbf503ef7126ac780b49bd1a868505534b80b781e2fbe1f44df27e993293c02'
-            'e44fd608fb4975914479b4a1a5aa44e87f125564fb812fb46c0ee07d503dfdcdb444d7335efe90436caecc7be502aae6b558c585013ee924e618e6213988ae99'
-            '4445c0880fc234c3838394483ce986e4e222260a99427069ba9c55b56fcd49a485ec916ee6aa2629f922390e92bfcd78028e30cc2e62fad9bc080ae45b26ba2e')
-fi
-
+            '09bc32cf9ee81b9cc6bb58ddbc66e6cc5c344badff8de3435cde5848e5a451e0172153231db85c2385ff05b5d9c20760cb18e4138dfc99060a9e960de2befbd5'
+            '669763939b00d31a8eb346acf5f9e6dd13d624e731ee4ba195677ac3e535aa02a4c2b3ff1987c9527222e24c02558a1fe35f0f6c6b169106a9f02329ba46b0f1'
+            '7da8d885ea3d30e5640189383d458dd0dc3c86fa9c2bad7148852adc08227eda91c683dd64e37d0cefdea2bf890752950dae960aa8382982480860a5029e11a9'
+            '63d9e67006ca847c4f66bc0caab84a332446cf947297a27cbd1357cc629273d06538ab3207f61483f253dc78503aa9078c8bc34d1165071520ea51cc6caa2ebc'
+            '1961f6a8672ea7c37cfd06e227367969bca330146e8424375628acdb61e09ddf3cf7c187f8a593d3b8b3cb589080630008f61332e7c3fc5c0998ee34707e3805'
+            'f5a3eb9d94f6e97146e3f6bafce172d37fb78e62da2c1889170fd5c835cf7b9987daf7c3ea16ca924ac195d47f66e29ea4080c1e8b0b1be6e00869b8319bbffa'
+            '9152bd3e6dc446337e6a2ed602279c620aedecc796ba28e777854c4f41fcf3067f9ebd086a4b63a6b76c2e69ec599ac6435b8eeda4f7488b1c45f69113facba4'
+            '20cbd73e28b25febfda33d97ba55f918fff97dc26ef0be349bc07a5f34ad8f62b68635e9ebcc834d7ca07f21d88a87648cbe906c7674318b25b06bc512f2e1d6'
+            '36ce3c2f97e4b53a627d3dba48a34921eb3fe7303524b8fe59033f3d159ea48bc90869fb555b1774b532f31e5b967fbf76d0305743f462cd9036f43cba7da044'
+            '4911ddb41bef8d9f6d6200159cde465627e940fe1c09099be55769d21a5a52a3f737e1bf803daa96126c035b091aea880fbc5d2e6cf5da96ddd17322461a72d6'
+            '64b974c6df7cff8f97fe82992bd3ee8f2258ab769dd2caa59e7c9395cdffa7108b78c43ea31ba0bad2dbdde45a9a2b6924945d9a1a7908ded0bbc6f543c4a1d4')
 # vim:set sw=2 et:
-
