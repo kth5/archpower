@@ -1,48 +1,56 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Contributor: Kevin <kevin@archlinux.org>
 # Contributor: criminy <criminy@gmail.com>
 
 pkgbase=cairomm
 pkgname=(cairomm cairomm-docs)
-pkgver=1.12.2
-pkgrel=4
+pkgver=1.14.3
+pkgrel=2
 pkgdesc="C++ bindings for Cairo"
 url="https://www.cairographics.org/cairomm/"
-arch=(x86_64 powerpc64le)
+arch=(x86_64 powerpc64le powerpc)
 license=(LGPL MPL)
 depends=(cairo libsigc++)
-makedepends=(git mm-common mesa)
-_commit=e9ef515b7b8db5b4f024ddfefe5dfc03f2b8ccea  # tags/v1.12.2^0
-source=("git+https://anongit.freedesktop.org/git/cairomm#commit=$_commit")
+makedepends=(git meson mm-common)
+options=(!emptydirs)
+_commit=77a0bac11cc16c66d5292bb2546c1dca3525c918  # tags/1.14.3^0
+source=("git+https://gitlab.freedesktop.org/cairo/cairomm.git#commit=$_commit")
 sha256sums=('SKIP')
 
 pkgver() {
-  cd $pkgbase
-  git describe --tags | sed 's/^v//;s/-/+/g'
+  cd cairomm
+  git describe --tags | sed 's/-/+/g'
 }
 
 prepare() {
-  cd $pkgbase
-  NOCONFIGURE=1 ./autogen.sh
+  cd cairomm
 }
 
 build() {
-  cd $pkgbase
-  ./configure --prefix=/usr --enable-maintainer-mode
-  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-  make
+  arch-meson cairomm build -D maintainer-mode=true
+  meson compile -C build
+}
+
+check() {
+  meson test -C build --print-errorlogs
 }
 
 package_cairomm() {
-  cd $pkgbase
-  sed -i -e 's/^doc_subdirs/#doc_subdirs/' Makefile
-  make DESTDIR="$pkgdir" install
+  depends+=(libsigc-2.0.so)
+  provides=(libcairomm-1.0.so)
+
+  meson install -C build --destdir "$pkgdir"
+
+  # Split -docs
+  mkdir -p docs/usr/share
+  mv -t docs/usr/share "$pkgdir"/usr/share/{devhelp,doc}
 }
 
 package_cairomm-docs() {
   pkgdesc+=" (documentation)"
   depends=()
+  options=(!strip)
 
-  cd $pkgbase
-  make -C docs DESTDIR="$pkgdir" install
+  mv -t "$pkgdir" docs/*
 }
