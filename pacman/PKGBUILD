@@ -1,19 +1,17 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # vim: set ts=2 sw=2 et:
-# Maintainer: Dan McGee <dan@archlinux.org>
-# Maintainer: Dave Reisner <dreisner@archlinux.org>
+# Maintainer:
 
 pkgname=pacman
-pkgver=5.2.2
-pkgrel=4
+pkgver=6.0.0
+pkgrel=3
 pkgdesc="A library-based package manager with dependency support"
-arch=(powerpc64le powerpc)
+arch=(x86_64 powerpc64le powerpc)
 url="https://www.archlinux.org/pacman/"
 license=('GPL')
 groups=('base-devel')
-depends=('bash' 'glibc' 'libarchive' 'curl' 'brotli'
-         'gpgme' 'archpower-keyring')
-makedepends=('asciidoc')
+depends=('bash' 'glibc' 'libarchive' 'curl' 'gpgme' 'archpower-keyring')
+makedepends=('meson' 'asciidoc' 'doxygen')
 checkdepends=('python' 'fakechroot')
 optdepends=('perl-locale-gettext: translation support in makepkg-template')
 provides=('libalpm.so')
@@ -22,44 +20,51 @@ backup=(etc/pacman.conf
 options=('strip' 'debug')
 validpgpkeys=('6645B0A8C7005E78DB1D7864F99FFE0FEAE999BD'  # Allan McRae <allan@archlinux.org>
               'B8151B117037781095514CA7BBDFFC92306B1121') # Andrew Gregory (pacman) <andrew@archlinux.org>
-source=(https://sources.archlinux.org/other/pacman/$pkgname-$pkgver.tar.gz{,.sig}
+source=(https://sources.archlinux.org/other/pacman/$pkgname-$pkgver.tar.xz{,.sig}
+        pacman-6.0.0-fix-404-download.patch::https://git.archlinux.org/pacman.git/patch/?id=3401f9e142ac4c701cd98c52618cb13164f2146b
+        pacman-6.0.0-fix-key-import-double-free.patch::https://git.archlinux.org/pacman.git/patch/?id=542910d684191eb7f25ddc5d3d8fe3060028a267
         pacman.conf
         pacman.conf.ppc32
-        makepkg.conf
-        pacman-5.2.2-fix-strip-messing-up-file-attributes.patch::'https://git.archlinux.org/pacman.git/patch/?id=88d054093c1c99a697d95b26bd9aad5bc4d8e170')
-sha256sums=('bb201a9f2fb53c28d011f661d50028efce6eef2c1d2a36728bdd0130189349a0'
+        makepkg.conf)
+sha256sums=('004448085a7747bdc7a0a4dd5d1fb7556c6b890111a06e029ab088f9905d4808'
             'SKIP'
-            'dba8797c50584f5bf9f23658b647db3528adb3ebe4165fecef7d3273bc1e2720'
-            '0a1ba8067d04e747a110cc482b62762b7ee6ed95643a1c7ef030d8d8620e3be2'
-            'e045f48a0d223bfc4bd17db380179d37c93004b20c963c619e8d52505f95a548'
-            '871fd97b3f13f1718358e4b8e046a56c0262c9042b5e3b5d60835606735798bd')
+            'fe7e037e1b84bfa5bc401650d148c2a2e87d827705a6ec18a596ff5eea3cc0fd'
+            'a51b57dd47818d97e29ac0b8604b4b409916bbe6029adfbb03ac7e7c2b2a0819'
+            '81bf2288212917533671d4056aec9126d48a212af8ec0ebe73c5169a5ffdad68'
+            '52d89af5dab145bc505f39176395f5aecc345fe9246718e56b2dd9a7b8ddde0b'
+            '196139a68b36e1511684373f05e8d58ee88643e092c1ec735616b2de329e6546')
 
 prepare() {
   cd "$pkgname-$pkgver"
-  patch -Np1 < ../pacman-5.2.2-fix-strip-messing-up-file-attributes.patch
+  patch -p1 -i "$srcdir"/pacman-6.0.0-fix-404-download.patch
+  patch -p1 -i "$srcdir"/pacman-6.0.0-fix-key-import-double-free.patch
 }
 
 build() {
   cd "$pkgname-$pkgver"
 
-  ./configure --prefix=/usr --sysconfdir=/etc \
-    --localstatedir=/var --enable-doc \
-    --with-scriptlet-shell=/usr/bin/bash \
-    --with-ldconfig=/usr/bin/ldconfig
-  make V=1
+  meson --prefix=/usr \
+        --buildtype=plain \
+        -Ddoc=enabled \
+        -Ddoxygen=enabled \
+        -Dscriptlet-shell=/usr/bin/bash \
+        -Dldconfig=/usr/bin/ldconfig \
+        build
+
+  meson compile -C build
 }
 
 check() {
-  make -C "$pkgname-$pkgver" check
+  cd "$pkgname-$pkgver"
+
+  meson test -C build
 }
 
 package() {
   cd "$pkgname-$pkgver"
 
-  make DESTDIR="$pkgdir" install
+  DESTDIR="$pkgdir" meson install -C build
 
-  # install Arch specific stuff
-  install -dm755 "$pkgdir/etc"
 
   sed "s@^Architecture.*@Architecture = ${CARCH}@g" -i "$srcdir/pacman.conf"
   sed "s@%ARCH%@${CARCH}@g" -i "$srcdir/makepkg.conf"
@@ -70,6 +75,7 @@ package() {
       ;;
     *)
       _CFLAGS="-O2 -pipe"
+      ;;
   esac
   sed "s@%CFLAGS%@${_CFLAGS}@g" -i "$srcdir/makepkg.conf"
 
@@ -78,6 +84,8 @@ package() {
     *)       PACMAN_CONF="pacman.conf" ;;
   esac
 
-  install -m644 "$srcdir/${PACMAN_CONF}" "$pkgdir/etc/pacman.conf"
+  # install Arch specific stuff
+  install -dm755 "$pkgdir/etc"
+  install -m644 "$srcdir/${PACMAN_CONF}" "$pkgdir/etc"
   install -m644 "$srcdir/makepkg.conf" "$pkgdir/etc"
 }
