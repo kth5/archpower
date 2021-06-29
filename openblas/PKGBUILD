@@ -4,29 +4,49 @@
 
 pkgname=openblas
 _pkgname=OpenBLAS
-pkgver=0.3.13
-pkgrel=2
+pkgver=0.3.15
+pkgrel=1
 pkgdesc="An optimized BLAS library based on GotoBLAS2 1.13 BSD"
 arch=(x86_64 powerpc64le powerpc)
 url="https://www.openblas.net/"
 license=('BSD')
 depends=('gcc-libs')
 makedepends=('perl' 'gcc-fortran')
-provides=('blas=3.8.0')
+checkdepends=('cblas')
+provides=('blas=3.9.0')
 conflicts=('blas')
-source=(${_pkgname}-v${pkgver}.tar.gz::https://github.com/xianyi/OpenBLAS/archive/v${pkgver}.tar.gz)
-sha512sums=('86e7f496587cc35d7feede99cbe3cf627ef690dd7489bb03b95f7d15ed758e32baf17d79f17b1de187184394233f60a8249a64dd53c3d59a9540db92269b7ee4')
+source=(${_pkgname}-v${pkgver}.tar.gz::https://github.com/xianyi/OpenBLAS/archive/v${pkgver}.tar.gz
+        "${pkgname}-pr3266-ppc.patch::https://patch-diff.githubusercontent.com/raw/xianyi/OpenBLAS/pull/3266.patch")
+sha512sums=('c07964ead5ffe9cf088364697bfe5cb409170663e420bdcd08a6366a028625d2a3c23ee4ddbaf0e625860a9fd08cbbb39f97eb985c366c052696d6f8598a844f'
+            'd0ac122fadd0687e864f9c2c43ecfa232d47d818a6ed9ffa00b63c7b84073348502515f61877e8d104fe0f2f864b1dc147a01430ced9edf6226fe6a91f52792d')
+
+prepare() {
+  cd $_pkgname-$pkgver
+  patch -Np1 -i ${srcdir}/${pkgname}-pr3266-ppc.patch
+}
 
 build() {
-  cd "$srcdir/$_pkgname-$pkgver"
+  cd $_pkgname-$pkgver
+
+  case "${CARCH}" in
+    powerpc64le) PLATFORM_FLAGS="TARGET=POWER8 DYNAMIC_ARCH=1" ;;
+    powerpc)     PLATFORM_FLAGS="TARGET=PPCG4";;
+    x86_64)      PLATFORM_FLASG="TARGET=CORE2 DYNAMIC_ARCH=1" ;;
+  esac
 
   make NO_STATIC=1 NO_LAPACK=1 NO_LAPACKE=1 NO_CBLAS=1 NO_AFFINITY=1 USE_OPENMP=1 \
-       CFLAGS="$CPPFLAGS $CFLAGS" DYNAMIC_ARCH=1 \
+       CFLAGS="$CPPFLAGS $CFLAGS" ${PLATFORM_FLAGS} \
        NUM_THREADS=64 MAJOR_VERSION=3 libs shared
 }
 
+check() {
+  cd $_pkgname-$pkgver
+  # TODO
+  #make CFLAGS="$CPPFLAGS $CFLAGS -lcblas" TARGET=CORE2 tests
+}
+
 package() {
-  cd "$srcdir/$_pkgname-$pkgver"
+  cd $_pkgname-$pkgver
 
   make PREFIX="$pkgdir"/usr NUM_THREADS=64 MAJOR_VERSION=3 install
   rm -f "$pkgdir"/usr/include/cblas.h "$pkgdir"/usr/include/lapack*
