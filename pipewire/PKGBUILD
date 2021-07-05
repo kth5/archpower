@@ -6,20 +6,20 @@ pkgbase=pipewire
 pkgname=(pipewire alsa-card-profiles pipewire-docs pipewire-media-session
          pipewire-alsa pipewire-jack pipewire-pulse gst-plugin-pipewire
          pipewire-zeroconf)
-pkgver=0.3.30
-pkgrel=2
+pkgver=0.3.31
+pkgrel=1
 epoch=1
 pkgdesc="Low-latency audio/video router and processor"
 url="https://pipewire.org"
 license=(MIT)
 arch=(x86_64 powerpc64le powerpc)
-makedepends=(git meson doxygen xmltoman valgrind libpulse alsa-lib
+makedepends=(git meson doxygen xmltoman valgrind libpulse alsa-lib libusb
              gst-plugins-base rtkit dbus sdl2 ncurses libsndfile bluez-libs sbc
-             libopenaptx libfdk-aac vulkan-headers vulkan-icd-loader
-             avahi webrtc-audio-processing)
+             libopenaptx libfdk-aac avahi webrtc-audio-processing)
+makedepends_powerpc64le=(libldac)
 makedepends_x86_64=(libldac)
 checkdepends=(desktop-file-utils)
-_commit=e857856be7b64d562cdcc01c43933218a68b225e  # tags/0.3.30
+_commit=c43dabcc96e2e072cdf08e5f094bb677d9017c6b  # tags/0.3.31
 source=("git+https://gitlab.freedesktop.org/pipewire/pipewire.git#commit=$_commit")
 sha256sums=('SKIP')
 
@@ -30,9 +30,6 @@ pkgver() {
 
 prepare() {
   cd pipewire
-
-  # https://bugs.archlinux.org/task/71157
-  git cherry-pick -n d8e0176bcfcd 23a0f29d4878 283e13629c0e 1c513464c83a
 }
 
 build() {
@@ -41,6 +38,7 @@ build() {
     -D jack=disabled
     -D libcamera=disabled
     -D udevrulesdir=/usr/lib/udev/rules.d
+    -D roc=disabled
   )
 
   case "${CARCH}" in
@@ -70,9 +68,10 @@ _ver=${pkgver:0:3}
 package_pipewire() {
   license+=(LGPL)  # libspa-alsa
   depends=(rtkit alsa-card-profiles libdbus-1.so libncursesw.so libsndfile.so
-           libudev.so libasound.so libsystemd.so libbluetooth.so libsbc.so
-           libopenaptx.so libfdk-aac.so libvulkan.so
+           libudev.so libusb-1.0.so libasound.so libsystemd.so libbluetooth.so
+           libsbc.so libopenaptx.so libfdk-aac.so
            libwebrtc_audio_processing.so)
+  depends_powerpc64le=(libldacBT_enc.so)
   depends_x86_64=(libldacBT_enc.so)
   optdepends=('pipewire-docs: Documentation'
               'pipewire-media-session: Default session manager'
@@ -101,7 +100,10 @@ package_pipewire() {
     _pick jack usr/share/man/man1/pw-jack.1
     _pick jack usr/share/pipewire/{jack.conf,media-session.d/with-jack}
 
+    _pick pulse usr/bin/pipewire-pulse
+    _pick pulse usr/lib/pipewire-$_ver/libpipewire-module-protocol-pulse.so
     _pick pulse usr/lib/pipewire-$_ver/libpipewire-module-pulse-tunnel.so
+    _pick pulse usr/lib/systemd/user/pipewire-pulse.*
     _pick pulse usr/share/pipewire/media-session.d/with-pulseaudio
 
     _pick gst usr/lib/gstreamer-1.0
@@ -164,7 +166,8 @@ package_pipewire-jack() {
 
 package_pipewire-pulse() {
   pkgdesc+=" - PulseAudio replacement"
-  depends=(pipewire-media-session libpulse)
+  depends=(pipewire-media-session libpipewire-$_ver.so libpulse.so
+           libavahi-{client,common}.so)
   provides=(pulseaudio pulseaudio-bluetooth)
   conflicts=(pulseaudio pulseaudio-bluetooth)
   install=pipewire-pulse.install
