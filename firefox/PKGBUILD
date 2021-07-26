@@ -4,7 +4,7 @@
 # Contributor: Jakub Schmidtke <sjakub@gmail.com>
 
 pkgname=firefox
-pkgver=89.0.2
+pkgver=90.0.2
 pkgrel=1
 pkgdesc="Standalone web browser from mozilla.org"
 arch=(x86_64 powerpc64le)
@@ -28,9 +28,9 @@ source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-
         ppc32-fix-build.patch
         skia-sucks{1,2,3}.patch
         flac-no-ffvpx.patch
-        "${pkgname}-${pkgver}-pgo.patch::https://src.fedoraproject.org/rpms/firefox/raw/rawhide/f/pgo.patch"
+        firefox-pgo.patch
         avoid-redefinition.patch)
-sha256sums=('3225f583c5e36bdf52ad16f71a2c359deb0c765c38205acdeb6b7b6520ac5494'
+sha256sums=('35c45dbc21a7bd59e5daa6b3fef7a08c51ff0a1333f47a355bb1cbc840c3ff59'
             'SKIP'
             'a9e5264257041c0b968425b5c97436ba48e8d294e1a0f02c59c35461ea245c33'
             'ad83c0c6195ab742848941be1d9c8f32c1d4a8bc019d8887b42256bafaefb541'
@@ -41,7 +41,7 @@ sha256sums=('3225f583c5e36bdf52ad16f71a2c359deb0c765c38205acdeb6b7b6520ac5494'
             'd98af26b723a8b590822a3d1ab925841b99882c158d3dec7514288c968f2428e'
             '851503764a3068d36659b9231c9aaa40fe8a15680f7d0a378e9009ae1a776dae'
             '944fc690a0b344ea56ff2b0880ba492ba80338a68f31d0fb205b891a5de42cee'
-            'd8398606891cfce677ee84f799ff1e6e6487ca8022f78c3026f48cb801b6aefe'
+            'f75fef9272a9ea1badd8a4cbf0247d03b6bece8582772b508f3649840a56d573'
             '3ebba6c6c59dbf754b522d2535c27eae3e724aab575b8e7be9658e0d33183bcf')
 validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
 
@@ -76,7 +76,13 @@ prepare() {
 
   case "${CARCH}" in
     powerpc64le)
-      patch -Np1 -i ${srcdir}/${pkgname}-${pkgver}-pgo.patch
+      patch -Np1 -i ${srcdir}/${pkgname}-pgo.patch
+      CC=gcc-10
+      CXX=g++-10
+      ;;
+    *)
+      CC=clang
+      CXX=clang++
       ;;
   esac
 
@@ -86,16 +92,16 @@ prepare() {
   echo -n "$_mozilla_api_key" >$srcdir/mozilla-api-key
 
   cat >${srcdir}/mozconfig <<END
+export CC=${CC}
+export CXX=${CXX}
 ac_add_options --enable-application=browser
 
 ac_add_options --prefix=/usr
 ac_add_options --enable-release
 ac_add_options --enable-hardening
-ac_add_options --enable-optimize
+ac_add_options --enable-optimize="${CXXFLAGS} -fpermissive"
 ac_add_options --enable-jemalloc
 ac_add_options --enable-linker=bfd
-export CC=gcc-10
-export CXX=g++-10
 export LDFLAGS="${LDFLAGS} -Wl,-rpath=/usr/lib/firefox"
 mk_add_options MOZ_MAKE_FLAGS="${MAKEFLAGS}"
 
@@ -165,7 +171,6 @@ build() {
   echo "Building symbol archive..."
   xvfb-run -s "-screen 0 1920x1080x24 -nolisten local" \
   ./mach buildsymbols
-
 }
 
 package() {
