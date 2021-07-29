@@ -14,7 +14,7 @@ _llvm_ver=12.0.1
 
 pkgdesc='Systems programming language focused on safety, speed and concurrency'
 url='https://www.rust-lang.org/'
-arch=(powerpc64le)
+arch=(powerpc powerpc64le)
 license=('MIT' 'Apache')
 
 makedepends=('rust' "llvm=$_llvm_ver" 'libffi' 'perl' 'python'
@@ -33,6 +33,10 @@ source=(
   0007-test-sysroot-crates-are-unstable-Fix-test-when-rpath.patch
   0009-Link-stage2-tools-dynamically-to-libstd.patch
   0016-do-not-copy-libunwind.patch
+  https://alpha.de.repo.voidlinux.org/distfiles/cargo-0.54.0-powerpc-unknown-linux-gnu.tar.xz
+  https://alpha.de.repo.voidlinux.org/distfiles/rust-std-${pkgver}-powerpc-unknown-linux-gnu.tar.xz
+  https://alpha.de.repo.voidlinux.org/distfiles/rustc-${pkgver}-powerpc-unknown-linux-gnu.tar.xz
+  fix-ppc32.patch
 )
 sha256sums=('5cf7ca39a10f6bf4e0b0bd15e3b9a61ce721f301e12d148262e5ba968ab825b9'
             'SKIP'
@@ -44,7 +48,9 @@ sha256sums=('5cf7ca39a10f6bf4e0b0bd15e3b9a61ce721f301e12d148262e5ba968ab825b9'
             '37dd40c028f4f3f79f8ecc7357023f2cf555ad6cfbd9a55c9f1ef61589144acd'
             '95ca814677947e87344b0890fd0d323f8dba567fa390219b92debdca71f14ff2'
             '0883036789d8f8523de8896f9eed5c50d714c67ccbefddb46de0a80be76f3c39'
-            'c2394b6ee55374fce587ec03c3ffc5bd684aa67194b1bed4c34a162245b535f4')
+            'c2394b6ee55374fce587ec03c3ffc5bd684aa67194b1bed4c34a162245b535f4'
+            '176f178b9e55f399311edb4888d931e5f696766f655cc9648ae4b6ef1bdc8369'
+            '7d0ca701816f4c02fa245a173b5330140089344a06ecf11f9516422008346f65')
 validpgpkeys=('108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE'  # Rust Language (Tag and Release Signing Key) <rust-key@rust-lang.org>
               '474E22316ABF4785A88C6E8EA2C794A986419D8A'  # Tom Stellard <tstellar@redhat.com>
               'B6C8F98282B944E3B0D5C2530FC3042E345AD05D') # Hans Wennborg <hans@chromium.org>
@@ -63,6 +69,24 @@ prepare() {
   patch -Np1 -i ../0009-Link-stage2-tools-dynamically-to-libstd.patch
   patch -Np1 -i ../0016-do-not-copy-libunwind.patch
 
+  case "${CARCH}" in
+    powerpc) 
+      patch -Np1 -i ../fix-ppc32.patch
+      mkdir -p ${srcdir}/bootstrap/{bin,lib,share}
+      cp ${srcdir}/cargo-0.54.0-${CHOST}/cargo/bin/cargo ${srcdir}/bootstrap/bin/cargo
+      ${srcdir}/rust-std-${pkgver}-${CHOST}/install.sh \
+	 --destdir="${srcdir}/bootstrap" --prefix=/ --disable-ldconfig
+      ${srcdir}/rustc-${pkgver}-${CHOST}/install.sh \
+	 --destdir="${srcdir}/bootstrap" --prefix=/ --disable-ldconfig
+      BOOTSTRAP_PATH="${srcdir}/bootstrap/bin"
+      BUILD_TOOLS='"cargo", "clippy", "rustfmt", "analysis", "src", "rust-demangler"'
+    ;;
+    *)
+      BOOTSTRAP_PATH="/usr/bin"
+      BUILD_TOOLS='"cargo", "rls", "clippy", "rustfmt", "analysis", "src", "rust-demangler"'
+    ;;
+  esac
+
   cat >config.toml <<END
 changelog-seen = 2
 profile = "user"
@@ -72,11 +96,11 @@ link-shared = true
 
 [build]
 target = ["${CHOST}"]
-cargo = "/usr/bin/cargo"
-rustc = "/usr/bin/rustc"
-rustfmt = "/usr/bin/rustfmt"
+cargo = "${BOOTSTRAP_PATH}/cargo"
+rustc = "${BOOTSTRAP_PATH}/rustc"
+rustfmt = "${BOOTSTRAP_PATH}/rustfmt"
 vendor = true
-tools = ["cargo", "rls", "clippy", "rustfmt", "analysis", "src", "rust-demangler"]
+tools = [${BUILD_TOOLS}]
 sanitizers = true
 profiler = true
 
@@ -160,3 +184,18 @@ package_rust-docs() {
 }
 
 # vim:set ts=2 sw=2 et:
+sha256sums=('5cf7ca39a10f6bf4e0b0bd15e3b9a61ce721f301e12d148262e5ba968ab825b9'
+            'SKIP'
+            'b4c8d5f2a802332987c1c0a95b5afb35b1a66a96fe44add4e4ed4792c4cba0a4'
+            'SKIP'
+            '35c9cd0d2a220c020f949c231d296bf4a1641ad253485e2f64440a6dc7731082'
+            '1833c3b5f8262b598115d13f08e2dcba792536768a2371869870e26244971112'
+            '08616f9acea0967af8fda6eed66854fb47fb618969dea139a5fc52017da43da0'
+            '37dd40c028f4f3f79f8ecc7357023f2cf555ad6cfbd9a55c9f1ef61589144acd'
+            '95ca814677947e87344b0890fd0d323f8dba567fa390219b92debdca71f14ff2'
+            '0883036789d8f8523de8896f9eed5c50d714c67ccbefddb46de0a80be76f3c39'
+            'c2394b6ee55374fce587ec03c3ffc5bd684aa67194b1bed4c34a162245b535f4'
+            '176f178b9e55f399311edb4888d931e5f696766f655cc9648ae4b6ef1bdc8369'
+            '6006f7f78e30810e8b929ab5ab97cf5e4488a25f7fe6a49a1a548dd4745281e0'
+            'be6ca5e02c04329b082eaf717ba2ea370d676a93e520cd5988883ea2ed8cb750'
+            '7d0ca701816f4c02fa245a173b5330140089344a06ecf11f9516422008346f65')
