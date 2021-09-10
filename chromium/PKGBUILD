@@ -5,10 +5,10 @@
 # Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
 
 pkgname=chromium
-pkgver=91.0.4472.77
-pkgrel=2
-_launcher_ver=7
-_gcc_patchset=5
+pkgver=93.0.4577.63
+pkgrel=1
+_launcher_ver=8
+_gcc_patchset=6
 pkgdesc="A web browser built for speed, simplicity, and security"
 arch=(x86_64 powerpc64le)
 url="https://www.chromium.org/Home"
@@ -16,8 +16,8 @@ license=('BSD')
 depends=('gtk3' 'nss' 'alsa-lib' 'xdg-utils' 'libxss' 'libcups' 'libgcrypt'
          'ttf-liberation' 'systemd' 'dbus' 'libpulse' 'pciutils' 'libva'
          'desktop-file-utils' 'hicolor-icon-theme')
-makedepends=('python' 'gn' 'ninja' 'clang' 'lld' 'gperf' 'nodejs-lts-dubnium' 'pipewire'
-             'java-runtime-headless' 'python2' 'python2-setuptools')
+makedepends=('python' 'gn' 'ninja' 'clang' 'lld' 'gperf' 'nodejs' 'pipewire'
+             'java-runtime-headless')
 optdepends=('pipewire: WebRTC desktop sharing under Wayland'
             'kdialog: support for native dialogs in Plasma'
             'org.freedesktop.secrets: password storage backend on GNOME / Xfce'
@@ -25,23 +25,23 @@ optdepends=('pipewire: WebRTC desktop sharing under Wayland'
 source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgname-$pkgver.tar.xz
         https://github.com/foutrelis/chromium-launcher/archive/v$_launcher_ver/chromium-launcher-$_launcher_ver.tar.gz
         https://github.com/stha09/chromium-patches/releases/download/chromium-${pkgver%%.*}-patchset-$_gcc_patchset/chromium-${pkgver%%.*}-patchset-$_gcc_patchset.tar.xz
-        fix-crash-in-ThemeService.patch
-        unbundle-use-char16_t-as-UCHAR_TYPE.patch
-        extend-enable-accelerated-video-decode-flag.patch
+        linux-sandbox-syscall-broker-use-struct-kernel_stat.patch
+        linux-sandbox-fix-fstatat-crash.patch
+        replace-blacklist-with-ignorelist.patch
         sql-make-VirtualCursor-standard-layout-type.patch
-        chromium-glibc-2.33.patch
+        chromium-93-ffmpeg-4.4.patch
         use-oauth2-client-switches-as-default.patch
         xxx-ppc64le-libvpx.patch
+        xxx-ppc64le-sandbox-linux-stat.patch
         xxx-ppc64le-support.patch
         xxx-ppc64le-swiftshader.patch)
-sha256sums=('45d5a43ef798d20313c78fa8a075be0c22055e39c8481eb53eabda81df901b31'
-            '86859c11cfc8ba106a3826479c0bc759324a62150b271dd35d1a0f96e890f52f'
-            '171525009003a9ed1182cfcb6f407d7169d9a731a474304e263029376719f55a'
-            '3cfe46e181cb9d337c454b5b5adbf5297052f29cd617cdee4380eeb1943825d8'
-            '59a59a60a08b335fe8647fdf0f9d2288d236ebf2cc9626396d0c4d032fd2b25d'
-            '66db9132d6f5e06aa26e5de0924f814224a76a9bdf4b61afce161fb1d7643b22'
-            'dd317f85e5abfdcfc89c6f23f4c8edbcdebdd5e083dcec770e5da49ee647d150'
-            '2fccecdcd4509d4c36af873988ca9dbcba7fdb95122894a9fdf502c33a1d7a4b'
+sha256sums=('eaf34fa6c2f24054655fbb2376b6e3ddee4cf4868c1324c921e71a45cfc94853'
+            '213e50f48b67feb4441078d50b0fd431df34323be15be97c55302d3fdac4483a'
+            'a44ffd9e25fcbd8b3cc778871890e4da6fe12600ad549c807e1d03f61f0cdf73'
+            '268e18ad56e5970157b51ec9fc8eb58ba93e313ea1e49c842a1ed0820d9c1fa3'
+            '253348550d54b8ae317fd250f772f506d2bae49fb5dc75fe15d872ea3d0e04a5'
+            'd3344ba39b8c6ed202334ba7f441c70d81ddf8cdb15af1aa8c16e9a3a75fbb35'
+            '1a9e074f417f8ffd78bcd6874d8e2e74a239905bf662f76a7755fa40dc476b57'
             'e393174d7695d0bafed69e868c5fbfecf07aa6969f3b64596d0bae8b067e1711')
 
 # Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
@@ -96,31 +96,38 @@ prepare() {
   # runtime -- this allows signing into Chromium without baked-in values
   patch -Np1 -i ../use-oauth2-client-switches-as-default.patch
 
-  # https://crbug.com/1164975
-  patch -Np1 -i ../chromium-glibc-2.33.patch
+  # Fix build with older ffmpeg
+  patch -Np1 -i ../chromium-93-ffmpeg-4.4.patch
+
+  # Revert transition to -fsanitize-ignorelist (needs newer clang)
+  patch -Rp1 -i ../replace-blacklist-with-ignorelist.patch
 
   # Upstream fixes
-  patch -Np1 -i ../fix-crash-in-ThemeService.patch
-  patch -Np1 -i ../unbundle-use-char16_t-as-UCHAR_TYPE.patch
-  patch -Np1 -i ../extend-enable-accelerated-video-decode-flag.patch
+  patch -Np1 -i ../linux-sandbox-syscall-broker-use-struct-kernel_stat.patch
+  patch -Np1 -i ../linux-sandbox-fix-fstatat-crash.patch
 
   # https://chromium-review.googlesource.com/c/chromium/src/+/2862724
   patch -Np1 -i ../sql-make-VirtualCursor-standard-layout-type.patch
 
   # Fixes for building with libstdc++ instead of libc++
+  patch -Np1 -i ../patches/chromium-93-pdfium-include.patch
   patch -Np1 -i ../patches/chromium-90-ruy-include.patch
+  patch -Np1 -i ../patches/chromium-93-HashPasswordManager-include.patch
+  patch -Np1 -i ../patches/chromium-93-BluetoothLowEnergyScanFilter-include.patch
+  patch -Np1 -i ../patches/chromium-93-ClassProperty-include.patch
+  patch -Np1 -i ../patches/chromium-93-DevToolsEmbedderMessageDispatcher-include.patch
+  patch -Np1 -i ../patches/chromium-93-ScopedTestDialogAutoConfirm-include.patch
 
-  patch -Np0 -i ${srcdir}/xxx-ppc64le-libvpx.patch
-  patch -Np0 -i ${srcdir}/xxx-ppc64le-support.patch
-  patch -Np0 -i ${srcdir}/xxx-ppc64le-swiftshader.patch
-
-  # Force script incompatible with Python 3 to use /usr/bin/python2
-  sed -i '1s|python$|&2|' third_party/dom_distiller_js/protoc_plugins/*.py
+  # powerpc64le support
+  patch -Np1 -i ${srcdir}/xxx-ppc64le-libvpx.patch
+  patch -Np1 -i ${srcdir}/xxx-ppc64le-sandbox-linux-stat.patch
+  patch -Np1 -i ${srcdir}/xxx-ppc64le-support.patch
+  patch -Np1 -i ${srcdir}/xxx-ppc64le-swiftshader.patch
 
   # Link to system tools required by the build
   mkdir -p third_party/node/linux/node-linux-{x64,ppc64le}/bin
-  ln -s /usr/bin/node third_party/node/linux/node-linux-ppc64le/bin/
   ln -s /usr/bin/node third_party/node/linux/node-linux-x64/bin/
+  ln -s /usr/bin/node third_party/node/linux/node-linux-ppc64le/bin/
   ln -s /usr/bin/java third_party/jdk/current/bin/
 
   pushd third_party/libvpx
@@ -155,7 +162,6 @@ build() {
   export CXX=clang++
   export AR=ar
   export NM=nm
-  export LD=lld
 
   local _flags=(
     'custom_toolchain="//build/toolchain/linux/unbundle:default"'
@@ -164,6 +170,7 @@ build() {
     'is_official_build=true' # implies is_cfi=true on x86_64
     'treat_warnings_as_errors=false'
     'fieldtrial_testing_like_official_build=true'
+    'blink_enable_generated_code_formatting=false'
     'ffmpeg_branding="Chrome"'
     'proprietary_codecs=true'
     'rtc_use_pipewire=true'
@@ -174,8 +181,8 @@ build() {
     'enable_hangout_services_extension=true'
     'enable_widevine=true'
     'enable_nacl=false'
-    'enable_jxl_decoder=false'
     'use_lld=true'
+    'enable_jxl_decoder=false'
     "google_api_key=\"$_google_api_key\""
   )
 
@@ -197,7 +204,7 @@ build() {
   CXXFLAGS+=' -Wno-unknown-warning-option'
 
   gn gen out/Release --args="${_flags[*]}"
-  ninja -C out/Release chrome chrome_sandbox chromedriver
+  ninja ${MAKEFLAGS} -C out/Release chrome chrome_sandbox chromedriver
 }
 
 package() {
@@ -210,7 +217,7 @@ package() {
 
   install -D out/Release/chrome "$pkgdir/usr/lib/chromium/chromium"
   install -Dm4755 out/Release/chrome_sandbox "$pkgdir/usr/lib/chromium/chrome-sandbox"
-  ln -s /usr/lib/chromium/chromedriver "$pkgdir/usr/bin/chromedriver"
+  #ln -s /usr/lib/chromium/chromedriver "$pkgdir/usr/bin/chromedriver"
 
   install -Dm644 chrome/installer/linux/common/desktop.template \
     "$pkgdir/usr/share/applications/chromium.desktop"
@@ -242,7 +249,8 @@ package() {
     libEGL.so
     libGLESv2.so
 
-    chromedriver
+#    chromedriver
+    crashpad_handler
   )
 
   if [[ -z ${_system_libs[icu]+set} ]]; then
@@ -267,15 +275,3 @@ package() {
 }
 
 # vim:set ts=2 sw=2 et:
-sha256sums=('45d5a43ef798d20313c78fa8a075be0c22055e39c8481eb53eabda81df901b31'
-            '86859c11cfc8ba106a3826479c0bc759324a62150b271dd35d1a0f96e890f52f'
-            '171525009003a9ed1182cfcb6f407d7169d9a731a474304e263029376719f55a'
-            '3cfe46e181cb9d337c454b5b5adbf5297052f29cd617cdee4380eeb1943825d8'
-            '59a59a60a08b335fe8647fdf0f9d2288d236ebf2cc9626396d0c4d032fd2b25d'
-            '66db9132d6f5e06aa26e5de0924f814224a76a9bdf4b61afce161fb1d7643b22'
-            'dd317f85e5abfdcfc89c6f23f4c8edbcdebdd5e083dcec770e5da49ee647d150'
-            '2fccecdcd4509d4c36af873988ca9dbcba7fdb95122894a9fdf502c33a1d7a4b'
-            'e393174d7695d0bafed69e868c5fbfecf07aa6969f3b64596d0bae8b067e1711'
-            '9af5aad8554c966542550f7467bb86d3a02d101aded4407f0a14ad289e47ee62'
-            'f43bcbb768072233d90f1e31ce5b7bed571dce985b23fc822f5bed9ab4bc9c81'
-            '92af4ffbfeb72964ec9bd4ab0f0565e942178aff2cb8bcd488d800912b235ba2')
