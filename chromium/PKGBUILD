@@ -6,7 +6,7 @@
 
 pkgname=chromium
 pkgver=93.0.4577.63
-pkgrel=1
+pkgrel=1.1
 _launcher_ver=8
 _gcc_patchset=6
 pkgdesc="A web browser built for speed, simplicity, and security"
@@ -34,15 +34,30 @@ source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgn
         xxx-ppc64le-libvpx.patch
         xxx-ppc64le-sandbox-linux-stat.patch
         xxx-ppc64le-support.patch
-        xxx-ppc64le-swiftshader.patch)
+        xxx-ppc64le-swiftshader.patch
+        sandbox-sched_getparam.patch
+        sandbox-membarrier.patch
+        fix-narrowing-cast.patch
+        remove-strip_binary.patch
+        libc_malloc.patch)
 sha256sums=('eaf34fa6c2f24054655fbb2376b6e3ddee4cf4868c1324c921e71a45cfc94853'
             '213e50f48b67feb4441078d50b0fd431df34323be15be97c55302d3fdac4483a'
             'a44ffd9e25fcbd8b3cc778871890e4da6fe12600ad549c807e1d03f61f0cdf73'
             '268e18ad56e5970157b51ec9fc8eb58ba93e313ea1e49c842a1ed0820d9c1fa3'
             '253348550d54b8ae317fd250f772f506d2bae49fb5dc75fe15d872ea3d0e04a5'
             'd3344ba39b8c6ed202334ba7f441c70d81ddf8cdb15af1aa8c16e9a3a75fbb35'
+            'dd317f85e5abfdcfc89c6f23f4c8edbcdebdd5e083dcec770e5da49ee647d150'
             '1a9e074f417f8ffd78bcd6874d8e2e74a239905bf662f76a7755fa40dc476b57'
-            'e393174d7695d0bafed69e868c5fbfecf07aa6969f3b64596d0bae8b067e1711')
+            'e393174d7695d0bafed69e868c5fbfecf07aa6969f3b64596d0bae8b067e1711'
+            '6b7ad5cd5d7d61b5441810688fc5bd99cb8198291b2252451d352a620a2e09bb'
+            '16361d737c14135e464bf52e09d0b79c0e9ef84c364253e08f435e8e72d7b5c9'
+            '043e007bcbd1d324b81cb1f82971bbd006edba3f4e144552c389e17d8f7a1979'
+            'be9416182beb25f0835bae1dad5a26786f694dbda2e5106f83714be42add653a'
+            'f5961ae09ddbdda69713d82e631bc3dab4884629f32f60ba201189c2c4269b39'
+            'ba514c06cc03d728d2c1727fac85f2bbe953fe9720dcf8c2fa8de0ae4385e33b'
+            '771395e3e84a4a1627945112b8c100c898221e04d86b76d4cff946530010e1a4'
+            '89c4512db46368809f45f4e092279e87104ba5a7c6a812d001c606b0efd8855b'
+            '612543dcef7fc6e45e1be2f3107d55d6194b20d39b7fd9f128050273eee91f40')
 
 # Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
 # Keys are the names in the above script; values are the dependencies in Arch
@@ -123,6 +138,11 @@ prepare() {
   patch -Np1 -i ${srcdir}/xxx-ppc64le-sandbox-linux-stat.patch
   patch -Np1 -i ${srcdir}/xxx-ppc64le-support.patch
   patch -Np1 -i ${srcdir}/xxx-ppc64le-swiftshader.patch
+  patch -Np1 -i ${srcdir}/sandbox-sched_getparam.patch
+  patch -Np1 -i ${srcdir}/sandbox-membarrier.patch
+  patch -Np1 -i ${srcdir}/fix-narrowing-cast.patch
+  patch -Np1 -i ${srcdir}/remove-strip_binary.patch
+  patch -Np1 -i ${srcdir}/libc_malloc.patch
 
   # Link to system tools required by the build
   mkdir -p third_party/node/linux/node-linux-{x64,ppc64le}/bin
@@ -181,10 +201,20 @@ build() {
     'enable_hangout_services_extension=true'
     'enable_widevine=true'
     'enable_nacl=false'
-    'use_lld=true'
     'enable_jxl_decoder=false'
     "google_api_key=\"$_google_api_key\""
   )
+
+  case "${CARCH}" in
+    powerpc64le)
+      _flags+=(
+        'use_custom_libcxx=false'
+        'use_lld=true' 
+        'use_allocator="none"'
+        'use_allocator_shim=false'
+      )
+    ;;
+  esac
 
   if [[ -n ${_system_libs[icu]+set} ]]; then
     _flags+=('icu_use_data_file=false')
@@ -204,7 +234,9 @@ build() {
   CXXFLAGS+=' -Wno-unknown-warning-option'
 
   gn gen out/Release --args="${_flags[*]}"
-  ninja ${MAKEFLAGS} -C out/Release chrome chrome_sandbox chromedriver
+  #bash
+  #exit 0
+  ninja ${MAKEFLAGS} -C out/Release chrome chrome_sandbox chromedriver mksnapshot
 }
 
 package() {
@@ -217,7 +249,7 @@ package() {
 
   install -D out/Release/chrome "$pkgdir/usr/lib/chromium/chromium"
   install -Dm4755 out/Release/chrome_sandbox "$pkgdir/usr/lib/chromium/chrome-sandbox"
-  #ln -s /usr/lib/chromium/chromedriver "$pkgdir/usr/bin/chromedriver"
+  ln -s /usr/lib/chromium/chromedriver "$pkgdir/usr/bin/chromedriver"
 
   install -Dm644 chrome/installer/linux/common/desktop.template \
     "$pkgdir/usr/share/applications/chromium.desktop"
@@ -249,7 +281,7 @@ package() {
     libEGL.so
     libGLESv2.so
 
-#    chromedriver
+    chromedriver
     crashpad_handler
   )
 
