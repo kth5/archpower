@@ -6,7 +6,7 @@
 
 pkgname=chromium
 pkgver=93.0.4577.63
-pkgrel=1.1
+pkgrel=1.2
 _launcher_ver=8
 _gcc_patchset=6
 pkgdesc="A web browser built for speed, simplicity, and security"
@@ -39,7 +39,16 @@ source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgn
         sandbox-membarrier.patch
         fix-narrowing-cast.patch
         remove-strip_binary.patch
-        libc_malloc.patch)
+        libc_malloc.patch
+        browser-size_t.patch
+        chromium-revert-drop-of-system-java.patch
+        chromium-system-nodejs.patch
+        chromium-webrtc-r0.patch
+        cursed^Uscoped_file.patch
+        no-execinfo.patch
+        no-getcontext.patch
+        webrtc-include.patch
+        webrtc-size_t.patch)
 sha256sums=('eaf34fa6c2f24054655fbb2376b6e3ddee4cf4868c1324c921e71a45cfc94853'
             '213e50f48b67feb4441078d50b0fd431df34323be15be97c55302d3fdac4483a'
             'a44ffd9e25fcbd8b3cc778871890e4da6fe12600ad549c807e1d03f61f0cdf73'
@@ -57,7 +66,16 @@ sha256sums=('eaf34fa6c2f24054655fbb2376b6e3ddee4cf4868c1324c921e71a45cfc94853'
             'ba514c06cc03d728d2c1727fac85f2bbe953fe9720dcf8c2fa8de0ae4385e33b'
             '771395e3e84a4a1627945112b8c100c898221e04d86b76d4cff946530010e1a4'
             '89c4512db46368809f45f4e092279e87104ba5a7c6a812d001c606b0efd8855b'
-            '612543dcef7fc6e45e1be2f3107d55d6194b20d39b7fd9f128050273eee91f40')
+            '612543dcef7fc6e45e1be2f3107d55d6194b20d39b7fd9f128050273eee91f40'
+            'd2028d47da62f054eb83ab692f8801d726f87d22c9a96e7b96c779ed0aba9287'
+            '4f74164ad790b00389565c638bf3e752017ca7ef4bb77a86a17b6e498de501de'
+            '9dc885b7d719a7cf87f8d3ddcc33184b08bfd9827f696f00d194bfbead39f63d'
+            '376bfa23760896cb006b2c5718a86c11ec8c62879fe3d9a5d409e8b89185e42d'
+            '6cfec4a32160df642ffa4b3c1e10ba19e94f1004bac65a349fa273b0f684b8ac'
+            'a76ec1a929b54d79b1fa643036fcbd9ff2c2cc99e7d7e1573122ca0b5e760347'
+            '26111345b8d9bf87f7336c35aa401ff2f1b2911519e7b725e224c59f33593378'
+            '80d9910ec018c517e4316419939aac9751ddae13b3cadf4712fdac770a899e81'
+            '83904114e89c2b1ed55814bc07ba5a0ad198010b3cac9f223c72ac4fbac3646b')
 
 # Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
 # Keys are the names in the above script; values are the dependencies in Arch
@@ -143,6 +161,15 @@ prepare() {
   patch -Np1 -i ${srcdir}/fix-narrowing-cast.patch
   patch -Np1 -i ${srcdir}/remove-strip_binary.patch
   patch -Np1 -i ${srcdir}/libc_malloc.patch
+  patch -Np1 -i ${srcdir}/browser-size_t.patch
+  patch -Np1 -i ${srcdir}/chromium-revert-drop-of-system-java.patch
+  patch -Np1 -i ${srcdir}/chromium-system-nodejs.patch
+  patch -Np1 -i ${srcdir}/chromium-webrtc-r0.patch
+  patch -Np1 -i ${srcdir}/cursed^Uscoped_file.patch
+  patch -Np1 -i ${srcdir}/no-execinfo.patch
+  patch -Np1 -i ${srcdir}/no-getcontext.patch
+  patch -Np1 -i ${srcdir}/webrtc-include.patch
+  patch -Np1 -i ${srcdir}/webrtc-size_t.patch
 
   # Link to system tools required by the build
   mkdir -p third_party/node/linux/node-linux-{x64,ppc64le}/bin
@@ -182,6 +209,8 @@ build() {
   export CXX=clang++
   export AR=ar
   export NM=nm
+
+  unset CFLAGS CXXFLAGS LDFLAGS
 
   local _flags=(
     'custom_toolchain="//build/toolchain/linux/unbundle:default"'
@@ -233,9 +262,9 @@ build() {
   CFLAGS+='   -Wno-unknown-warning-option'
   CXXFLAGS+=' -Wno-unknown-warning-option'
 
+  LDFLAGS+=' -pthread'
+
   gn gen out/Release --args="${_flags[*]}"
-  #bash
-  #exit 0
   ninja ${MAKEFLAGS} -C out/Release chrome chrome_sandbox chromedriver mksnapshot
 }
 
