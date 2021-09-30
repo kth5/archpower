@@ -8,60 +8,57 @@
 
 pkgbase=thunderbird
 pkgname=(thunderbird)
-pkgver=78.13.0
+pkgver=91.1.2
 pkgrel=1
 pkgdesc='Standalone mail and news reader from mozilla.org'
 url='https://www.mozilla.org/thunderbird/'
 arch=(x86_64 powerpc64le)
 license=(MPL GPL LGPL)
 depends=(
-  glibc gtk3 libgdk-3.so mime-types dbus libdbus-1.so dbus-glib alsa-lib nss
-  hunspell sqlite ttf-font libvpx libvpx.so zlib bzip2 botan libwebp libevent
-  libjpeg-turbo libffi nspr gcc10-libs libx11 libxrender libxfixes libxext
-  libxcomposite libxdamage pango libpango-1.0.so cairo gdk-pixbuf2 icu
-  libicui18n.so libicuuc.so freetype2 libfreetype.so fontconfig
-  libfontconfig.so glib2 libglib-2.0.so pixman libpixman-1.so gnupg
-)
-optdepends=(
-  'libotr: OTR support for active one-to-one chats'
+  glibc gtk3 libgdk-3.so libgtk-3.so mime-types dbus libdbus-1.so dbus-glib
+  alsa-lib nss hunspell sqlite ttf-font libvpx libvpx.so zlib bzip2 libbz2.so
+  botan libwebp libwebp.so libwebpdemux.so libevent libjpeg-turbo libffi
+  libffi.so nspr gcc-libs libx11 libxrender libxfixes libxext libxcomposite
+  libxdamage pango libpango-1.0.so cairo gdk-pixbuf2 icu libicui18n.so
+  libicuuc.so freetype2 libfreetype.so fontconfig libfontconfig.so glib2
+  libglib-2.0.so pixman libpixman-1.so gnupg
 )
 makedepends=(
   unzip zip diffutils python python-setuptools mesa imake libpulse
-  inetutils xorg-server-xvfb autoconf2.13 rust gcc10 llvm clang gtk2 cbindgen nodejs-lts-dubnium
+  xorg-server-xvfb autoconf2.13 rust clang llvm cbindgen nodejs
   gawk perl findutils libotr
 )
-makedepends_x86_64=(yasm nasm)
+makedepends_x86_64=(nasm yasm)
 options=(!emptydirs !makeflags)
 source=(https://ftp.mozilla.org/pub/mozilla.org/thunderbird/releases/$pkgver/source/thunderbird-$pkgver.source.tar.xz{,.asc}
         thunderbird.desktop
         vendor-prefs.js
         distribution.ini
-        mozconfig.cfg
-        mozconfig.cfg.powerpc64le
-        mozconfig.cfg.powerpc
-        fix-fortify-inline.patch
+        mozconfig.cfg{,.powerpc64le}
+        metainfo.patch
+        avoid-redefinition.patch
+        big-endian-image-decoders.patch
+        firefox-pgo.patch
+        firefox-powerpc-clang.patch
         fix-image-format-warning.patch
-        fix-webrtc-glibcisms.patch
-        rust-has-i128.patch
-        rust-configure.patch
+        flac-no-ffvpx.patch
         skia-sucks1.patch
         skia-sucks2.patch
-        skia-sucks3.patch
-        sandbox-largefile.patch
-        sandbox-fork.patch
-        firefox-78esr-combo.patch
-        ppc32-fix-build.patch)
-validpgpkeys=(14F26682D0916CDD81E37B6D61B7B526D98F0353) # Mozilla Software Releases <release@mozilla.com>
+        skia-sucks3.patch)
+validpgpkeys=(
+  14F26682D0916CDD81E37B6D61B7B526D98F0353 # Mozilla Software Releases <release@mozilla.com>
+  4360FE2109C49763186F8E21EBE41E90F6F12F6D # Mozilla Software Releases <release@mozilla.com>
+)
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
-# Note: These are for Arch POWER use ONLY. For your own distribution, please
-# get your own set of keys. Feel free to contact foutrelis@archlinux.org for
+# Note: These are for Arch Linux POWER use ONLY. For your own distribution, please
+# get your own set of keys. Feel free to contact alex.bldck@gmail.com for
 # more information.
 _google_api_key=AIzaSyDgkw4O3LM0Jnr2N7Wq2NG7iUVzRU5sBaA
 
 # Mozilla API keys (see https://location.services.mozilla.com/api)
-# Note: These are for Arch POWER use ONLY. For your own distribution, please
-# get your own set of keys. Feel free to contact heftig@archlinux.org for
+# Note: These are for Arch Linux POWER use ONLY. For your own distribution, please
+# get your own set of keys. Feel free to contact alex.bldck@gmail.com for
 # more information.
 _mozilla_api_key=de0473f2-d53f-46da-956c-6aff61bda3ab
 
@@ -76,47 +73,35 @@ prepare() {
     src="${src##*/}"
     [[ $src = *.patch ]] || continue
     echo "Applying patch $src..."
-    patch -Np1 < "../$src"
-  done
-
-  for _name in audio_thread_priority num-traits glslopt; do
-    sed -i 's/\("files":{\)[^}]*/\1/' third_party/rust/${_name}/.cargo-checksum.json
+    patch -Np0 < "../$src"
   done
 
   printf "%s" "$_google_api_key" >google-api-key
   printf "%s" "$_mozilla_api_key" >mozilla-api-key
-  cp ../mozconfig.cfg .mozconfig
+
   case "${CARCH}" in
-   powerpc64le) cp ../mozconfig.cfg.powerpc64le .mozconfig ;;
-   powerpc) cp ../mozconfig.cfg.powerpc .mozconfig ;;
+    powerpc64le) cp ../mozconfig.cfg.powerpc64le .mozconfig ;;
+    *) cp ../mozconfig.cfg .mozconfig ;;
   esac
   sed "s|@PWD@|${PWD@Q}|g" -i .mozconfig
 
   # remove pre-built binaries
   find third_party -type f \( -name '*.so' -o -name '*.o' \) -print -delete || die
 
+  for _name in audio_thread_priority num-traits glslopt; do
+    sed -i 's/\("files":{\)[^}]*/\1/' third_party/rust/${_name}/.cargo-checksum.json
+  done
+
   case "${CARCH}" in
     powerpc64le)
       cat >>.mozconfig <<END
-export CC=gcc-10
-export CXX=g++-10
+export CC=gcc
+export CXX=g++
 export LDFLAGS="${LDFLAGS} -Wl,-rpath=/usr/lib/thunderbird"
 mk_add_options MOZ_MAKE_FLAGS="${MAKEFLAGS}"
 ac_add_options --enable-optimize="${CXXFLAGS}"
 END
-    ;;
-    powerpc)
-      cat >>.mozconfig <<END
-export CC=gcc-10
-export CXX=g++-10
-export CXXFLAGS="-Os -latomic -Wno-class-memaccess"
-export LDFLAGS="-Wl,-rpath=/usr/lib/thunderbird -Wl,-z,stack-size=1048576 -latomic"
-ac_add_options --disable-jit
-ac_add_options --with-system-icu
-ac_add_options --enable-linker=bfd
-ac_add_options --disable-webrtc
-END
-    ;;
+                    ;;
   esac
 }
 
@@ -125,18 +110,17 @@ build() {
   if [[ -n "${SOURCE_DATE_EPOCH}" ]]; then
     export MOZ_BUILD_DATE=$(date --date "@${SOURCE_DATE_EPOCH}" "+%Y%m%d%H%M%S")
   fi
-
-  export MOZ_MAKE_FLAGS="${MAKEFLAGS}"
-  export MOZ_NOSPAM=1
-  export LC_ALL=C
-
+  export MACH_USE_SYSTEM_PYTHON=1
   ./mach configure
   ./mach build
   ./mach buildsymbols
 }
 
 package_thunderbird() {
-  optdepends=('libcanberra: sound support')
+  optdepends=(
+    'libotr: OTR support for active one-to-one chats'
+    'libnotify: Notification integration'
+  )
 
   cd $pkgname-$pkgver
   DESTDIR="$pkgdir" ./mach install
@@ -144,6 +128,8 @@ package_thunderbird() {
   install -Dm 644 ../vendor-prefs.js -t "$pkgdir/usr/lib/$pkgname/defaults/pref"
   install -Dm 644 ../distribution.ini -t "$pkgdir/usr/lib/$pkgname/distribution"
   install -Dm 644 ../thunderbird.desktop -t "$pkgdir/usr/share/applications"
+  install -Dm 644 comm/mail/branding/thunderbird/net.thunderbird.Thunderbird.appdata.xml \
+    "$pkgdir/usr/share/metainfo/net.thunderbird.Thunderbird.appdata.xml"
 
   for i in 16 22 24 32 48 64 128 256; do
     install -Dm644 comm/mail/branding/thunderbird/default${i}.png \
@@ -168,121 +154,22 @@ END
     "$pkgdir/usr/lib/$pkgname/thunderbird-bin"
 }
 
-_package_i18n() {
-  pkgdesc="$2 language pack for Thunderbird"
-  depends=("thunderbird>=$pkgver")
-  install -Dm644 thunderbird-i18n-$pkgver-$1.xpi \
-    "$pkgdir/usr/lib/thunderbird/extensions/langpack-$1@thunderbird.mozilla.org.xpi"
-}
-
-_languages=(
-  'af     "Afrikaans"'
-  'ar     "Arabic"'
-  'ast    "Asturian"'
-  'be     "Belarusian"'
-  'bg     "Bulgarian"'
-  'br     "Breton"'
-  'ca     "Catalan"'
-  'cak    "Kaqchikel"'
-  'cs     "Czech"'
-  'cy     "Welsh"'
-  'da     "Danish"'
-  'de     "German"'
-  'dsb    "Lower Sorbian"'
-  'el     "Greek"'
-  'en-GB  "English (British)"'
-  'en-US  "English (US)"'
-  'es-AR  "Spanish (Argentina)"'
-  'es-ES  "Spanish (Spain)"'
-  'et     "Estonian"'
-  'eu     "Basque"'
-  'fa     "Persian"'
-  'fi     "Finnish"'
-  'fr     "French"'
-  'fy-NL  "Frisian"'
-  'ga-IE  "Irish"'
-  'gd     "Gaelic (Scotland)"'
-  'gl     "Galician"'
-  'he     "Hebrew"'
-  'hr     "Croatian"'
-  'hsb    "Upper Sorbian"'
-  'hu     "Hungarian"'
-  'hy-AM  "Armenian"'
-  'id     "Indonesian"'
-  'is     "Icelandic"'
-  'it     "Italian"'
-  'ja     "Japanese"'
-  'ka     "Georgian"'
-  'kab    "Kabyle"'
-  'kk     "Kazakh"'
-  'ko     "Korean"'
-  'lt     "Lithuanian"'
-  'ms     "Malay"'
-  'nb-NO  "Norwegian (Bokmål)"'
-  'nl     "Dutch"'
-  'nn-NO  "Norwegian (Nynorsk)"'
-  'pa-IN  "Punjabi (India)"'
-  'pl     "Polish"'
-  'pt-BR  "Portuguese (Brazilian)"'
-  'pt-PT  "Portuguese (Portugal)"'
-  'rm     "Romansh"'
-  'ro     "Romanian"'
-  'ru     "Russian"'
-  'si     "Sinhala"'
-  'sk     "Slovak"'
-  'sl     "Slovenian"'
-  'sq     "Albanian"'
-  'sr     "Serbian"'
-  'sv-SE  "Swedish"'
-  'th     "Thai"'
-  'tr     "Turkish"'
-  'uk     "Ukrainian"'
-  'uz     "Uzbek"'
-  'vi     "Vietnamese"'
-  'zh-CN  "Chinese (Simplified)"'
-  'zh-TW  "Chinese (Traditional)"'
-)
-_url=https://ftp.mozilla.org/pub/mozilla.org/thunderbird/releases/$pkgver/linux-x86_64/xpi
-
-[ "${CARCH}" != 'x86_64' ] && _languages=()
-
-for _lang in "${_languages[@]}"; do
-  _locale=${_lang%% *}
-  _pkgname=thunderbird-i18n-${_locale,,}
-
-  pkgname+=($_pkgname)
-  source+=("thunderbird-i18n-$pkgver-$_locale.xpi::$_url/$_locale.xpi")
-  eval "package_$_pkgname() {
-    _package_i18n $_lang
-  }"
-done
-
-# Don't extract languages
-noextract=()
-for _src in "${source[@]%%::*}"; do
-    case "$_src" in 
-      *.xpi) noextract+=("$_src") ;;
-    esac
-done
-
-sha512sums=('daee9ea9e57bdfce231a35029807f279a06f8790d71efc8998c78eb42d99a93cf98623170947df99202da038f949ba9111a7ff7adbd43c161794deb6791370a0'
+sha256sums=('4c63a215761d8710e9cc78c938828ff532ace33a00d0d59332b30d3d45c3b0f3'
             'SKIP'
-            'a0061fcb2a7f66061e336a8d95948592f56f4752e56467f14ba63846720ebf845cce7511d1a2637e3b80d5a1ffdaa2fb783fa37195103425ef65222d45372012'
-            '6918c0de63deeddc6f53b9ba331390556c12e0d649cf54587dfaabb98b32d6a597b63cf02809c7c58b15501720455a724d527375a8fb9d757ccca57460320734'
-            '5d622d208e62b512e1af7ef8fd5de76c02e209d6b569041ad9047132a1bff093162f4ebce1450d92dfa0b0405d3cd24501604629e97cfae00457afbf4b615b72'
-            'e44fd608fb4975914479b4a1a5aa44e87f125564fb812fb46c0ee07d503dfdcdb444d7335efe90436caecc7be502aae6b558c585013ee924e618e6213988ae99'
-            '9dd82f392f6cc45ad5fa4e0a95bdd73e3fed13f6fb04cd54797804b51e32fdbf065f0514f473948a2d1d4ea1a5c24b22abb3e69478a947cbba3dec562dca792e'
-            'e9264b96f437e2548ae2a19b1f4b440d5adfca956cbc168546d9f1d0d10b0ef3831cbaa8f6164fa21b0d8e4f6df90ca43fd07e59b292235f3095d7dfb591ec90'
-            '09bc32cf9ee81b9cc6bb58ddbc66e6cc5c344badff8de3435cde5848e5a451e0172153231db85c2385ff05b5d9c20760cb18e4138dfc99060a9e960de2befbd5'
-            '669763939b00d31a8eb346acf5f9e6dd13d624e731ee4ba195677ac3e535aa02a4c2b3ff1987c9527222e24c02558a1fe35f0f6c6b169106a9f02329ba46b0f1'
-            '7da8d885ea3d30e5640189383d458dd0dc3c86fa9c2bad7148852adc08227eda91c683dd64e37d0cefdea2bf890752950dae960aa8382982480860a5029e11a9'
-            '63d9e67006ca847c4f66bc0caab84a332446cf947297a27cbd1357cc629273d06538ab3207f61483f253dc78503aa9078c8bc34d1165071520ea51cc6caa2ebc'
-            '1961f6a8672ea7c37cfd06e227367969bca330146e8424375628acdb61e09ddf3cf7c187f8a593d3b8b3cb589080630008f61332e7c3fc5c0998ee34707e3805'
-            'f5a3eb9d94f6e97146e3f6bafce172d37fb78e62da2c1889170fd5c835cf7b9987daf7c3ea16ca924ac195d47f66e29ea4080c1e8b0b1be6e00869b8319bbffa'
-            '9152bd3e6dc446337e6a2ed602279c620aedecc796ba28e777854c4f41fcf3067f9ebd086a4b63a6b76c2e69ec599ac6435b8eeda4f7488b1c45f69113facba4'
-            '20cbd73e28b25febfda33d97ba55f918fff97dc26ef0be349bc07a5f34ad8f62b68635e9ebcc834d7ca07f21d88a87648cbe906c7674318b25b06bc512f2e1d6'
-            '36ce3c2f97e4b53a627d3dba48a34921eb3fe7303524b8fe59033f3d159ea48bc90869fb555b1774b532f31e5b967fbf76d0305743f462cd9036f43cba7da044'
-            '4911ddb41bef8d9f6d6200159cde465627e940fe1c09099be55769d21a5a52a3f737e1bf803daa96126c035b091aea880fbc5d2e6cf5da96ddd17322461a72d6'
-            '64b974c6df7cff8f97fe82992bd3ee8f2258ab769dd2caa59e7c9395cdffa7108b78c43ea31ba0bad2dbdde45a9a2b6924945d9a1a7908ded0bbc6f543c4a1d4'
-            'f6a45686154f0ffce96ff1354a5d6a40561a3ff9537c8228fecdb2a2e91ff5c02acbae598f54e8f0af39afe436ad891f577c1e900b06f53e30b5334e830ca56c')
+            'e44c55501f650a4e80b9c353b81f33e07ca65808db831eff6ca616aded233827'
+            'fa11b4736bbf53ec015f71cd42b1040b22d1a855c562b76927b3f0eccb925c85'
+            'bc3aae2cc00dc9806f54606f98d967366a2ba7223f6a3ad1c658a653ebff5569'
+            '1c5d830f2dd4e8c988fcc038121e7563a44af866d6283ee24274d16f8414d1b6'
+            'ace80afd8dadb000e324e400d5a8f9f2e4ad214b32844bf23236f604c5f88db1'
+            'd1a81bdadc6cc1b96aeb7898e986efbb132a1ce142611b7af2cf744f00cad601'
+            '3ebba6c6c59dbf754b522d2535c27eae3e724aab575b8e7be9658e0d33183bcf'
+            '0df637d44218524e213814d15d623f27724d8e405390173f6cc385e145110bfe'
+            'cd9baa74c6dd7e2a689b072ac039c3fe4618012dd8f11d4ca422369a842d6441'
+            'ad83c0c6195ab742848941be1d9c8f32c1d4a8bc019d8887b42256bafaefb541'
+            '958cf5016e9845b6ee6e2ed05ad96cc2fc6f74bebbb338a7b7ce29bffd2be716'
+            '944fc690a0b344ea56ff2b0880ba492ba80338a68f31d0fb205b891a5de42cee'
+            '9cdffb3f91e0956f4147c8556c80b97bcae448b84ce0d0a0e009a231a9915396'
+            'd98af26b723a8b590822a3d1ab925841b99882c158d3dec7514288c968f2428e'
+            '851503764a3068d36659b9231c9aaa40fe8a15680f7d0a378e9009ae1a776dae')
+
 # vim:set sw=2 et:
