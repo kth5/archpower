@@ -1,0 +1,124 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Andrea Scarpino <andrea@archlinux.org>
+
+pkgname=qt5-webengine
+_qtver=5.15.6
+pkgver=${_qtver/-/}
+pkgrel=2
+# Upstream won't tag releases, because potatoes https://lists.qt-project.org/pipermail/interest/2021-March/036386.html
+arch=(x86_64 powerpc64le)
+url='https://www.qt.io'
+license=('LGPL3' 'LGPL2.1' 'BSD')
+pkgdesc='Provides support for web applications using the Chromium browser project'
+depends=('qt5-webchannel' 'qt5-location' 'libxcomposite' 'libxrandr' 'pciutils' 'libxss' 'libxkbfile' 
+         'libevent' 'snappy' 'nss' 'libxslt' 'minizip' 'ffmpeg' 're2' 'libvpx' 'libxtst' 'ttf-font'
+         'clang')
+makedepends=('git' 'python2' 'python' 'gperf' 'jsoncpp' 'ninja' 'qt5-tools'
+             'poppler' 'libpipewire02' 'nodejs' 'gn')
+optdepends=('libpipewire02: WebRTC desktop sharing under Wayland')
+groups=('qt' 'qt5')
+options=(!ccache)
+_pkgfqn=qtwebengine
+source=(git+https://code.qt.io/qt/qtwebengine.git#tag=v${pkgver}-lts
+        git+https://code.qt.io/qt/qtwebengine-chromium.git
+        0012-chromium-abseil-cpp-fix-build-with-glibc-2.34.patch
+        0013-chromium-breakpad-fix-build-with-glibc-2.34.patch
+        0018-sandbox-membarrier.patch
+        0020-msgvec-push_back.patch
+        0021-sandbox-sched_getparam.patch
+        0089-enable-ppc64.patch
+        0090-qtwebengine-ppc64.patch
+        0110-size_t.patch
+        0114-time64.patch
+        qt5-webengine-glibc-2.33.patch
+        chromium-harfbuzz-3.0.0.patch
+        skia-harfbuzz-3.0.0.patch
+	qtwebengine-gcc11.patch
+        xxx-ppc64le-libvpx.patch)
+sha256sums=('SKIP'
+            'SKIP'
+            '17087b110cc26dd3aa90dcaf8747dcbab0263a6268fd6596b47307dfc1087410'
+            'd1ad185e25a62d50bbed0dbf131e52bead8a52ccc63a53642b3a4f62056a5458'
+            'da58d2214d1c50a7b784e18a97473c9086657d5f43e8640675e98451859307d1'
+            'd13e6ad37d36834867d57e23c339b73053983dafa76c7377999ff2a5b17332c3'
+            '7fd108dfbf67f6fbda59a74bdc0d63b443e1beb98238f5401d01bd0233122944'
+            '6a859d37d2971bee39792f6a0e69ed1fed986400070c1f795c147d89c7ad948e'
+            '76d99f3ed901581c756bb8b5c74513ab944840e680ac310e5463116d3cf4551e'
+            '3095e912dda73d3126aa94e1618c9e2ca40035c0d488035df1cebe9c7a526a27'
+            '78b9ed91da2a62fe4fd7952c0c7f663ad3eac464b4e6101a864074edf6aa08f9'
+            '2294e5390c869963fc58f7bf1ee0a254a3f7fce3ed00c04e34a5f03e2b31b624'
+            '7ce947944a139e66774dfc7249bf7c3069f07f83a0f1b2c1a1b14287a7e15928'
+            'dae11dec5088eb1b14045d8c9862801a342609c15701d7c371e1caccf46e1ffd'
+            'a1e1e02a8be1b40d961eb7f4dbe5842c2ccab6e5c6d47acb34810e7c474e9c49'
+            '9af5aad8554c966542550f7467bb86d3a02d101aded4407f0a14ad289e47ee62')
+
+prepare() {
+  mkdir -p build
+  
+  cd ${_pkgfqn}
+  git submodule init
+  git submodule set-url src/3rdparty "$srcdir"/qtwebengine-chromium
+  git submodule set-branch --branch 87-based src/3rdparty
+  git submodule update
+
+  # Fix build with harfbuzz 3.0.0
+  patch -p1 -d src/3rdparty/chromium -i "$srcdir"/chromium-harfbuzz-3.0.0.patch
+  patch -p1 -d src/3rdparty/chromium/third_party/skia -i "$srcdir"/skia-harfbuzz-3.0.0.patch
+
+  patch -p1 -i "$srcdir"/qt5-webengine-glibc-2.33.patch # Fix text rendering when building with glibc 2.33
+
+  patch -p2 -d src/3rdparty/chromium -i "$srcdir"/0012-chromium-abseil-cpp-fix-build-with-glibc-2.34.patch
+  patch -p2 -d src/3rdparty/chromium -i "$srcdir"/0013-chromium-breakpad-fix-build-with-glibc-2.34.patch
+  patch -Np1 -i ${srcdir}/qtwebengine-gcc11.patch
+
+  # thanks Voidlinux!
+  patch -Np1 -i ${srcdir}/0018-sandbox-membarrier.patch
+  patch -Np1 -i ${srcdir}/0020-msgvec-push_back.patch
+  patch -Np1 -i ${srcdir}/0021-sandbox-sched_getparam.patch
+  patch -Np1 -i ${srcdir}/0089-enable-ppc64.patch
+  patch -Np1 -i ${srcdir}/0090-qtwebengine-ppc64.patch
+  patch -Np1 -i ${srcdir}/0110-size_t.patch
+  patch -Np1 -i ${srcdir}/0114-time64.patch
+
+  # thanks Gentoo!
+  patch -Np0 -d src/3rdparty/chromium -i ${srcdir}/xxx-ppc64le-libvpx.patch
+}
+
+build() {
+  pushd ${srcdir}/qtwebengine/src/3rdparty/chromium/third_party/libvpx
+  mkdir -p source/config/linux/ppc64
+  mkdir -p source/libvpx/test
+  touch source/libvpx/test/test.mk
+  ./generate_gni.sh
+  popd
+
+  cd build
+  ulimit -n 4096
+  qmake ../${_pkgfqn} -- \
+    -proprietary-codecs \
+    -system-ffmpeg \
+    -webp \
+    -spellchecker \
+    -webengine-icu \
+    -webengine-kerberos \
+    -webengine-webrtc-pipewire
+  make
+}
+
+package() {
+  cd build
+  make INSTALL_ROOT="$pkgdir" install
+
+  # Drop QMAKE_PRL_BUILD_DIR because reference the build dir
+  find "$pkgdir/usr/lib" -type f -name '*.prl' \
+    -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
+  # Replace ${wrksrc} in project include files
+  find "$pkgdir" -type f -name "*.pri" -exec sed -i "{}" \
+    -e "s@${srcdir}/qtbase@/usr/lib/qt5@g" \;
+
+  install -Dm644 "$srcdir"/${_pkgfqn}/src/3rdparty/chromium/LICENSE "$pkgdir"/usr/share/licenses/${pkgname}/LICENSE.chromium
+
+  # Fix cmake dependency versions
+  sed -e "s|$pkgver\ |5.15.2 |" -i "$pkgdir"/usr/lib/cmake/*/*Config.cmake
+}
