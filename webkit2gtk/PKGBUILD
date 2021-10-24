@@ -4,7 +4,7 @@
 # Contributor: Eric Bélanger <eric@archlinux.org>
 
 pkgname=webkit2gtk
-pkgver=2.34.0
+pkgver=2.34.1
 pkgrel=1
 pkgdesc="Web content engine for GTK"
 url="https://webkitgtk.org"
@@ -22,14 +22,21 @@ optdepends=('geoclue: Geolocation support'
             'gst-plugins-good: media decoding'
             'gst-plugins-bad: media decoding'
             'gst-libav: nonfree media decoding')
-source=($url/releases/webkitgtk-$pkgver.tar.xz{,.asc})
-sha256sums=('880c8ee626f67019f67557ca09e59a23ecf245e60f6173215f1a8823cb09af34'
-            'SKIP')
+source=($url/releases/webkitgtk-$pkgver.tar.xz{,.asc}
+        be-typedarray.patch
+        no-color.patch)
+sha256sums=('443c1316705de024741748e85fe32324d299d9ee68e6feb340b89e4a04073dee'
+            'SKIP'
+            'a72c41afe9b66f15791c60c76afbea823fd41bfab9d5bcc5f5378e913aba03ff'
+            'e1868de08b7f5b261186146b2bd4d9c2a69e2fee2d4fb9f01e10fc3d53ef9d39')
 validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
               '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B') # Adrián Pérez de Castro <aperez@igalia.com>
 
 prepare() {
   cd webkitgtk-$pkgver
+
+  #patch -Np0 -i ${srcdir}/be-typedarray.patch
+  #patch -Np0 -i ${srcdir}/no-color.patch
 
   sed -i -e '/foreach my.*(keys/s/(keys/(sort keys/' \
             Source/WebCore/bindings/scripts/CodeGenerator.pm \
@@ -52,6 +59,7 @@ build() {
       EXTRA_CMAKE_FLAGS="-DENABLE_JIT=OFF
                          -DUSE_SYSTEMD=OFF
                          -DPORT=GTK -DUSE_LD_GOLD=OFF
+                         -DFORCE_32BIT=ON
                          -DUSE_SYSTEM_MALLOC=ON
                          -DCMAKE_CXX_FLAGS_RELEASE=-DNDEBUG
                          -DCMAKE_CXX_FLAGS_DEBUG=-DNDEBUG
@@ -63,6 +71,8 @@ build() {
     ;;
   esac
 
+  # Using libsoup2 instead of libsoup3, can be disabled if libsoup3 is available.
+
   cmake -S webkitgtk-$pkgver -B build -G Ninja \
     -DPORT=GTK \
     -DCMAKE_BUILD_TYPE=Release \
@@ -71,9 +81,9 @@ build() {
     -DCMAKE_INSTALL_LIBEXECDIR=lib \
     -DCMAKE_SKIP_RPATH=ON \
     -DENABLE_GTKDOC=ON \
-    -DENABLE_MINIBROWSER=ON \
+    -DENABLE_MINIBROWSER=ON ${EXTRA_CMAKE_FLAGS} \
     -DENABLE_BUBBLEWRAP_SANDBOX=ON \
-    -DUSE_SOUP2=ON ${EXTRA_CMAKE_FLAGS}
+    -DUSE_SOUP2=ON
   cmake --build build ${MAKEFLAGS}
 }
 
