@@ -3,8 +3,8 @@
 # Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
 
 pkgname=('llvm' 'llvm-libs' 'llvm-ocaml')
-pkgver=12.0.1
-pkgrel=3
+pkgver=13.0.0
+pkgrel=2
 _ocaml_ver=4.12.0
 arch=(x86_64 powerpc64le powerpc)
 url="https://llvm.org/"
@@ -16,24 +16,14 @@ makedepends=('cmake' 'ninja' 'libffi' 'libedit' 'ncurses' 'libxml2'
 options=('staticlibs')
 _source_base=https://github.com/llvm/llvm-project/releases/download/llvmorg-$pkgver
 source=($_source_base/$pkgname-$pkgver.src.tar.xz{,.sig}
-        x86-twist-shuffle-mask.patch
         no-strict-aliasing-DwarfCompileUnit.patch
-        llvm-link-with-Bsymbolic-functions.patch
-        add-fno-semantic-interposition.patch
-        llvm-config.h
-        llvm-001-ppc-secureplt.patch
-        llvm-002-override-opt.patch
-        llvm-003-ppc-bigpic.patch)
-sha256sums=('7d9a8405f557cefc5a21bf5672af73903b64749d9bc3a50322239f56f34ffddf'
+        disable-bswap-for-spir.patch
+        llvm-config.h)
+sha256sums=('408d11708643ea826f519ff79761fcdfc12d641a2510229eec459e72f8163020'
             'SKIP'
-            'c51b8754f76eb3774f46d530409f6d89f5bb47d90f0d718dbfa861f716b29693'
             'd1eff24508e35aae6c26a943dbaa3ef5acb60a145b008fd1ef9ac6f6c4faa662'
-            '560ce1e206c19f4b86f4c583b743db0ad47a610418999350710aafd60ae50fcd'
-            'fc8c64267a5d179e9fc24fb2bc6150edef2598c83f5b2d138d14e05ce9f4e345'
-            '597dc5968c695bbdbb0eac9e8eb5117fcd2773bc91edf5ec103ecffffab8bc48'
-            '3a0eca893749223088645fee0cc1b238bd0b90d2474ed5202d181c7fd9101af3'
-            '93a9f83235762742da0324b3084955ca47d50978606f92db5c6deedbe12f6404'
-            '5a7f75f4a8488fd2e71c618b4a56a46653250369547564881972474d7d7ad290')
+            'af163392fbc19d65d11ab4b1510a2eae39b417d6228023b3ba5395b138bb41f5'
+            '597dc5968c695bbdbb0eac9e8eb5117fcd2773bc91edf5ec103ecffffab8bc48')
 validpgpkeys+=('B6C8F98282B944E3B0D5C2530FC3042E345AD05D') # Hans Wennborg <hans@chromium.org>
 validpgpkeys+=('474E22316ABF4785A88C6E8EA2C794A986419D8A') # Tom Stellard <tstellar@redhat.com>
 
@@ -41,21 +31,12 @@ prepare() {
   cd "$srcdir/llvm-$pkgver.src"
   mkdir build
 
-  # https://bugs.archlinux.org/task/70697
-  patch -Np2 -i ../llvm-link-with-Bsymbolic-functions.patch
-  # https://reviews.llvm.org/D102453
-  patch -Np2 -i ../add-fno-semantic-interposition.patch
-
-  # https://bugs.llvm.org/show_bug.cgi?id=50823
-  patch -Np2 -i ../x86-twist-shuffle-mask.patch
-
   # Work around intermittent 'clang -O -g' crashes
   # https://bugs.llvm.org/show_bug.cgi?id=50611#c3
   patch -Np2 -i ../no-strict-aliasing-DwarfCompileUnit.patch
 
-  patch -Np1 -i ${srcdir}/llvm-001-ppc-secureplt.patch
-  patch -Np1 -i ${srcdir}/llvm-002-override-opt.patch
-  patch -Np1 -i ${srcdir}/llvm-003-ppc-bigpic.patch
+  # Fix an ISPC build failure (https://github.com/ispc/ispc/issues/2189)
+  patch -Np2 -i ../disable-bswap-for-spir.patch
 }
 
 build() {
@@ -80,6 +61,11 @@ build() {
 }
 
 check() {
+  case "${CARCH}" in
+    powerpc) return 0 ;;
+  esac
+
+
   cd "$srcdir/llvm-$pkgver.src/build"
   ninja check
 }
