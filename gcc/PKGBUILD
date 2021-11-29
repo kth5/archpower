@@ -6,16 +6,22 @@
 # toolchain build order: linux-api-headers->glibc->binutils->gcc->binutils->glibc
 # NOTE: libtool requires rebuilt with each new gcc version
 
-pkgname=(gcc gcc-libs gcc-fortran gcc-objc gcc-ada gcc-go gcc-d)
+pkgname=(gcc gcc-libs gcc-fortran gcc-objc gcc-go gcc-d)
+case "${CARCH}" in
+  powerpc*|x86_64) pkgname+=(gcc-ada) ;;
+esac
 pkgver=11.2.0
 _majorver=${pkgver%%.*}
 _islver=0.24
 pkgrel=1
 pkgdesc='The GNU Compiler Collection'
-arch=(x86_64 powerpc64le powerpc)
+arch=(x86_64 powerpc64le powerpc riscv64)
 license=(GPL LGPL FDL custom)
 url='https://gcc.gnu.org'
-makedepends=(binutils libmpc gcc-ada doxygen python git libxcrypt)
+makedepends=(binutils libmpc libxcrypt) # doxygen python git libxcrypt)
+makedepends_powerpc=(gcc-ada)
+makedepends_powerpc64le=(gcc-ada)
+makedepends_x86_64=(gcc-ada)
 checkdepends=(dejagnu inetutils)
 options=(!emptydirs)
 _libdir=usr/lib/gcc/$CHOST/${pkgver%%+*}
@@ -78,6 +84,10 @@ build() {
   CFLAGS=${CFLAGS/-pipe/}
   CXXFLAGS=${CXXFLAGS/-pipe/}
 
+  case "${CARCH}" in
+    powerpc*|x86_64) _ada=',ada' ;;
+  esac
+
   "$srcdir/gcc/configure" --prefix=/usr \
       --libdir=/usr/lib \
       --libexecdir=/usr/lib \
@@ -85,7 +95,7 @@ build() {
       --infodir=/usr/share/info \
       --with-pkgversion="Arch POWER" \
       --with-bugurl=https://github.com/kth5/archpower/issues \
-      --enable-languages=c,c++,ada,fortran,go,lto,objc,obj-c++,d \
+      --enable-languages=c,c++,fortran,go,lto,objc,obj-c++,d${_ada} \
       --with-isl \
       --with-linker-hash-style=gnu \
       --with-system-zlib \
@@ -99,7 +109,7 @@ build() {
       --enable-install-libiberty \
       --enable-linker-build-id \
       --enable-lto \
-      --enable-multilib \
+      --disable-multilib \
       --enable-plugin \
       --enable-shared \
       --enable-threads=posix \
@@ -107,14 +117,13 @@ build() {
       --disable-libstdcxx-pch \
       --disable-libunwind-exceptions \
       --disable-werror \
-      --with-abi=elfv2 \
       --enable-secureplt \
       gdc_include_dir=/usr/include/dlang/gdc
 
-  make
+  make STAGE1_CFLAGS="-O2"
 
   # make documentation
-  make -C $CHOST/libstdc++-v3/doc doc-man-doxygen
+  #make -C $CHOST/libstdc++-v3/doc doc-man-doxygen
 }
 
 check() {
@@ -134,7 +143,7 @@ package_gcc-libs() {
   options+=(!strip)
   provides=($pkgname-multilib libgo.so libgfortran.so libgphobos.so
             libubsan.so libasan.so liblsan.so)
-  [ "${CARCH}" != 'powerpc' ] && provides+=(libtsan.so)
+  [ "${CARCH}" != 'powerpc' -a "${CARCH}" != 'riscv64' ] && provides+=(libtsan.so)
   replaces=($pkgname-multilib libgphobos)
 
   cd gcc-build
@@ -145,14 +154,13 @@ package_gcc-libs() {
              libgfortran \
              libgo \
              libgomp \
-             libitm \
              libquadmath \
              libsanitizer/{a,l,ub}san \
              libstdc++-v3/src; do
     make -C $CHOST/$lib DESTDIR="$pkgdir" install-toolexeclibLTLIBRARIES
   done
 
-  [ "${CARCH}" != 'powerpc' ] && make -C $CHOST/libsanitizer/tsan DESTDIR="$pkgdir" install-toolexeclibLTLIBRARIES
+  [ "${CARCH}" != 'powerpc' -a "${CARCH}" != 'riscv64' ] && make -C $CHOST/libsanitizer/tsan DESTDIR="$pkgdir" install-toolexeclibLTLIBRARIES
 
   make -C $CHOST/libobjc DESTDIR="$pkgdir" install-libs
   make -C $CHOST/libstdc++-v3/po DESTDIR="$pkgdir" install
@@ -162,7 +170,6 @@ package_gcc-libs() {
   rm -f "$pkgdir"/usr/lib/libgphobos.spec
 
   for lib in libgomp \
-             libitm \
              libquadmath; do
     make -C $CHOST/$lib DESTDIR="$pkgdir" install-info
   done
@@ -214,19 +221,18 @@ package_gcc() {
     "$pkgdir/usr/lib/bfd-plugins/"
 
   make -C $CHOST/libgomp DESTDIR="$pkgdir" install-nodist_{libsubinclude,toolexeclib}HEADERS
-  make -C $CHOST/libitm DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
   make -C $CHOST/libquadmath DESTDIR="$pkgdir" install-nodist_libsubincludeHEADERS
   make -C $CHOST/libsanitizer DESTDIR="$pkgdir" install-nodist_{saninclude,toolexeclib}HEADERS
   make -C $CHOST/libsanitizer/asan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
-  [ "${CARCH}" != 'powerpc' ] && make -C $CHOST/libsanitizer/tsan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
+  [ "${CARCH}" != 'powerpc' -a "${CARCH}" != 'riscv64' ] && make -C $CHOST/libsanitizer/tsan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
   make -C $CHOST/libsanitizer/lsan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
 
   make -C libiberty DESTDIR="$pkgdir" install
   install -m644 libiberty/pic/libiberty.a "$pkgdir/usr/lib"
 
   make -C gcc DESTDIR="$pkgdir" install-man install-info
-  rm "$pkgdir"/usr/share/man/man1/{gccgo,gfortran,gdc}.1
-  rm "$pkgdir"/usr/share/info/{gccgo,gfortran,gnat-style,gnat_rm,gnat_ugn,gdc}.info
+  rm -fv "$pkgdir"/usr/share/man/man1/{gccgo,gfortran,gdc}.1
+  rm -fv "$pkgdir"/usr/share/info/{gccgo,gfortran,gnat-style,gnat_rm,gnat_ugn,gdc}.info
 
   make -C libcpp DESTDIR="$pkgdir" install
   make -C gcc DESTDIR="$pkgdir" install-po
@@ -239,7 +245,7 @@ package_gcc() {
   install -Dm755 "$srcdir/c99" "$pkgdir/usr/bin/c99"
 
   # install the libstdc++ man pages
-  make -C $CHOST/libstdc++-v3/doc DESTDIR="$pkgdir" doc-install-man
+  #make -C $CHOST/libstdc++-v3/doc DESTDIR="$pkgdir" doc-install-man
 
   # remove files provided by lib32-gcc-libs
   rm -f "$pkgdir"/usr/lib32/lib{stdc++,gcc_s}.so
