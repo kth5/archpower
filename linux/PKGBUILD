@@ -7,19 +7,20 @@ pkgrel=1
 pkgdesc='Linux'
 _srctag=v${pkgver%.*}-${pkgver##*.}
 url="https://github.com/archlinux/linux/commits/$_srctag"
-arch=(powerpc64le powerpc)
+arch=(powerpc64le powerpc riscv64)
 license=(GPL2)
 makedepends=(
-  bc kmod libelf pahole
-  xmlto python-sphinx python-sphinx_rtd_theme graphviz imagemagick
-  git
-)
-options=('!strip')
+  bc kmod libelf pahole)
+#  xmlto python-sphinx python-sphinx_rtd_theme graphviz imagemagick
+#  git
+#)
+options=('!strip' '!distcc')
 _srcname=archlinux-linux
 source=(
   "$_srcname::git+https://github.com/archlinux/linux?signed#tag=$_srctag"
   config         # the main kernel config file
   config.ppc32
+  config.riscv64
 )
 validpgpkeys=(
   'ABAF11C65A2970B130ABE3C479BE3E4300411886'  # Linus Torvalds
@@ -29,14 +30,17 @@ validpgpkeys=(
 )
 sha256sums=('SKIP'
             'f278986f13ef8f7e099738b0c6cba5c4c269cecc7d9283772996b8407de667bd'
-            'fcc02fb8e3a0b5925453975ada69ec02833e11fab063446f08f320bd6c13eadc')
+            'fcc02fb8e3a0b5925453975ada69ec02833e11fab063446f08f320bd6c13eadc'
+            'SKIP')
 
 export KBUILD_BUILD_HOST=archpower
 export KBUILD_BUILD_USER=$pkgbase
 export KBUILD_BUILD_TIMESTAMP="$(date -Ru${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH})"
 
-export MYARCH="powerpc"
-
+case "${CARCH}" in
+  powerpc*) export MYARCH="powerpc" ;;
+  riscv64)  export MYARCH="riscv"   ;;
+esac
 
 prepare() {
   cd $_srcname
@@ -57,8 +61,9 @@ prepare() {
   echo "Setting config..."
   cp ../config .config
   [ "${CARCH}" == "powerpc" ] && cp ../config.ppc32 .config
+  [ "${CARCH}" == "riscv64" ] && cp ../config.riscv64 .config
   make oldconfig
-
+  sed -i '/HAVE_GCC_PLUGINS/d' arch/x86/Kconfig
   make -s kernelrelease > version
   echo "Prepared $pkgbase version $(<version)"
 }
@@ -194,7 +199,7 @@ _package-docs() {
   ln -sr "$builddir/Documentation" "$pkgdir/usr/share/doc/$pkgbase"
 }
 
-pkgname=("$pkgbase" "$pkgbase-headers" "$pkgbase-docs")
+pkgname=("$pkgbase" "$pkgbase-headers") # "$pkgbase-docs")
 for _p in "${pkgname[@]}"; do
   eval "package_$_p() {
     $(declare -f "_package${_p#$pkgbase}")

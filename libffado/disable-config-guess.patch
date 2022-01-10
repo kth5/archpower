@@ -1,0 +1,52 @@
+Description: Do not use config.guess to get the CPU type
+ config.guess needs regular updates to stay up-to-date.  CDBS would automatically
+ update it before configure, but the way this SConstruct is written, it runs it
+ also when running --clean, thus breaking on new architectures nonetheless.
+ Given that we are running this in Debian, just rely on DEB_HOST_GNU_CPU.
+Author: Mattia Rizzolo <mattia@debian.org>
+Last-Update: 2019-08-05
+Bug-Debian: https://bugs.debian.org/933813
+
+--- a/SConstruct
++++ b/SConstruct
+@@ -154,12 +154,6 @@
+ 
+ opts.Save( 'cache/options.cache', env )
+ 
+-def ConfigGuess( context ):
+-    context.Message( "Trying to find the system triple: " )
+-    ret = check_output(("/bin/sh", "admin/config.guess")).rstrip()
+-    context.Result( ret )
+-    return ret.decode()
+-
+ def CheckForApp( context, app ):
+     context.Message( "Checking whether '" + app + "' executes " )
+     ret = context.TryAction( app )
+@@ -202,7 +196,6 @@
+     return ret
+ 
+ tests = {
+-    "ConfigGuess" : ConfigGuess,
+     "CheckForApp" : CheckForApp,
+     "CheckForPyModule": CheckForPyModule,
+     "CompilerCheck" : CompilerCheck,
+@@ -469,8 +462,6 @@
+     # code, suppress the "set but not used" warning.
+     env['DBUS1_FLAGS'] += b" -Wno-unused-but-set-variable"
+ 
+-config_guess = conf.ConfigGuess()
+-
+ env = conf.Finish()
+ 
+ if env['DEBUG']:
+@@ -564,7 +555,9 @@
+ config_arch = 1
+ config_kernel = 2
+ config_os = 3
+-config = config_guess.split ("-")
++config = (
++    os.environ['DEB_HOST_GNU_CPU'],
++)  # the other variables are not used, so whatever…
+ 
+ needs_fPIC = False
+ 

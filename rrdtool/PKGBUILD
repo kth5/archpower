@@ -5,7 +5,7 @@ pkgname=rrdtool
 pkgver=1.7.2
 pkgrel=8
 pkgdesc="Data logging and graphing application"
-arch=(x86_64 powerpc64le powerpc)
+arch=(x86_64 powerpc64le powerpc riscv64)
 url="https://www.rrdtool.org"
 license=('GPL' 'custom')
 depends=('libxml2' 'pango' 'ttf-dejavu')
@@ -16,11 +16,21 @@ optdepends=('perl: to use corresponding binding'
             'ruby: to use corresponding binding'
             'lua51: to use corresponding binding')
 options=('!emptydirs' '!makeflags')
-source=(https://oss.oetiker.ch/rrdtool/pub/rrdtool-${pkgver}.tar.gz)
-sha256sums=('a199faeb7eff7cafc46fac253e682d833d08932f3db93a550a4a5af180ca58db')
+source=(https://oss.oetiker.ch/rrdtool/pub/rrdtool-${pkgver}.tar.gz
+        rrdtool-1.4.9-disable-rrd_graph-perl.patch
+        rrdtool-1.7.0-disable-rrd_graph-cgi.patch
+        rrdtool-1.7.1-configure.ac.patch)
+sha256sums=('a199faeb7eff7cafc46fac253e682d833d08932f3db93a550a4a5af180ca58db'
+            'a8d5f4816fbfc760b52dc70de92ca97888f920c0192776cae819453e157f71cd'
+            '870eee1ca13ac701a8eefb735aac3eab7b72179e640c9d36f428851a3a643bf6'
+            '675fedd17baf87511814a8e5682f51089c3941685b6ec4fbcd8e5957ca53596f')
 
 prepare() {
   cd ${pkgname}-${pkgver}
+
+  patch -Np1 -i ${srcdir}/rrdtool-1.4.9-disable-rrd_graph-perl.patch
+  patch -Np1 -i ${srcdir}/rrdtool-1.7.0-disable-rrd_graph-cgi.patch
+  patch -Np1 -i ${srcdir}/rrdtool-1.7.1-configure.ac.patch
 
   # fix FS#28521 make ruby install to vendor_ruby instead of site_ruby
   sed -e 's/$(RUBY) ${abs_srcdir}\/ruby\/extconf.rb/& --vendor/' -i bindings/Makefile.am
@@ -30,6 +40,8 @@ prepare() {
 
 build() {
   cd ${pkgname}-${pkgver}
+  CFLAGS+=" -I/usr/include/libxml2" \
+  CXXFLAGS+=" -I /usr/include/libxml2" \
   LUA=/usr/bin/lua5.1 \
     LUA_CFLAGS="-I/usr/include/lua5.1 -llua5.1" LUA_INSTALL_CMOD="/usr/lib/lua/5.1" \
     ./configure --prefix=/usr --localstatedir=/var --disable-rpath \

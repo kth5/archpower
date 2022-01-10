@@ -4,25 +4,33 @@
 # Contributor: Sarah Hay <sarah@archlinux.org>
 
 pkgbase=gpgme
-pkgname=(gpgme qgpgme python-gpgme)
+pkgname=(gpgme python-gpgme)
 pkgver=1.16.0
 pkgrel=1
 _python_ver=3.9
 pkgdesc="A C wrapper library for GnuPG"
-arch=( x86_64 powerpc64le powerpc )
+arch=(x86_64 powerpc64le powerpc riscv64)
 url='https://www.gnupg.org/related_software/gpgme/'
 license=('LGPL')
-makedepends=('libgpg-error' 'gnupg' 'qt5-base' 'python' 'swig')
+makedepends=('libgpg-error' 'gnupg' 'python' 'swig')
 validpgpkeys=('6DAA6E64A76D2840571B4902528897B826403ADA') # Werner Koch (dist signing 2020)
-source=("https://www.gnupg.org/ftp/gcrypt/${pkgbase}/${pkgbase}-${pkgver}.tar.bz2"{,.sig})
+source=("https://www.gnupg.org/ftp/gcrypt/${pkgbase}/${pkgbase}-${pkgver}.tar.bz2"{,.sig}
+        https://github.com/i386x/gpgme/commit/ed9939afc0bc1ef6a0a2dccaae62f19bc30b363d.patch)
 sha256sums=('6c8cc4aedb10d5d4c905894ba1d850544619ee765606ac43df7405865de29ed0'
+            'SKIP'
             'SKIP')
+
+prepare() {
+  cd ${pkgname}-${pkgver}
+  patch -Np1 -i ${srcdir}/ed9939afc0bc1ef6a0a2dccaae62f19bc30b363d.patch
+}
 
 build() {
   cd ${pkgbase}-${pkgver}
 
   export PYTHONHASHSEED=0
   ./configure \
+    --build=${CHOST} \
     --prefix=/usr \
     --disable-fd-passing \
     --disable-static \
@@ -33,6 +41,7 @@ build() {
   _arch=x86_64
   [ "${CARCH}" = "powerpc" ] && _arch=ppc
   [ "${CARCH}" = "powerpc64le" ] && _arch=ppc64le
+  [ "${CARCH}" = "riscv64" ] && _arch=riscv64
   touch -d @$SOURCE_DATE_EPOCH lang/python/version.py
   touch -d @$SOURCE_DATE_EPOCH lang/python/python${_python_ver}-gpg/lib.linux-${_arch}-${_python_ver}/gpg/gpgme.py
 
@@ -63,9 +72,9 @@ package_gpgme() {
   make DESTDIR="${pkgdir}" install
 
   # split qgpgme
-  rm -r "${pkgdir}"/usr/include/{qgpgme,QGpgME}/
-  rm -r "${pkgdir}"/usr/lib/{cmake/QGpgme/,libqgpgme.*}
-  rm -r "${pkgdir}"/usr/lib/python*
+  rm -rf "${pkgdir}"/usr/include/{qgpgme,QGpgME}/
+  rm -rf "${pkgdir}"/usr/lib/{cmake/QGpgme/,libqgpgme.*}
+  rm -rf "${pkgdir}"/usr/lib/python*
 }
 
 package_qgpgme() {

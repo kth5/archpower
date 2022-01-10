@@ -5,14 +5,17 @@ pkgname=js78
 pkgver=78.15.0
 pkgrel=1
 pkgdesc="JavaScript interpreter and libraries - Version 78"
-arch=(x86_64 powerpc64le powerpc)
+arch=(x86_64 powerpc64le powerpc riscv64)
 url="https://developer.mozilla.org/en-US/docs/Mozilla/Projects/SpiderMonkey"
 license=(MPL)
 depends=(gcc-libs readline zlib sh)
-makedepends=(zip autoconf2.13 python-setuptools python-psutil rust llvm clang lld)
+makedepends=(zip autoconf2.13 python-setuptools python-psutil rust)
+makedepends_powerpc=(llvm clang ldd)
+makedepends_powerpc64le=(llvm clang ldd)
+makedepends_x86_64=(llvm clang ldd
 checkdepends=(mercurial git)
 _relver=${pkgver}esr
-_whissi_patches_ver=78esr-patches-18
+_whissi_patches_ver=78esr-patches-19
 source=(https://archive.mozilla.org/pub/firefox/releases/$_relver/source/firefox-$_relver.source.tar.xz{,.asc}
         0001-Fixes-for-LTO-PGO-support.patch
         rust-configure.patch
@@ -21,7 +24,7 @@ sha256sums=('a4438d84d95171a6d4fea9c9f02c2edbf0475a9c614d968ebe2eedc25a672151'
             'SKIP'
             '926a573eabe3b6177363b795ed5e5641b4a4ebc6d7cfa093f11e1779ac0f897c'
             'd6eb063743f07ba8aaacf7c5f915253422f8096560c37c3c529ed1c34910a002'
-            '8c817c8c3ccffdd0dd2df0f8637a85fc17bc2944fd95c81521e5079c1b42a1d8')
+            '22db5fd3a737bcaa0d6c3ab4818084c6952866f9a12c825e508c8e03b2ae2ca0')
 validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
 
 # Make sure the duplication between bin and lib is found
@@ -32,7 +35,7 @@ prepare() {
   mkdir obj
 
   local src
-  for src in "${source[@]}"; do
+  for src in "${source[@]}" "${srcdir}/firefox-patches/*"; do
     src="${src%%::*}"
     src="${src##*/}"
     [[ $src = *.patch ]] || continue
@@ -57,7 +60,6 @@ build() {
     --enable-tests
     --with-intl-api
     --with-system-zlib
-    --enable-linker=lld
     --without-system-icu
   )
   case "${CARCH}" in
@@ -79,11 +81,12 @@ build() {
 
   cd firefox-$pkgver/obj
 
-  if [ "${CARCH}" != 'powerpc' ]; then
+  if [ "${CARCH}" != 'powerpc' -a "${CARCH}" != 'riscv64' ]; then
     # Do 3-tier PGO
     echo "Building instrumented JS..."
     sh ../js/src/configure "${configure_args[@]}" \
       --enable-profile-generate=cross
+      --enable-linker=lld
     make
 
     echo "Profiling instrumented JS..."
@@ -115,6 +118,7 @@ build() {
       --enable-profile-use=cross \
       --with-pgo-profile-path="$PWD/merged.profdata"
   else
+    CC=gcc CXX=g++ LD=ld \
     sh ../js/src/configure "${configure_args[@]}"
   fi
 

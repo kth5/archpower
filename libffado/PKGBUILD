@@ -8,25 +8,27 @@ pkgname=libffado
 pkgver=2.4.4
 pkgrel=3
 pkgdesc="Driver for FireWire audio devices"
-arch=(x86_64 powerpc64le powerpc)
+arch=(x86_64 powerpc64le powerpc riscv64)
 url="http://www.ffado.org/"
 license=('GPL3')
 depends=('gcc-libs' 'glibc' 'glibmm' 'hicolor-icon-theme' 'libavc1394'
-'libiec61883' 'libxml++' 'python-dbus')
-makedepends=('alsa-lib' 'dbus-c++' 'jack' 'libconfig' 'python-pyqt5' 'scons')
-optdepends=('python-pyqt5: ffado-mixer')
+         'libiec61883' 'libxml++' 'python-dbus')
+makedepends=('alsa-lib' 'dbus-c++' 'libconfig' 'scons')
+#optdepends=('python-pyqt5: ffado-mixer')
 provides=('libffado.so')
 source=("http://www.ffado.org/files/${pkgname}-${pkgver}.tgz"
-        "${pkgname}-simple-power-detect.patch")
-sha512sums=('065b7f9ce9bf58320c02353b63ed17b3610d0ee8a2de58de27159b2190e39c779094b01ae1123c087387e6077375e646b564b9e7717b192865b2f1f22a3acc80'
-            '97df392401f32e346fbe137f14a884abd9ec16b22930d8fff8c76eeda93f3f3ae404ec459d71a02e621937e619dcec377f5e54e8520140584686bec68a9c6c22')
-b2sums=('70d3b17f7d7317acc63351faaefb27fa850664015134887f0508b4a76aabbf6e9573f87eb2dd9792ac5f4f4b06ac7c872afa33af6af0341e6cceeb43e7a79526'
-        '386274b5b193563938315d9f0007bafb1f9ba69cc4bad1cd6b82c48de9d8f7edb75bccf6a2449ba865f5f3ab4cced0920121248317dce6a4164c1cffb928d154')
+        disable-config-guess.patch)
+sha256sums=('a47178cdc8c0c91e91edbaabe23d19ca12a752cbcf81c27314adb27cc00d60f0'
+            '1979741980b71e8ff96c3ac07220fc49cb2cd8106398cf3826abd5e200ea1e3a')
 
 prepare() {
   cd "${pkgname}-${pkgver}"
 
-  [ "${CARCH}" == 'powerpc64le' ] && patch -Np1 -i ${srcdir}/${pkgname}-simple-power-detect.patch
+  #patch -Np1 -i ${srcdir}/disable-config-guess.patch
+  cp /usr/share/autoconf/build-aux/config.guess admin/
+
+  # Bugs #658052, #659226
+  sed -i -e 's/^CacheDir/#CacheDir/' SConstruct
 
   # fix icon name, so it's coherent with XDG desktop file name
   sed -e 's/hi64-apps-ffado/ffado-mixer/g' \
@@ -39,13 +41,16 @@ prepare() {
 build() {
   local python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
   cd "${pkgname}-${pkgver}"
+
   scons PREFIX=/usr \
         DEBUG=no \
-        CUSTOM_ENV=True \
+        CUSTOM_ENV=true \
         MANDIR='/usr/share/man' \
         PYTHON_INTERPRETER='/usr/bin/python3' \
         PYPKGDIR="/usr/lib/python${python_version}/site-packages" \
         UDEVDIR='/usr/lib/udev/rules.d'
+	      DETECT_USERSPACE_ENV=false \
+        ENABLE_OPTIMIZATION=false
 }
 
 package() {
