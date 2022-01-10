@@ -39,6 +39,16 @@ check() {
   rm -r tmp
 }
 
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
 package_harfbuzz() {
   depends=(glib2 freetype2 graphite libglib-2.0.so libfreetype.so
            libgobject-2.0.so)
@@ -48,18 +58,19 @@ package_harfbuzz() {
 
   meson install -C build --destdir "$pkgdir"
 
-  # Split harfbuzz-icu
-  mkdir -p hb-icu/usr/{include/harfbuzz,lib/pkgconfig}
-  mv -t hb-icu/usr/lib "$pkgdir"/usr/lib/libharfbuzz-icu*
-  mv -t hb-icu/usr/lib/pkgconfig "$pkgdir"/usr/lib/pkgconfig/harfbuzz-icu.pc
-  mv -t hb-icu/usr/include/harfbuzz "$pkgdir"/usr/include/harfbuzz/hb-icu.h
+  ( cd "$pkgdir"
+
+    _pick hb-icu usr/lib/libharfbuzz-icu*
+    _pick hb-icu usr/lib/pkgconfig/harfbuzz-icu.pc
+    _pick hb-icu usr/include/harfbuzz/hb-icu.h
+  )
 
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 harfbuzz/COPYING
 }
 
 package_harfbuzz-icu() {
-  pkgdesc="$pkgdesc (ICU integration)"
-  depends=("harfbuzz=$pkgver-$pkgrel" icu libharfbuzz.so)
+  pkgdesc+=" - ICU integration"
+  depends=("harfbuzz=$pkgver-$pkgrel" libicuuc.so libharfbuzz.so)
   provides=(libharfbuzz-icu.so)
 
   mv hb-icu/* "$pkgdir"
