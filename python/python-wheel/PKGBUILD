@@ -4,21 +4,21 @@
 # Contributor: Lance Chen <cyen0312@gmail.com>
 
 _pypiname=wheel
-pkgbase=python-wheel
-pkgname=('python-wheel' 'python2-wheel')
-pkgver=0.37.0
+pkgname=python-wheel
+pkgver=0.37.1
 pkgrel=1
 pkgdesc="A built-package format for Python"
 arch=(any)
 url="https://pypi.python.org/pypi/wheel"
 license=('MIT')
-makedepends=('python-packaging' 'python-setuptools'
-             'python2-packaging' 'python2-setuptools')
+depends=('python-packaging')
+optdepends=('python-keyring: for wheel.signatures'
+            'python-xdg: for wheel.signatures')
+makedepends=('python-setuptools')
 checkdepends=('python-jsonschema' 'python-pytest' 'python-keyring' 'python-keyrings-alt'
-              'python-xdg')
-source=("https://pypi.io/packages/source/w/wheel/$_pypiname-$pkgver.tar.gz")
+              'python-xdg' 'python-pytest-cov')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/pypa/wheel/archive/$pkgver.tar.gz")
-sha512sums=('2e0eb1c5560a0229be9de450da8b2bc62153744abb6d8ab9a0625c150dc00d3fc3e24dbe37cc26f4ca6b6876b5c63298427b2076ee42b8f772c75010bfc135a8')
+sha512sums=('9493db2f29e16d17ca06a4d47854b3df5dfd17f21c77efd42befd54470858256fd59f56aa9585cbf0a09830927b657d546324f793e1b1153665bf0b74d0c0457')
 
 prepare() {
   # don't depend on python-coverage for tests
@@ -27,18 +27,11 @@ prepare() {
   # https://github.com/pypa/wheel/pull/365 but why?
   rm -r wheel-$pkgver/src/wheel/vendored
   sed -i 's/from .vendored.packaging import tags/from packaging import tags/' wheel-$pkgver/src/wheel/bdist_wheel.py
-
-  cp -a wheel-$pkgver{,-py2}
 }
 
 build() {
-  export PYTHONHASHSEED=0
-
   cd "$srcdir/wheel-$pkgver"
   python setup.py build
-
-  cd "$srcdir/wheel-$pkgver-py2"
-  python2 setup.py build
 }
 
 check() {
@@ -46,28 +39,11 @@ check() {
 
   cd wheel-$pkgver
   python setup.py install --root="$PWD/tmp_install" --optimize=1
-  PYTHONPATH="$PWD/tmp_install/usr/lib/python3.9/site-packages:$PYTHONPATH" py.test
+  PYTHONPATH="$PWD/tmp_install/usr/lib/python3.10/site-packages:$PYTHONPATH" py.test
 }
 
-package_python-wheel() {
-  depends=('python-packaging')
-  optdepends=('python-keyring: for wheel.signatures')
-  optdepends=('python-xdg: for wheel.signatures')
-
+package() {
   cd "$srcdir/$_pypiname-$pkgver"
   python setup.py install --root="$pkgdir/" --optimize=1 --skip-build
   install -D -m644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE.txt"
 }
-
-package_python2-wheel() {
-  depends=('python2-packaging')
-  optdepends=('python2-keyring: for wheel.signatures')
-  optdepends=('python2-xdg: for wheel.signatures')
-
-  cd "$srcdir/$_pypiname-$pkgver"
-  python2 setup.py install --root="$pkgdir/" --optimize=1 --skip-build
-  install -D -m644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE.txt"
-  mv "$pkgdir/usr/bin/wheel" "$pkgdir/usr/bin/wheel2"
-}
-
-# vim:set ts=2 sw=2 et:

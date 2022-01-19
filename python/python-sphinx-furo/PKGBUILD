@@ -3,35 +3,31 @@
 
 _pkgname=furo
 pkgname=python-sphinx-$_pkgname
-pkgver=2020.11.10.beta15
-pkgrel=3
+pkgver=2022.01.02
+pkgrel=2
 pkgdesc='A clean customizable documentation theme for Sphinx'
 arch=('any')
 url='https://github.com/pradyunsg/furo'
 license=('MIT')
-depends=('python-sphinx' 'python-beautifulsoup4')
-makedepends=('npm' 'gulp' 'python2' 'python-setuptools' 'python-dephell' 'python-myst-parser' 'python-sphinx-inline-tabs')
+depends=('python-sphinx' 'python-pygments' 'python-beautifulsoup4')
+makedepends=('python-build' 'python-pip' 'python-sphinx-theme-builder' 'python-flit-core'
+             'nodejs-lts-gallium' 'npm' 'expac')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/$pkgver.tar.gz")
-sha512sums=('cadb1be5982b71f944397428515fc9821bd6874db6ce67a66f725342d109992ba2ad9d2de7029d17de4e6a2c5fb1746f3b4b5df92ba4d1fba66ac2b662746ea2')
+sha512sums=('dcd2bae18c28a8623b566ef79a996a76d9157a05627b4e9c930b0ea82154992b9d2321ffe1c62fc2d014d499b7ca1f71117bcea9a1e8879a0ef12d3818cdd290')
 
 prepare() {
   cd $_pkgname-$pkgver
-
-  npm install
+  # force use of system nodejs
+  local node_ver=$(expac %v nodejs-lts-gallium | cut -d - -f 1)
+  sed -i "s/16.13.0/$node_ver/" pyproject.toml
 }
 
 build() {
   cd $_pkgname-$pkgver
 
-  gulp build
-  rm -rf node_modules
+  python -m build -nw
 
-  # this should be in prepare() but it evaluates the package data when we run dephell,
-  # instead of using the glob module in setup.py or something similar, so we need to
-  # build the data first with gulp and only then we can generate the setup.py
-  dephell deps convert --from pyproject.toml --to setup.py
-
-  python setup.py build
+  # docs disabled for now to unblock Python 3.10 update
 
   # sphinx needs this theme installed because it is uses it.
   # simply injecting the package to sys.path (via PYTHONPATH or similar)
@@ -40,20 +36,20 @@ build() {
   # for this we will create a venv with access to system packages and
   # install the theme there, then we will build the documentation.
 
-  python -m venv --system-site-packages doc-env
-  doc-env/bin/python setup.py install --skip-build
+  #python -m venv --system-site-packages doc-env
+  #doc-env/bin/python setup.py install --skip-build
 
-  doc-env/bin/python /usr/bin/sphinx-build -b dirhtml -v docs build/docs/html
+  #doc-env/bin/python /usr/bin/sphinx-build -b dirhtml -v docs build/docs/html
 }
 
 package() {
   cd $_pkgname-$pkgver
 
-  python setup.py install --root="$pkgdir" --optimize=1 --skip-build
+  PIP_CONFIG_FILE=/dev/null pip install --isolated --root="$pkgdir" --ignore-installed --no-deps dist/*.whl
 
-  install -dm 755 "$pkgdir"/usr/share/doc/$pkgname
-  cp -r -a --no-preserve=ownership build/docs/html "$pkgdir"/usr/share/doc/$pkgname
-  rm -rf "$pkgdir"/usr/share/doc/$pkgname/html/.doctrees
+  #install -dm 755 "$pkgdir"/usr/share/doc/$pkgname
+  #cp -r -a --no-preserve=ownership build/docs/html "$pkgdir"/usr/share/doc/$pkgname
+  #rm -rf "$pkgdir"/usr/share/doc/$pkgname/html/.doctrees
 
   install -Dm 644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
