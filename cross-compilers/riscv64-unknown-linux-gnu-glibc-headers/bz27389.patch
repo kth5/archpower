@@ -1,0 +1,176 @@
+From 3e880d733753183696d1a81c34caef3a9add2b0c Mon Sep 17 00:00:00 2001
+From: DJ Delorie <dj@redhat.com>
+Date: Thu, 18 Feb 2021 15:26:30 -0500
+Subject: [PATCH 10] nss: Re-enable NSS module loading after chroot [BZ
+ #27389]
+
+The glibc 2.33 release enabled /etc/nsswitch.conf reloading,
+and to prevent potential security issues like CVE-2019-14271
+the re-loading of nsswitch.conf and all mdoules was disabled
+when the root filesystem changes (see bug 27077).
+
+Unfortunately php-lpfm and openldap both require the ability
+to continue to load NSS modules after chroot. The packages
+do not exec after the chroot, and so do not cause the
+protections to be reset. The only solution is to re-enable
+only NSS module loading (not nsswitch.conf reloading) and so
+get back the previous glibc behaviour.
+
+In the future we may introduce a way to harden applications
+so they do not reload NSS modules once the root filesystem
+changes, or that only files/dns are available pre-loaded
+(or builtin).
+
+Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+(cherry picked from commit 58673149f37389495c098421085ffdb468b3f7ad)
+---
+ nss/nss_database.c                            |  1 -
+ nss/tst-reload2.c                             | 35 +++++++++++++++----
+ nss/tst-reload2.root/etc/hosts                |  1 +
+ nss/tst-reload2.root/etc/nsswitch.conf        |  1 +
+ nss/tst-reload2.root/subdir/etc/hosts         |  1 +
+ nss/tst-reload2.root/subdir/etc/nsswitch.conf |  1 +
+ 6 files changed, 32 insertions(+), 8 deletions(-)
+ create mode 100644 nss/tst-reload2.root/etc/hosts
+ create mode 100644 nss/tst-reload2.root/subdir/etc/hosts
+
+diff --git a/nss/nss_database.c b/nss/nss_database.c
+index e1bef6bd75c..fb72d0cc03d 100644
+--- a/nss/nss_database.c
++++ b/nss/nss_database.c
+@@ -402,7 +402,6 @@ nss_database_check_reload_and_get (struct nss_database_state *local,
+       atomic_store_release (&local->data.reload_disabled, 1);
+       *result = local->data.services[database_index];
+       __libc_lock_unlock (local->lock);
+-      __nss_module_disable_loading ();
+       return true;
+     }
+   local->root_ino = str.st_ino;
+diff --git a/nss/tst-reload2.c b/nss/tst-reload2.c
+index 5dae16b4f05..5ecb032e9fc 100644
+--- a/nss/tst-reload2.c
++++ b/nss/tst-reload2.c
+@@ -26,6 +26,7 @@
+ #include <pwd.h>
+ #include <grp.h>
+ #include <unistd.h>
++#include <netdb.h>
+ 
+ #include <support/support.h>
+ #include <support/check.h>
+@@ -48,7 +49,7 @@ static const char *group_4[] = {
+   "alpha", "beta", "gamma", "fred", NULL
+ };
+ 
+-static struct group group_table_data[] =
++static struct group group_table_data1[] =
+   {
+    GRP (4),
+    GRP_LAST ()
+@@ -58,7 +59,7 @@ void
+ _nss_test1_init_hook (test_tables *t)
+ {
+   t->pwd_table = pwd_table1;
+-  t->grp_table = group_table_data;
++  t->grp_table = group_table_data1;
+ }
+ 
+ static struct passwd pwd_table2[] =
+@@ -68,10 +69,21 @@ static struct passwd pwd_table2[] =
+    PWD_LAST ()
+   };
+ 
++static const char *group_5[] = {
++  "fred", NULL
++};
++
++static struct group group_table_data2[] =
++  {
++   GRP (5),
++   GRP_LAST ()
++  };
++
+ void
+ _nss_test2_init_hook (test_tables *t)
+ {
+   t->pwd_table = pwd_table2;
++  t->grp_table = group_table_data2;
+ }
+ 
+ static int
+@@ -79,6 +91,7 @@ do_test (void)
+ {
+   struct passwd *pw;
+   struct group *gr;
++  struct hostent *he;
+   char buf1[PATH_MAX];
+   char buf2[PATH_MAX];
+ 
+@@ -99,7 +112,9 @@ do_test (void)
+     TEST_COMPARE (pw->pw_uid, 1234);
+ 
+   /* This just loads the test2 DSO.  */
+-  gr = getgrnam ("name4");
++  gr = getgrgid (5);
++  TEST_VERIFY (gr != NULL);
++
+ 
+   /* Change the root dir.  */
+ 
+@@ -114,15 +129,21 @@ do_test (void)
+   if (pw)
+     TEST_VERIFY (pw->pw_uid != 2468);
+ 
+-  /* The "files" DSO should not be loaded.  */
+-  gr = getgrnam ("test3");
+-  TEST_VERIFY (gr == NULL);
+-
+   /* We should still be using the old configuration.  */
+   pw = getpwnam ("test1");
+   TEST_VERIFY (pw != NULL);
+   if (pw)
+     TEST_COMPARE (pw->pw_uid, 1234);
++  gr = getgrgid (5);
++  TEST_VERIFY (gr != NULL);
++  gr = getgrnam ("name4");
++  TEST_VERIFY (gr == NULL);
++
++  /* hosts in the outer nsswitch is files; the inner one is test1.
++     Verify that we're still using the outer nsswitch *and* that we
++     can load the files DSO. */
++  he = gethostbyname ("test2");
++  TEST_VERIFY (he != NULL);
+ 
+   return 0;
+ }
+diff --git a/nss/tst-reload2.root/etc/hosts b/nss/tst-reload2.root/etc/hosts
+new file mode 100644
+index 00000000000..bbd9e494ef3
+--- /dev/null
++++ b/nss/tst-reload2.root/etc/hosts
+@@ -0,0 +1 @@
++1.2.3.4 test1
+diff --git a/nss/tst-reload2.root/etc/nsswitch.conf b/nss/tst-reload2.root/etc/nsswitch.conf
+index 570795ae22d..688a5895191 100644
+--- a/nss/tst-reload2.root/etc/nsswitch.conf
++++ b/nss/tst-reload2.root/etc/nsswitch.conf
+@@ -1,2 +1,3 @@
+ passwd: test1
+ group: test2
++hosts: files
+diff --git a/nss/tst-reload2.root/subdir/etc/hosts b/nss/tst-reload2.root/subdir/etc/hosts
+new file mode 100644
+index 00000000000..0a2cbd4337f
+--- /dev/null
++++ b/nss/tst-reload2.root/subdir/etc/hosts
+@@ -0,0 +1 @@
++1.2.3.4 test2
+diff --git a/nss/tst-reload2.root/subdir/etc/nsswitch.conf b/nss/tst-reload2.root/subdir/etc/nsswitch.conf
+index f1d73f87651..fea271869ef 100644
+--- a/nss/tst-reload2.root/subdir/etc/nsswitch.conf
++++ b/nss/tst-reload2.root/subdir/etc/nsswitch.conf
+@@ -1,2 +1,3 @@
+ passwd: test2
+ group: files
++hosts: test1
+
