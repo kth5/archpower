@@ -3,28 +3,21 @@
 
 pkgname=js78
 pkgver=78.15.0
-pkgrel=1
+pkgrel=3
 pkgdesc="JavaScript interpreter and libraries - Version 78"
 arch=(x86_64 powerpc64le powerpc riscv64)
 url="https://developer.mozilla.org/en-US/docs/Mozilla/Projects/SpiderMonkey"
 license=(MPL)
 depends=(gcc-libs readline zlib sh)
-makedepends=(zip autoconf2.13 python-setuptools python-psutil rust)
-makedepends_powerpc=(llvm clang ldd)
-makedepends_powerpc64le=(llvm clang ldd)
-makedepends_x86_64=(llvm clang ldd)
+makedepends=(zip autoconf2.13 python-setuptools python-psutil rust llvm clang lld)
 checkdepends=(mercurial git)
 _relver=${pkgver}esr
-_whissi_patches_ver=78esr-patches-19
+_whissi_patches_ver=78esr-patches-20
 source=(https://archive.mozilla.org/pub/firefox/releases/$_relver/source/firefox-$_relver.source.tar.xz{,.asc}
-        0001-Fixes-for-LTO-PGO-support.patch
-        rust-configure.patch
         https://dev.gentoo.org/~whissi/mozilla/patchsets/firefox-${_whissi_patches_ver}.tar.xz)
 sha256sums=('a4438d84d95171a6d4fea9c9f02c2edbf0475a9c614d968ebe2eedc25a672151'
             'SKIP'
-            '926a573eabe3b6177363b795ed5e5641b4a4ebc6d7cfa093f11e1779ac0f897c'
-            'd6eb063743f07ba8aaacf7c5f915253422f8096560c37c3c529ed1c34910a002'
-            '22db5fd3a737bcaa0d6c3ab4818084c6952866f9a12c825e508c8e03b2ae2ca0')
+            '76dbb23445ceca9a5b2abef00126ed674801959c25d35db538d0642363a1a915')
 validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
 
 # Make sure the duplication between bin and lib is found
@@ -33,14 +26,11 @@ COMPRESSZST+=(--long)
 prepare() {
   cd firefox-$pkgver
   mkdir obj
-
-  local src
-  for src in "${source[@]}" "${srcdir}/firefox-patches/*"; do
-    src="${src%%::*}"
-    src="${src##*/}"
-    [[ $src = *.patch ]] || continue
-    echo "Applying patch $src..."
-    patch -Np1 < "../$src"
+  
+  local patch
+  for patch in ${srcdir}/firefox-patches/*; do
+    echo "Applying patch $patch..."
+    patch -Np1 < $patch
   done
 }
 
@@ -85,7 +75,7 @@ build() {
     # Do 3-tier PGO
     echo "Building instrumented JS..."
     sh ../js/src/configure "${configure_args[@]}" \
-      --enable-profile-generate=cross
+      --enable-profile-generate=cross \
       --enable-linker=lld
     make
 
