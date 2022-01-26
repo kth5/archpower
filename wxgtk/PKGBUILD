@@ -1,28 +1,28 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Eric Bélanger <eric@archlinux.org>
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Contributor: Eric Bélanger <eric@archlinux.org>
 
 pkgbase=wxgtk
 pkgname=(wxgtk2 wxgtk3 wxgtk-common)
 pkgver=3.1.5
-pkgrel=1
-arch=(x86_64 powerpc64le powerpc)
-url="https://wxwidgets.org"
-license=('custom:wxWindows')
-makedepends=(gst-plugins-base glu webkit2gtk libnotify gtk2)
-options=('!emptydirs')
+pkgrel=2
+arch=(x86_64 powerpc64le powerpc riscv64)
+url='https://wxwidgets.org'
+license=(custom:wxWindows)
+makedepends=(gst-plugins-base glu libnotify gtk2 gtk3)
+makedepends_powerpc=(webkit2gtk)
+makedepends_powerpc64le=(webkit2gtk)
+makedepends_x86_64=(webkit2gtk)
+options=(!emptydirs)
 source=(https://github.com/wxWidgets/wxWidgets/releases/download/v$pkgver/wxWidgets-$pkgver.tar.bz2
-        make-abicheck-non-fatal.patch)
+        wxgtk-abicheck.patch)
 sha256sums=('d7b3666de33aa5c10ea41bb9405c40326e1aeb74ee725bb88f90f1d50270a224'
-            '46a1bb97d69163547da13d5e23a4c73e68de27ee601da5d2fb5bc5c417931453')
+            '53501db871290b71967af08b60aedb738c920a307ef9bd32dd19c30498732cf8')
 
 prepare() {
-  cd wxWidgets-$pkgver
+  # C++ ABI check is too strict
+  patch -d wxWidgets-$pkgver -p1 -i ../wxgtk-abicheck.patch
 
-  # C++ ABI check is too strict and breaks with GCC 5.1
-  # https://bugzilla.redhat.com/show_bug.cgi?id=1200611
-  patch -Np1 -i ../make-abicheck-non-fatal.patch
-
-  cd ..
   cp -r wxWidgets-$pkgver wxWidgets-$pkgver-gtk3
 }
 
@@ -35,9 +35,10 @@ build() {
   make
   make -C locale allmo
 
+  [ ! "${CARCH}" == 'riscv' ] && flags="--enable-webview"
   cd ../wxWidgets-$pkgver-gtk3
   ./configure --prefix=/usr --libdir=/usr/lib --with-gtk=3 --with-opengl --enable-unicode \
-    --enable-graphics_ctx --enable-mediactrl --enable-webview --with-regex=builtin \
+    --enable-graphics_ctx --enable-mediactrl $flags --with-regex=builtin \
     --with-libpng=sys --with-libxpm=sys --with-libjpeg=sys --with-libtiff=sys \
     --disable-precomp-headers
   make
