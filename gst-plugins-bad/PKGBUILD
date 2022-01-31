@@ -3,12 +3,13 @@
 # Contributor: Jan de Groot <jgc@archlinux.org>
 
 pkgbase=gst-plugins-bad
-pkgname=(gst-plugins-bad-libs gst-plugins-bad gst-plugin-opencv gst-plugin-wpe)
+pkgname=(gst-plugins-bad-libs gst-plugins-bad gst-plugin-opencv)
+[ "${CARCH}" != 'riscv64' ] && pkgname+=(gst-plugin-wpe)
 pkgver=1.18.5
-pkgrel=1
+pkgrel=5
 pkgdesc="Multimedia graph framework - bad plugins"
 url="https://gstreamer.freedesktop.org/"
-arch=(x86_64 powerpc64le powerpc)
+arch=(x86_64 powerpc64le powerpc riscv64)
 license=(LGPL)
 depends=(gst-plugins-base-libs orc libdrm libx11 libgudev libusb libvdpau
          libxkbcommon-x11)
@@ -21,30 +22,39 @@ makedepends=(mjpegtools curl chromaprint libmms faad2 libdca libdvdnav
              librsvg fluidsynth lilv lv2 gst-plugins-good python git
              gobject-introspection vulkan-headers vulkan-validation-layers
              wayland-protocols gtk3 meson shaderc libavtp libmicrodns
-             zxing-cpp opencv libva wpewebkit)
-makedepends_x86_64=(svthevcenc svt-hevc)
+	     zxing-cpp opencv libva)
+makedepends_powerpc=(wpewebkit)
+makedepends_powerpc64le=(wpewebkit)
+makedepends_x86_64=(wpewebkit)
 checkdepends=(xorg-server-xvfb)
 options=(!emptydirs)
 _commit=d3af58d5b31941caa26c3ded85d7a7b84a91f0cc  # tags/1.18.5^0
-source=("git+https://gitlab.freedesktop.org/gstreamer/gst-plugins-bad.git#commit=$_commit")
-sha256sums=('SKIP')
+source=("git+https://gitlab.freedesktop.org/gstreamer/gst-plugins-bad.git#commit=$_commit"
+        1267.patch wpe-1.1.diff)
+sha256sums=('SKIP'
+            '6b44a256d1ce3ed788d689a9abc5d8a2c4f992ce3c6c60f7a1efb4aa5cc3deb1'
+            '841988d7dffaf98adeff046cfeed97505a66d268c156361ac29c2b7a112cf984')
 
 pkgver() {
   cd $pkgbase
-
   git describe --tags | sed 's/-/+/g'
 }
 
 prepare() {
   cd $pkgbase
+
+  # zxing-cpp 1.1.1
+  git cherry-pick -n 451c875d40a92ade05389cb62ef885eefd29be4a
+
+  # Neon 0.32.x
+  # https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1267
+  patch -Np3 -i ../1267.patch
+
+  # wpe-webkit-1.1 (libsoup3)
+  patch -Np1 -i ../wpe-1.1.diff
 }
 
 build() {
-  case "${CARCH}" in
-    x86_64) EXTRA_MESON_FLAGS="-D svthevcenc=enabled" ;;
-    *) EXTRA_MESON_FLAGS="-D svthevcenc=disabled" ;;
-  esac
-
   arch-meson $pkgbase build \
     -D directfb=disabled \
     -D doc=disabled \
@@ -62,11 +72,10 @@ build() {
     -D voamrwbenc=disabled \
     -D wasapi2=disabled \
     -D wasapi=disabled \
-    -D nvdec=disabled \
-    -D nvenc=disabled \
     -D gobject-cast-checks=disabled \
+    -D svthevcenc=disabled \
     -D package-name="GStreamer Bad Plugins (Arch POWER)" \
-    -D package-origin="https://www.archlinuxpower.org/" ${EXTRA_MESON_FLAGS}
+    -D package-origin="https://www.archlinuxpower.org/"
   meson compile -C build
 }
 
@@ -74,9 +83,8 @@ check() (
   mkdir -p -m 700 "${XDG_RUNTIME_DIR:=$PWD/runtime-dir}"
   export XDG_RUNTIME_DIR
 
-  # elements_dtls test hangs sometimes
   xvfb-run -s '-nolisten local' \
-    meson test -C build --print-errorlogs || :
+    meson test -C build --print-errorlogs
 )
 
 package_gst-plugins-bad-libs() {
@@ -85,7 +93,7 @@ package_gst-plugins-bad-libs() {
   conflicts=("gst-transcoder<1.18.0")
   replaces=("gst-transcoder<1.18.0")
 
-  DESTDIR="$pkgdir" meson install -C build
+  meson install -C build --destdir "$pkgdir"
 
   mkdir -p ext/lib/gstreamer-1.0
   for _x in aom assrender bs2b bz2 chromaprint closedcaption colormanagement \
@@ -121,7 +129,6 @@ package_gst-plugins-bad() {
            libsrtp zvbi vulkan-icd-loader libxcb wayland libwebp libnice
            webrtc-audio-processing wildmidi x265 zbar libavtp
            libmicrodns zxing-cpp libva)
-  depends_x86_64=(svthevcenc svt-hevc)
   optdepends=('nvidia-utils: nvcodec plugin')
 
   mv ext "$pkgdir/usr"
