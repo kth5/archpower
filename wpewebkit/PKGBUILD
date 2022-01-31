@@ -2,34 +2,34 @@
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
 pkgname=wpewebkit
-pkgver=2.32.4
+pkgver=2.34.4
 pkgrel=1
 pkgdesc="Web content engine for embedded devices"
 url="https://wpewebkit.org"
-arch=(x86_64 powerpc64le powerpc)
+arch=(x86_64 powerpc64le powerpc) # riscv64)
 license=(custom)
 depends=(cairo fontconfig freetype2 glib2 harfbuzz harfbuzz-icu icu libjpeg
-         libepoxy libgcrypt libsoup libxml2 zlib libpng sqlite libwebp libwpe
+         libepoxy libgcrypt libsoup3 libxml2 zlib libpng sqlite libwebp libwpe
          atk at-spi2-atk openjpeg2 woff2 libtasn1 libxslt libsystemd bubblewrap
          libseccomp xdg-dbus-proxy gstreamer gst-plugins-base-libs libxkbcommon
          wayland wpebackend-fdo)
 makedepends=(cmake ninja gtk-doc python ruby systemd gst-plugins-bad gperf
-             wayland-protocols)
+             wayland-protocols lld clang)
 optdepends=('geoclue: Geolocation support'
             'gst-plugins-good: media decoding'
             'gst-plugins-bad: media decoding'
             'gst-libav: nonfree media decoding')
-source=($url/releases/$pkgname-$pkgver.tar.xz{,.asc}
-        wpewebkit-no-ninja-colours.patch)
-sha256sums=('381f1422cbc319db1aa42dda48de39590ed90ac3bec6b81ec83f3f2cae5c3eeb'
+options=(!lto)
+source=($url/releases/$pkgname-$pkgver.tar.xz{,.asc} fix-doc.diff)
+sha256sums=('3653ba42dbe22a4e6751b3f7cab8d2ebb2db5b7654c5d135a2f9bedf94778cee'
             'SKIP'
-            '82976d5ffb89c443cb1f55279eb929f5b4a629f7453c97b80a68a3f37da85050')
+            'd8406f972334b22c7bcad4b105f4fe3e1c9f3dda5b396dbf912afa01fc121d8f')
 validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
               '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B') # Adrián Pérez de Castro <aperez@igalia.com>
 
 prepare() {
   cd $pkgname-$pkgver
-  patch -Np1 -i ${srcdir}/wpewebkit-no-ninja-colours.patch
+  patch -Np1 -i ../fix-doc.diff
 }
 
 build() {
@@ -40,14 +40,12 @@ build() {
       CXXFLAGS="${CXXFLAGS/-O?/-Os}"
       EXTRA_CMAKE_FLAGS="-DENABLE_JIT=OFF
                          -DUSE_SYSTEMD=OFF
-                         -DUSE_LD_GOLD=ON
                          -DCMAKE_CXX_FLAGS_RELEASE=-DNDEBUG
                          -DCMAKE_CXX_FLAGS_DEBUG=-DNDEBUG
                          -DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-DNDEBUG
                          -DCMAKE_C_FLAGS_RELEASE=-DNDEBUG
                          -DCMAKE_C_FLAGS_DEBUG=-DNDEBUG
-                         -DCMAKE_C_FLAGS_RELWITHDEBINFO=-DNDEBUG
-                         -DCMAKE_LINKER=${CHOST}-gcc"
+                         -DCMAKE_C_FLAGS_RELWITHDEBINFO=-DNDEBUG"
     ;;
   esac
 
@@ -59,13 +57,15 @@ build() {
     -DCMAKE_INSTALL_LIBEXECDIR=lib \
     -DCMAKE_SKIP_RPATH=ON \
     -DENABLE_GTKDOC=ON \
-    -DENABLE_MINIBROWSER=ON ${EXTRA_CMAKE_FLAGS}
+    -DENABLE_MINIBROWSER=ON \
+    -DUSE_LD_LLD=ON \
+    -DLTO_MODE=thin
   cmake --build build
 }
 
 package() {
   depends+=(libwpe-1.0.so libWPEBackend-fdo-1.0.so)
-  provides+=(libWPEWebKit-1.0.so)
+  provides+=(libWPEWebKit-1.1.so)
 
   DESTDIR="$pkgdir" cmake --install build
 
