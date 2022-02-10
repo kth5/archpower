@@ -8,11 +8,11 @@
 
 pkgbase=networkmanager
 pkgname=(networkmanager libnm nm-cloud-setup)
-pkgver=1.32.12
+pkgver=1.34.0
 pkgrel=1
 pkgdesc="Network connection manager and user applications"
 url="https://networkmanager.dev/"
-arch=(x86_64 powerpc64le powerpc)
+arch=(x86_64 powerpc64le powerpc riscv64)
 license=(GPL)
 _pppver=2.4.9
 makedepends=(intltool dhclient dhcpcd iptables-nft gobject-introspection gtk-doc
@@ -21,13 +21,13 @@ makedepends=(intltool dhclient dhcpcd iptables-nft gobject-introspection gtk-doc
              python-gobject git vala jansson bluez-libs glib2-docs iwd dnsmasq
              openresolv libpsl audit meson)
 checkdepends=(libx11 python-dbus)
-_commit=d90c03b1b8f3e6f5ff8fbc1cbc176f0a0dec6362  # tags/1.32.12^0
+_commit=9133a30c9deb3a003a20b09a617a25b07ada18ae  # tags/1.34.0^0
 source=("git+https://gitlab.freedesktop.org/NetworkManager/NetworkManager.git#commit=$_commit")
-sha256sums=('SKIP')
+b2sums=('SKIP')
 
 pkgver() {
   cd NetworkManager
-  git describe --abbrev=10 | sed 's/-dev/dev/;s/-rc/rc/;s/-/+/g'
+  git describe --tags | sed 's/-dev/dev/;s/-rc/rc/;s/[^-]*-g/r&/;s/-/+/g'
 }
 
 prepare() {
@@ -35,7 +35,7 @@ prepare() {
 }
 
 build() {
-  local meson_args=(
+  local meson_options=(
     # system paths
     -D dbus_conf_dir=/usr/share/dbus-1/system.d
 
@@ -44,7 +44,6 @@ build() {
     -D session_tracking_consolekit=false
     -D suspend_resume=systemd
     -D modify_system=true
-    -D polkit_agent=true
     -D selinux=false
 
     # features
@@ -70,7 +69,7 @@ build() {
     -D qt=false
   )
 
-  arch-meson NetworkManager build "${meson_args[@]}"
+  arch-meson NetworkManager build "${meson_options[@]}"
   meson compile -C build
 }
 
@@ -89,19 +88,22 @@ _pick() {
 }
 
 package_networkmanager() {
-  depends=(libnm iproute2 polkit wpa_supplicant libmm-glib libnewt libndp libteam curl
+  depends=(libnm iproute2 wpa_supplicant libmm-glib libnewt libndp libteam curl
            bluez-libs libpsl audit mobile-broadband-provider-info)
-  optdepends=('dnsmasq: connection sharing'
-              'nftables: connection sharing'
-              'iptables: connection sharing'
-              'bluez: Bluetooth support'
-              'ppp: dialup connection support'
-              'modemmanager: cellular network support'
-              'iwd: wpa_supplicant alternative'
-              'dhclient: alternative DHCP client'
-              'dhcpcd: alternative DHCP client'
-              'openresolv: alternative resolv.conf manager'
-              'firewalld: firewall support')
+  optdepends=(
+    'polkit: let non-root users control networking'
+    'dnsmasq: connection sharing'
+    'nftables: connection sharing'
+    'iptables: connection sharing'
+    'bluez: Bluetooth support'
+    'ppp: dialup connection support'
+    'modemmanager: cellular network support'
+    'iwd: wpa_supplicant alternative'
+    'dhclient: alternative DHCP client'
+    'dhcpcd: alternative DHCP client'
+    'openresolv: alternative resolv.conf manager'
+    'firewalld: firewall support'
+  )
   backup=(etc/NetworkManager/NetworkManager.conf)
 
   meson install -C build --destdir "$pkgdir"
