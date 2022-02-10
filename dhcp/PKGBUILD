@@ -8,11 +8,12 @@ pkgname=('dhcp' 'dhclient')
 # separate patch levels with a period to maintain proper versioning.
 _realver=4.4.2-P1
 pkgver=${_realver/-/.}
-pkgrel=1
-arch=(x86_64 powerpc64le powerpc)
+pkgrel=4
+arch=(x86_64 powerpc64le powerpc riscv64)
 license=('custom:isc-dhcp')
 url='https://www.isc.org/dhcp/'
 makedepends=('bash' 'iproute2' 'openldap')
+options=('!lto')
 validpgpkeys=('7E1C91AC8030A5A59D1EFAB9750F3C87723E4012') # Internet Systems Consortium, Inc. (Signing key, 2021-2022) <codesign@isc.org>
 source=("https://downloads.isc.org/isc/${pkgbase}/${_realver}/${pkgbase}-${_realver}.tar.gz"{,.asc}
         '0002-iproute2.patch'
@@ -21,7 +22,7 @@ source=("https://downloads.isc.org/isc/${pkgbase}/${_realver}/${pkgbase}-${_real
         'dhcp-tmpfiles.conf'
         'dhcpd4.service'
         'dhcpd6.service'
-        'dhclient@.service')
+	'dhclient@.service')
 sha256sums=('b05e04337539545a8faa0d6ac518defc61a07e5aec66a857f455e7f218c85a1a'
             'SKIP'
             '837a64189b949afae951655546967cc8f17f2f2cf370faabff00575364f0fcf7'
@@ -40,6 +41,10 @@ prepare() {
 
   # [#117] Fixed gcc 10 compilation issues
   patch -Np1 -i ../0003-117-fixed-gcc-10-compilation-issues.patch
+
+  sed "s@^bindconfig = @bindconfig = --build=${CHOST} @g" -i bind/Makefile.in
+
+  autoreconf -fiv
 }
 
 build() {
@@ -48,6 +53,7 @@ build() {
   [ "${CARCH}" == 'powerpc' ] && export CFLAGS+=' -latomic'
 
   ./configure \
+      --build=${CHOST} \
       --prefix=/usr \
       --sbindir=/usr/bin \
       --sysconfdir=/etc \
