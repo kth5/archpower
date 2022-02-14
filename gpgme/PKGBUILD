@@ -5,28 +5,28 @@
 
 pkgbase=gpgme
 pkgname=(gpgme qgpgme python-gpgme)
-pkgver=1.16.0
-pkgrel=3
+pkgver=1.17.0
+pkgrel=1
 _python_ver=3.10
-pkgdesc="A C wrapper library for GnuPG"
+pkgdesc='A C wrapper library for GnuPG'
 arch=(x86_64 powerpc64le powerpc riscv64)
 url='https://www.gnupg.org/related_software/gpgme/'
 license=('LGPL')
 makedepends=('libgpg-error' 'gnupg' 'qt5-base' 'python' 'swig')
+options=('debug')
 validpgpkeys=('6DAA6E64A76D2840571B4902528897B826403ADA') # Werner Koch (dist signing 2020)
 source=("https://www.gnupg.org/ftp/gcrypt/${pkgbase}/${pkgbase}-${pkgver}.tar.bz2"{,.sig}
-	python310.patch
-        gpgme-1.16.0-glibc-2.34.patch)
-sha256sums=('6c8cc4aedb10d5d4c905894ba1d850544619ee765606ac43df7405865de29ed0'
+        python310.patch
+        include-config.patch)
+sha256sums=('4ed3f50ceb7be2fce2c291414256b20c9ebf4c03fddb922c88cda99c119a69f5'
             'SKIP'
             '5de2f6bcb6b30642d0cbc3fbd86803c9460d732f44a526f44cedee8bb78d291a'
-            'c14b19ad01531bcbf9a8083809aca6e1550409e31279f214bd95663888b29a14')
+            '4890c50c94dc05bc054eef7ddba02a9ef2162c32b575d044ede127ada621b826')
 
 prepare() {
   cd ${pkgbase}-${pkgver}
   patch -Np1 -i ../python310.patch
-
-  patch -Np1 -i ../gpgme-1.16.0-glibc-2.34.patch
+  patch -Np1 -i ../include-config.patch
 }
 
 build() {
@@ -40,14 +40,15 @@ build() {
     --disable-gpgsm-test
   make
 
-  _arch=x86_64
-  [ "${CARCH}" = "powerpc" ] && _arch=ppc
-  [ "${CARCH}" = "powerpc64le" ] && _arch=ppc64le
-  [ "${CARCH}" = "riscv64" ] && _arch=riscv64
+  _pyarch=${CARCH}
+  case "${CARCH}" in
+    powerpc)     _pyarch=ppc ;;
+    powerpc64le) _pyarch=ppc64le ;;
+  esac
 
   # ensure reproducibility of .pyc files
   touch -d @$SOURCE_DATE_EPOCH lang/python/version.py
-  touch -d @$SOURCE_DATE_EPOCH lang/python/python${_python_ver}-gpg/lib.linux-${_arch}-${_python_ver}/gpg/gpgme.py
+  touch -d @$SOURCE_DATE_EPOCH lang/python/python${_python_ver}-gpg/lib.linux-${_pyarch}-${_python_ver}/gpg/gpgme.py
 
   # .pyc files will be created if check() is used - generate them here
 
