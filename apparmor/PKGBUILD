@@ -2,56 +2,61 @@
 # Maintainer: David Runge <dvzrv@archlinux.org>
 
 pkgname=apparmor
-pkgver=3.0.3
+pkgver=3.0.4
 pkgrel=1
 pkgdesc="Mandatory Access Control (MAC) using Linux Security Module (LSM)"
-arch=(x86_64 powerpc64le powerpc)
+arch=(x86_64 powerpc64le powerpc riscv64)
 url="https://gitlab.com/apparmor/apparmor"
-license=('GPL2' 'LGPL2.1')
-depends=('audit' 'glibc' 'pam' 'python')
-makedepends=('apache' 'libxcrypt' 'ruby' 'swig')
-checkdepends=('dejagnu' 'perl-locale-gettext' 'python-notify2' 'python-psutil')
+license=(GPL2 LGPL2.1)
+depends=(audit glibc pam python)
+makedepends=(apache libxcrypt python-setuptools ruby swig)
+checkdepends=(dejagnu perl-locale-gettext python-notify2 python-psutil)
 optdepends=('perl: for perl bindings'
             'python-notify2: for aa-notify'
             'python-psutil: for aa-notify'
             'ruby: for ruby bindings')
-provides=('libapparmor.so')
+provides=(libapparmor.so)
 backup=('etc/apparmor/easyprof.conf'
         'etc/apparmor/logprof.conf'
         'etc/apparmor/notify.conf'
         'etc/apparmor/parser.conf'
         'etc/apparmor/severity.db')
+# NOTE: debug package currently contains invalid /build dir
+# LTO is currently still broken: https://gitlab.com/apparmor/apparmor/-/issues/214
+options=(!lto)
 source=(
   "https://launchpad.net/${pkgname}/${pkgver%.[0-9]}/${pkgver}/+download/${pkgname}-${pkgver}.tar.gz"{,.asc}
 )
-sha512sums=('bbf26377e60da60dab56473ee5af15aa0f3fdf2f2a61dbfcdeba12a925afda3bc6a0f6cc31e07927400425b8c3b3649833f448d8674044c7274ef06923ab48b5'
+sha512sums=('1edd800771f46fab9bc5274842e64482b7fd4a5ba4de9855d621baf1d08c8236bfa7752dd9ab3dee095f8e0798129241a9aebf68ed1c994ae5597086a4a1a8ca'
             'SKIP')
-b2sums=('aada9c32c2cde4a110cbd1d626ec00b08e29e76182185752e5c23e2ec0c2668a732ffdf1eb1660bd8bc294188ccf0da42b4282939f5969a6aed39084be00769c'
+b2sums=('831ea65ed0972ad8a6e335e438e7b0a8a2a3977dc4360ad1923d48cc7b21b1941ec011d3894d8bdc98934b953a3f1d89a859fc27ec2530f5dd9b3cc850fe66f0'
         'SKIP')
 validpgpkeys=('3ECDCBA5FB34D254961CC53F6689E64E3D3664BB') # AppArmor Development Team (AppArmor signing key) <apparmor@lists.ubuntu.com>
 _core_perl="/usr/bin/core_perl"
 
 prepare() {
   cd "${pkgname}-${pkgver}"
+
+  # remove test for help output that hardcodes expected output:
+  # https://gitlab.com/apparmor/apparmor/-/issues/220
+  sed '147,179d' -i utils/test/test-aa-notify.py
+
   # fix PYTHONPATH and add LD_LIBRARY_PATH for aa-logprof based check:
   # https://gitlab.com/apparmor/apparmor/issues/39
-  local _py3_ver=$(python --version | cut -d " " -f2)
-  local path="${PWD}/libraries/libapparmor/swig/python/build/lib.linux-${CARCH}-${_py3_ver%"."*}/LibAppArmor"
+  local python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+  local path="${PWD}/libraries/libapparmor/swig/python/build/lib.linux-${CARCH}-${python_version}/"
   local libs="${PWD}/libraries/libapparmor/src/.libs"
+
   sed -e "/PYTHONPATH/ s|utils\ |utils:$path\ LD_LIBRARY_PATH=$libs\ |" \
       -i profiles/Makefile
   (
     cd libraries/libapparmor/
-    autoreconf -vfi
+    autoreconf -fiv
   )
 }
 
 build() {
   cd "${pkgname}-${pkgver}"
-
-  # make some python bytecode reproducible
-  # https://gitlab.com/apparmor/apparmor/-/issues/185
-  export PYTHONHASHSEED=0
 
   # export required perl executable locations
   export MAKEFLAGS+=" POD2MAN=${_core_perl}/pod2man"
@@ -76,8 +81,7 @@ build() {
   make -C utils/vim
 
   # copy to test location as some tests render the resulting python bytecode
-  # unreproducible even when exporting PYTHONHASHSEED=0:
-  # https://gitlab.com/apparmor/apparmor/-/issues/184
+  # unreproducible: https://gitlab.com/apparmor/apparmor/-/issues/184
   cd ..
   cp -av "${pkgname}-${pkgver}" "${pkgname}-${pkgver}-test"
 }
@@ -130,11 +134,9 @@ package() {
 
   # set file mode to allow the perl library to be stripped:
   # https://gitlab.com/apparmor/apparmor/issues/34
-  find "${pkgdir}/usr/lib/perl5/" \
-    -type f -iname "*.so" \
-    -exec chmod 755 {} \;
+  find "${pkgdir}/usr/lib/perl5/" -type f -iname "*.so" -exec chmod 755 {} \;
 
-  # removing empty core_perl directory:
+  # remove empty core_perl directory:
   # https://gitlab.com/apparmor/apparmor/issues/40
   rm -rv "${pkgdir}"/usr/lib/perl5/*/core_perl
   # move ruby bindings to vendor_ruby:
