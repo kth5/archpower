@@ -6,20 +6,19 @@
 # NOTE: valgrind requires rebuilt with each major glibc version
 
 pkgname=glibc
-pkgver=2.34
-pkgrel=1.1
+pkgver=2.35
+pkgrel=1
 arch=(powerpc64le powerpc riscv64)
 groups=(base)
 url='https://www.gnu.org/software/libc'
 pkgdesc='GNU C Library'
 license=(GPL LGPL)
-depends=('linux-api-headers>=5.13' tzdata filesystem)
-#makedepends=(git gd python)
+depends=('linux-api-headers>=5.16' tzdata filesystem)
+makedepends=(git gd python)
 optdepends=('perl: for mtrace')
 conflicts=(systemtap)
 provides=(systemtap)
 options=(!strip staticlibs)
-docker_priv=1
 #_commit=18fdba553dd9b907e9812b90d2cea593f776058f
 #source=(git+https://sourceware.org/git/glibc.git#commit=$_commit
 source=(https://ftp.gnu.org/gnu/glibc/glibc-$pkgver.tar.xz{,.sig}
@@ -27,22 +26,16 @@ source=(https://ftp.gnu.org/gnu/glibc/glibc-$pkgver.tar.xz{,.sig}
 	locale-gen
         sdt-config.h
         sdt.h
-        local-powerpc8xx-dcbz.diff
-        Add-C.UTF-8-locale.patch
-        Revert-sysdeps-posix-getaddrinfo.c-gaih_inet-Only-us.patch
-        glibc-bz27476.patch)
+	disable-clone3.diff)
 validpgpkeys=(7273542B39962DF7B299931416792B4EA25340F8 # Carlos O'Donell
               BC7C7372637EC10C57D7AA6579C43DFBF1CF2187) # Siddhesh Poyarekar
-sha256sums=('44d26a1fe20b8853a48f470ead01e4279e869ac149b195dda4e44a195d981ab2'
+sha256sums=('5123732f6b67ccd319305efd399971d58592122bcc2a6518a1bd2510dd0cf52e'
             'SKIP'
             'd42648cea552ba5353a32e264686e992263289d5cc86207314dffc54ab514981'
             '83f108f915863c7ed0338e2d3e8f2e071a531a090ef8f8b2eb3a956a3c4f04d7'
             'cdc234959c6fdb43f000d3bb7d1080b0103f4080f5e67bcfe8ae1aaf477812f0'
             '774061aff612a377714a509918a9e0e0aafce708b87d2d7e06b1bd1f6542fe70'
-            'b379cd1657942a176e31884cfd85fb78bbcd388b4a79bd46682e6f19c6366ff9'
-            '69aaac9e1940131348b804bde15e7ccfa7230dcd0c2e1c7c44ca93f7e3f1c6c7'
-            '44e77b0e01b3aaeef6e16c5171be6e834b56f5283041af0f223c2b8785a2b6cd'
-            'e5e98d4b7bc55ba85f21d38be0099f0e4fcd7d6000641d9404d0c1d89486ed85')
+            'f5df8fc95592cce7825744aeb8c9699a5b4b5b7ccf7bcf554355167c3a7e375e')
 optdepends=('gd: for memusagestat')
 install=glibc.install
 backup=(etc/gai.conf
@@ -55,22 +48,14 @@ prepare() {
 
   [[ -d glibc-$pkgver ]] && ln -s glibc-$pkgver glibc 
   cd glibc
-
-  patch -p1 -i "$srcdir"/local-powerpc8xx-dcbz.diff
-  patch -p1 -i "$srcdir"/Add-C.UTF-8-locale.patch
-  patch -p1 -i "$srcdir"/Revert-sysdeps-posix-getaddrinfo.c-gaih_inet-Only-us.patch
-  patch -p1 -i "$srcdir"/glibc-bz27476.patch
+  # Disable clone3 syscall for now
+  # Can be removed when eletron{9,11,12} and discord are removed or patched:
+  # https://github.com/electron/electron/commit/993ecb5bdd5c57024c8718ca6203a8f924d6d574
+  # Patch src: https://patchwork.ozlabs.org/project/glibc/patch/87eebkf8ph.fsf@oldenburg.str.redhat.com/
+  patch -Np1 -i "${srcdir}"/disable-clone3.diff
 }
 
 build() {
-  case ${CARCH} in
-    powerpc|powerpc64le)
-      CFLAGS="-O3 -fno-tree-vectorize"
-      CXXFLAGS="-O3 -fno-tree-vectorize"
-      ;;
-  esac
-
-
   local _configure_flags=(
         --host=$CHOST
 	--build=$CHOST
@@ -102,6 +87,14 @@ build() {
   CFLAGS=${CFLAGS/-fno-plt/}
   CXXFLAGS=${CXXFLAGS/-fno-plt/}
   LDFLAGS=${LDFLAGS/,-z,now/}
+
+  #case "${CARCH}" in
+  #  riscv64)
+  #    CPPFLAGS+=" -D__riscv_xlen=64 -D__riscv_flen=64"
+  #    CPPFLAGS+=" -D__riscv_float_abi_double=1 -D__riscv_atomic=1"
+  #    export CPPFLAGS
+  #  ;;
+  #esac
 
   "$srcdir/glibc/configure" \
       --libdir=/usr/lib \
