@@ -13,7 +13,7 @@ esac
 pkgver=11.2.0
 _majorver=${pkgver%%.*}
 _islver=0.24
-pkgrel=2
+pkgrel=2.1
 pkgdesc='The GNU Compiler Collection'
 arch=(x86_64 powerpc64le powerpc riscv64)
 license=(GPL LGPL FDL custom)
@@ -23,7 +23,7 @@ makedepends_powerpc=(gcc-ada)
 makedepends_powerpc64le=(gcc-ada)
 makedepends_x86_64=(gcc-ada)
 checkdepends=(dejagnu inetutils)
-options=(!emptydirs)
+options=(!emptydirs !lto debug)
 _libdir=usr/lib/gcc/$CHOST/${pkgver%%+*}
 # _commit=6beb39ee6c465c21d0cc547fd66b445100cdcc35
 # source=(git://gcc.gnu.org/git/gcc.git#commit=$_commit
@@ -57,12 +57,12 @@ prepare() {
   # Do not run fixincludes
   sed -i 's@\./fixinc\.sh@-c true@' gcc/Makefile.in
 
-  # Arch Linux installs 64bit libraries /lib
+  # Arch POWER installs 64bit libraries /lib
   sed -i '/m64=/s/lib64/lib/' gcc/config/i386/t-linux64
   sed -i 's@/lib64@/lib@g' gcc/config/rs6000/t-*
 
   # hack! - some configure tests for header files using "$CPP $CPPFLAGS"
-  sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" {libiberty,gcc}/configure
+  sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" gcc/configure
 
   # D hacks
   patch -p1 -i "$srcdir/gdc_phobos_path.patch"
@@ -81,8 +81,8 @@ build() {
   
   # using -pipe causes spurious test-suite failures
   # http://gcc.gnu.org/bugzilla/show_bug.cgi?id=48565
-  CFLAGS=${CFLAGS/-pipe/}
-  CXXFLAGS=${CXXFLAGS/-pipe/}
+  #CFLAGS=${CFLAGS/-pipe/}
+  #CXXFLAGS=${CXXFLAGS/-pipe/}
 
   case "${CARCH}" in
     powerpc*|x86_64) _ada=',ada' ;;
@@ -106,7 +106,9 @@ build() {
       --enable-default-ssp \
       --enable-gnu-indirect-function \
       --enable-gnu-unique-object \
-      --enable-install-libiberty \
+      --enable-pgo-build=lto \
+      --with-build-config=bootstrap-lto \
+      --enable-link-serialization=1 \
       --enable-linker-build-id \
       --enable-lto \
       --disable-multilib \
@@ -115,15 +117,18 @@ build() {
       --enable-threads=posix \
       --disable-libssp \
       --disable-libstdcxx-pch \
-      --disable-libunwind-exceptions \
       --disable-werror \
       --enable-secureplt \
       gdc_include_dir=/usr/include/dlang/gdc
 
-  make STAGE1_CFLAGS="-O2"
+   # see https://bugs.archlinux.org/task/71777 for rationale re *FLAGS handling
+   make -O STAGE1_CFLAGS="-O2" \
+	   BOOT_CFLAGS="$CFLAGS" \
+	   BOOT_LDFLAGS="$LDFLAGS" \
+	   LDFLAGS_FOR_TARGET="$LDFLAGS"
 
   # make documentation
-  #make -C $CHOST/libstdc++-v3/doc doc-man-doxygen
+  make -O -C $CHOST/libstdc++-v3/doc doc-man-doxygen
 }
 
 check() {
@@ -184,11 +189,11 @@ package_gcc-libs() {
 
 package_gcc() {
   pkgdesc="The GNU Compiler Collection - C and C++ frontends"
-  depends=("gcc-libs=$pkgver-$pkgrel" 'binutils>=2.28' libmpc)
+  depends=("gcc-libs=$pkgver-$pkgrel" 'binutils>=2.28' libmpc zstd)
   groups=('base-devel')
   provides=($pkgname-multilib)
   replaces=($pkgname-multilib)
-  options+=(staticlibs)
+  options=(!emptydirs staticlibs debug)
 
   cd gcc-build
 
@@ -226,9 +231,6 @@ package_gcc() {
   make -C $CHOST/libsanitizer/asan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
   [ "${CARCH}" != 'powerpc' -a "${CARCH}" != 'riscv64' ] && make -C $CHOST/libsanitizer/tsan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
   make -C $CHOST/libsanitizer/lsan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
-
-  make -C libiberty DESTDIR="$pkgdir" install
-  install -m644 libiberty/pic/libiberty.a "$pkgdir/usr/lib"
 
   make -C gcc DESTDIR="$pkgdir" install-man install-info
   rm -fv "$pkgdir"/usr/share/man/man1/{gccgo,gfortran,gdc}.1
@@ -303,7 +305,7 @@ package_gcc-ada() {
   depends=("gcc=$pkgver-$pkgrel")
   provides=($pkgname-multilib)
   replaces=($pkgname-multilib)
-  options+=(staticlibs)
+  options=(!emptydirs staticlibs debug)
 
   cd gcc-build/gcc
   make DESTDIR="$pkgdir" ada.install-{common,info}
@@ -353,7 +355,7 @@ package_gcc-d() {
   depends=("gcc=$pkgver-$pkgrel")
   provides=(gdc)
   replaces=(gdc)
-  options=('staticlibs')
+  options=(staticlibs debug)
 
   cd gcc-build
   make -C gcc DESTDIR="$pkgdir" d.install-{common,man,info}
