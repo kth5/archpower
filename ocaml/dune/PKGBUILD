@@ -4,20 +4,30 @@
 # Contributor: Jakob Gahde <j5lx@fmail.co.uk>
 
 pkgname=dune
-pkgver=2.9.3
+pkgver=3.0.1
 pkgrel=1
 pkgdesc="A composable build system for OCaml (formerly jbuilder)"
 arch=(x86_64 powerpc64le powerpc riscv64)
 url="https://github.com/ocaml/dune"
 license=(Apache)
-depends=('glibc' 'ocaml>=4.13.1' 'ocaml-findlib' 'ocaml-csexp')
+depends=('glibc' 'ocaml>=4.13.1' 'ocaml-csexp' 'ocaml-pp')
 source=("${url}/archive/${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('df6e06a9beebf41f3ed375384be781b5c87c7949048995cc0bbad13dd65c96bd8b27415cd41e43b1112bd86524a59a7dd418e14b5c72b4f1f8fd4ac5ca2d1494')
+sha512sums=('94c5975b9afef75727b537805e54850156e92f04b3cd8a1cc07e43f543c6b4642cd416ef827fc106c4b6f775cac074e603850a900a28fd357db7904956138840')
+
+_dune_release_pkgs=('dune' 'dune-action-plugin' 'dune-build-info' 'dune-configurator' 'dune-glob' 'dune-private-libs' 'dune-site' 'dyn' 'stdune' 'ordering' 'xdg' 'fiber')
 
 build() {
     cd "${srcdir}/${pkgname}-${pkgver}"
     make dune.exe  # this runs `ocaml bootstrap.ml`, but keeps upstream's choice
-    dune_release_pkgs='dune,dune-action-plugin,dune-build-info,dune-configurator,dune-glob,dune-private-libs,dune-site'
+
+    # dune build needs a comma separated list of packages
+    local dune_release_pkgs='dummy'
+    for _pkg in "${_dune_release_pkgs[@]}"; do
+      dune_release_pkgs+=",${_pkg}"
+    done
+    dune_release_pkgs="${dune_release_pkgs#dummy,}"
+    echo "Building packages: ${dune_release_pkgs}"
+
     ./dune.exe build -p "${dune_release_pkgs}" --profile dune-bootstrap
 }
 
@@ -30,9 +40,15 @@ build() {
 package() {
     cd "${srcdir}/${pkgname}-${pkgver}"
 
-    DESTDIR="${pkgdir}" ./dune.exe install --prefix "/usr" --libdir=$(ocamlfind printconf destdir)
+    # we need to install packages one by one
+	for _pkg in "${_dune_release_pkgs[@]}"; do
+      ./dune.exe install "${_pkg}" --destdir="${pkgdir}" --prefix="/usr" --libdir="$(ocamlfind printconf destdir)"
+    done
+
     # Fix doc and man install
-    rm -r "${pkgdir}"/usr/doc
-    install -dm755 "${pkgdir}"/usr/share
+    install -d "${pkgdir}"/usr/share
+    mv "${pkgdir}"/usr/{doc,share/}
     mv "${pkgdir}"/usr/{man,share/}
+    install -dm755 "${pkgdir}/usr/share/licenses/${pkgname}"
+    ln -s /usr/share/doc/pp/LICENSE.md "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }
