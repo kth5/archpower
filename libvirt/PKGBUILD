@@ -7,7 +7,7 @@
 pkgname=(libvirt libvirt-storage-gluster libvirt-storage-iscsi-direct)
 [ "${CARCH}" != 'powerpc' ] && pkgname+=(libvirt-storage-rbd)
 epoch=1
-pkgver=7.8.0
+pkgver=8.1.0
 pkgrel=1
 pkgdesc="API for controlling virtualization engines (openvz,kvm,qemu,virtualbox,xen,etc)"
 arch=(x86_64 powerpc64le powerpc)
@@ -19,7 +19,6 @@ makedepends=('meson' 'libxslt' 'python-docutils' 'lvm2' 'open-iscsi' 'libiscsi' 
              'bash-completion' 'rpcsvc-proto' 'dnsmasq' 'iproute2' 'qemu-headless')
 makedepends_powerpc64le=('ceph-libs')
 makedepends_x86_64=('ceph-libs')
-checkdepends=('ebtables')
 optdepends=('libvirt-storage-gluster: Gluster storage backend'
             'libvirt-storage-iscsi-direct: iSCSI-direct storage backend'
             'gettext: required for libvirt-guests.service'
@@ -99,11 +98,9 @@ backup=(
   'etc/logrotate.d/libvirtd.qemu'
   'etc/sasl2/libvirt.conf'
 )
-source=("https://libvirt.org/sources/$pkgname-$pkgver.tar.xz"{,.asc}
-        "find_programs.ini")
-sha256sums=('a727cd0a47bfa24fa7de2874d23f3a9f9f02ceb6b49ba15288f6d9a098b19921'
-            'SKIP'
-            '735ac805fbf06021418f82297845babf481d5681bd939a6994fbdf36fe1661e4')
+source=("https://libvirt.org/sources/$pkgname-$pkgver.tar.xz"{,.asc})
+sha256sums=('3c6c43becffeb34a3f397c616206aa69a893ff8bf5e8208393c84e8e75352934'
+            'SKIP')
 validpgpkeys=('453B65310595562855471199CA68BE8010084C9C') # Jiří Denemark <jdenemar@redhat.com>
 
 prepare() {
@@ -117,8 +114,6 @@ prepare() {
   sed -i 's|/usr/libexec/qemu-bridge-helper|/usr/lib/qemu/qemu-bridge-helper|g' \
     src/qemu/qemu.conf \
     src/qemu/test_libvirtd_qemu.aug.in
-
-  sed -i 's/notify/simple/' src/remote/libvirtd.service.in
 }
 
 build() {
@@ -131,8 +126,8 @@ build() {
 
   arch-meson build \
     --libexecdir=lib/libvirt \
-    --native-file "$srcdir"/find_programs.ini \
     -Drunstatedir=/run \
+    -Dqemu_user=kvm \
     -Dqemu_group=kvm \
     -Dnetcf=disabled \
     -Dopenwsman=disabled \
@@ -167,7 +162,6 @@ package_libvirt() {
   cd "$pkgname-$pkgver"
   DESTDIR="$pkgdir" ninja -C build install
 
-  mv "$pkgdir"/etc/{sysconfig,conf.d}
   mkdir "$pkgdir"/usr/lib/{sysusers,tmpfiles}.d
   echo "g libvirt - -" > "$pkgdir/usr/lib/sysusers.d/libvirt.conf"
   echo "z /var/lib/libvirt/qemu 0751" > "$pkgdir/usr/lib/tmpfiles.d/libvirt.conf"
@@ -176,9 +170,6 @@ package_libvirt() {
   chmod 0750 "$pkgdir/usr/share/polkit-1/rules.d"
   chmod 600 "$pkgdir"/etc/libvirt/nwfilter/*.xml \
     "$pkgdir/etc/libvirt/qemu/networks/default.xml"
-
-  # Strip auto-generated UUID, so it will be generated per-install. (reproducible builds)
-  sed -i 's|<uuid>.*</uuid>|<uuid></uuid>|' "$pkgdir"/etc/libvirt/qemu/networks/default.xml
 
   rm -rf \
     "$pkgdir/run" \
