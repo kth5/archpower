@@ -1,9 +1,9 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 pkgbase=linux-visionfive
-pkgver=5.16.11
+pkgver=5.17.0.rc7
 pkgrel=1
 pkgdesc='Linux kernel for the StarFive VisionFive V1'
-commit="d7f399d52baa99c715f257707040573768ba3d97"
+_commit="b75fcbba0e03fd9655bc4c8854422d51474664d3"
 url="https://git.archlinux.org/linux.git/log/?h=$_srctag"
 arch=(any)
 license=(GPL2)
@@ -13,7 +13,7 @@ makedepends=(
 )
 options=('!strip')
 source=(
-  "${pkgbase}::git+https://github.com/starfive-tech/linux.git#commit=${commit}"
+  "${pkgbase}::git+https://github.com/starfive-tech/linux.git#commit=${_commit}"
   config         # the main kernel config file
 )
 validpgpkeys=(
@@ -23,7 +23,7 @@ validpgpkeys=(
   'C7E7849466FE2358343588377258734B41C31549'  # David Runge <dvzrv@archlinux.org>
 )
 sha256sums=('SKIP'
-            '8348087c686a7737d436447f3504362a90e72600594f4df8dce91b5660d961f6')
+            'cea06dc74cb165dcf24de4b3b23bd192048400265acafd458b5499e4a30e5c9e')
 
 export KBUILD_BUILD_HOST=archpower
 export KBUILD_BUILD_USER=$pkgbase
@@ -39,6 +39,9 @@ prepare() {
   echo "-$pkgrel" > localversion.10-pkgrel
   echo "${pkgbase#linux}" > localversion.20-pkgname
 
+  # fix mkinitcpio that can't cope with githashes in LOCALVERSION
+  echo -n '' > .scmversion
+
   local src
   for src in "${source[@]}"; do
     src="${src%%::*}"
@@ -47,12 +50,6 @@ prepare() {
     echo "Applying patch $src..."
     patch -Np1 < "../$src"
   done
-
-  mkdir -p ${srcdir}/gcc
-  for fn in gcc cc g++ c++; do
-    ln -sf /usr/bin/ccache ${srcdir}/gcc/riscv64-unknown-linux-gnu-${fn}
-  done
-  export PATH=${srcdir}/gcc:${PATH}
 
   echo "Setting config..."
   cp ../config .config
@@ -82,7 +79,7 @@ _package() {
   echo "Installing boot image..."
   # systemd expects to find the kernel here to allow hibernation
   # https://github.com/systemd/systemd/commit/edda44605f06a41fb86b7ab8128dcf99161d2344
-  install -Dm644 "$(ARCH=${MYARCH} CROSS_COMPILE=riscv64-unknown-linux-gnu- make -s image_name)" "$modulesdir/vmlinux"
+  install -Dm644 arch/riscv/boot/Image "$modulesdir/vmlinuz"
 
   # Used by mkinitcpio to name the kernel
   echo "$pkgbase" | install -Dm644 /dev/stdin "$modulesdir/pkgbase"
@@ -90,8 +87,11 @@ _package() {
   echo "Installing modules..."
   ARCH=${MYARCH} CROSS_COMPILE=riscv64-unknown-linux-gnu- make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 modules_install
 
+  echo "Installing device tree..."
+  install -Dm755 arch/riscv/boot/dts/starfive/jh7100-starfive-visionfive-v1.dtb ${pkgdir}/boot/jh7100-starfive-visionfive-v1.dtb 
+
   # remove build and source links
-  rm "$modulesdir"/{source,build}
+  rm -f "$modulesdir"/{source,build}
 }
 
 _package-headers() {
