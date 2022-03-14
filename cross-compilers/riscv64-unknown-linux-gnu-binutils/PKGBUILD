@@ -5,7 +5,7 @@
 
 _target=riscv64-unknown-linux-gnu
 pkgname=$_target-binutils
-pkgver=2.37
+pkgver=2.38
 pkgrel=1
 pkgdesc='Assemble and manipulate binary and object files for 32-bit and 64-bit RISC-V'
 arch=(x86_64 powerpc64le powerpc)
@@ -13,11 +13,31 @@ url='https://gnu.org/software/binutils/'
 license=(GPL)
 groups=(risc-v)
 makedepends=(setconf)
-source=("https://ftp.gnu.org/gnu/binutils/binutils-$pkgver.tar.xz")
-sha512sums=('5c11aeef6935860a6819ed3a3c93371f052e52b4bdc5033da36037c1544d013b7f12cb8d561ec954fe7469a68f1b66f1a3cd53d5a3af7293635a90d69edd15e7')
+source=("https://ftp.gnu.org/gnu/binutils/binutils-$pkgver.tar.xz"
+        gold-warn-unsupported.patch
+        fix-incorrect-undefined-symbol.patch
+        "binutils-pr28733.patch::https://sourceware.org/git/?p=binutils-gdb.git;a=patch;h=e4028336b19998e74a51dd0918a8b3922e08a537;hp=df0a549ebdae74ef9d233243b869d424e6a33c73")
+sha512sums=('8bf0b0d193c9c010e0518ee2b2e5a830898af206510992483b427477ed178396cd210235e85fd7bd99a96fc6d5eedbeccbd48317a10f752b7336ada8b2bb826d'
+            '5d827b349b4456f8314776f1545396945c751b822a77604157b3fe436e5ff82bb313af3a215c99fd9d1f1f8ebb9f92033cc1a4968e35734619ad28b9bb3839a7'
+            '36da578519db4665f959a64813173ecbf3f999bc6b3acfb216e24d73a617ded22202e08915d2fa4c86b46c627127bc6e22e6dba07ce89588c0da7771c6f34a58'
+            '243d177b01174cdafd87ba2df0b7dd982fbaf5502a35a5ebd96ede6a606db79c2f331da336e009c37a72dd4bbab4624386caa8e32632a1ce8d36a549fbf48b82')
 
 prepare() {
-  setconf binutils-$pkgver/libiberty/configure ac_cpp "'\$CPP \$CPPFLAGS -O2'"
+  cd "binutils-$pkgver"
+  # Creds @Fedora
+  # Change the gold configuration script to only warn about
+  # unsupported targets.  This allows the binutils to be built with
+  # BPF support enabled.
+  patch -Np1 -i "${srcdir}"/gold-warn-unsupported.patch
+
+  # fix incorrect "undefined reference" errors
+  # https://sourceware.org/bugzilla/show_bug.cgi?id=28879
+  patch -Np1 -i "${srcdir}"/fix-incorrect-undefined-symbol.patch
+
+  # riscv64: PR28733, add missing extension info to 'unrecognized opcode' error
+  patch -Np1 -i "${srcdir}"/binutils-pr28733.patch
+
+  setconf libiberty/configure ac_cpp "'\$CPP \$CPPFLAGS -O2'"
 }
 
 build() {
@@ -56,4 +76,3 @@ package() {
 }
 
 # getver: gnu.org/software/binutils
-
