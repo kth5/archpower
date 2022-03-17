@@ -5,7 +5,7 @@ A repository for my Archlinux based PKGBUILDs for GNU/Linux on POWER8 or later p
 https://archlinuxpower.org
 
 # pacman repository
-https://archlinuxpower.org/base
+https://repo.archlinuxpower.org`
 
 # Docker images
 https://hub.docker.com/r/kth5/archpower
