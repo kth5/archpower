@@ -1,42 +1,79 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Alexaner Baldeck <alex.bldck@gmail.com>
 pkgname=yaboot
 pkgver=1.3.17
 pkgrel=1
-pkgdesc="A PowerPC bootloader for Open Firmware based machines"
+pkgdesc="A PowerPC bootloader"
 arch=(powerpc)
-url="http://yaboot.ozlabs.org/"
+url="http://yaboot.ozlabs.org"
 license=('GPL')
-depends=('powerpc-utils' 'hfsprogs')
-makedepends=('git')
-_commont='dc5421b84b9633b00e4d9ea53fc97e1cf36cf3a9'
-_e2fsprogs_ver=1.41.14
-source=("git://ozlabs.org/srv/projects/yaboot/yaboot.git#commit=dc5421b84b9633b00e4d9ea53fc97e1cf36cf3a9"
-	yaboot-modern.patch
-	http://ftp.be.debian.org/pub/linux/kernel/people/tytso/e2fsprogs/e2fsprogs-${_e2fsprogs_ver}.tar.gz)
-sha256sums=('SKIP'
-            '9b4add400d98835a0d872e5864f4fa18b46670de5e01c21fec1703f69b283067'
-            '3f8ac1fedd7c4bec480afcbe4acabdd4ac59ec0446a0fd50c8975cd0aad7b176')
-validpgpkeys=('4774128D015CF860AA791D625E442088ED632E87'  # Tony Breeds (Signing Key) <tony@bakeyournoodle.com>
-	      '3AB057B7E78D945C8C5591FBD36F769BC11804F0') # Theodore Ts'o <tytso@mit.edu>
+depends=('bash')
+_e2fsprogs_version="1.42.13"
+source=("http://ftp.osuosl.org/pub/clfs/conglomeration/yaboot/$pkgname-$pkgver.tar.gz"
+        "https://www.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v${_e2fsprogs_version}/e2fsprogs-${_e2fsprogs_version}.tar.gz"
+        e2fsprogs-1.42.13-sysmacros.h.patch
+        yaboot-1.3.17-nopiessp-gcc4.patch
+        yabootconfig-1.3.13.patch
+        yaboot-stubfuncs.patch
+        chrpfix.patch
+        new-ofpath
+        new-ofpath-devspec.patch)
+sha256sums=('2fb738d8fd48b94ab2534a4fdf63738ad02c1a30f4b2add91f837baff8fa2aa1'
+            'e59e1b9973339f48024afaf19ec47a37c84181173eeade4f318f62e61a326622'
+            '0651d0df445c98a6ab07366a61151871a44319ea41dad80b235892eac0e57688'
+            '0c00ec6c191723d2bd5621ee193ab4b0483cb3bb2443d7ac4b7f8ba859952917'
+            'ee662c068ba7800d1d0c85a927f3990658cc488ebd3672e40740b7473ba3bb20'
+            '0ea38eca5f0bd31fb9e62965227936b4aca2071ab20b3a7b64677b654e64ebbf'
+            '640bc4012dff8cfb53a13a345c3bfd919f70c653a1d1e82e0d7b7111342cb62a'
+            '7a20474bdb92f0f99b1142c45583883932807bcb3534cdc14c1238a438152dcc'
+            'd9d1dcaaa60ec7ab2fb436d0d2b33db8e4fbd4533594111b327a094bd6c62674')
 
 prepare() {
-	cd "${srcdir}/e2fsprogs-${_e2fsprogs_ver}"
-	CFLAGS="-Os -fno-stack-protector -no-pie -fgnu89-inline -fno-builtin-malloc -DNDEBUG" \
-	./configure --disable-testio-debug --disable-debugfs --disable-tls
-	make -C lib/et
-	make -C lib/ext2fs
-	cp lib/libcom_err.a lib/libext2fs.a ${srcdir}/${pkgname}/
+  pushd e2fsprogs-${_e2fsprogs_version}
+  patch -Np1 -i ${srcdir}/e2fsprogs-1.42.13-sysmacros.h.patch
+  popd  
 
-	cd "${srcdir}/${pkgname}"
-	patch -Np1 -i ${srcdir}/yaboot-modern.patch
+  pushd ${pkgname}-${pkgver}
+
+  patch -Np1 -i ${srcdir}/yaboot-1.3.17-nopiessp-gcc4.patch
+  patch -Np1 -i ${srcdir}/yabootconfig-1.3.13.patch
+  patch -Np1 -i ${srcdir}/yaboot-stubfuncs.patch
+  patch -Np1 -i ${srcdir}/chrpfix.patch
+
+
+  cp -v ${srcdir}/new-ofpath ybin/ofpath
+  patch -Np1 -i ${srcdir}/new-ofpath-devspec.patch
+
+  sed -i \
+    -e 's:-I/usr/include::' \
+    -e 's:-Werror:-Wno-error:g' \
+    Makefile
+
+  popd
 }
 
 build() {
-	cd "${srcdir}/${pkgname}"
-	make -j1
+  pushd e2fsprogs-${_e2fsprogs_version}
+  ./configure --enable-libblkid \
+              --enable-libuuid \
+              --disable-fsck \
+              --disable-quota
+  make DESTDIR=${srcdir}/e2fslibs V=1
+  make DESTDIR=${srcdir}/e2fslibs install-libs V=1
+  popd
+
+  pushd "$pkgname-$pkgver"
+  make ROOT=${pkgdir}/ PREFIX=/usr MANDIR=share/man \
+       CC="gcc -std=gnu90 -fcommon" \
+       LD="ld -L${srcdir}/e2fslibs/usr/lib"
+  popd
 }
 
 package() {
-	cd "${srcdir}/${pkgname}"
-	make ROOT="${pkgdir}" PREFIX="/usr" install
+  cd "$pkgname-$pkgver"
+  make ROOT=${pkgdir}/ PREFIX=/usr MANDIR=share/man \
+       CC="gcc -std=gnu90 -fcommon" \
+       LD="ld -L${srcdir}/e2fslibs/usr/lib" \
+       install
+
+  mv ${pkgdir}/usr/{s,}bin 
 }
