@@ -6,15 +6,17 @@
 
 pkgbase=java-openjdk
 pkgname=('jre-openjdk-headless' 'jre-openjdk' 'jdk-openjdk' 'openjdk-src')
-[ "${CARCH}" != 'powerpc' ] && pkgname+=('openjdk-doc')
-_majorver=16
+[ "${CARCH}" = 'x86_64' ] && pkgname+=('openjdk-doc')
+_majorver=17
 _minorver=0
-_securityver=2
-_updatever=7
+_securityver=3
+_updatever=3
+pkgver=${_majorver}.${_minorver}.${_securityver}.u${_updatever}
+#pkgver=${_majorver}.u${_updatever}
 pkgrel=1
 pkgver=${_majorver}.${_minorver}.${_securityver}.u${_updatever}
 _git_tag=jdk-${_majorver}.${_minorver}.${_securityver}+${_updatever}
-arch=(x86_64 powerpc64le powerpc)
+arch=(x86_64 powerpc64le powerpc riscv64)
 url='https://openjdk.java.net/'
 license=('custom')
 makedepends=('java-environment>=15' 'cpio' 'unzip' 'zip' 'libelf' 'libcups' 'libx11'
@@ -22,16 +24,16 @@ makedepends=('java-environment>=15' 'cpio' 'unzip' 'zip' 'libelf' 'libcups' 'lib
              'graphviz' 'freetype2' 'libjpeg-turbo' 'giflib' 'libpng' 'lcms2'
              'libnet' 'bash' 'harfbuzz' 'gcc-libs' 'glibc')
 makedepends_powerpc=('libffi')
-makedepends_powerpc64le=('pandoc')
 makedepends_x86_64=('pandoc')
+options=(!lto !distcc)
 source=(https://github.com/openjdk/jdk${_majorver}u/archive/${_git_tag}.tar.gz
         freedesktop-java.desktop
         freedesktop-jconsole.desktop
         freedesktop-jshell.desktop)
-sha256sums=('b4a0e71e41a11175e8a7c1dba86ed5b0aa878413158c8d48813db1b64ac9536c'
-            '11150daae08fff25309dcc060c07cd056181644d2b563c22668b98e306e8f2db'
-            'c0673d680cc728af88bec89275f0a8e2199d52e48b5c5b0aa2d921bedbc2e12f'
-            '0cdf3dc10a64c5e589e655276189422b60a6b3294539164a6f29123d6b2046c7')
+sha256sums=('f985bc954c50b9c09d1f8fab698b6591cc46ce3ef6a18570aa192567ff661ca0'
+            '85c4742764590783160af74587a47269e6797fbdf17ec485c7644bd239adf61d'
+            'abac1ab09a33a3654378bc69be5a7cf075263ab3ae9efec1eb25cf388e711bb7'
+            'e7cce0ecf868f656d8dc2eb25ab82ab665526a0a28aba20f02632dd29962dac3')
 
 _JVM=server
 case "${CARCH}" in
@@ -39,6 +41,7 @@ case "${CARCH}" in
   i686)   _JARCH='x86';;
   powerpc) _JARCH='ppc'; _DOC_ARCH='ppc'; _JVM=zero;;
   powerpc64le) _JARCH='ppc64le'; _DOC_ARCH='ppc';;
+  riscv64) _JARCH='riscv64'; _DOC_ARCH='riscv64'; _JVM=zero;;
 esac
 
 _jvmdir=/usr/lib/jvm/java-${_majorver}-openjdk
@@ -72,6 +75,14 @@ build() {
     _CXXFLAGS=${CXXFLAGS/-fno-plt/}
   fi
 
+  # TODO: Should be rechecked for the next releases
+  # compiling with -fexceptions leads to:
+  # /usr/bin/ld: /build/java-openjdk/src/jdk17u-jdk-17.0.3-2/build/linux-x86_64-server-release/hotspot/variant-server/libjvm/objs/zPhysicalMemory.o: in function `ZList<ZMemory>::~ZList()':
+  # /build/java-openjdk/src/jdk17u-jdk-17.0.3-2/src/hotspot/share/gc/z/zList.hpp:54: undefined reference to `ZListNode<ZMemory>::~ZListNode()'
+  # collect2: error: ld returned 1 exit status
+  _CFLAGS=${CFLAGS/-fexceptions/}
+  _CXXFLAGS=${CXXFLAGS/-fexceptions/}
+
   if check_buildoption ccache y; then
     export PATH=${PATH/\/usr\/lib\/ccache\/bin:/}
     export CCACHE_ENABLE="--enable-ccache"
@@ -83,6 +94,9 @@ build() {
       ;;
     powerpc)
       JVM_FEATURES="--with-jvm-variants=zero --with-boot-jdk-jvmargs=-XX:ThreadStackSize=2560"
+      ;;
+    riscv64)
+      JVM_FEATURES="--build=${CHOST} --with-jvm-variants=zero"
       ;;
     *)
       JVM_FEATURES=""
@@ -118,8 +132,8 @@ build() {
     #--disable-javac-server
 
   case "${CARCH}" in
-    powerpc) make images legacy-jre-image ;;
-    *) make images legacy-jre-image docs ;;
+    x86_64) make images legacy-jre-image docs ;;
+    *) make images legacy-jre-image ;;
   esac
 
   # https://bugs.openjdk.java.net/browse/JDK-8173610
