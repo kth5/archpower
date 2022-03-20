@@ -1,40 +1,28 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Frederik Schwan <freswa at archlinux dot org>
 # Maintainer: Guillaume ALAUX <guillaume@archlinux.org>
 # Contributor: Boyan Ding <stu_dby@126.com>
 
 pkgname=('jre8-openjdk-headless' 'jre8-openjdk' 'jdk8-openjdk' 'openjdk8-src' 'openjdk8-doc')
 pkgbase=java8-openjdk
-_java_ver=8
-_jdk_update=292
-_jdk_build=10
-pkgver=${_java_ver}.u${_jdk_update}
-_repo_ver=jdk${_java_ver}u${_jdk_update}-b${_jdk_build}
+
+_majorver=8
+_minorver=332
+_updatever=04
+pkgver=${_majorver}.${_minorver}.u${_updatever}
 pkgrel=1
+_git_tag=jdk${_majorver}u${_minorver}-b${_updatever}
 arch=(x86_64 powerpc64le powerpc)
 url='https://openjdk.java.net/'
 license=('custom')
-makedepends=('java-environment=8' 'ccache' 'cpio' 'unzip' 'zip'
-             'libxrender' 'libxtst' 'fontconfig' 'libcups' 'alsa-lib' 'libxt')
-makedepends_powerpc=('llvm')
-_url_src=https://hg.openjdk.java.net/jdk8u/jdk8u
-source=(jdk8u-${_repo_ver}.tar.gz::${_url_src}/archive/${_repo_ver}.tar.gz
-        corba-${_repo_ver}.tar.gz::${_url_src}/corba/archive/${_repo_ver}.tar.gz
-        hotspot-${_repo_ver}.tar.gz::${_url_src}/hotspot/archive/${_repo_ver}.tar.gz
-        jdk-${_repo_ver}.tar.gz::${_url_src}/jdk/archive/${_repo_ver}.tar.gz
-        jaxws-${_repo_ver}.tar.gz::${_url_src}/jaxws/archive/${_repo_ver}.tar.gz
-        jaxp-${_repo_ver}.tar.gz::${_url_src}/jaxp/archive/${_repo_ver}.tar.gz
-        langtools-${_repo_ver}.tar.gz::${_url_src}/langtools/archive/${_repo_ver}.tar.gz
-        nashorn-${_repo_ver}.tar.gz::${_url_src}/nashorn/archive/${_repo_ver}.tar.gz)
-
-sha256sums=('aba46c3c758b5fdedc812ce7d8ac46b45c3dfc2c51e41f9b23683d3ea4119d2b'
-            '55028874f71eda4bd170580885dd1bf707fd69c1e4a4af14175e6ac777ef5927'
-            '6a6be1e9d69d0bc8ca98b356e1150baae9e112241e3392c2adb6b30ec82864af'
-            '67f1c3a2c897c81bafb14327fcea249b9faac31a0b4d09321eae79847d4ea509'
-            '749073e9ba943a6fc87239d808463b05c804a5855fbc8c99fe9a090ae8cd07ef'
-            'ca954d02629c43a0b553df75c1c7fe9cea31c428d99a9718a3e6860d684fb8a1'
-            'e742f778cbdcb76b4dc593b9fed4bee26af91972096a265c1edb6d8e6ddf6fa3'
-            '1f335e8fb4ddff5786d1b65345daa4e525aa4ebcefe7e24bf5428b259e47c5d0')
+makedepends=('jdk8-openjdk' 'jre8-openjdk' 'ccache' 'cpio' 'unzip' 'zip' 'git' 'bash'
+             'libxrender' 'libxtst' 'fontconfig' 'libcups' 'alsa-lib')
+options=(!lto)
+source=(git+https://github.com/openjdk/jdk${_majorver}u.git#tag=${_git_tag}
+        gcc11.patch)
+sha256sums=('SKIP'
+            'e1e9452b2078c3e9b45aa73491f3f187e7a9abbc40b6a7fc9239d4e5e525569e')
 
 case "${CARCH}" in
   'x86_64') _JARCH=amd64 ; _DOC_ARCH=x86_64 ;;
@@ -43,42 +31,49 @@ case "${CARCH}" in
   'powerpc') _JARCH=ppc; _DOC_ARCH=ppc ;;
 esac
 
+case "${CARCH}" in
+  powerpc) JVM_TYPE=zero ;;
+  *) JVM_TYPE=server ;;
+esac
+
 _jdkname=openjdk8
 _jvmdir=/usr/lib/jvm/java-8-openjdk
-_prefix="jdk8u-${_repo_ver}/image"
-_imgdir="${_prefix}/jvm/openjdk-1.8.0_$(printf '%.2d' ${_jdk_update})"
+_prefix="jdk8u/image"
+_imgdir="${_prefix}/jvm/openjdk-1.8.0_$(printf '%.2d' ${_minorver})"
 _nonheadless=(bin/policytool
               lib/${_JARCH}/libjsound.so
               lib/${_JARCH}/libjsoundalsa.so
               lib/${_JARCH}/libsplashscreen.so)
 
 prepare() {
-  cd jdk8u-${_repo_ver}
-  for subrepo in corba hotspot jdk jaxws jaxp langtools nashorn; do
-    ln -s ../${subrepo}-${_repo_ver} ${subrepo}
-  done
+  cd jdk8u
+
+  # Fix build with C++17 (Fedora)
+  patch -Np1 -i "${srcdir}"/gcc11.patch
 }
 
 build() {
-  cd jdk8u-${_repo_ver}
+  cd jdk8u
 
   unset JAVA_HOME
   # http://icedtea.classpath.org/bugzilla/show_bug.cgi?id=1346
   export MAKEFLAGS=${MAKEFLAGS/-j*}
 
-  # Avoid optimization of HotSpot being lowered from O3 to O2
-  export CFLAGS="${CFLAGS//-O2/-O3} ${CPPFLAGS} -Wno-error=deprecated-declarations -Wno-error=stringop-overflow= -Wno-error=return-type -Wno-error=cpp -fno-lifetime-dse -fno-delete-null-pointer-checks -fcommon -Wno-error=format-overflow="
-  export CXXFLAGS="${CXXFLAGS} ${CPPFLAGS} -fcommon"
-
   case "${CARCH}" in
-    powerpc) EXTRA_CONFIGURE_FLAGS="--with-jvm-variants=zero"
+    powerpc) EXTRA_CONFIGURE_FLAGS="--with-jvm-variants=zero" ;;
   esac
 
+
+  # Avoid optimization of HotSpot being lowered from O3 to O2
+  # -fno-exceptions for FS#73134
+  export CFLAGS="${CFLAGS//-O2/-O3} -Wno-error=nonnull -Wno-error=deprecated-declarations -Wno-error=stringop-overflow= -Wno-error=return-type -Wno-error=cpp -fno-lifetime-dse -fno-delete-null-pointer-checks -fcommon -fno-exceptions -Wno-error=format-overflow="
+  export CXXFLAGS="${CXXFLAGS} -fcommon -fno-exceptions"
+
   install -d -m 755 "${srcdir}/${_prefix}/"
-  sh configure \
+  bash configure \
     --prefix="${srcdir}/${_prefix}" \
-    --with-update-version="${_jdk_update}" \
-    --with-build-number="b${_jdk_build}" \
+    --with-update-version="${_minorver}" \
+    --with-build-number="b${_updatever}" \
     --with-milestone="fcs" \
     --enable-unlimited-crypto \
     --with-zlib=system \
@@ -112,7 +107,7 @@ build() {
 }
 
 check() {
-  cd jdk8u-${_repo_ver}
+  cd jdk8u
   #make -k test
 }
 
@@ -146,6 +141,8 @@ package_jre8-openjdk-headless() {
 
   install -d -m 755 "${pkgdir}${_jvmdir}/jre/"
   cp -a bin lib "${pkgdir}${_jvmdir}/jre"
+
+  cp ../release "${pkgdir}${_jvmdir}" # FS#52692
 
   # Set config files
   mv "${pkgdir}${_jvmdir}"/jre/lib/management/jmxremote.password{.template,}
@@ -275,13 +272,8 @@ package_openjdk8-src() {
 package_openjdk8-doc() {
   pkgdesc='OpenJDK Java 8 documentation'
 
-  case "${CARCH}" in
-    powerpc) JVM_TYPE=zero ;;
-    *) JVM_TYPE=server ;;
-  esac
-
   install -d -m 755 "${pkgdir}/usr/share/doc/${pkgbase}/"
-  cp -r "${srcdir}"/jdk8u-${_repo_ver}/build/linux-${_DOC_ARCH}-normal-${JVM_TYPE}-release/docs/* \
+  cp -r "${srcdir}"/jdk8u/build/linux-${_DOC_ARCH}-normal-${JVM_TYPE}-release/docs/* \
     "${pkgdir}/usr/share/doc/${pkgbase}/"
 }
 
