@@ -3,26 +3,26 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=qt5-webengine
-_qtver=5.15.8
-pkgver=${_qtver/-/}
-pkgrel=8
-arch=(x86_64 powerpc64le powerpc riscv64)
+_basever=5.15.3
+pkgver=5.15.8
+pkgrel=10
+arch=(x86_64 powerpc64le)
 url='https://www.qt.io'
 license=('LGPL3' 'LGPL2.1' 'BSD')
 pkgdesc='Provides support for web applications using the Chromium browser project'
 depends=('qt5-webchannel' 'qt5-location' 'libxcomposite' 'libxrandr' 'pciutils' 'libxss' 'libxkbfile' 
          'libevent' 'snappy' 'nss' 'libxslt' 'minizip' 'ffmpeg' 're2' 'libvpx' 'libxtst' 'ttf-font')
-makedepends=('git' 'python' 'gperf' 'jsoncpp' 'ninja' 'qt5-tools' 'poppler' 'libpipewire02' 'nodejs'
-             'clang' 'gn')
-optdepends=('libpipewire02: WebRTC desktop sharing under Wayland')
+makedepends=('git' 'python' 'gperf' 'jsoncpp' 'ninja' 'qt5-tools' 'poppler' 'pipewire' 'nodejs' 'clang' 'gn')
+optdepends=('pipewire: WebRTC desktop sharing under Wayland')
 groups=('qt' 'qt5')
-_pkgfqn=qtwebengine
+_pkgfqn=${pkgname/5-/}
 source=(git+https://code.qt.io/qt/qtwebengine.git#tag=v${pkgver}-lts
         git+https://code.qt.io/qt/qtwebengine-chromium.git
         git+https://chromium.googlesource.com/catapult#commit=5eedfe23148a234211ba477f76fc2ea2e8529189
         qt5-webengine-python3.patch
         qt5-webengine-chromium-python3.patch
-	qt5-webengine-ffmpeg5.patch
+        qt5-webengine-ffmpeg5.patch
+        qt5-webengine-pipewire-0.3.patch
         0001-include-sys-reg.h-to-get-__WORDSIZE-on-musl-libc.patch
         0002-sandbox-membarrier.patch
         0003-msgvec-push_back.patch
@@ -37,6 +37,7 @@ sha256sums=('SKIP'
             '398c996cb5b606695ac93645143df39e23fa67e768b09e0da6dbd37342a43f32'
             'fda4ff16790799fb285847918a677f4f3f7c0f513d4751f846ffc5aa5d873932'
             'c50d3019626183e753c53a997dc8a55938847543aa3178d4c51f377be741c693'
+            '5e3a3c4711d964d5152a04059a2b5c1d14bb13dd29bce370120f60e85b476b6f'
             'c218876cf5f257effdb6cd8a937b88ddd461656a228069f96708b45f3cd741d8'
             'da58d2214d1c50a7b784e18a97473c9086657d5f43e8640675e98451859307d1'
             'd13e6ad37d36834867d57e23c339b73053983dafa76c7377999ff2a5b17332c3'
@@ -45,6 +46,7 @@ sha256sums=('SKIP'
             '6f6a39bcf7c4739341d4b9910553b72d5afef07abb99473859141d312f239bb2'
             '3095e912dda73d3126aa94e1618c9e2ca40035c0d488035df1cebe9c7a526a27'
             '19dac26d6753f4cbe1fe2bcb911d8124ea082f55ff86b45cdcba294d3c199249')
+options=(debug)
 
 prepare() {
   mkdir -p build
@@ -59,6 +61,7 @@ prepare() {
   patch -p1 -d src/3rdparty -i "$srcdir"/qt5-webengine-chromium-python3.patch
 
   patch -p1 -d src/3rdparty -i "$srcdir"/qt5-webengine-ffmpeg5.patch # Fix build with ffmpeg 5
+  patch -p1 -d src/3rdparty -i "$srcdir"/qt5-webengine-pipewire-0.3.patch # Port to pipewire 0.3
 
   patch -Np1 -i ${srcdir}/0001-include-sys-reg.h-to-get-__WORDSIZE-on-musl-libc.patch
   patch -Np1 -i ${srcdir}/0002-sandbox-membarrier.patch
@@ -75,6 +78,8 @@ prepare() {
 }
 
 build() {
+  cd build
+
   pushd ${srcdir}/qtwebengine/src/3rdparty/chromium/third_party/libvpx
   mkdir -p source/config/linux/ppc64
   mkdir -p source/libvpx/test
@@ -82,8 +87,7 @@ build() {
   ./generate_gni.sh
   popd
 
-  cd build
-  qmake ../${_pkgfqn} -- \
+  qmake ../${_pkgfqn} CONFIG+=force_debug_info -- \
     -proprietary-codecs \
     -system-ffmpeg \
     -webp \
@@ -105,5 +109,5 @@ package() {
   install -Dm644 "$srcdir"/${_pkgfqn}/src/3rdparty/chromium/LICENSE "$pkgdir"/usr/share/licenses/${pkgname}/LICENSE.chromium
 
   # Fix cmake dependency versions
-  sed -e "s|$pkgver\ |5.15.2 |" -i "$pkgdir"/usr/lib/cmake/*/*Config.cmake
+  sed -e "s|$pkgver\ |$_basever |" -i "$pkgdir"/usr/lib/cmake/*/*Config.cmake
 }
