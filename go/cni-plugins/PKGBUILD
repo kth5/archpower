@@ -1,0 +1,42 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Morten Linderud <foxboron@archlinux.org>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+
+pkgname=cni-plugins
+pkgver=1.1.1
+pkgrel=1
+pkgdesc='Some standard networking plugins, maintained by the CNI team'
+arch=(x86_64 powerpc64le riscv64)
+url="https://github.com/containernetworking/plugins"
+license=(Apache)
+depends=(glibc)
+makedepends=(go)
+provides=(container-network-stack)
+# unable to build with LTO: https://github.com/containernetworking/plugins/issues/706
+options=(!lto)
+source=($pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz)
+sha512sums=('03da31caee5f9595abf65d4a551984b995bc18c5e97409549f08997c5a6a2b41a8950144f8a5b4f810cb401ddbe312232d2be76ec977acf8108eb490786b1817')
+b2sums=('2fd70260995e423d2b4ac3a8d2135074baffe5d36177d5e1e5a9ce146f6d2ecfeb3b843de62e43f863085ff965be4160cf5f4cae892d3c59070ef390409ef3c9')
+
+build() {
+  cd plugins-$pkgver
+  export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
+  export CGO_LDFLAGS="${LDFLAGS}"
+  export CGO_CFLAGS="${CFLAGS}"
+  export CGO_CPPFLAGS="${CPPFLAGS}"
+  export CGO_CXXFLAGS="${CXXFLAGS}"
+  ./build_linux.sh
+}
+
+package() {
+  cd plugins-$pkgver
+  install -vDm755 bin/* -t "$pkgdir/usr/lib/cni/"
+  # some applications would build their own versions of CNI plugins in
+  # /opt/cni/bin if they are not found (as non-symlink files), so we have to
+  # install them twice... ;_;
+  install -vDm755 bin/* -t "$pkgdir/opt/cni/bin/"
+  install -vdm755 "$pkgdir/etc/cni/net.d/"
+  install -vDm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -vDm644 plugins/ipam/dhcp/systemd/* -t "$pkgdir/usr/lib/systemd/system/"
+}
