@@ -1,4 +1,3 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Maxime Gauduin <alucryd@archlinux.org>
 # Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 # Contributor: Ionut Biru <ibiru@archlinux.org>
@@ -7,7 +6,7 @@
 
 pkgname=ffmpeg
 pkgver=5.0
-pkgrel=3
+pkgrel=5
 epoch=2
 pkgdesc='Complete solution to record, convert and stream audio and video'
 arch=(x86_64 powerpc64le powerpc riscv64)
@@ -63,25 +62,35 @@ depends=(
   sdl2
   speex
   srt
+  svt-av1
   v4l-utils
+  vmaf
   xz
   zlib
 )
+depends_x86_64=(
+  libmfx
+)
 makedepends=(
+  amf-headers
+  avisynthplus
   clang
   git
   ladspa
 )
+makedepends_x86_64=(
+  ffnvcodec-headers
+  nasm
+)
 
 optdepends=(
+  'avisynthplus: AviSynthPlus support'
   'ladspa: LADSPA filters'
 )
-depends_powerpc=(libatomic_ops)
-depends_x86_64+=(libmfx vmaf)
-makedepends_x86_64=(nasm avisynthplus amf-headers ffnvcodec-headers)
-optdepends_x86_64=('avisynthplus: AviSynthPlus support'
-                   'intel-media-sdk: Intel QuickSync support'
-                   'nvidia-utils: Nvidia NVDEC/NVENC support')
+optdepends_x86_64=(
+  'intel-media-sdk: Intel QuickSync support'
+  'nvidia-utils: Nvidia NVDEC/NVENC support'
+)
 provides=(
   libavcodec.so
   libavdevice.so
@@ -95,60 +104,50 @@ provides=(
 _tag=390d6853d0ef408007feb39c0040682c81c02751
 source=(
   git+https://git.ffmpeg.org/ffmpeg.git#tag=${_tag}
-  vmaf-model-path.patch
-  powerpc-altivec.patch
+  ffmpeg-vmaf2.x.patch
   add-av_stream_get_first_dts-for-chromium.patch
+  powerpc-altivec.patch
 )
-sha256sums=(
-  SKIP
-  8dff51f84a5f7460f8893f0514812f5d2bd668c3276ef7ab7713c99b71d7bd8d
-  116119f9a9f3207c20b848f7fcfad0f8c01961dc5a2a7b4e82909c9371c0470d
-  91973c465f01446a999f278f0c2a3763304994dba1ac35de0e4c72f12f39409e
-)
+b2sums=('SKIP'
+        '65039aac811bfd143359e32720cd6ca64124f1789c1b624bd28a5bd75b37362b2a3b6b402203c4e9d137fb1d00895114f3789df40f8381091d38c98e7876cc8a'
+        '3f2ee7606500fa9444380d138959cd2bccfbba7d34629a17f4f6288c6bde29e931bbe922a7c25d861f057ddd4ba0b095bbd675c1930754746d5dd476b3ccbc13'
+        'd7a5d2180e523d8c593686d9f3effa73c3d5a8d450a8ec0b64018a3f9f944fe77bb1690ad9a33625704c0eda3d9bccf5e7aa95b3db12552bfbeb7f22a748fdf0')
 
-pkgver() {
-  cd ffmpeg
-
-  git describe --tags | sed 's/^n//'
-}
+options=(!distcc)
 
 prepare() {
   cd ffmpeg
   git cherry-pick -n 988f2e9eb063db7c1a678729f58aab6eba59a55b # fix nvenc on older gpus
-  patch -Np1 -i "${srcdir}"/vmaf-model-path.patch
+  patch -Np1 -i ../ffmpeg-vmaf2.x.patch # vmaf 2.x support
+  patch -Np1 -i ../add-av_stream_get_first_dts-for-chromium.patch # https://crbug.com/1251779
+  patch -Np1 -i ../powerpc-altivec.patch
+}
 
-  # https://crbug.com/1251779
-  patch -Np1 -i "${srcdir}"/add-av_stream_get_first_dts-for-chromium.patch
+pkgver() {
+  cd ffmpeg
+  git describe --tags | sed 's/^n//'
 }
 
 build() {
   cd ffmpeg
 
   case "${CARCH}" in
-    powerpc64le)
-      EXTRA_CONFIGURE_FLAGS=(
-        --enable-vsx
-        --enable-altivec
-        --enable-power8
-      )
-      ;;
-    powerpc)
-      EXTRA_CONFIGURE_FLAGS=(
-        --disable-altivec
-        --extra-libs="-latomic"
-      )
-      patch -Np1 -i ${srcdir}/powerpc-altivec.patch
-      ;;
-    x86_64)
-      EXTRA_CONFIGURE_FLAGS='--enable-amf --enable-avisynth --enable-libmfx --enable-cuda-llvm --enable-libvmaf --enable-nvdec --enable-nvenc'
-      ;;
+    x86_64) _configure_flags=(
+               --enable-cuda-llvm
+               --enable-libmfx
+               --enable-nvdec
+               --enable-nvenc
+            )
+    ;;
   esac
-  
+
   ./configure \
     --prefix=/usr \
     --disable-debug \
     --disable-static \
     --disable-stripping \
+    --enable-amf \
+    --enable-avisynth \
     --enable-lto \
     --enable-fontconfig \
     --enable-gmp \
@@ -178,9 +177,11 @@ build() {
     --enable-libspeex \
     --enable-libsrt \
     --enable-libssh \
+    --enable-libsvtav1 \
     --enable-libtheora \
     --enable-libv4l2 \
     --enable-libvidstab \
+    --enable-libvmaf \
     --enable-libvorbis \
     --enable-libvpx \
     --enable-libwebp \
@@ -191,7 +192,7 @@ build() {
     --enable-libxvid \
     --enable-libzimg \
     --enable-shared \
-    --enable-version3 ${EXTRA_CONFIGURE_FLAGS[@]}
+    --enable-version3 ${_configure_flags[@]}
 
   make
   make tools/qt-faststart
