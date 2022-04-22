@@ -1,11 +1,10 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# POWER Contributor: Sadoon AlBader <sadoon@soulserv.xyz>
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Contributor: Eric Bélanger <eric@archlinux.org>
 
 pkgname=webkit2gtk
-pkgver=2.34.6
-pkgrel=1
+pkgver=2.36.0
+pkgrel=3
 pkgdesc="Web content engine for GTK"
 url="https://webkitgtk.org"
 arch=(x86_64 powerpc64le powerpc riscv64)
@@ -22,28 +21,22 @@ optdepends=('geoclue: Geolocation support'
             'gst-plugins-good: media decoding'
             'gst-plugins-bad: media decoding'
             'gst-libav: nonfree media decoding')
+options=(debug)
 source=($url/releases/webkitgtk-$pkgver.tar.xz{,.asc})
-options=(!lto)
-sha256sums=('6bc8fd034aad0432a2459ce4fc7ee25ad65a4924c618bf8d93b52b0c1a84c1f6'
+sha256sums=('b877cca1f105235f5dd57c7ac2b2c2be3c6b691ff444f93925c7254cf156c64d'
             'SKIP')
 validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
               '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B') # Adrián Pérez de Castro <aperez@igalia.com>
 
 prepare() {
   cd webkitgtk-$pkgver
-
-  sed -i -e '/foreach my.*(keys/s/(keys/(sort keys/' \
-            Source/WebCore/bindings/scripts/CodeGenerator.pm \
-            Source/WebCore/bindings/scripts/CodeGeneratorJS.pm \
-            Source/WebCore/css/makeprop.pl \
-            Source/cmake/tools/scripts/version-stamp.pl
 }
 
 build() {
-  # WebKitCCache.cmake set this variable
-  # include_file_mtime was not enabled to avoid a race,
-  # but this is run under our control
-  export CCACHE_SLOPPINESS=time_macros,include_file_mtime
+  # Produce minimal debug info: 4.3 GB of debug data makes the
+  # build too slow and is too much to package for debuginfod
+  CFLAGS+=' -g1'
+  CXXFLAGS+=' -g1'
 
   case "${CARCH}" in
     powerpc)
@@ -71,11 +64,10 @@ build() {
     -DCMAKE_INSTALL_LIBDIR=lib \
     -DCMAKE_INSTALL_LIBEXECDIR=lib \
     -DCMAKE_SKIP_RPATH=ON \
+    -DUSE_SOUP2=ON \
     -DENABLE_GTKDOC=OFF \
-    -DENABLE_MINIBROWSER=ON \
-    -DENABLE_BUBBLEWRAP_SANDBOX=ON \
-    -DUSE_SOUP2=ON ${EXTRA_CMAKE_FLAGS}
-  cmake --build build ${MAKEFLAGS}
+    -DENABLE_MINIBROWSER=ON ${EXTRA_CMAKE_FLAGS}
+  cmake --build build
 }
 
 package() {
@@ -83,6 +75,8 @@ package() {
   provides+=(libjavascriptcoregtk-4.0.so libwebkit2gtk-4.0.so)
 
   DESTDIR="$pkgdir" cmake --install build
+
+  rm -r "$pkgdir/usr/bin"
 
   cd webkitgtk-$pkgver
   find Source -name 'COPYING*' -or -name 'LICENSE*' -print0 | sort -z |
