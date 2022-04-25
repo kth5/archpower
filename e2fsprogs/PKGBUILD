@@ -5,9 +5,10 @@
 pkgbase=e2fsprogs
 pkgname=('e2fsprogs' 'fuse2fs')
 pkgver=1.46.5
-pkgrel=3
+pkgrel=3.1
 pkgdesc='Ext2/3/4 filesystem utilities'
 arch=(x86_64 powerpc64le powerpc riscv64)
+arch=(powerpc)
 license=('GPL' 'LGPL' 'MIT')
 url='http://e2fsprogs.sourceforge.net'
 options=('debug')
@@ -30,6 +31,8 @@ prepare() {
 build() {
   cd "${srcdir}/${pkgbase}-${pkgver}"
 
+  [ "${CARCH}" = 'powerpc' ] && PLATFORM_FLAGS="--enable-static"
+
   ./configure \
       --prefix=/usr \
       --with-root-prefix='' \
@@ -39,7 +42,7 @@ build() {
       --disable-fsck \
       --disable-uuidd \
       --disable-libuuid \
-      --disable-libblkid
+      --disable-libblkid ${PLATFORM_FLAGS}
   make
 
   # regenerate locale files
@@ -69,7 +72,10 @@ package_e2fsprogs() {
   sed -i -e 's#^ET_DIR=.*#ET_DIR="/usr/share/et"#' "${pkgdir}/usr/bin/compile_et"
 
   # remove static libraries with a shared counterpart
-  rm "${pkgdir}"/usr/lib/lib{com_err,e2p,ext2fs,ss}.a
+  rm -v "${pkgdir}"/usr/lib/lib{com_err,e2p,ss}.a
+
+  # yaboot needs this
+  [ "${CARCH}" != 'powerpc' ] && rm "${pkgdir}"/usr/lib/libext2fs.a
 
   # remove fuse2fs which will be packaged separately
   rm "${pkgdir}"/usr/{bin/fuse2fs,share/man/man1/fuse2fs.1}
