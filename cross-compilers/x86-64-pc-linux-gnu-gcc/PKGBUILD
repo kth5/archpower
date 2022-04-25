@@ -6,31 +6,31 @@
 # Contributor: Tavian Barnes <tavianator@tavianator.com>
 # Maintainer: Stefan Schmidt <thrimbor.github@gmail.com>
 
-_target="x86_64-linux-gnu"
-pkgname=${_target}-gcc
-pkgver=8.3.0
+_target=x86_64-pc-linux-gnu
+pkgname="${_target}-gcc"
+pkgver=11.2.0
 _majorver=${pkgver:0:1}
-_islver=0.20
-pkgrel=1
-pkgdesc="The GNU Compiler Collection. Stage 1 for toolchain building (${_target})"
-arch=(x86_64 powerpc64le)
+_islver=0.24
+pkgrel=3
+pkgdesc="The GNU Compiler Collection (${_target})"
+arch=(x86_64 powerpc64le powerpc riscv64)
 license=(GPL LGPL FDL custom)
 url='http://gcc.gnu.org'
-depends=("${_target}-binutils>=2.32-1" libmpc zlib)
+depends=("${_target}-binutils>=2.38-1" "${_target}-glibc>=2.35-1" libmpc elfutils zlib)
+checkdepends=(dejagnu inetutils)
 options=(!emptydirs !distcc !strip)
-source=(https://sources.archlinux.org/other/gcc/gcc-${pkgver}.tar.xz{,.sig}
+conflicts=("${_target}-gcc-stage1" "${_target}-gcc-stage2")
+replaces=("${_target}-gcc-stage1" "${_target}-gcc-stage2")
+provides=("${_target}-gcc-stage1=${pkgver}" "${_target}-gcc-stage2=${pkgver}")
+source=(https://ftp.gnu.org/gnu/gcc/gcc-${pkgver}/gcc-${pkgver}.tar.xz{,.sig}
         http://isl.gforge.inria.fr/isl-${_islver}.tar.bz2)
 validpgpkeys=(F3691687D867B81B51CE07D9BBE43771487328A9  # bpiotrowski@archlinux.org
               86CFFCA918CF3AF47147588051E8B148A9999C34  # evangelos@foutrelis.com
               13975A70E63C361C73AE69EF6EEB81F8981C74C7  # richard.guenther@gmail.com
-              33C235A34C46AA3FFB293709A328C3A2C3C45C06) # Jakub Jelinek <jakub@redhat.com>
-sha256sums=('64baadfe6cc0f4947a84cb12d7f0dfaf45bb58b7e92461639596c21e02d97d2c'
+              D3A93CAD751C2AF4F8C7AD516C35B99309B5FA62) # Jakub Jelinek <jakub@redhat.com>
+sha256sums=('d08edc536b54c372a1010ff6619dd274c0f1603aa49212ba20f7aa2cda36fa8b'
             'SKIP'
-            'b587e083eb65a8b394e833dea1744f21af3f0e413a448c17536b5549ae42a4c2')
-
-_svnrev=259195
-_svnurl=svn://gcc.gnu.org/svn/gcc/branches/gcc-${_majorver}-branch
-_libdir=usr/lib/gcc/$CHOST/${pkgver%%+*}
+            'fcf78dd9656c10eb8cf9fbd5f59a0b6b01386205fe1934b3b287a0a1898145c0')
 
 prepare() {
   [[ ! -d gcc ]] && ln -s gcc-${pkgver/+/-} gcc
@@ -53,8 +53,10 @@ build() {
 
   # using -pipe causes spurious test-suite failures
   # http://gcc.gnu.org/bugzilla/show_bug.cgi?id=48565
-  CFLAGS=${CFLAGS/-pipe/}
+  CFLAGS=${CFLAGS/-pipe}
+  CFLAGS=${CFLAGS/-Wformat -Werror=format-security/}
   CXXFLAGS=${CXXFLAGS/-pipe/}
+  CXXFLAGS=${CXXFLAGS/ -Wformat -Werror=format-security/}
 
   "$srcdir/gcc/configure" --prefix=/usr \
       --program-prefix=${_target}- \
@@ -63,13 +65,11 @@ build() {
       --with-build-sysroot=/usr/${_target} \
       --with-as=/usr/bin/${_target}-as \
       --with-ld=/usr/bin/${_target}-ld \
-      --libdir=/usr/lib \
-      --libexecdir=/usr/lib \
+      --libdir=/usr/lib --libexecdir=/usr/lib \
       --disable-nls \
-      --with-newlib \
       --enable-languages=c,c++ \
-      --disable-shared \
-      --disable-threads \
+      --enable-shared \
+      --enable-threads=posix \
       --with-system-zlib \
       --with-isl \
       --enable-__cxa_atexit \
@@ -79,8 +79,8 @@ build() {
       --disable-libssp \
       --enable-gnu-unique-object \
       --enable-linker-build-id \
-      --disable-lto \
-      --disable-plugin \
+      --enable-lto \
+      --enable-plugin \
       --enable-install-libiberty \
       --with-linker-hash-style=gnu \
       --enable-gnu-indirect-function \
@@ -93,13 +93,14 @@ build() {
       --host=${CHOST} \
       --build=${CHOST}
 
-  make all-gcc all-target-libgcc
+  make STAGE1_CFLAGS="-O2 -mcpu=power8" STAGE2_CFLAGS="-O2 -mcpu=power8"
 }
 
 package() {
   cd gcc-build
 
-  make DESTDIR="$pkgdir" install-gcc install-target-libgcc
+  make DESTDIR="$pkgdir" install-gcc install-target-libgcc \
+    install-target-libstdc++-v3
 
   rm -rf "$pkgdir/usr/share"
 
