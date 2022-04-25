@@ -3,7 +3,7 @@
 # Contributor: francois <francois.archlinux.org>
 
 pkgname=('texlive-bin' 'libsynctex')
-pkgver=2021.59745
+pkgver=2022.62885
 pkgrel=1
 license=('GPL')
 arch=(x86_64 powerpc64le powerpc riscv64)
@@ -12,13 +12,16 @@ makedepends=('git' 'cairo' 'pixman' 'graphite' 't1lib' 'gd'
          'icu' 'harfbuzz' 'harfbuzz-icu' 'gmp' 'mpfr' 'potrace' 'libpaper'
          'perl' 'clisp' 'ffcall' 'libxcrypt')
 url='https://tug.org/texlive/'
-_commit=7eaec95e244515fe11445111c0aaa1349de6790d # svn://tug.org/texlive/tags/texlive-2021.3/Build/source@59745
+_commit=f398692b64d6462c35939ec9489694d0828edee5 # svn://tug.org/texlive/tags/texlive-2022.0/Build/source@62885
 source=("git+https://github.com/Tex-Live/texlive-source.git#commit=${_commit}")
 sha256sums=('SKIP')
 
 prepare() {
     cd "$srcdir/texlive-source"
 
+    # bibtex-x needs kpathsea flags
+    sed -i '/AC_SEARCH_LIBS/a KPSE_KPATHSEA_FLAGS' texk/bibtex-x/configure.ac
+    (cd texk/bibtex-x && autoreconf)
     # t4ht expects to be un /usr/share/texmf/bin/t4ht (FS#27251)
     sed -i s/SELFAUTOPARENT/TEXMFROOT/ texk/tex4htk/t4ht.c
 }
@@ -43,13 +46,13 @@ build() {
    # Preset float endianness to avoid a crash in cairo configure
    # with recent toolchains. We are not building cairo anyway.
    ax_cv_c_float_words_bigendian=${BIGENDIAN} \
-   ../configure --prefix=/usr -C \
+     ../configure --prefix=/usr -C \
      --sysconfdir=/etc \
      --datarootdir=/usr/share \
      --datadir=/usr/share \
      --mandir=/usr/share/man \
      --disable-native-texlive-build \
-     --with-banner-add="/Arch POWER" \
+     --with-banner-add="/Arch Linux" \
      --disable-multiplatform \
      --disable-dialog \
      --disable-psutils \
@@ -97,6 +100,8 @@ package_libsynctex() {
     cd "${srcdir}/texlive-source/Work"
     make -C texk/web2c DESTDIR="${pkgdir}" \
         install-data-am install-libLTLIBRARIES
+
+    rm -f "$pkgdir"/usr/share/man/man1/hi*.*
 }
 
 package_texlive-bin() {
@@ -164,6 +169,7 @@ bibexport
 bibmradd
 biburl2doi
 bibzbladd
+citeproc
 convertgls2bib
 listbib
 ltx2crossrefxml
@@ -246,6 +252,7 @@ listings-ext.sh
 llmk
 ltxfileinfo
 ltximg
+luafindfont
 luaotfload-tool
 luatools
 lwarpmk
@@ -263,6 +270,7 @@ mktextfm
 mptopdf
 mtxrun
 mtxrunjit
+optexcount
 ot2kpx
 pamphletangler
 pdfatfi
@@ -304,6 +312,8 @@ texindy
 texlinks
 texliveonfly
 texloganalyser
+texlogfilter
+texlogsieve
 texmfstart
 texosquery
 texosquery-jre5
@@ -318,6 +328,8 @@ updmap-sys
 updmap-user
 vpl2ovp
 vpl2vpl
+xelatex-unsafe
+xetex-unsafe
 xhlatex
 xindex
 xindy
@@ -386,6 +398,9 @@ tikztosvg"
         ${_science_scripts}    \
         tlmgr; do
        ! readlink -e "$pkgdir"/usr/bin/$s && rm "$pkgdir"/usr/bin/$s
+       if [[ -f "$pkgdir/usr/share/man/man1/${s%.*}.1" ]]; then
+           rm -vf "$pkgdir/usr/share/man/man1/${s%.*}.1"
+       fi
    done
    ###################################################################
 
