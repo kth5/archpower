@@ -4,50 +4,79 @@
 # Contributor: William Rea <sillywilly@gmail.com>
 
 pkgname=maven
-pkgver=3.8.1
+pkgver=3.8.5
 pkgrel=1
 pkgdesc='Java project management and project comprehension tool'
 url='https://maven.apache.org'
-arch=('any')
+arch=(any)
 license=('APACHE')
 depends=('java-environment>=7' 'bash' 'procps-ng')
 makedepends=('maven' 'java-environment=8')
 backup=('opt/maven/conf/settings.xml')
-source=(https://www-eu.apache.org/dist/maven/maven-3/${pkgver}/source/apache-maven-${pkgver}-src.tar.gz{,.asc}
+source=(https://downloads.apache.org/maven/maven-3/${pkgver}/source/apache-maven-${pkgver}-src.tar.gz{,.asc}
+        # both bin artifacts are only used for reproducible builds from source
+        https://downloads.apache.org/maven/maven-3/${pkgver}/binaries/apache-maven-${pkgver}-bin.tar.gz{,.asc,.sha512}
         maven.sh)
-# https://www.apache.org/dist/maven/KEYS
+noextract=(apache-maven-${pkgver}-bin.tar.gz)
+# https://www.apachenn.org/dist/maven/KEYS
 validpgpkeys=(
   '042B29E928995B9DB963C636C7CA19B7B620D787' # StephenConnolly<stephenc@apache.org>
   'AE9E53FC28FF2AB1012273D0BF1518E0160788A2' # Karl Heinz Marbaise (ASF Key) <khmarbaise@apache.org>
   'BBE7232D7991050B54C8EA0ADC08637CA615D22C' # Enrico Olivelli <eolivelli@apache.org>
   'B02137D875D833D9B23392ECAE5A7FB608A0221C' # Robert Scholte <rfscholte@apache.org>
+  '6A814B1F869C2BBEAB7CB7271A2A1C94BDE89688' # Michael Osipov (Java developer) <1983-01-06@gmx.net>
 )
-sha256sums=('86dc0df5950bb22dedcab326499531ee9c155016c9a7a3d3f33315becb0c71b1'
+sha256sums=('a60ddbb333f3addb93e063613a9589f47ed805a572c156075dc1bf4db774c007'
             'SKIP'
+            '88e30700f32a3f60e0d28d0f12a3525d29b7c20c72d130153df5b5d6d890c673'
+            'SKIP'
+            'f5a278e87f67d8025f9fc7d3f137dafde97b5f75b468e2d98c16cca438b344ec'
             '17d9b8efa6a922907110026273443bcc8d83e061e14ac82cb5052b483acc9b76')
+
+_buildnumber() {
+  # use same build number as the binary dist but prove that our source build is
+  # identical and therefor canonical in the build() step
+  bsdtar xOf <(bsdtar xOf "${srcdir}/apache-maven-${pkgver}-bin.tar.gz" apache-maven-${pkgver}/lib/maven-core-${pkgver}.jar) \
+    org/apache/maven/messages/build.properties | grep buildNumber | cut -d= -f2 | tr -cd '[:print:]'
+}
 
 build() {
   cd apache-maven-${pkgver}
 
   export PATH="/usr/lib/jvm/java-8-openjdk/bin:${PATH}"
   mvn package \
+    -DbuildNumber="$(_buildnumber)" \
+    -Dline.separator=$'\r\n' \
+    -Dproject.build.sourceEncoding=UTF-8 -e \
     -Dmaven.repo.local="${srcdir}/repo" \
-    -Dproject.build.sourceEncoding=UTF-8 -e
+    -DskipTests
+
+  # check reproducible builds result against upstream hashes. This way we can
+  # prove that our source build is identical and therefor canonical so we are
+  # technically free to use the static build number in our build env. On top we
+  # ensure bit by bit identical upstream signed binary dist against our variant
+  # via diff exiting non-successful on mismatch.
+  #sha512sum -c <(printf "$(cat ${srcdir}/apache-maven-${pkgver}-bin.tar.gz.sha512) apache-maven/target/apache-maven-${pkgver}-bin.tar.gz")
+  #diff "${srcdir}/apache-maven-${pkgver}-bin.tar.gz" apache-maven/target/apache-maven-${pkgver}-bin.tar.gz
+}
+
+check() {
+  cd apache-maven-${pkgver}
+
+  export PATH="/usr/lib/jvm/java-8-openjdk/bin:${PATH}"
+  mvn test \
+    -Dmaven.repo.local="${srcdir}/repo"
 }
 
 package() {
   cd apache-maven-${pkgver}
 
   install -Dm 755 ../maven.sh -t "${pkgdir}/etc/profile.d"
-  install -d "${pkgdir}/opt/maven"
 
-  # skip tests as they were already executed
-  export PATH="/usr/lib/jvm/java-8-openjdk/bin:${PATH}"
-  mvn install \
-    -Dmaven.repo.local="${srcdir}/repo" \
-    -Dproject.build.sourceEncoding=UTF-8 -e \
-    -DdistributionTargetDir="${pkgdir}/opt/maven" \
-    -DskipTests -Dmaven.test.skip=true
+  install -d "${pkgdir}/opt/maven"
+  bsdtar xf apache-maven/target/apache-maven-${pkgver}-bin.tar.gz \
+    --strip-components=1 \
+    -C "${pkgdir}/opt/maven"
 
   install -d "${pkgdir}/usr/bin"
   ln -s /opt/maven/bin/mvn "${pkgdir}/usr/bin/mvn"
