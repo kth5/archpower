@@ -4,37 +4,40 @@
 
 pkgname=xplc
 pkgver=0.3.13
-pkgrel=9
+pkgrel=10
 pkgdesc="Cross-Platform Lightweight Components"
-arch=( x86_64 powerpc64le powerpc )
+arch=(x86_64 powerpc64le powerpc riscv64)
 url="http://xplc.sourceforge.net"
 license=('LGPL')
 depends=('gcc-libs')
 source=("https://downloads.sourceforge.net/${pkgname}/$pkgname-$pkgver.tar.gz"
-	gcc10.patch)
+        0001-Fix-narrowing-conversion-error.patch
+        xplc-0.3.13-as-needed.patch)
 md5sums=('39da3270527c8712b8e8fcf03768d29f'
-	 '92c90101be7cf7cccbef14d6e1b7dced')
-options=('!buildflags')
+         '049ca1c475703c52b2e11d06bfb676fc'
+         '308e3b8f7d7f6a7df05699bdcaed9b18')
 
 prepare() {
-  cd $srcdir/$pkgname-$pkgver
-  patch -Np1 -i $srcdir/gcc10.patch
+  cd "$pkgname-$pkgver"
+  patch -Np1 -i ../0001-Fix-narrowing-conversion-error.patch
+  patch -Np0 -i ../xplc-0.3.13-as-needed.patch # Gentoo
 }
 
 build() {
-  cd $srcdir/$pkgname-$pkgver
- 
-  ./configure --build=${CHOST} \
-	      --prefix=/usr \
-              --mandir=/usr/share/man \
-              --without-libuuid
+  cd "$pkgname-$pkgver"
+  CFLAGS+=" -ffat-lto-objects" \
+  ./configure --prefix=/usr \
+    --mandir=/usr/share/man \
+    --without-libuuid \
+    --build=${CHOST}
   make
 }
 
 package() {
-  cd "$srcdir/$pkgname-$pkgver"
+  cd "$pkgname-$pkgver"
   make DESTDIR="$pkgdir" install
 
   mv "$pkgdir/usr/share/man/man1/"{uuidgen.1,uuidcdef.1}
   rm -f "$pkgdir/usr/bin/uuidgen"
+  rm "$pkgdir"/usr/lib/xplc-0.3.13/libxplc_s.a
 }
