@@ -4,7 +4,7 @@
 # Contributor: Jakub Schmidtke <sjakub@gmail.com>
 
 pkgname=firefox
-pkgver=99.0.1
+pkgver=100.0
 pkgrel=1
 pkgdesc="Standalone web browser from mozilla.org"
 arch=(x86_64 powerpc64le riscv64)
@@ -20,7 +20,7 @@ optdepends=('networkmanager: Location detection via available WiFi networks'
             'pulseaudio: Audio support'
             'speech-dispatcher: Text-to-Speech'
             'hunspell-en_US: Spell checking, American English')
-options=(!emptydirs !makeflags strip)
+options=(!emptydirs !makeflags strip !distcc !ccache)
 source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-$pkgver.source.tar.xz{,.asc}
         $pkgname.desktop
         identity-icons-brand.svg
@@ -31,12 +31,12 @@ source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-
         avoid-redefinition.patch
         firefox-pgo.diff
         riscv.patch
+        hotfix-riscv.patch
         ppc.patch
         Skia-table-titles-fading.patch
         Skia-menu-fonts.patch
-        Skia-ConvolutionFilter.patch
-        1758610.diff)
-sha256sums=('76d22279ce99588a728bb2d034064be0d5918b5900631f2148d4565b8a72e00b'
+        Skia-ConvolutionFilter.patch)
+sha256sums=('664c0cc4e0fb70886aa4e652d144996045d533a18eebc7d61093103cbb2d5e7f'
             'SKIP'
             'a9e5264257041c0b968425b5c97436ba48e8d294e1a0f02c59c35461ea245c33'
             'a9b8b4a0a1f4a7b4af77d5fc70c2686d624038909263c795ecc81e0aec7711e9'
@@ -46,12 +46,12 @@ sha256sums=('76d22279ce99588a728bb2d034064be0d5918b5900631f2148d4565b8a72e00b'
             '944fc690a0b344ea56ff2b0880ba492ba80338a68f31d0fb205b891a5de42cee'
             '3ebba6c6c59dbf754b522d2535c27eae3e724aab575b8e7be9658e0d33183bcf'
             'bb1e775512137859ee0dd6eaebd4580257f793196fb074c660247d3935ca9148'
-            'e03d3f9fc62c4de4226dba4c42239a328b5061dca869296d222bacd3fc961872'
+            'fab815cd1b67a7580cb58d16d87c48f928f9d4e93f555ea506211bf4c2d4a774'
+            'e89229d4b74c129307627c5707ffbb442387d79b1eb791549343ba49c1ffff69'
             'cea57582d6cd7c34e99226bccafc87dbf7368186a5d76eb0836d4ddbce3bc81f'
             '895129290e71efa359f547552f99259e7e1c3b042c47397e90407942c2f59f24'
             'd2e5974942f161eb43b158968ad8ea3184a9c0527169d0af7ef5e9ac126be0f7'
-            'ad3799ee347923572aee6ca2934779b26a88cfc0db444208f4b8015b976b203c'
-            '04e9ccc75abe70c4fa45af183e3e422615e821c857dfd59002ee9187680e05f6')
+            'ad3799ee347923572aee6ca2934779b26a88cfc0db444208f4b8015b976b203c')
 validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
@@ -68,7 +68,6 @@ _mozilla_api_key=de0473f2-d53f-46da-956c-6aff61bda3ab
 
 prepare() {
   mkdir -p mozbuild
-
   cd ${srcdir}/firefox-$pkgver
 
   patch -Np0 -i ${srcdir}/firefox-powerpc-clang.patch
@@ -81,10 +80,10 @@ prepare() {
 
   # Talospace goodness
   patch -Np1 -i ${srcdir}/firefox-pgo.diff
-  patch -Np1 -i ${srcdir}/1758610.diff
 
   # sourced from T2 SDE, thanks!
-  #patch -Np1 -i ${srcdir}/riscv.patch
+  patch -Np1 -i ${srcdir}/riscv.patch
+  patch -Np1 -i ${srcdir}/hotfix-riscv.patch
   patch -Np1 -i ${srcdir}/ppc.patch
   patch -Np1 -i ${srcdir}/Skia-table-titles-fading.patch
   patch -Np1 -i ${srcdir}/Skia-menu-fonts.patch
@@ -170,6 +169,7 @@ END
 }
 
 build() {
+  sudo pacman --noconfirm -R ccache
   cd firefox-$pkgver
 
   export TMPDIR=${srcdir}/.tmp
@@ -181,7 +181,7 @@ build() {
   export MOZ_APP_REMOTINGNAME=${pkgname//-/}
   export MOZ_TELEMETRY_REPORTING=1
   export MOZ_REQUIRE_SIGNING=1
-  export MACH_USE_SYSTEM_PYTHON=1
+  #export MACH_BUILD_PYTHON_NATIVE_PACKAGE_SOURCE=none
 
   # LTO needs more open files
   ulimit -n 4096
