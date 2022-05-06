@@ -3,20 +3,20 @@
 
 pkgbase=linux-tools
 pkgname=(
+  'bootconfig'
   'cgroup_event_listener'
-  'cpupower'
   'hyperv'
-  'libtraceevent'
   'linux-tools-meta'
   'perf'
 #  'python-perf'
   'tmon'
   'usbip'
 )
-pkgver=5.12
+[ "${CARCH}" = 'x86_64' ] && pkgname+=(bpf cpupower turbostat x86_energy_perf_policy)
+pkgver=5.17
 pkgrel=1
 license=('GPL2')
-arch=(x86_64 powerpc64le powerpc)
+arch=(x86_64 powerpc64le powerpc riscv64)
 url='https://www.kernel.org'
 options=('!strip')
 makedepends=('git')
@@ -31,9 +31,15 @@ makedepends+=('pciutils')
 makedepends+=('glib2' 'sysfsutils' 'udev')
 # tmon deps
 makedepends+=('ncurses')
+# bpf deps
+makedepends+=('readline' 'zlib' 'libelf' 'libcap' 'python-docutils')
+# turbostat deps
+makedepends+=('libcap')
+# bpftool
+makedepends+=('llvm' 'clang')
 groups=("$pkgbase")
-source=("git+https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git#tag=v${pkgver//_/-}"
-        "https://cdn.kernel.org/pub/linux/kernel/v5.x/patch-$pkgver.1.xz"
+source=("git+https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git#tag=v${pkgver//_/-}?signed"
+#        "https://cdn.kernel.org/pub/linux/kernel/v5.x/patch-$pkgver.1.xz"
         'cpupower.default'
         'cpupower.systemd'
         'cpupower.service'
@@ -42,11 +48,10 @@ source=("git+https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git#
         'hv_kvp_daemon.service'
         'hv_vss_daemon.service')
 validpgpkeys=(
-   'ABAF11C65A2970B130ABE3C479BE3E4300411886'  # Linus Torvalds
-   '647F28654894E3BD457199BE38DBBDC86092693E'  # Greg Kroah-Hartman
+  'ABAF11C65A2970B130ABE3C479BE3E4300411886'  # Linus Torvalds
+  '647F28654894E3BD457199BE38DBBDC86092693E'  # Greg Kroah-Hartman
 )
 sha256sums=('SKIP'
-            'd90692a8c4bc8d4ea20a21e30927ba4d01bc772c3ff537059303f01a0bfaa813'
             '4fa509949d6863d001075fa3e8671eff2599c046d20c98bb4a70778595cd1c3f'
             'b692f4859ed3fd9831a058a450a84d8c409bf7e3e45aac1c2896a14bb83f3d7a'
             '42d2ec9f1d9cc255ee7945a27301478364ef482f5a6ddfc960189f03725ccec2'
@@ -71,11 +76,6 @@ prepare() {
 }
 
 build() {
-  echo ':: libtraceevent'
-  pushd linux/tools/lib/traceevent
-  make
-  popd
-
   echo ':: perf'
   pushd linux/tools/perf
   make -f Makefile.perf \
@@ -89,10 +89,31 @@ build() {
     DESTDIR="$pkgdir"
   popd
 
-  echo ':: cpupower'
-  pushd linux/tools/power/cpupower
-  make VERSION=$pkgver-$pkgrel
-  popd
+  if [ "${CARCH}" = 'x86_64' ]; then
+    echo ':: cpupower'
+    pushd linux/tools/power/cpupower
+    make VERSION=$pkgver-$pkgrel
+    popd
+
+    echo ':: x86_energy_perf_policy'
+    pushd linux/tools/power/x86/x86_energy_perf_policy
+    make
+    popd
+
+    echo ':: turbostat'
+    pushd linux/tools/power/x86/turbostat
+    make
+    popd
+
+    echo ':: bpf'
+    pushd linux/tools/bpf
+    # doesn't compile when we don't first compile bpftool in its own directory and
+    # man pages require to be also launch from the subdirectory
+    make -C bpftool all doc
+    # runqslower, require kernel binary path to build, skip it
+    make -W runqslower
+    popd
+  fi
 
   echo ':: usbip'
   pushd linux/tools/usb/usbip
@@ -112,10 +133,15 @@ build() {
   pushd linux/tools/cgroup
   make
   popd
-
+ 
   echo ':: hv'
   pushd linux/tools/hv
   CFLAGS+=' -DKVP_SCRIPTS_PATH=\"/usr/lib/hyperv/kvp_scripts/\"' make
+  popd
+
+  echo ':: bootconfig'
+  pushd linux/tools/bootconfig
+  make
   popd
 }
 
@@ -123,28 +149,18 @@ package_linux-tools-meta() {
   pkgdesc='Linux kernel tools meta package'
   groups=()
   depends=(
+    'bootconfig'
     'cgroup_event_listener'
-    'cpupower'
     'hyperv'
-    'libtraceevent'
     'perf'
 #    'python-perf'
     'tmon'
     'usbip'
   )
+  depends_x86_64=(bpf cpupower turbpstat x86_energy_perf_policy)
   conflicts=(
     'acpidump'
   )
-}
-
-package_libtraceevent() {
-  pkgdesc='Linux kernel trace event library'
-  depends=('glibc')
-
-  cd linux/tools/lib/traceevent
-  install -dm 755 "$pkgdir/usr/lib"
-  install -m 644 libtraceevent.so "$pkgdir/usr/lib"
-  ln -sf libtraceevent.so "$pkgdir/usr/lib/libtraceevent.so.1"
 }
 
 package_perf() {
@@ -208,6 +224,15 @@ package_cpupower() {
   install -Dm 755 $pkgname.systemd "$pkgdir/usr/lib/systemd/scripts/$pkgname"
 }
 
+package_x86_energy_perf_policy() {
+  pkgdesc='Read or write MSR_IA32_ENERGY_PERF_BIAS'
+  depends=('glibc')
+
+  cd linux/tools/power/x86/x86_energy_perf_policy
+  install -Dm 755 x86_energy_perf_policy "$pkgdir/usr/bin/x86_energy_perf_policy"
+  install -Dm 644 x86_energy_perf_policy.8 "$pkgdir/usr/share/man/man8/x86_energy_perf_policy.8"
+}
+
 package_usbip() {
   pkgdesc='An USB device sharing system over IP network'
   depends=('glibc' 'glib2' 'sysfsutils' 'systemd-libs')
@@ -238,6 +263,14 @@ package_cgroup_event_listener() {
   install -Dm755 cgroup_event_listener "$pkgdir/usr/bin/cgroup_event_listener"
 }
 
+package_turbostat() {
+  pkgdesc='Report processor frequency and idle statistics'
+  depends=('glibc' 'libcap')
+
+  cd linux/tools/power/x86/turbostat
+  make install DESTDIR="$pkgdir"
+}
+
 package_hyperv() {
   pkgdesc='Hyper-V tools'
   depends=('glibc')
@@ -248,6 +281,29 @@ package_hyperv() {
     install -Dm644 "$srcdir/$_p.service" "$pkgdir/usr/lib/systemd/system/$_p.service"
   done
   install -dm755 "$pkgdir/usr/lib/hyperv/kvp_scripts"
+}
+
+package_bpf() {
+  pkgdesc='BPF tools'
+  depends=('glibc' 'readline' 'zlib' 'libelf' 'libcap')
+
+  cd linux/tools/bpf
+  # skip runsqlower until disabled in build
+  make -W runqslower_install install prefix=/usr DESTDIR="$pkgdir"
+  # fix bpftool hard written path
+  mv "$pkgdir"/usr/sbin/bpftool "$pkgdir"/usr/bin/bpftool
+  rmdir "$pkgdir"/usr/sbin
+  # install man pages
+  make -C bpftool doc-install prefix=/usr/share DESTDIR="$pkgdir"
+}
+
+package_bootconfig() {
+  pkgdesc='Apply, delete or show boot config to initrd'
+  depends=('glibc')
+
+  cd linux/tools/bootconfig
+  install -dm755 "$pkgdir/usr/bin"
+  make install DESTDIR="$pkgdir"
 }
 
 # vim:set ts=2 sw=2 et:
