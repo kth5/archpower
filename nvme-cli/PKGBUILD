@@ -6,22 +6,32 @@
 # Contributor: Martin Schrodt <martin@schrodt.org>
 
 pkgname=nvme-cli
-pkgver=1.15
-pkgrel=1
+pkgver=2.0
+pkgrel=2
 pkgdesc="NVM-Express user space tooling for Linux"
 arch=(i686 x86_64 powerpc64le powerpc)
 url="https://github.com/linux-nvme/nvme-cli"
 license=('GPL')
-makedepends=('systemd')
+makedepends=('systemd' 'meson' 'git')
 depends=('util-linux' 'libsystemd')
+options=(debug strip)
 install=nvme-cli.install
 # checkdepends=('python2-nose' 'python-nose')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/linux-nvme/${pkgname}/archive/v${pkgver}.tar.gz")
-sha256sums=('4c681d1a98fc139c0c81f0c878d052c475679a2aca28221050b3be7e5b996528')
+sha256sums=('471869b3bf643bb357dc9613ad14d24ff342fcd97e2db5a753c81c335ad8859c')
 
 build() {
 	cd "${pkgname}-${pkgver}"
-	make PREFIX=/usr
+	meson setup \
+	--prefix /usr \
+	--libexecdir lib \
+	--sbindir bin \
+	--buildtype plain \
+	--auto-features enabled \
+	-D b_lto=true -D b_pie=true \
+	-D docs=man -D docs-build=true \
+	-D udevrulesdir=lib/udev/rules.d \
+	.build
 }
 
 # Tests require a working NVME disk.
@@ -32,9 +42,5 @@ build() {
 
 package() {
 	cd "${pkgname}-${pkgver}"
-	make DESTDIR="$pkgdir" UDEVDIR=/usr/lib/udev PREFIX=/usr SBINDIR=/usr/bin install-spec
-
-	# This is done because we don't want the hostnqn and hostid files tracked.
-	# they are supposed to be unique
-	rm $pkgdir/etc/nvme/host{nqn,id}
+	DESTDIR="$pkgdir" meson install -C .build
 }
