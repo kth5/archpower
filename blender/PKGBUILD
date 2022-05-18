@@ -1,5 +1,5 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Sven-Hendrik Haase <svenstaro@gmail.com>
+# Maintainer: Sven-Hendrik Haase <svenstaro@archlinux.org>
 # Contributor: John Sowiak <john@archlinux.org>
 # Contributor: tobias <tobias@archlinux.org>
 
@@ -8,8 +8,8 @@
 # fine with them.
 
 pkgname=blender
-pkgver=2.93.3
-pkgrel=1
+pkgver=3.1.2
+pkgrel=2
 epoch=17
 pkgdesc="A fully integrated 3D graphics creation suite"
 arch=(x86_64 powerpc64le)
@@ -19,40 +19,28 @@ depends=('libpng' 'libtiff' 'openexr' 'python' 'desktop-file-utils' 'python-requ
          'shared-mime-info' 'hicolor-icon-theme' 'xdg-utils' 'glew' 'openjpeg2' 'python-numpy'
          'freetype2' 'openal' 'ffmpeg' 'fftw' 'boost-libs' 'opencollada' 'alembic' 'openxr'
          'openimageio' 'libsndfile' 'jack' 'opencolorio' 'openshadinglanguage'
-         'jemalloc' 'libspnav' 'ptex' 'opensubdiv' 'openvdb' 'log4cplus' 'sdl2')
+         'jemalloc' 'libspnav' 'ptex' 'opensubdiv' 'openvdb' 'log4cplus' 'sdl2' 'libharu'
+         'draco')
 makedepends=('cmake' 'boost' 'mesa' 'git' 'llvm' 'ninja')
+makedepends_x86_64=('cuda' 'embree' 'openimagedenoise')
+optdepends_x86_64=('cuda: cycles renderer cuda support')
 options=(!strip)
 source=("git+https://git.blender.org/blender.git#tag=v$pkgver"
         "git+https://git.blender.org/blender-addons.git"
         "git+https://git.blender.org/blender-addons-contrib.git"
         "git+https://git.blender.org/blender-translations.git"
         "git+https://git.blender.org/blender-dev-tools.git"
-        https://developer.download.nvidia.com/redist/optix/v7.0/OptiX-7.0.0-include.zip
-        blender-openexr3.patch
-        altivec-all.patch)
+        https://developer.download.nvidia.com/redist/optix/v7.3/OptiX-7.3.0-Include.zip
+        force-draco1.patch
+        force-draco2.patch)
 sha512sums=('SKIP'
             'SKIP'
             'SKIP'
             'SKIP'
             'SKIP'
-            'b2cff73def3757d4259f4b4d318a8ccfe166bf7c215cbb2124f1c81bd6e742f96207285b24eb4d99b527b7b97dc6d5e8fdf2f16d78d5d1e2684c26d681328491'
-            'e2dd7210d26b70445e9ae8e33dea35111ad0b0aca9d3b4ded3df560d0fcc8dc044868f729e0f090a04b6f316f083b5505a7056ce088e8702065add87b9b457e5'
-            'dd87d718fb7189c7d03c2e5f3e3f02f956afef39d77b42ee6ce17ba3ac4e05ec6b9ad5be941c1d9c36f3a9e88ba523ec280ca27148a32203d74ff74c8d0cbf00')
-
-case "${CARCH}" in
-  x86_64)
-    # these are conveniently x86 only, thanks Intel!
-    depends+=('embree' 'openimagedenoise')
-    # no support for Cuda on non-x86 yet
-    makedepends+=('cuda')
-    optdepends=('cuda: cycles renderer cuda support')
-    CMAKE_EXTRA_FLAGS="-DWITH_CYCLES_EMBREE=ON"
-    ;;
-  # the rest of the world
-  *)
-    CMAKE_EXTRA_FLAGS="-DWITH_CYCLES=OFF -DWITH_CYCLES_EMBREE=OFF -DWITH_CYCLES_DEVICE_OPTIX=OFF"
-esac
-
+            'd842e989bf86f4ae932f8708f6340861de4ea33b21435cceeb9a5e3135ef2ddb671e19fe11c397bddbf85894ba312194eac5acc21cbec70607120c0bda0100ef'
+            'e239da4f3906f1b54265435181cf770bae3d269c8d915df9a73861e6ee71ec70bf2339426e7c81a91e5a567273b3b3742d7a99feefd3398d821b26e1ff3a56d0'
+            '527ab66e5eace777de0043c1ca5787a488f6471450ce67fd6d08137ad0ef56177bc0c17696f30a5fca23fa55d8ca9c3f30cb7b17550dba2dbd8e89ca0b361990')
 
 prepare() {
   cd "$pkgname"
@@ -65,17 +53,20 @@ prepare() {
   git submodule update
   git submodule foreach git checkout v${pkgver}
 
-  patch -p1 < "$srcdir"/blender-openexr3.patch # Fix build with OpenEXR 3
-
-  patch -p1 < "$srcdir"/altivec-all.patch
+  patch -p1 -i "$srcdir"/force-draco1.patch
+  patch -p1 -d release/scripts/addons -i "$srcdir"/force-draco2.patch
 }
 
 build() {
   cd "$pkgname"
 
-  local PYTHON_VER=3.9
- 
-  cmake . \
+  local PYTHON_VER=3.10
+
+  if [ "${CARCH}" != 'x86_64' ]; then
+    PLATFORM_FLAGS="-DWITH_EMBREE=OFF -DWITH_CYCLES_EMBREE=OFF -DWITH_CYCLES_DEVICE_OPTIX=OFF -DWITH_CYCLES_DEVICE_CUDA=OFF"
+  fi
+
+  cmake \
     -Bbuild \
     -GNinja \
     -Cbuild_files/cmake/config/blender_release.cmake \
@@ -84,11 +75,12 @@ build() {
     -DCMAKE_BUILD_TYPE=Release \
     -DWITH_INSTALL_PORTABLE=OFF \
     -DWITH_PYTHON_INSTALL=OFF \
+    -DPYTHON_VERSION=$PYTHON_VER \
     -DPYTHON_LIBPATH=/usr/lib \
     -DPYTHON_LIBRARY=python$PYTHON_VER \
     -DPYTHON_INCLUDE_DIRS=/usr/include/python$PYTHON_VER \
-    -DCMAKE_CXX_FLAGS="-I /usr/include/python$PYTHON_VER" ${CMAKE_EXTRA_FLAGS}
-  ninja -C build ${MAKEFLAGS}
+    -DCMAKE_CXX_FLAGS="-I /usr/include/python$PYTHON_VER" ${PLATFORM_FLAGS}
+  ninja -C build
 }
 
 package() {
@@ -102,5 +94,10 @@ package() {
   install -Dm644 release/freedesktop/org.blender.Blender.appdata.xml "${pkgdir}/usr/share/metainfo/org.blender.Blender.appdata.xml"
 
   # Manually install additional scripts (See FS#69351)
-  cp -r release/scripts/addons_contrib/* "${pkgdir}"/usr/share/blender/2*/scripts/addons_contrib/
+  cp -r release/scripts/addons_contrib/* "${pkgdir}"/usr/share/blender/3*/scripts/addons_contrib/
+
+  # Manually install draco bindings (See FS#73415)
+  mkdir -p "${pkgdir}"/usr/lib/python3.10/
+  mv "${pkgdir}"/usr/share/blender/3*/python/lib/* "${pkgdir}"/usr/lib/
+  rm -r "${pkgdir}"/usr/share/blender/3*/python
 }
