@@ -10,15 +10,14 @@ pkgname=(gcc gcc-libs gcc-fortran gcc-objc gcc-go gcc-d libgccjit)
 case "${CARCH}" in
   powerpc*|x86_64) pkgname+=(gcc-ada) ;;
 esac
-pkgver=11.2.0
+pkgver=11.3.0
 _majorver=${pkgver%%.*}
-_islver=0.24
-pkgrel=5
+pkgrel=1
 pkgdesc='The GNU Compiler Collection'
 arch=(x86_64 powerpc64le powerpc riscv64)
 license=(GPL LGPL FDL custom)
 url='https://gcc.gnu.org'
-makedepends=(binutils libmpc libxcrypt doxygen python git libxcrypt libisl)
+makedepends=(binutils libmpc libxcrypt doxygen python git libxcrypt libisl gcc-d)
 makedepends_powerpc=(gcc-ada)
 makedepends_powerpc64le=(gcc-ada)
 makedepends_x86_64=(gcc-ada)
@@ -31,19 +30,17 @@ source=(https://sourceware.org/pub/gcc/releases/gcc-${pkgver}/gcc-${pkgver}.tar.
         c89 c99
         gdc_phobos_path.patch
         gcc-ada-repro.patch
-        gcc11-Wno-format-security.patch
 )
 validpgpkeys=(F3691687D867B81B51CE07D9BBE43771487328A9  # bpiotrowski@archlinux.org
               86CFFCA918CF3AF47147588051E8B148A9999C34  # evangelos@foutrelis.com
               13975A70E63C361C73AE69EF6EEB81F8981C74C7  # richard.guenther@gmail.com
               D3A93CAD751C2AF4F8C7AD516C35B99309B5FA62) # Jakub Jelinek <jakub@redhat.com>
-sha256sums=('d08edc536b54c372a1010ff6619dd274c0f1603aa49212ba20f7aa2cda36fa8b'
+sha256sums=('b47cf2818691f5b1e21df2bb38c795fac2cfbd640ede2d0a5e1c89e338a3ac39'
             'SKIP'
             'de48736f6e4153f03d0a5d38ceb6c6fdb7f054e8f47ddd6af0a3dbf14f27b931'
             '2513c6d9984dd0a2058557bf00f06d8d5181734e41dcfe07be7ed86f2959622a'
             'c86372c207d174c0918d4aedf1cb79f7fc093649eb1ad8d9450dccc46849d308'
-            '1773f5137f08ac1f48f0f7297e324d5d868d55201c03068670ee4602babdef2f'
-            '504e4b5a08eb25b6c35f19fdbe0c743ae4e9015d0af4759e74150006c283585e')
+            '1773f5137f08ac1f48f0f7297e324d5d868d55201c03068670ee4602babdef2f')
 
 prepare() {
   [[ ! -d gcc ]] && ln -s gcc-${pkgver/+/-} gcc
@@ -64,9 +61,6 @@ prepare() {
 
   # Reproducible gcc-ada
   patch -Np0 < "$srcdir/gcc-ada-repro.patch"
-
-  # configure.ac: When adding -Wno-format, also add -Wno-format-security
-  patch -Np0 < "$srcdir/gcc11-Wno-format-security.patch"
 
   mkdir -p "$srcdir/gcc-build"
   mkdir -p "$srcdir/libgccjit-build"
@@ -95,7 +89,6 @@ build() {
       --with-pkgversion="Arch POWER" \
       --with-bugurl=https://github.com/kth5/archpower/issues \
       --enable-languages=c,c++,fortran,go,lto,objc,obj-c++,d${_ada} \
-      --with-isl \
       --with-linker-hash-style=gnu \
       --with-system-zlib \
       --enable-__cxa_atexit \
@@ -105,9 +98,6 @@ build() {
       --enable-default-ssp \
       --enable-gnu-indirect-function \
       --enable-gnu-unique-object \
-      --enable-pgo-build=lto \
-      --with-build-config=bootstrap-lto \
-      --enable-link-serialization=1 \
       --enable-linker-build-id \
       --enable-lto \
       --disable-multilib \
@@ -117,8 +107,8 @@ build() {
       --disable-libssp \
       --disable-libstdcxx-pch \
       --disable-werror \
-      --enable-secureplt \
-      gdc_include_dir=/usr/include/dlang/gdc
+      --with-build-config=bootstrap-lto \
+      --enable-link-serialization=1
 
    # see https://bugs.archlinux.org/task/71777 for rationale re *FLAGS handling
    make -O STAGE1_CFLAGS="-O2" \
