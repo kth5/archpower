@@ -1,80 +1,78 @@
-# Contributor: Alexander 'hatred' Drozdov <adrozdoff@gmail.com>
-# Contributor: toha257 <toha257@gmail.com>
-# Contributor: Allan McRae <allan@archlinux.org>
-# Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
-# Contributor: Kevin Mihelich <kevin@archlinuxarm.org>
-# Contributor: Tavian Barnes <tavianator@tavianator.com>
-# Maintainer: Stefan Schmidt <thrimbor.github@gmail.com>
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Alexander F. Rødseth <xyproto@archlinux.org>
+# Contributor: Emil Renner Berthing <aur@esmil.dk>
 
-_target="powerpc64le-linux-gnu"
-pkgname=${_target}-binutils
-pkgver=2.32
+_target=powerpc64le-unknown-linux-gnu
+pkgname=$_target-binutils
+pkgver=2.38
 pkgrel=1
-pkgdesc="A set of programs to assemble and manipulate binary and object files (${_target})"
-arch=(i686 x86_64)
-url='http://www.gnu.org/software/binutils/'
+pkgdesc='Assemble and manipulate binary and object files for 32-bit and 64-bit RISC-V'
+arch=(x86_64 powerpc)
+url='https://gnu.org/software/binutils/'
 license=(GPL)
-depends=(glibc zlib)
-checkdepends=(dejagnu bc)
-options=(staticlibs !distcc !ccache)
-source=(https://ftp.gnu.org/gnu/binutils/binutils-$pkgver.tar.xz{,.sig})
-validpgpkeys=(3A24BC1E8FB409FA9F14371813FCEF89DD9E3C4F)
-md5sums=('0d174cdaf85721c5723bf52355be41e6'
-         'SKIP')
+groups=(risc-v)
+makedepends=(setconf)
+source=("https://ftp.gnu.org/gnu/binutils/binutils-$pkgver.tar.xz"
+        gold-warn-unsupported.patch
+        fix-incorrect-undefined-symbol.patch
+        "binutils-pr28733.patch::https://sourceware.org/git/?p=binutils-gdb.git;a=patch;h=e4028336b19998e74a51dd0918a8b3922e08a537;hp=df0a549ebdae74ef9d233243b869d424e6a33c73")
+sha512sums=('8bf0b0d193c9c010e0518ee2b2e5a830898af206510992483b427477ed178396cd210235e85fd7bd99a96fc6d5eedbeccbd48317a10f752b7336ada8b2bb826d'
+            '5d827b349b4456f8314776f1545396945c751b822a77604157b3fe436e5ff82bb313af3a215c99fd9d1f1f8ebb9f92033cc1a4968e35734619ad28b9bb3839a7'
+            '36da578519db4665f959a64813173ecbf3f999bc6b3acfb216e24d73a617ded22202e08915d2fa4c86b46c627127bc6e22e6dba07ce89588c0da7771c6f34a58'
+            '302e1fe276fdc54ffc3285b48839777c182014952bc0383c32d1316a818a3a58599ca4a5ac8f7cf55081c1bf8749c8452f8e8572fb29ae4995dafc53abdc5211')
 
 prepare() {
-  mkdir -p binutils-build
+  cd "binutils-$pkgver"
+  # Creds @Fedora
+  # Change the gold configuration script to only warn about
+  # unsupported targets.  This allows the binutils to be built with
+  # BPF support enabled.
+  patch -Np1 -i "${srcdir}"/gold-warn-unsupported.patch
 
-  #cd binutils-gdb
-  cd binutils-$pkgver
+  # fix incorrect "undefined reference" errors
+  # https://sourceware.org/bugzilla/show_bug.cgi?id=28879
+  patch -Np1 -i "${srcdir}"/fix-incorrect-undefined-symbol.patch
 
-  # hack! - libiberty configure tests for header files using "$CPP $CPPFLAGS"
-  sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" libiberty/configure
+  # riscv64: PR28733, add missing extension info to 'unrecognized opcode' error
+  patch -Np1 -i "${srcdir}"/binutils-pr28733.patch
+
+  setconf libiberty/configure ac_cpp "'\$CPP \$CPPFLAGS -O2'"
 }
 
 build() {
-  cd binutils-build
+  cd "binutils-$pkgver"
 
-  "$srcdir/binutils-$pkgver/configure" \
-      --prefix=/usr \
-      --program-prefix=${_target}- \
-      --with-lib-path=/usr/lib/binutils/${_target} \
-      --with-local-prefix=/usr/lib/${_target} \
-      --with-sysroot=/usr/${_target} \
-      --enable-deterministic-archives \
-      --enable-gold \
-      --enable-ld=default \
-      --enable-lto \
-      --enable-plugins \
-      --enable-relro \
-      --enable-shared \
-      --enable-threads \
-      --disable-gdb \
-      --disable-werror \
-      --with-pic \
-      --with-system-zlib \
-      --disable-sim \
-      --target=${_target} \
-      --host=${CHOST} \
-      --build=${CHOST}
-
-  make configure-host
-  make tooldir=/usr
+  unset CPPFLAGS
+  ./configure \
+    --disable-nls \
+    --enable-deterministic-archives \
+    --enable-gold \
+    --enable-ld=default \
+    --enable-multilib \
+    --enable-plugins \
+    --prefix=/usr \
+    --target=$_target \
+    --with-gnu-as \
+    --with-gnu-ld \
+    --with-sysroot=/usr/$_target \
+    --with-system-zlib
+  make
 }
 
 check() {
-  cd binutils-build
-
-  # unset LDFLAGS as testsuite makes assumptions about which ones are active
-  # ignore failures in gold testsuite...
-  make -k LDFLAGS="" check || true
+  # * Unset LDFLAGS as testsuite makes assumptions about which ones are active.
+  # * Do not abort on errors - manually check log files.
+  make -C "binutils-$pkgver" LDFLAGS="" -k check
 }
 
 package() {
-  cd binutils-build
-  make prefix="$pkgdir/usr" tooldir="$pkgdir/usr" install
+  make -C "binutils-$pkgver" DESTDIR="$pkgdir" install
 
-  # Remove unwanted files
-  rm -rf "$pkgdir/usr/share"
-  rm -f "$pkgdir/usr/bin/"{ar,as,ld,nm,objdump,ranlib,readelf,strip,objcopy}
+  # Remove info documents that conflict with host version
+  rm -r "$pkgdir/usr/share/info"
+
+  rm "$pkgdir"/usr/lib/bfd-plugins/libdep.so
 }
+
+# getver: gnu.org/software/binutils
