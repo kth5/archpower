@@ -6,28 +6,31 @@
 # Contributor: Tavian Barnes <tavianator@tavianator.com>
 # Maintainer: Stefan Schmidt <thrimbor.github@gmail.com>
 
-_target="powerpc-unknown-linux-gnu"
+_target=powerpc-unknown-linux-gnu
 pkgname=${_target}-glibc
-pkgver=2.32
-pkgrel=1
+pkgver=2.35
+pkgrel=2
 pkgdesc="GNU C Library (${_target})"
 arch=('any')
 url="http://www.gnu.org/software/libc/"
 license=(GPL LGPL)
-depends=("${_target}-linux-api-headers>=5.4.17")
-makedepends=("${_target}-gcc-stage2>=9.3.0")
+depends=("${_target}-linux-api-headers>=5.17.5")
+makedepends=("${_target}-gcc-stage2>=12.1.0" "python")
 provides=("${_target}-glibc-headers=${pkgver}" "${_target}-eglibc")
 conflicts=("${_target}-glibc-headers" "${_target}-eglibc")
 replaces=("${_target}-glibc-headers")
 options=(!buildflags !strip staticlibs)
-_commit=067fc32968b601493f4b247a3ac00caeea3f3d61
-source=(git+https://sourceware.org/git/glibc.git#commit=$_commit
-        bz20338.patch
-	0001-Revert-elf-Correct-absolute-SHN_ABS-symbol-run-time-.patch)
-validpgpkeys=(7273542B39962DF7B299931416792B4EA25340F8) # Carlos O'Donell
-sha256sums=('SKIP'
-            '959d4f41edd004bddd9091c4d8c8c3aa07d79a04bfdb89d59f9f26fe5a74d32a'
-	    '0761f152bca433aec085ff44a05ce2edb9fdd16e2261580dc41be8bdf9f1252a')
+source=(https://ftp.gnu.org/gnu/glibc/glibc-$pkgver.tar.xz{,.sig}
+        sdt-config.h
+        sdt.h
+	disable-clone3.diff)
+validpgpkeys=(7273542B39962DF7B299931416792B4EA25340F8 # Carlos O'Donell
+              BC7C7372637EC10C57D7AA6579C43DFBF1CF2187) # Siddhesh Poyarekar
+sha256sums=('5123732f6b67ccd319305efd399971d58592122bcc2a6518a1bd2510dd0cf52e'
+            'SKIP'
+            'cdc234959c6fdb43f000d3bb7d1080b0103f4080f5e67bcfe8ae1aaf477812f0'
+            '774061aff612a377714a509918a9e0e0aafce708b87d2d7e06b1bd1f6542fe70'
+            'f5df8fc95592cce7825744aeb8c9699a5b4b5b7ccf7bcf554355167c3a7e375e')
 
 prepare() {
   mkdir -p glibc-build
@@ -37,7 +40,7 @@ prepare() {
 
   local i; for i in ${source[@]}; do
     case ${i%::*} in
-      *.patch)
+      *.patch|*.diff)
         msg2 "Applying ${i}"
         patch -p1 -i "$srcdir/${i}"
         ;;
@@ -57,7 +60,6 @@ build() {
       --enable-stackguard-randomization
       --disable-profile
       --disable-werror
-      --without-tests
   )
 
   cd glibc-build
