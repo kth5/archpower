@@ -5,8 +5,8 @@
 
 pkgbase=systemd
 pkgname=('systemd' 'systemd-libs' 'systemd-resolvconf' 'systemd-sysvcompat')
-_tag='20e3fdcb595febff92fe3e89ee33da2c04c5c682' # git rev-parse v${_tag_name}
-_tag_name=250.5
+_tag='615e67a0eeb479009f185d2526acf7cc1ed36e62' # git rev-parse v${_tag_name}
+_tag_name=251.2
 pkgver="${_tag_name/-/}"
 pkgrel=1
 arch=(x86_64 powerpc64le powerpc riscv64)
@@ -24,6 +24,7 @@ makedepends_x86_64=('gnu-efi-libs' 'kexec-tools' 'libseccomp')
 options=('debug' 'strip' '!distcc' '!ccache')
 validpgpkeys=('63CDA1E5D3FC22B998D20DD6327F26951A015CC4'  # Lennart Poettering <lennart@poettering.net>
               'A9EA9081724FFAE0484C35A1A81CEA22BC8C7E2E'  # Luca Boccassi <luca.boccassi@gmail.com>
+              '9A774DB5DB996C154EBBFBFDA0099A18E29326E1'  # Yu Watanabe <watanabe.yu+github@gmail.com>
               '5C251B5FC54EB2F80F407AAAC54CA336CFEB557E') # Zbigniew Jędrzejewski-Szmek <zbyszek@in.waw.pl>
 source=("git+https://github.com/systemd/systemd-stable#tag=${_tag}?signed"
         "git+https://github.com/systemd/systemd#tag=v${_tag_name%.*}?signed"
@@ -66,8 +67,6 @@ sha512sums=('SKIP'
             'a50d202a9c2e91a4450b45c227b295e1840cc99a5e545715d69c8af789ea3dd95a03a30f050d52855cabdc9183d4688c1b534eaa755ebe93616f9d192a855ee3'
             '825b9dd0167c072ba62cabe0677e7cd20f2b4b850328022540f122689d8b25315005fa98ce867cf6e7460b2b26df16b88bb3b5c9ebf721746dce4e2271af7b97')
 _backports=(
-  # bus: Use OrderedSet for introspection
-  'acac88340ace3cd631126eebb6d0390cd54e8231'
 )
 
 _reverts=(
@@ -86,7 +85,7 @@ prepare() {
     else
       git log --oneline -1 "${_c}"
     fi
-    git cherry-pick -n "${_c}"
+    git cherry-pick -n -m1 "${_c}"
   done
   for _c in "${_reverts[@]}"; do
     git log --oneline -1 "${_c}"
@@ -116,6 +115,7 @@ build() {
     # internal version comparison is incompatible with pacman:
     #   249~rc1 < 249 < 249.1 < 249rc
     -Dversion-tag="${_tag_name/-/\~}-${pkgrel}-arch"
+    -Dshared-lib-tag="${pkgver}-${pkgrel}"
     -Dmode=release
 
     -Dima=false
@@ -130,7 +130,7 @@ build() {
     -Ddefault-dnssec=no
     -Ddefault-hierarchy=unified
     -Ddefault-kill-user-processes=false
-    -Ddefault-locale=C
+    -Ddefault-locale='C.UTF-8'
     -Dlocalegen-path=/usr/bin/locale-gen
     -Ddns-over-tls=openssl
     -Dfallback-hostname='archpower'
@@ -158,7 +158,6 @@ build() {
       _meson_options+=(
         -Dgnu-efi=false
         -Dtests=false
-        -Dseccomp=false
       )
       ;;
     powerpc64le|riscv64)
@@ -185,12 +184,9 @@ package_systemd() {
   depends=('acl' 'libacl.so' 'bash' 'cryptsetup' 'libcryptsetup.so' 'dbus'
            'iptables' 'kbd' 'kmod' 'libkmod.so' 'hwdata' 'libcap' 'libcap.so'
            'libgcrypt' 'libxcrypt' 'libcrypt.so' 'systemd-libs' 'libidn2' 'lz4' 'pam'
-           'libelf' 'util-linux' 'libblkid.so'
+           'libelf' 'libseccomp.so' 'util-linux' 'libblkid.so'
            'libmount.so' 'xz' 'pcre2' 'audit' 'libaudit.so' 'libp11-kit'
            'libp11-kit.so' 'openssl')
-  depends_powerpc64le=('libseccomp' 'libseccomp.so')
-  depends_riscv64=('libseccomp' 'libseccomp.so')
-  depends_x86_64=('tpm2-tss')
   provides=('nss-myhostname' "systemd-tools=$pkgver" "udev=$pkgver")
   replaces=('nss-myhostname' 'systemd-tools' 'udev')
   conflicts=('nss-myhostname' 'systemd-tools' 'udev')
@@ -199,8 +195,8 @@ package_systemd() {
               'systemd-sysvcompat: symlink package to provide sysvinit binaries'
               'polkit: allow administration as unprivileged user'
               'curl: machinectl pull-tar and pull-raw'
-              'libfido2: unlocking LUKS2 volumes with FIDO2 token')
-  optdepends_x86_64=('tpm2-tss: unlocking LUKS2 volumes with TPM2')
+              'libfido2: unlocking LUKS2 volumes with FIDO2 token'
+              'tpm2-tss: unlocking LUKS2 volumes with TPM2')
   backup=(etc/pam.d/systemd-user
           etc/systemd/coredump.conf
           etc/systemd/homed.conf

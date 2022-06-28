@@ -8,31 +8,29 @@
 
 pkgname=binutils
 pkgver=2.38
-pkgrel=3.6
+_commit=9c67f6382ac2c90fbde5729feaf7d59ce662147a
+pkgrel=5.2
 pkgdesc='A set of programs to assemble and manipulate binary and object files'
 arch=(x86_64 powerpc64le powerpc riscv64)
-arch=(riscv64)
 url='https://www.gnu.org/software/binutils/'
 license=('GPL3' 'GPL' 'FDL1.3' 'custom:FSFAP')
 groups=(base-devel)
 depends=(glibc zlib libelf)
-makeepends=(autoconf-archive)
+makedepends=(autoconf-archive git)
 checkdepends=(dejagnu debuginfod bc)
 optdepends=('debuginfod: for debuginfod server/client functionality')
 conflicts=(binutils-multilib)
 replaces=(binutils-multilib)
 options=(staticlibs !distcc !ccache debug)
 #_commit=cb5f6a3e146cc70bc2d864989386df80acec5d3e
-#source=(git+https://sourceware.org/git/binutils-gdb.git#commit=$_commit)
-source=(https://ftp.gnu.org/gnu/binutils/binutils-$pkgver.tar.xz{,.sig}
+source=(git+https://sourceware.org/git/binutils-gdb.git#commit=$_commit
         gold-warn-unsupported.patch
-        fix-incorrect-undefined-symbol.patch
-        "binutils-pr28733.patch::https://sourceware.org/git/?p=binutils-gdb.git;a=patch;h=e4028336b19998e74a51dd0918a8b3922e08a537;hp=df0a549ebdae74ef9d233243b869d424e6a33c73")
-sha256sums=('e316477a914f567eccc34d5d29785b8b0f5a10208d36bbacedcc39048ecfe024'
-            'SKIP'
+	"binutils-pr28733.patch::https://sourceware.org/git/?p=binutils-gdb.git;a=patch;h=e4028336b19998e74a51dd0918a8b3922e08a537;hp=df0a549ebdae74ef9d233243b869d424e6a33c73"
+        ppc-pagesize.patch)
+sha256sums=('SKIP'
             '2d430b66f84a19c154725ec535280c493be1d34f1a90f95208dce02fecd0e4e4'
-            'fd33b2f8cac7561cecf3fdbb5a50fd2f2dfa6420516cbe57c47784a06fa16bf6'
-            '6c095f62d3bdf9d150f2b9dea3caf5d672140333760de598fdbec216c22e4be9')
+            '940ba1bcf495a5790aef47cc47dee4c62c9fb401f16b7e0fd115cd441819d8a5'
+            'e28fa1537cc4bc3732d1a56e04b564c0f91120c7629f65722eb3bd582ff072b0')
 validpgpkeys=(3A24BC1E8FB409FA9F14371813FCEF89DD9E3C4F)
 
 prepare() {
@@ -44,21 +42,16 @@ prepare() {
   # Turn off development mode (-Werror, gas run-time checks, date in sonames)
   sed -i '/^development=/s/true/false/' bfd/development.sh
 
-  # hack! - libiberty configure tests for header files using "$CPP $CPPFLAGS"
-  sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" libiberty/configure
-
   # Creds @Fedora
   # Change the gold configuration script to only warn about
   # unsupported targets.  This allows the binutils to be built with
   # BPF support enabled.
   patch -Np1 -i "${srcdir}"/gold-warn-unsupported.patch
 
-  # fix incorrect "undefined reference" errors
-  # https://sourceware.org/bugzilla/show_bug.cgi?id=28879
-  patch -Np1 -i "${srcdir}"/fix-incorrect-undefined-symbol.patch
-
   # riscv64: PR28733, add missing extension info to 'unrecognized opcode' error
   patch -Np1 -i "${srcdir}"/binutils-pr28733.patch
+
+  #patch -Np1 -i "${srcdir}"/ppc-pagesize.patch
 }
 
 build() {
@@ -92,14 +85,14 @@ build() {
     --with-debuginfod \
     --with-pic \
     --with-system-zlib \
-    --enable-obsolete ${_configure_flags[@]}
+    --enable-obsolete ${_configure_flags[@]} || cat config.log
 
   make -O tooldir=/usr
 
   # Extract the FSF All Permissive License
   # <https://www.gnu.org/prep/maintain/html_node/License-Notices-for-Other-Files.html>
   # used for some linker scripts.
-  tail -n 5 "${srcdir}"/binutils-${pkgver}/ld/scripttempl/README > FSFAP
+  tail -n 5 "${srcdir}"/binutils-gdb/ld/scripttempl/README > FSFAP
 }
 
 check() {
@@ -127,7 +120,7 @@ package() {
   install -m644 libiberty/pic/libiberty.a "$pkgdir/usr/lib"
 
   # Remove unwanted files
-  rm -f "$pkgdir"/usr/share/man/man1/{dlltool,nlmconv,windres,windmc}*
+  rm -f "$pkgdir"/usr/share/man/man1/{dlltool,windres,windmc}*
 
   # No shared linking to these files outside binutils
   rm -f "$pkgdir"/usr/lib/lib{bfd,opcodes}.so
