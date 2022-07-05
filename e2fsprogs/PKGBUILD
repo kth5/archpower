@@ -5,10 +5,9 @@
 pkgbase=e2fsprogs
 pkgname=('e2fsprogs' 'fuse2fs')
 pkgver=1.46.5
-pkgrel=3.1
+pkgrel=4
 pkgdesc='Ext2/3/4 filesystem utilities'
 arch=(x86_64 powerpc64le powerpc riscv64)
-arch=(powerpc)
 license=('GPL' 'LGPL' 'MIT')
 url='http://e2fsprogs.sourceforge.net'
 options=('debug')
@@ -31,8 +30,6 @@ prepare() {
 build() {
   cd "${srcdir}/${pkgbase}-${pkgver}"
 
-  [ "${CARCH}" = 'powerpc' ] && PLATFORM_FLAGS="--enable-static"
-
   ./configure \
       --prefix=/usr \
       --with-root-prefix='' \
@@ -42,7 +39,7 @@ build() {
       --disable-fsck \
       --disable-uuidd \
       --disable-libuuid \
-      --disable-libblkid ${PLATFORM_FLAGS}
+      --disable-libblkid
   make
 
   # regenerate locale files
@@ -52,6 +49,9 @@ build() {
 
 package_e2fsprogs() {
   depends=('sh' 'util-linux-libs')
+  optdepends=('lvm2: for e2scrub'
+              'util-linux: for e2scrub'
+              'smtp-forwarder: for e2scrub_fail script')
   provides=('libcom_err.so'
             'libe2p.so'
             'libext2fs.so'
@@ -68,14 +68,11 @@ package_e2fsprogs() {
   sed -i -e 's/^AWK=.*/AWK=awk/' "${pkgdir}/usr/bin/compile_et"
 
   # remove references to build directory
-  sed -i -e 's#^SS_DIR=.*#SS_DIR="/usr/share/ss"#' "${pkgdir}/usr/bin/mk_cmds"
-  sed -i -e 's#^ET_DIR=.*#ET_DIR="/usr/share/et"#' "${pkgdir}/usr/bin/compile_et"
+  sed -i -e 's#^DIR=.*#DIR="/usr/share/ss"#' "${pkgdir}/usr/bin/mk_cmds"
+  sed -i -e 's#^DIR=.*#DIR="/usr/share/et"#' "${pkgdir}/usr/bin/compile_et"
 
   # remove static libraries with a shared counterpart
-  rm -v "${pkgdir}"/usr/lib/lib{com_err,e2p,ss}.a
-
-  # yaboot needs this
-  [ "${CARCH}" != 'powerpc' ] && rm "${pkgdir}"/usr/lib/libext2fs.a
+  rm "${pkgdir}"/usr/lib/lib{com_err,e2p,ext2fs,ss}.a
 
   # remove fuse2fs which will be packaged separately
   rm "${pkgdir}"/usr/{bin/fuse2fs,share/man/man1/fuse2fs.1}
