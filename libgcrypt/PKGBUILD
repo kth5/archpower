@@ -7,7 +7,7 @@
 
 pkgname=libgcrypt
 pkgver=1.10.1
-pkgrel=1
+pkgrel=1.1
 pkgdesc="General purpose cryptographic library based on the code from GnuPG"
 arch=(x86_64 powerpc64le powerpc riscv64)
 url="https://www.gnupg.org"
@@ -23,6 +23,7 @@ validpgpkeys=('6DAA6E64A76D2840571B4902528897B826403ADA') # "Werner Koch (dist s
 prepare() {
   cd "${pkgname}"-${pkgver}
 
+
   # tests fail due to systemd+libseccomp preventing memory syscalls when building in chroots
   #  t-secmem: line 176: gcry_control (GCRYCTL_INIT_SECMEM, pool_size, 0) failed: General error
   #  FAIL: t-secmem
@@ -35,6 +36,18 @@ prepare() {
 
 build() {
   cd "${pkgname}"-${pkgver}
+
+  case "${CARCH}" in
+    powerpc)
+      # prevent AltiVec and VSX to slip in to not break
+      # older PowerPC CPUs
+      local -x gcry_cv_cc_ppc_altivec=no
+      local -x gcry_cv_cc_ppc_altivec_cflags=no
+      local -x cry_cv_gcc_inline_asm_ppc_altivec=no
+      local -x gcry_cv_gcc_inline_asm_ppc_arch_3_00=no
+    ;;
+  esac
+
   ./configure --prefix=/usr \
 	--disable-static \
 	--disable-padlock-support
