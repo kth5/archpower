@@ -1,0 +1,64 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Anatol Pomozov
+# Contributor: Byron Clark <byron@theclarkfamily.name>
+
+# This package contains only thrift compiler and C/C++ libraries
+# for all the language binding one should use corresponding language-specific package manager:
+# CPAN for perl, gem for ruby, pip for python etc... Or better to create arch packages that install
+# the binding from the language specific managers python2-thrift, perl-thrift, ruby-thrift, ...
+
+pkgname=thrift
+pkgver=0.16.0
+pkgrel=1
+pkgdesc='Scalable cross-language services framework for IPC/RPC'
+arch=(x86_64 powerpc64le powerpc riscv64)
+url='https://thrift.apache.org'
+license=(APACHE)
+depends=(gcc-libs openssl)
+makedepends=(qt5-base boost libevent emacs-nox cmake)
+optdepends=(
+  'qt5-base: TQTcpServer (Qt5) support'
+)
+source=(thrift-$pkgver.zip::https://github.com/apache/thrift/archive/v$pkgver.zip)
+sha1sums=('116830ef5ac88e9086dbebe6edad075015442ff4')
+
+build() {
+  cd thrift-$pkgver
+  _cmake_args=(
+    -DCMAKE_INSTALL_PREFIX=/usr
+    -DBUILD_CPP=ON
+    -DBUILD_C_GLIB=ON
+    -DWITH_ZLIB=ON
+    -DWITH_JAVA=OFF
+    -DWITH_JAVASCRIPT=OFF
+    -DWITH_LIBEVENT=ON
+    -DWITH_NODEJS=OFF
+    -DWITH_OPENSSL=ON
+    -DWITH_PYTHON=OFF
+    -DWITH_QT5=ON
+    -Wno-dev
+  )
+
+  case "${CARCH}" in
+    powerpc|riscv64) _cmake_args+=(-DCMAKE_CXX_FLAGS="-latomic") ;;
+  esac
+
+  cmake . ${_cmake_args[@]}
+  make
+
+  emacs -Q --batch -f batch-byte-compile contrib/thrift.el
+}
+
+check() {
+  cd thrift-$pkgver
+#  make check
+}
+
+package() {
+  cd thrift-$pkgver
+  make DESTDIR="$pkgdir" install
+
+  install -m0644 -D contrib/thrift.vim "$pkgdir"/usr/share/vim/vimfiles/syntax/thrift.vim
+  install -m0644 -D contrib/thrift.el "$pkgdir"/usr/share/emacs/site-lisp/thrift.el
+  install -m0644 -D contrib/thrift.elc "$pkgdir"/usr/share/emacs/site-lisp/thrift.elc
+}

@@ -4,31 +4,45 @@
 # Contributor: damir <damir@archlinux.org>
 
 pkgname=netcdf
-pkgver=4.8.1
-pkgrel=3
+pkgver=4.9.0
+pkgrel=2
 pkgdesc="network Common Data Form interface for array-oriented data access and corresponding library"
 arch=(x86_64 powerpc64le powerpc riscv64)
 url="https://www.unidata.ucar.edu/software/netcdf/"
-depends=(hdf5 curl)
+depends=(hdf5 curl libxml2)
 makedepends=(cmake)
 checkdepends=(unzip)
 optdepends=('netcdf-fortran: fortran bindings' 'netcdf-cxx: c++ bindings')
 options=(!makeflags)
 license=(custom)
-source=(https://github.com/Unidata/netcdf-c/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz)
-sha256sums=('bc018cc30d5da402622bf76462480664c6668b55eb16ba205a0dfb8647161dd0')
+source=(https://github.com/Unidata/netcdf-c/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz
+        netcdf-4.9.0-fix-cmake-typo.patch::https://patch-diff.githubusercontent.com/raw/Unidata/netcdf-c/pull/2412.patch
+        netcdf-4.9.0-read-chunk-size.patch::https://patch-diff.githubusercontent.com/raw/Unidata/netcdf-c/pull/2319.patch)
+sha256sums=('9f4cb864f3ab54adb75409984c6202323d2fc66c003e5308f3cdf224ed41c0a6'
+            'ed45ae6c49cf8dcddaadef4c5cf403049bf3f761187413d7b03754d319345d6a'
+            'd71b441b6499d6ddb97ea25377018000781d16de6551f0d2ba33b9bcd6e769fd')
+
+prepare() {
+  # https://github.com/Unidata/netcdf-c/issues/2188 https://github.com/Unidata/netcdf-c/issues/2242
+  sed -i "/tst_remote3/d" ${pkgname}-c-${pkgver}/ncdap_test/CMakeLists.txt
+  # https://github.com/Unidata/netcdf-c/issues/2390
+  patch -p1 -d ${pkgname}-c-${pkgver} < netcdf-4.9.0-fix-cmake-typo.patch
+  # https://github.com/Unidata/netcdf-c/issues/2418
+  patch -p1 -d ${pkgname}-c-${pkgver} < netcdf-4.9.0-read-chunk-size.patch
+}
 
 build() {
-   case "${CARCH}" in
-     powerpc64le|x86_64) EXTRA_CMAKE_FLAGS="-DENABLE_CDF5=ON" ;;
-   esac
-      
-   cmake -B build -S ${pkgname}-c-${pkgver} \
+  case "${CARCH}" in
+    powerpc64le|x86_64) EXTRA_CMAKE_FLAGS="-DENABLE_CDF5=ON" ;;
+  esac
+
+  cmake -B build -S ${pkgname}-c-${pkgver} \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_INSTALL_LIBDIR=lib \
     -DCMAKE_BUILD_TYPE=Release \
     -DENABLE_BYTERANGE=ON \
-    -DENABLE_DAP_LONG_TESTS=OFF \
+    -DENABLE_DAP_LONG_TESTS=ON \
+    -DENABLE_DAP_REMOTE_TESTS=ON \
     -DENABLE_EXAMPLE_TESTS=ON \
     -DENABLE_EXTRA_TESTS=ON \
     -DENABLE_FILTER_TESTING=ON \

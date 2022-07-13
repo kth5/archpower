@@ -4,7 +4,7 @@
 # Contributor: Jakub Schmidtke <sjakub@gmail.com>
 
 pkgname=firefox
-pkgver=101.0.1
+pkgver=102.0
 pkgrel=1
 pkgdesc="Standalone web browser from mozilla.org"
 arch=(x86_64 powerpc64le riscv64)
@@ -22,6 +22,7 @@ optdepends=('networkmanager: Location detection via available WiFi networks'
             'hunspell-en_US: Spell checking, American English')
 options=(!emptydirs !makeflags strip !distcc !ccache)
 source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-$pkgver.source.tar.xz{,.asc}
+        zstandard-0.18.0.diff
         $pkgname.desktop
         identity-icons-brand.svg
         firefox-powerpc-clang.patch
@@ -30,13 +31,16 @@ source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-
         flac-no-ffvpx.patch
         avoid-redefinition.patch
         firefox-pgo.patch
-        riscv.patch
-        ppc.patch
-        Skia-table-titles-fading.patch
-        Skia-menu-fonts.patch
-        Skia-ConvolutionFilter.patch)
-sha256sums=('b4c76e8bdf81f473f3e56b2f69dbe5119bba5cab38e36ab0f3f38cf0cdc4a9c2'
+        skia-sucks3.patch
+        skia-sucks2.patch
+        skia-sucks1.patch
+        lto-thin.patch
+        sandbox-fork.patch
+        sandbox-largefile.patch
+        new-cbindgen-fix.patch)
+sha256sums=('01797f04bd8d65f4c7f628d7ce832bf52a0874433886e4d0d78ef33c1ca66abf'
             'SKIP'
+            'a6857ad2f2e2091c6c4fdcde21a59fbeb0138914c0e126df64b50a5af5ff63be'
             'a9e5264257041c0b968425b5c97436ba48e8d294e1a0f02c59c35461ea245c33'
             'a9b8b4a0a1f4a7b4af77d5fc70c2686d624038909263c795ecc81e0aec7711e9'
             'ad83c0c6195ab742848941be1d9c8f32c1d4a8bc019d8887b42256bafaefb541'
@@ -45,11 +49,13 @@ sha256sums=('b4c76e8bdf81f473f3e56b2f69dbe5119bba5cab38e36ab0f3f38cf0cdc4a9c2'
             '944fc690a0b344ea56ff2b0880ba492ba80338a68f31d0fb205b891a5de42cee'
             '3ebba6c6c59dbf754b522d2535c27eae3e724aab575b8e7be9658e0d33183bcf'
             '7337e2f9d82d7aa0625f442597989aa93e030750d1a7a87098fbf3d3f06bc69c'
-            'fab815cd1b67a7580cb58d16d87c48f928f9d4e93f555ea506211bf4c2d4a774'
-            'cea57582d6cd7c34e99226bccafc87dbf7368186a5d76eb0836d4ddbce3bc81f'
-            '895129290e71efa359f547552f99259e7e1c3b042c47397e90407942c2f59f24'
-            'd2e5974942f161eb43b158968ad8ea3184a9c0527169d0af7ef5e9ac126be0f7'
-            'ad3799ee347923572aee6ca2934779b26a88cfc0db444208f4b8015b976b203c')
+            '5a0fea05cf1828f102b0b73878a27c0d05b0cf21c81e1a2f463242a0d3121251'
+            'a4ad198fc98acb0a16a013f1ae0a09ab1b96d9b49eadc52045138de5ae2c5ee2'
+            'c36b73c23975ef72b6f562c4e9199e4958ea5083473926562b96ea255c08b148'
+            '59f29af746912d5bd74f7e253d54ce43696614fb8c2b8385ba0a5ab43f3c0e30'
+            'ef9bd794b322482ec7ba217da0cc7cf9e079e05e27bdb37b241b9e16551295ad'
+            'b6019e8b9e8e08d6e9ee7b68dc476a7430d18d8d754ab9d0c49ace10fea6f703'
+            'b8518fcee01177bbe33984d571dc55b5d7d0ebdf47590512479462365af096c0')
 validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
@@ -69,23 +75,28 @@ prepare() {
 sudo pacman --noconfirm -R ccache
   cd ${srcdir}/firefox-$pkgver
 
+  # Unbreak build with python-zstandard 0.18.0
+  patch -Np1 -i ../zstandard-0.18.0.diff
+
   patch -Np0 -i ${srcdir}/firefox-powerpc-clang.patch
+
+  # newer cbindgen breaks the build
+  patch -Np1 -i ${srcdir}/new-cbindgen-fix.patch
 
   # sourced from Voidlinux, thanks!
   patch -Np0 -i ${srcdir}/big-endian-image-decoders.patch
   patch -Np0 -i ${srcdir}/fix-image-format-warning.patch
   patch -Np0 -i ${srcdir}/flac-no-ffvpx.patch
   patch -Np0 -i ${srcdir}/avoid-redefinition.patch
+  patch -Np1 -i ${srcdir}/skia-sucks3.patch
+  patch -Np1 -i ${srcdir}/skia-sucks2.patch
+  patch -Np1 -i ${srcdir}/skia-sucks1.patch
+  patch -Np1 -i ${srcdir}/lto-thin.patch
+  patch -Np1 -i ${srcdir}/sandbox-fork.patch
+  patch -Np1 -i ${srcdir}/sandbox-largefile.patch
 
   # Talospace goodness
   patch -Np1 -i ${srcdir}/firefox-pgo.patch
-
-  # sourced from T2 SDE, thanks!
-  #patch -Np1 -i ${srcdir}/riscv.patch
-  patch -Np1 -i ${srcdir}/ppc.patch
-  patch -Np1 -i ${srcdir}/Skia-table-titles-fading.patch
-  patch -Np1 -i ${srcdir}/Skia-menu-fonts.patch
-  patch -Np1 -i ${srcdir}/Skia-ConvolutionFilter.patch
 
   sed -i 's/\("files":{\)[^}]*/\1/' third_party/rust/num-traits/.cargo-checksum.json
 
