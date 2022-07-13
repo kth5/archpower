@@ -5,12 +5,9 @@
 # Contributor: Andreas Radke <andyrtr@archlinux.org>
 
 pkgbase=mesa
-pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
-case "${CARCH}" in
-  powerpc64le|riscv64|x86_64) pkgname+=(vulkan-swrast) ;;
-esac
+pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'libva-mesa-driver' 'vulkan-swrast' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=21.3.7
+pkgver=21.3.9
 pkgrel=1
 arch=(powerpc)
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
@@ -24,7 +21,7 @@ source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
         0001-amd-common-Add-missing-line-from-backport-for-cohere.patch
         0002-big-endian-flipping.patch)
-sha512sums=('0991543e9435457fa4d077517408b3f197be32ed61a6c7ca34ddb3906eed208791f1a57227f74115f99df18e612efab1d2c6809b7cf426d273633b53d4aefc88'
+sha512sums=('4cec6f4f50f444fcd327f7c40f8899c2f265e348e121455262b540b1f890a1468bbea59965af0876c548fa97aa0a05a1b23fa6ca7d308bd60328cfdeab757684'
             'SKIP'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
             'f47c227dc888f2030491eaad42d42150539f2c9fc3bbc76d0fd46dc2d85482f520d929b01314cabb963dd36cc3729967f40c7bbfde28fc655024ef52d9fc71b7'
@@ -43,29 +40,13 @@ prepare() {
 }
 
 build() {
-  GALLIUM_DRV="r300,r600,radeonsi,nouveau,virgl,swrast,zink"
-  VULKAN_DRV="amd,swrast"
-
-  case "${CARCH}" in
-    powerpc) 
-      EXTRA_MESON_FLAGS="-D draw-use-llvm=false -D power8=false" 
-      GALLIUM_DRV="r300,r600,radeonsi,nouveau"  
-      VULKAN_DRV="amd"
-    ;;
-    powerpc64le) 
-      EXTRA_MESON_FLAGS="-D power8=true -D gallium-nine=true -D osmesa=true" ;;
-    *)
-      EXTRA_MESON_FLAGS="-D gallium-nine=true -D osmesa=true"
-    ;;
-  esac
-	
   arch-meson mesa-$pkgver build \
     -D b_lto=false \
     -D b_ndebug=true \
     -D platforms=x11,wayland \
-    -D gallium-drivers=${GALLIUM_DRV} \
+    -D gallium-drivers=r300,r600,radeonsi,nouveau,swrast,zink \
     -D dri-drivers=r100,r200,nouveau \
-    -D vulkan-drivers=${VULKAN_DRV} \
+    -D vulkan-drivers=amd,swrast \
     -D vulkan-layers=device-select,overlay \
     -D dri3=enabled \
     -D egl=enabled \
@@ -87,7 +68,10 @@ build() {
     -D shared-glapi=enabled \
     -D microsoft-clc=disabled \
     -D valgrind=enabled \
-    -D cpp_st=gnu++14 ${EXTRA_MESON_FLAGS}
+    -D cpp_st=gnu++14 \
+    -D draw-use-llvm=true \
+    -D power8=false \
+    -D osmesa=true
 
   # Print config
   meson configure build
@@ -143,6 +127,7 @@ package_vulkan-radeon() {
   optdepends=('vulkan-mesa-layers: additional vulkan layers')
   provides=('vulkan-driver')
 
+  _install fakeinstall/usr/share/drirc.d/00-radv-defaults.conf
   _install fakeinstall/usr/share/vulkan/icd.d/radeon_icd*.json
   _install fakeinstall/usr/lib/libvulkan_radeon.so
 
