@@ -6,7 +6,7 @@
 pkgbase='grpc'
 pkgname=('grpc' 'php-grpc' 'php7-grpc' 'grpc-cli')
 [[ ! "${CARCH}" = 'powerpc' ]] && pkgname+=('python-grpcio')
-pkgver=1.46.3
+pkgver=1.47.0
 _gtestver=0e402173c97aea7a00749e825b194bfede4f2e45
 pkgrel=1
 pkgdesc="High performance, open source, general RPC framework that puts mobile and HTTP/2 first."
@@ -17,26 +17,23 @@ makedepends=('re2' 're2c' 'protobuf' 'php' 'php7' 'c-ares' 'openssl' 'chrpath' '
              'cmake' 'benchmark' 'python-setuptools' 'abseil-cpp' 'ninja' 'python-six')
 options=('debug')
 source=("https://github.com/grpc/grpc/archive/v$pkgver/$pkgbase-$pkgver.tar.gz"
-        "https://github.com/google/googletest/archive/$_gtestver/googletest-$_gtestver.tar.gz"
-        "python-grpcio-use-system-abseil.patch")
+	"https://github.com/google/googletest/archive/$_gtestver/googletest-$_gtestver.tar.gz")
 sha256sums=('d6cbf22cb5007af71b61c6be316a79397469c58c82a942552a62e708bce60964'
-            'c8de6c60e12ad014a28225c5247ee735861d85cf906df617f6a29954ca05f547'
-            '3cfb289266f9d2697b917e4400f18a6592f95a99e658e401c1332870b219358b')
-
-case "${CARCH}" in
-  powerpc) export EXTRA_CMAKE_FLAGS="-DCMAKE_CXX_STANDARD_LIBRARIES=-latomic"
-  ;;
-esac
+            'c8de6c60e12ad014a28225c5247ee735861d85cf906df617f6a29954ca05f547')
 
 prepare() {
   cd "$srcdir/$pkgbase-$pkgver"
-  patch -Np1 -i ../python-grpcio-use-system-abseil.patch
 
   ln -sf "$srcdir/googletest-$_gtestver/"{googlemock,googletest} \
     third_party/googletest
 
   cp -a src/php{,7}
 
+  case "${CARCH}" in
+    powerpc|riscv64) _cmake_options+=(-DCMAKE_CXX_FLAGS="-latomic") ;;
+  esac
+
+  CC=${CC} CXX=${CXX} \
   cmake -Bbuild \
     -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_CXX_FLAGS="${CXXFLAGS} -DNDEBUG" \
@@ -65,7 +62,7 @@ prepare() {
     -DgRPC_BUILD_GRPC_PHP_PLUGIN=ON \
     -DgRPC_BUILD_GRPC_PYTHON_PLUGIN=ON \
     -DgRPC_BUILD_GRPC_RUBY_PLUGIN=ON \
-    -GNinja ${EXTRA_CMAKE_FLAGS}
+    -GNinja ${_cmake_options[@]}
 }
 
 build() {
@@ -186,3 +183,5 @@ package_grpc-cli() {
   install -Dm0755 build/grpc_cli "$pkgdir/usr/bin/grpc_cli"
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
+sha256sums=('271bdc890bf329a8de5b65819f0f9590a5381402429bca37625b63546ed19e54'
+            'c8de6c60e12ad014a28225c5247ee735861d85cf906df617f6a29954ca05f547')
