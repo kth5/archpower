@@ -1,17 +1,18 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
 pkgbase=linux-ppc64
-pkgver=5.18.12.arch1
+pkgver=5.18.14.arch1
 pkgrel=1
-pkgdesc='Linux'
+pkgdesc='Linux (powerpc64)'
 _srctag=v${pkgver%.*}-${pkgver##*.}
-url="https://git.archlinux.org/linux.git/log/?h=$_srctag"
+url="https://github.com/archlinux/linux/commits/$_srctag"
 arch=(any)
 license=(GPL2)
 makedepends=(
-  bc kmod libelf pahole git
-  powerpc64-unknown-linux-gnu-gcc
+  bc libelf pahole cpio perl tar xz
+  xmlto python-sphinx python-sphinx_rtd_theme graphviz imagemagick texlive-latexextra
+  git powerpc64-unknown-linux-gnu-gcc
 )
 options=('!strip')
 _srcname=archlinux-linux
@@ -19,6 +20,7 @@ source=(
   "$_srcname::git+https://github.com/archlinux/linux?signed#tag=$_srctag"
   config         # the main kernel config file
   linux-powerpc-binutils-2.38.patch
+  ppc-radeon-qw-pm.patch
 )
 validpgpkeys=(
   'ABAF11C65A2970B130ABE3C479BE3E4300411886'  # Linus Torvalds
@@ -28,15 +30,17 @@ validpgpkeys=(
 )
 sha256sums=('SKIP'
             'bb6e1ba7bc478eb06d6566bd325770d886fd4960ba6f6a2a3720cd2be8f8c699'
-            'c30e372bcf445bb40521a1568c69fc9d6d3c08c2d1a8a3e539c9b186b7b5ff38')
+            'c30e372bcf445bb40521a1568c69fc9d6d3c08c2d1a8a3e539c9b186b7b5ff38'
+            '07dbbf3e8f743e8d2ad90891a8b567392271db139e339529df1ab4387e0e6400')
+
 export KBUILD_BUILD_HOST=archpower
 export KBUILD_BUILD_USER=$pkgbase
 export KBUILD_BUILD_TIMESTAMP="$(date -Ru${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH})"
-
-export MYARCH="powerpc"
+export KARCH="powerpc"
 
 prepare() {
   cd $_srcname
+
   echo "Setting version..."
   scripts/setlocalversion --save-scmversion
   echo "-$pkgrel" > localversion.10-pkgrel
@@ -51,32 +55,26 @@ prepare() {
     patch -Np1 < "../$src"
   done
 
-  mkdir -p ${srcdir}/gcc
-  for fn in gcc cc g++ c++; do
-    ln -sf /usr/bin/ccache ${srcdir}/gcc/powerpc64-linux-gnu-${fn}
-  done
-  export PATH=${srcdir}/gcc:${PATH}
-
   echo "Setting config..."
   cp ../config .config
-  ARCH=${MYARCH} CROSS_COMPILE=powerpc64-unknown-linux-gnu- make oldconfig
+  ARCH=${KARCH} CROSS_COMPILE=powerpc64-unknown-linux-gnu- make oldconfig
 
-  ARCH=${MYARCH} CROSS_COMPILE=powerpc64-unknown-linux-gnu- make -s kernelrelease > version
+  ARCH=${KARCH} CROSS_COMPILE=powerpc64-unknown-linux-gnu- make -s kernelrelease > version
   echo "Prepared $pkgbase version $(<version)"
 }
 
 build() {
   cd $_srcname
-  ARCH=${MYARCH} CROSS_COMPILE=powerpc64-unknown-linux-gnu- make all
+  ARCH=${KARCH} CROSS_COMPILE=powerpc64-unknown-linux-gnu- make htmldocs all
 }
 
 _package() {
   pkgdesc="The $pkgdesc kernel and modules"
   depends=(coreutils kmod initramfs)
-  optdepends=('crda: to set the correct wireless channels of your country'
+  optdepends=('wireless-regdb: to set the correct wireless channels of your country'
               'linux-firmware: firmware images needed for some devices')
-  provides=(WIREGUARD-MODULE)
-  replaces=(wireguard-arch)
+  provides=(VIRTUALBOX-GUEST-MODULES WIREGUARD-MODULE)
+  replaces=(virtualbox-guest-modules-arch wireguard-arch)
 
   cd $_srcname
   local kernver="$(<version)"
@@ -85,13 +83,14 @@ _package() {
   echo "Installing boot image..."
   # systemd expects to find the kernel here to allow hibernation
   # https://github.com/systemd/systemd/commit/edda44605f06a41fb86b7ab8128dcf99161d2344
-  install -Dm644 "$(ARCH=${MYARCH} CROSS_COMPILE=powerpc64-unknown-linux-gnu- make -s image_name)" "$modulesdir/vmlinuz"
+  install -Dm644 "$(make -s image_name)" "$modulesdir/vmlinuz"
 
   # Used by mkinitcpio to name the kernel
   echo "$pkgbase" | install -Dm644 /dev/stdin "$modulesdir/pkgbase"
 
   echo "Installing modules..."
-  ARCH=${MYARCH} CROSS_COMPILE=powerpc64-unknown-linux-gnu- make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 modules_install
+  ARCH=${KARCH} CROSS_COMPILE=powerpc64-unknown-linux-gnu- make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
+    DEPMOD=/doesnt/exist modules_install  # Suppress depmod
 
   # remove build and source links
   rm "$modulesdir"/{source,build}
@@ -99,8 +98,7 @@ _package() {
 
 _package-headers() {
   pkgdesc="Headers and scripts for building modules for the $pkgdesc kernel"
-  provides=('linux-headers')
-  conflicts=('linux-headers')
+  depends=(pahole)
 
   cd $_srcname
   local builddir="$pkgdir/usr/lib/modules/$(<version)/build"
@@ -109,31 +107,35 @@ _package-headers() {
   install -Dt "$builddir" -m644 .config Makefile Module.symvers System.map \
     localversion.* version vmlinux
   install -Dt "$builddir/kernel" -m644 kernel/Makefile
-  install -Dt "$builddir/arch/${MYARCH}" -m644 arch/${MYARCH}/Makefile
+  install -Dt "$builddir/arch/${KARCH}" -m644 arch/${KARCH}/Makefile
   cp -t "$builddir" -a scripts
 
-  # add objtool for external module building and enabled VALIDATION_STACK option
-  [ "${CARCH}" == "x86_64" ] && \
+  if [ "${CARCH}" == "x86_64" ]; then
+    # required when STACK_VALIDATION is enabled
     install -Dt "$builddir/tools/objtool" tools/objtool/objtool
 
-  # add xfs and shmem for aufs building
-  mkdir -p "$builddir"/{fs/xfs,mm}
+    # required when DEBUG_INFO_BTF_MODULES is enabled
+    install -Dt "$builddir/tools/bpf/resolve_btfids" tools/bpf/resolve_btfids/resolve_btfids
+  fi
 
   echo "Installing headers..."
   cp -t "$builddir" -a include
-  cp -t "$builddir/arch/${MYARCH}" -a arch/${MYARCH}/include
-  install -Dt "$builddir/arch/${MYARCH}/kernel" -m644 arch/${MYARCH}/kernel/asm-offsets.s
+  cp -t "$builddir/arch/${KARCH}" -a arch/${KARCH}/include
+  install -Dt "$builddir/arch/${KARCH}/kernel" -m644 arch/${KARCH}/kernel/asm-offsets.s
 
   install -Dt "$builddir/drivers/md" -m644 drivers/md/*.h
   install -Dt "$builddir/net/mac80211" -m644 net/mac80211/*.h
 
-  # http://bugs.archlinux.org/task/13146
+  # https://bugs.archlinux.org/task/13146
   install -Dt "$builddir/drivers/media/i2c" -m644 drivers/media/i2c/msp3400-driver.h
 
-  # http://bugs.archlinux.org/task/20402
+  # https://bugs.archlinux.org/task/20402
   install -Dt "$builddir/drivers/media/usb/dvb-usb" -m644 drivers/media/usb/dvb-usb/*.h
   install -Dt "$builddir/drivers/media/dvb-frontends" -m644 drivers/media/dvb-frontends/*.h
   install -Dt "$builddir/drivers/media/tuners" -m644 drivers/media/tuners/*.h
+
+  # https://bugs.archlinux.org/task/71392
+  install -Dt "$builddir/drivers/iio/common/hid-sensors" -m644 drivers/iio/common/hid-sensors/*.h
 
   echo "Installing KConfig files..."
   find . -name 'Kconfig*' -exec install -Dm644 {} "$builddir/{}" \;
@@ -141,7 +143,7 @@ _package-headers() {
   echo "Removing unneeded architectures..."
   local arch
   for arch in "$builddir"/arch/*/; do
-    [[ $arch = */${MYARCH}/ ]] && continue
+    [[ $arch = */${KARCH}/ ]] && continue
     echo "Removing $(basename "$arch")"
     rm -r "$arch"
   done
@@ -178,7 +180,26 @@ _package-headers() {
   ln -sr "$builddir" "$pkgdir/usr/src/$pkgbase"
 }
 
-pkgname=("$pkgbase" "$pkgbase-headers")
+_package-docs() {
+  pkgdesc="Documentation for the $pkgdesc kernel"
+
+  cd $_srcname
+  local builddir="$pkgdir/usr/lib/modules/$(<version)/build"
+
+  echo "Installing documentation..."
+  local src dst
+  while read -rd '' src; do
+    dst="${src#Documentation/}"
+    dst="$builddir/Documentation/${dst#output/}"
+    install -Dm644 "$src" "$dst"
+  done < <(find Documentation -name '.*' -prune -o ! -type d -print0)
+
+  echo "Adding symlink..."
+  mkdir -p "$pkgdir/usr/share/doc"
+  ln -sr "$builddir/Documentation" "$pkgdir/usr/share/doc/$pkgbase"
+}
+
+pkgname=("$pkgbase" "$pkgbase-headers" "$pkgbase-docs")
 for _p in "${pkgname[@]}"; do
   eval "package_$_p() {
     $(declare -f "_package${_p#$pkgbase}")
