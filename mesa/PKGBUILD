@@ -7,13 +7,13 @@
 pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=22.1.2
-pkgrel=3
-arch=(x86_64 powerpc64le riscv64)
+pkgver=22.1.3
+pkgrel=1
+arch=(x86_64 powerpc64le powerpc riscv64)
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd' 'elfutils' 'llvm'
              'libomxil-bellagio' 'libclc' 'clang' 'libglvnd' 'libunwind' 'lm_sensors' 'libxrandr'
-             'valgrind' 'glslang' 'vulkan-icd-loader' 'directx-headers' 'cmake' 'meson')
+             'systemd' 'valgrind' 'glslang' 'vulkan-icd-loader' 'directx-headers' 'cmake' 'meson')
 url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
@@ -21,7 +21,7 @@ source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0001-amd-common-Add-missing-line-from-backport-for-cohere.patch
         0002-big-endian-flipping.patch)
 options=('debug')
-sha512sums=('2bcce3dcb6f151de7717153a0745c1c754dec7e63dae6923a2123d2149562f13ef8faaa0f15e54c434e80b0562932a8cf8be007d181777c82ccf7a1b1bb621cc'
+sha512sums=('e7348839eb37de89c90d21277a7cbb42ee673ad6c656177853f6d35db99556dbac29867712222342d902b4fa67df5687c9d543bad99c81bcd0ecfb7f08f37480'
             'SKIP'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
             'f47c227dc888f2030491eaad42d42150539f2c9fc3bbc76d0fd46dc2d85482f520d929b01314cabb963dd36cc3729967f40c7bbfde28fc655024ef52d9fc71b7'
@@ -41,6 +41,10 @@ prepare() {
 
 build() {
   mkdir -p ${srcdir}/tmp
+  # Build only minimal debug info to reduce size
+  CFLAGS+=' -g1'
+  CXXFLAGS+=' -g1'
+
   export TMPDIR=${srcdir}/tmp
 
   arch-meson mesa-$pkgver build \
@@ -110,7 +114,7 @@ package_vulkan-mesa-layers() {
 
 package_opencl-mesa() {
   pkgdesc="OpenCL support for AMD/ATI Radeon mesa drivers"
-  depends=('libdrm' 'libclc' 'clang')
+  depends=('libdrm' 'libclc' 'clang' 'expat')
   optdepends=('opencl-headers: headers necessary for OpenCL development')
   provides=('opencl-driver')
 
@@ -123,10 +127,11 @@ package_opencl-mesa() {
 
 package_vulkan-radeon() {
   pkgdesc="Radeon's Vulkan mesa driver"
-  depends=('wayland' 'libx11' 'libxshmfence' 'libelf' 'libdrm' 'llvm-libs')
+  depends=('wayland' 'libx11' 'libxshmfence' 'libelf' 'libdrm' 'llvm-libs' 'systemd-libs')
   optdepends=('vulkan-mesa-layers: additional vulkan layers')
   provides=('vulkan-driver')
 
+  _install fakeinstall/usr/share/drirc.d/00-radv-defaults.conf
   _install fakeinstall/usr/share/vulkan/icd.d/radeon_icd*.json
   _install fakeinstall/usr/lib/libvulkan_radeon.so
 
@@ -135,7 +140,7 @@ package_vulkan-radeon() {
 
 package_vulkan-swrast() {
   pkgdesc="Vulkan software rasteriser driver"
-  depends=('wayland' 'libx11' 'libxshmfence' 'libdrm' 'zstd' 'llvm-libs')
+  depends=('wayland' 'libx11' 'libxshmfence' 'libdrm' 'zstd' 'llvm-libs' 'systemd-libs' 'libunwind')
   optdepends=('vulkan-mesa-layers: additional vulkan layers')
   conflicts=('vulkan-mesa')
   replaces=('vulkan-mesa')
