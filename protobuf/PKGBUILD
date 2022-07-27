@@ -10,42 +10,44 @@
 
 pkgbase='protobuf'
 pkgname=('protobuf' 'python-protobuf')
-pkgver=3.20.1
-pkgrel=2
+pkgver=21.3
+pkgrel=1
 pkgdesc="Protocol Buffers - Google's data interchange format"
 arch=(x86_64 powerpc64le powerpc riscv64)
 url='https://developers.google.com/protocol-buffers/'
 license=('BSD')
 depends=('gcc-libs' 'glibc' 'zlib')
-makedepends=('unzip' 'python-setuptools')
-source=("https://github.com/protocolbuffers/$pkgname/releases/download/v$pkgver/$pkgname-all-$pkgver.tar.gz"
-         https://github.com/protocolbuffers/protobuf/commit/b180b280.patch)
-sha512sums=('8b32f944be76a4713084a9b18664d17bb6947fafa10412ebaf98f1cebb0e7650e0d9389d9bbb1d53df6c6e96c44467ec2e52cf1740b4e091ddb5f2c0ae9aa742'
-            '4b64418216b2e776a5471df887278b798385788c4de92e5c176f8b3505e5b522251fc45ae57b3f139ab4bf51b0d320c5bd4a655dd98c1b1da4b3347d0e3ba7f5')
+makedepends=('python-setuptools' 'cmake' 'gtest')
+source=(https://github.com/protocolbuffers/protobuf/archive/v$pkgver/$pkgname-$pkgver.tar.gz
+        protobuf-assertion-powerpc.patch)
+sha512sums=('0bbce4dca03c554d5ada37055a3f9eb009c8413046a29211b751a87936330be32f2c2d18ae3c3d4cf50c9f29f5adb1142037140fafec116db9ee4941b3f8805d')
 
 prepare() {
-  cd "$pkgbase-$pkgver"
-  autoreconf -vfi
-
-# Don't fail tests on deprecation warnings
-  sed -e "/DeprecationWarning/d" -i python/google/protobuf/internal/*test.py
-
-  patch -p1 -i ../b180b280.patch # Fix broken generated code with GCC 12.1
+  cd ${srcdir}/${pkgname}-${pkgver}
+  [ "${CARCH}" = 'powerpc' ] && patch -Np1 -i ${srcdir}/protobuf-assertion-powerpc.patch
 }
 
 build() {
-  cd "$pkgbase-$pkgver"
-  ./configure --prefix=/usr
-  make
-  cd python
+  case "${CARCH}" in
+    powerpc) export LDFLAGS+=' -latomic'
+  esac
+
+  cmake -B build -S $pkgbase-$pkgver \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -Dprotobuf_USE_EXTERNAL_GTEST=ON \
+    -Dprotobuf_BUILD_SHARED_LIBS=ON
+  cmake --build build
+
+  ln -rs build $pkgbase-$pkgver/src/.libs
+  cd $pkgbase-$pkgver/python
+  PROTOC="$srcdir"/build/protoc \
   python setup.py build --cpp_implementation
 }
 
 check() {
-  cd "$pkgbase-$pkgver"
-  make check
+  cmake --build build --target check
 
-  cd python
+  cd $pkgbase-$pkgver/python
   python setup.py test
 }
 
@@ -53,9 +55,9 @@ package_protobuf() {
   replaces=('protobuf-cpp')
   provides=('libprotoc.so' 'libprotobuf.so' 'libprotobuf-lite.so')
 
-  cd "$pkgbase-$pkgver"
-  make DESTDIR="$pkgdir" install
+  DESTDIR="$pkgdir" cmake --install build
 
+  cd $pkgbase-$pkgver
   install -vDm 644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
   install -vDm 644 editors/protobuf-mode.el \
     -t "$pkgdir/usr/share/emacs/site-lisp/"
@@ -79,3 +81,5 @@ package_python-protobuf() {
   )
   install -vDm 644 LICENSE -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
+sha512sums=('0bbce4dca03c554d5ada37055a3f9eb009c8413046a29211b751a87936330be32f2c2d18ae3c3d4cf50c9f29f5adb1142037140fafec116db9ee4941b3f8805d'
+            'e8f6dea62a4b5d000838cc0502f72ceadcbb956d6fd648d61ac3056eb1709da7ac28ffe46752980918584f3b4844cc2a0a91df9771a9acce6c302f542935134d')
