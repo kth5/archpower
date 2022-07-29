@@ -1,0 +1,57 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Andreas 'Segaja' Schleifer <segaja at archlinux dot org>
+
+_gemname='stringio'
+pkgname="ruby-${_gemname}"
+pkgver=3.0.2
+pkgrel=1
+pkgdesc='Pseudo `IO` class from/to `String`.'
+arch=(x86_64 powerpc64le powerpc riscv64)
+url='https://github.com/ruby/stringio'
+license=('BSD' 'RUBY')
+depends=('ruby')
+makedepends=('ruby-bundler' 'ruby-rake' 'ruby-rake-compiler')
+checkdepends=('ruby-test-unit')
+options=(!emptydirs)
+source=(
+    "${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('a9ac2820ce1c2bd55aac032be42a493a910787ed04bc41f35ec33b19ffd878c925dbbca49d6c27b07cea5ffb8fa98ecdb576738c9654587dea6842e3bd1f486c')
+
+prepare() {
+  cd "${_gemname}-${pkgver}"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
+
+  rm -v rakelib/changelogs.rake \
+      rakelib/epoch.rake
+}
+
+build() {
+  cd "${_gemname}-${pkgver}"
+
+  rake build
+}
+
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  rake test
+}
+
+package() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+  local _platform="$(gem env platform | cut -d':' -f2)"
+  local _extension_api_version="$(ruby -e'puts Gem.extension_api_version')"
+
+  gem install --ignore-dependencies --no-user-install --install-dir "${pkgdir}/${_gemdir}" --bindir "${pkgdir}/usr/bin" "pkg/${_gemname}-${pkgver}.gem"
+
+  rm "${pkgdir}/${_gemdir}/cache/${_gemname}-${pkgver}.gem" \
+      "${pkgdir}/${_gemdir}/gems/${_gemname}-${pkgver}/ext/stringio/Makefile" \
+      "${pkgdir}/${_gemdir}/extensions/${_platform}/${_extension_api_version}/${_gemname}-${pkgver}/gem_make.out"
+
+  install -Dm 644 LICENSE.txt "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm 644 COPYING README.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
