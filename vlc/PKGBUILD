@@ -9,7 +9,7 @@ _vlcver=3.0.17.4
 # optional fixup version including hyphen
 _vlcfixupver=
 pkgver=${_vlcver}${_vlcfixupver//-/.r}
-pkgrel=1
+pkgrel=6
 pkgdesc='Multi-platform MPEG, VCD/DVD, and DivX player'
 url='https://www.videolan.org/vlc/'
 arch=(x86_64 powerpc64le powerpc riscv64)
@@ -99,18 +99,18 @@ optdepends=('avahi: service discovery using bonjour protocol'
             'pcsclite: aribcam support')
 conflicts=('vlc-plugin')
 replaces=('vlc-plugin')
-options=(debug '!emptydirs')
+options=('debug' '!emptydirs')
 source=(https://download.videolan.org/${pkgname}/${_vlcver}/${pkgname}-${_vlcver}${_vlcfixupver}.tar.xz{,.asc}
+        $pkgname-dav1d-1.0.patch::https://github.com/videolan/vlc/commit/2202c892c8dc.patch
         update-vlc-plugin-cache.hook
         caca-fix-to-newer-version.patch
-        vlc-live-media-2021.patch
-        vlc-dav1d-1.0.patch)
+        vlc-live-media-2021.patch)
 sha512sums=('dac14c6586603c064294672eb878253e52b3a7bef431fb10303345e5400591b5c1f2d452a2af03f503db0ca186582a84be06fdf05ab011c33f7b0bd5389c51fb'
             'SKIP'
+            'd8c405f6295ff565cdbd00e4462b79a6f7ca09b55222f52e944ddb88c0effa846730fa628fda9b3acd67cef7fa33109af530cae03314a9315b84368462948448'
             'b247510ffeadfd439a5dadd170c91900b6cdb05b5ca00d38b1a17c720ffe5a9f75a32e0cb1af5ebefdf1c23c5acc53513ed983a736e8fa30dd8fad237ef49dd3'
             'ef479a246dc98f882a05ca56a1c2872cc67ced154c625790070b887858ddc250d55b1295db82c9122e5ecd3c2c9c712ec9718e28d0a9d21ff6a230eb6c5010ce'
-            'ad17d6f4f2cc83841c1c89623c339ec3ee94f6084ea980e2c8cbc3903854c85e5396e31bfd8dc90745b41794670903d854c4d282d8adec263087a9d47b226ccc'
-            'd8c405f6295ff565cdbd00e4462b79a6f7ca09b55222f52e944ddb88c0effa846730fa628fda9b3acd67cef7fa33109af530cae03314a9315b84368462948448')
+            'ad17d6f4f2cc83841c1c89623c339ec3ee94f6084ea980e2c8cbc3903854c85e5396e31bfd8dc90745b41794670903d854c4d282d8adec263087a9d47b226ccc')
 validpgpkeys=('65F7C6B4206BD057A7EB73787180713BE58D1ADC') # VideoLAN Release Signing Key
 
 prepare() {
@@ -133,6 +133,13 @@ prepare() {
 build() {
   cd ${pkgname}-${_vlcver}
 
+  case "${CARCH}" in
+    riscv64)
+      export CFLAGS+=" -latomic"
+      export CXXFLAGS+=" -latomic"
+    ;;
+  esac
+
   export CFLAGS+=" -I/usr/include/samba-4.0 -ffat-lto-objects"
   export CPPFLAGS+=" -I/usr/include/samba-4.0"
   export CXXFLAGS+=" -std=c++11"
@@ -141,13 +148,6 @@ build() {
   export LUA_LIBS="$(pkg-config --libs lua5.2)"
   export RCC=/usr/bin/rcc-qt5
   export PKG_CONFIG_PATH="/usr/lib/ffmpeg4.4/pkgconfig/:$PKG_CONFIG_PATH"
-
-  case "${CARCH}" in
-    riscv64)
-      export CFLAGS+=" -latomic"
-      export CXXFLAGS+=" -latomic"
-    ;;
-  esac
 
   ./configure \
     --prefix=/usr \
