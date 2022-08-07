@@ -5,16 +5,15 @@
 
 pkgbase=opencv
 pkgname=(opencv opencv-samples python-opencv)
-[ "${CARCH}" = 'x86_64' ] && pkgname+=(opencv-cuda)
-pkgver=4.5.5
-pkgrel=5
+[[ "${CARCH}" = 'x86_64' ]] && pkgname+=(opencv-cuda)
+pkgver=4.6.0
+pkgrel=3
 pkgdesc='Open Source Computer Vision Library'
 arch=(x86_64 powerpc64le powerpc riscv64)
 license=(BSD)
 url='https://opencv.org/'
-depends=(tbb openexr gst-plugins-base libdc1394 cblas lapack libgphoto2 openjpeg2 ffmpeg4.4 protobuf)
-makedepends=(cmake python-numpy python-setuptools mesa eigen hdf5 lapacke qt5-base vtk glew ant java-environment pugixml openmpi fmt
-             'java-environment=11')
+depends=(tbb openexr gst-plugins-base libdc1394 cblas lapack libgphoto2 openjpeg2 ffmpeg protobuf)
+makedepends=(cmake python-numpy python-setuptools mesa eigen hdf5 lapacke qt5-base vtk glew ant java-environment=11 pugixml openmpi fmt)
 makedepends_x86_64=(cudnn)
 optdepends=('opencv-samples: samples'
             'vtk: for the viz module'
@@ -26,8 +25,8 @@ optdepends=('opencv-samples: samples'
 source=(https://github.com/opencv/opencv/archive/$pkgver/$pkgname-$pkgver.tar.gz
         https://github.com/opencv/opencv_contrib/archive/$pkgver/opencv_contrib-$pkgver.tar.gz
         vtk9.patch)
-sha256sums=('a1cfdcf6619387ca9e232687504da996aaa9f7b5689986b8331ec02cb61d28ad'
-            'a97c2eaecf7a23c6dbd119a609c6d7fae903e5f9ff5f1fe678933e01c67a6c11'
+sha256sums=('1ec1cba65f9f20fe5a41fda1586e01c70ea0c9a6d7b67c9e13edf0cfe2239277'
+            '1777d5fd2b59029cf537e5fd6f8aa68d707075822f90bde683fcde086f85f7a7'
             'f35a2d4ea0d6212c7798659e59eda2cb0b5bc858360f7ce9c696c77d3029668e')
 
 prepare() {
@@ -35,10 +34,11 @@ prepare() {
 }
 
 build() {
-  export ANT_HOME="/usr/share/ant"
-  export JAVA_HOME="/usr/lib/jvm/java-11-openjdk"
-  export PATH=${PATH}:${JAVA_HOME}/bin
-  export PKG_CONFIG_PATH=/usr/lib/ffmpeg4.4/pkgconfig
+  case "${CARCH}" in
+    powerpc|rsicv64) CXXFLAGS+=' -lto' ;;
+  esac
+
+  export JAVA_HOME="/usr/lib/jvm/default"
   # cmake's FindLAPACK doesn't add cblas to LAPACK_LIBRARIES, so we need to specify them manually
   _opts="-DWITH_OPENCL=ON \
          -DWITH_OPENGL=ON \
@@ -67,10 +67,14 @@ build() {
          -DOPENCV_GENERATE_SETUPVARS=OFF \
          -DEIGEN_INCLUDE_PATH=/usr/include/eigen3"
  
+  case "${CARCH}" in
+    riscv64|powerpc) _opts+=' -DCMAKE_CXX_FLAGS="-latomic"' ;;
+  esac
+
   cmake -B build -S $pkgname-$pkgver $_opts
   cmake --build build
 
-  if [ "${CARCH}" = 'x86_64' ]; then
+  if [[ "${CARCH}" = 'x86_64' ]]; then
     CFLAGS="${CFLAGS} -fno-lto" CXXFLAGS="${CXXFLAGS} -fno-lto" LDFLAGS="${LDFLAGS} -fno-lto" \
     cmake -B build-cuda -S $pkgname-$pkgver $_opts \
       -DWITH_CUDA=ON \
