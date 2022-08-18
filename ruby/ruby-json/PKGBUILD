@@ -1,0 +1,49 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+
+_name=json
+pkgname=ruby-json
+pkgver=2.6.2
+pkgrel=1
+pkgdesc="JSON implementation for Ruby"
+arch=(x86_64 powerpc64le powerpc riscv64)
+url="https://github.com/flori/json"
+license=(BSD)
+depends=(ruby)
+makedepends=(ragel ruby-rake ruby-rdoc)
+checkdepends=(git ruby-bundler ruby-test-unit)
+options=(!emptydirs)
+source=($pkgname-$pkgver.tar.gz::https://github.com/flori/$_name/archive/v$pkgver.tar.gz)
+sha512sums=('9c1c16ef462e7736c0306781573f32b96a0a53368ed24b4d1ae97953df62956b6cd72dcd20ed07708b0e1e3dd71baa61551bde452c87d7efac41267c0ee60b33')
+b2sums=('f81202ee284d3a6afe5c6f3ddccde76655e170b64883e37bc38c47bd63d731f8dca4e8a57da15e275ad64af5e1e967def69590d1105c0069b92f322919782a84')
+
+prepare() {
+  cd $_name-$pkgver
+  # we don't do version pinning
+  sed -r 's|~>|>=|g' -i *.gemspec Gemfile Rakefile
+}
+
+build() {
+  cd $_name-$pkgver
+  gem build $_name.gemspec
+}
+
+check(){
+  cd $_name-$pkgver
+  rake test
+}
+
+package() {
+  local _gemdir="$(gem env gemdir)"
+
+  cd $_name-$pkgver
+  gem install --ignore-dependencies --no-user-install -i "$pkgdir/$_gemdir" -n "$pkgdir/usr/bin" $_name-$pkgver.gem
+  install -vDm 644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+
+  # remove all unneeded stuff
+  cd "${pkgdir}/${_gemdir}"
+  rm -rvf cache \
+    "doc/$_name-$pkgver/ri/ext/" \
+    extensions/*/*/$_name-$pkgver/{mkmf.log,gem_make.out} \
+    gems/$_name-$pkgver/{ext,lib/*/*.so,*.gemspec}
+}
