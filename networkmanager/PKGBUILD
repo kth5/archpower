@@ -8,8 +8,8 @@
 
 pkgbase=networkmanager
 pkgname=(networkmanager libnm nm-cloud-setup)
-pkgver=1.38.2
-pkgrel=2
+pkgver=1.38.4
+pkgrel=1
 pkgdesc="Network connection manager and user applications"
 url="https://networkmanager.dev/"
 arch=(x86_64 powerpc64le powerpc riscv64)
@@ -20,9 +20,10 @@ makedepends=(intltool dhclient dhcpcd iptables-nft gobject-introspection gtk-doc
              systemd libmm-glib libnewt libndp libteam nftables vala perl-yaml
              python-gobject git vala jansson bluez-libs glib2-docs iwd dnsmasq
              openresolv libpsl audit meson)
+makedepends_riscv64=(mold)
 checkdepends=(libx11 python-dbus)
-options=(debug)
-_commit=abfd2d6ea729926bff0ddafa1367a54f6d6f4230  # tags/1.38.2^0
+options=(debug !distcc)
+_commit=89f351d4534fd9d88dc07c7d23bb254145a93178  # tags/1.38.4^0
 source=("git+https://gitlab.freedesktop.org/NetworkManager/NetworkManager.git#commit=$_commit")
 b2sums=('SKIP')
 
@@ -70,7 +71,19 @@ build() {
     -D qt=false
   )
 
-  arch-meson NetworkManager build "${meson_options[@]}"
+  case "${CARCH}" in
+    powerpc)
+      meson_options+=(-D ld_gc=false)
+    ;;
+    riscv64)
+      # takes >8hours on native builds on a dual-core JH7100 1ghz
+      meson_options+=(-D tests=no)
+      CFLAGS+=' -fuse-ld=mold'
+      CXXFLAGS+=' -fuse-ld=mold'
+    ;;
+  esac
+
+  arch-meson NetworkManager build "${meson_options[@]}" || cat build/meson-logs/meson-log.txt
   meson compile -C build
 }
 
