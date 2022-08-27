@@ -3,8 +3,8 @@
 # Contributor: Eric Bélanger <eric@archlinux.org>
 
 pkgname=webkit2gtk-4.1
-pkgver=2.36.4
-pkgrel=2
+pkgver=2.36.6
+pkgrel=1
 pkgdesc="Web content engine for GTK"
 url="https://webkitgtk.org"
 arch=(x86_64 powerpc64le powerpc riscv64)
@@ -22,19 +22,14 @@ optdepends=('geoclue: Geolocation support'
             'gst-plugins-bad: media decoding'
             'gst-libav: nonfree media decoding')
 options=(debug)
-source=($url/releases/webkitgtk-$pkgver.tar.xz{,.asc}
-        7916fda00b347ff263fbfe72c065032d1d9b523c.patch)
-sha256sums=('b6bebe1f85a479d968c19e44a4704622ef8cef61636ad1b2406b77d16ae2e2a8'
-            'SKIP'
-            '9b1bcb54553274701f7574b1449a29f3a2d569bfbbaaa5d81526270d1c512f3e')
+source=($url/releases/webkitgtk-$pkgver.tar.xz{,.asc})
+sha256sums=('1193bc821946336776f0dfa5e0dca5651f1e57157eda12da4721d2441f24a61a'
+            'SKIP')
 validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
               '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B') # Adrián Pérez de Castro <aperez@igalia.com>
 
 prepare() {
   cd webkitgtk-$pkgver
-
-  # Unbreak LTO
-  patch -Rp1 -i ../7916fda00b347ff263fbfe72c065032d1d9b523c.patch
 }
 
 build() {
@@ -42,6 +37,25 @@ build() {
   # build too slow and is too much to package for debuginfod
   CFLAGS+=' -g1'
   CXXFLAGS+=' -g1'
+
+  case "${CARCH}" in
+    powerpc)
+      export LDFLAGS+=' -Wl,--no-keep-memory -Wl,--no-warn-rwx-segments -Wl,--no-warn-execstack'
+      export CFLAGS="${CFLAGS/-O?/-Os}"
+      export CXXFLAGS="${CXXFLAGS/-O?/-Os}"
+      EXTRA_CMAKE_FLAGS="-DENABLE_JIT=OFF
+                         -DUSE_SYSTEMD=OFF
+                         -DPORT=GTK -DUSE_LD_GOLD=OFF
+                         -DUSE_SYSTEM_MALLOC=ON
+                         -DCMAKE_CXX_FLAGS_RELEASE=-DNDEBUG
+                         -DCMAKE_CXX_FLAGS_DEBUG=-DNDEBUG
+                         -DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-DNDEBUG
+                         -DCMAKE_C_FLAGS_RELEASE=-DNDEBUG
+                         -DCMAKE_C_FLAGS_DEBUG=-DNDEBUG
+                         -DCMAKE_C_FLAGS_RELWITHDEBINFO=-DNDEBUG
+                         -DCMAKE_LINKER=${CHOST}-gcc"
+    ;;
+  esac
 
   cmake -S webkitgtk-$pkgver -B build -G Ninja \
     -DPORT=GTK \
@@ -52,7 +66,7 @@ build() {
     -DCMAKE_SKIP_RPATH=ON \
     -DUSE_SOUP2=OFF \
     -DENABLE_GTKDOC=ON \
-    -DENABLE_MINIBROWSER=ON
+    -DENABLE_MINIBROWSER=ON ${EXTRA_CMAKE_FLAGS}
   cmake --build build
 }
 
