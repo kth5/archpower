@@ -2,8 +2,8 @@
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
 pkgname=wpewebkit
-pkgver=2.36.4
-pkgrel=2
+pkgver=2.36.6
+pkgrel=1
 pkgdesc="Web content engine for embedded devices"
 url="https://wpewebkit.org"
 arch=(x86_64 powerpc64le powerpc riscv64)
@@ -20,19 +20,14 @@ optdepends=('geoclue: Geolocation support'
             'gst-plugins-bad: media decoding'
             'gst-libav: nonfree media decoding')
 options=(debug)
-source=($url/releases/$pkgname-$pkgver.tar.xz{,.asc}
-        7916fda00b347ff263fbfe72c065032d1d9b523c.patch)
-sha256sums=('307a3bedf5d4299a861f773f631c39a44c3e6276c3af37f7cbefaed2c8d7c021'
-            'SKIP'
-            '9b1bcb54553274701f7574b1449a29f3a2d569bfbbaaa5d81526270d1c512f3e')
+source=($url/releases/$pkgname-$pkgver.tar.xz{,.asc})
+sha256sums=('e98a4eae2464ffaf4e5b53be08b9ae6386db511015c8002918b824d29f05d58f'
+            'SKIP')
 validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
               '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B') # Adrián Pérez de Castro <aperez@igalia.com>
 
 prepare() {
   cd $pkgname-$pkgver
-
-  # Unbreak LTO
-  patch -Rp1 -i ../7916fda00b347ff263fbfe72c065032d1d9b523c.patch
 }
 
 build() {
@@ -40,6 +35,25 @@ build() {
   # build too slow and is too much to package for debuginfod
   CFLAGS+=' -g1'
   CXXFLAGS+=' -g1'
+
+  case "${CARCH}" in
+    powerpc)
+      export LDFLAGS+=' -Wl,--no-keep-memory -Wl,--no-warn-rwx-segments -Wl,--no-warn-execstack'
+      export CFLAGS="${CFLAGS/-O?/-Os}"
+      export CXXFLAGS="${CXXFLAGS/-O?/-Os}"
+      EXTRA_CMAKE_FLAGS="-DENABLE_JIT=OFF
+                         -DUSE_SYSTEMD=OFF
+                         -DPORT=GTK -DUSE_LD_GOLD=OFF
+                         -DUSE_SYSTEM_MALLOC=ON
+                         -DCMAKE_CXX_FLAGS_RELEASE=-DNDEBUG
+                         -DCMAKE_CXX_FLAGS_DEBUG=-DNDEBUG
+                         -DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-DNDEBUG
+                         -DCMAKE_C_FLAGS_RELEASE=-DNDEBUG
+                         -DCMAKE_C_FLAGS_DEBUG=-DNDEBUG
+                         -DCMAKE_C_FLAGS_RELWITHDEBINFO=-DNDEBUG
+                         -DCMAKE_LINKER=${CHOST}-gcc"
+    ;;
+  esac
 
   cmake -S $pkgname-$pkgver -B build -G Ninja \
     -DPORT=WPE \
