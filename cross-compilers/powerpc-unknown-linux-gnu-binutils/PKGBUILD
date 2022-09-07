@@ -5,43 +5,37 @@
 
 _target=powerpc-unknown-linux-gnu
 pkgname=$_target-binutils
-pkgver=2.38
-pkgrel=2
-pkgdesc="Assemble and manipulate binary and object ($_target)"
-arch=(x86_64 powerpc64le)
+pkgver=2.39
+_commit=9e855cffa1fda44629e7f9b76dfa3e5a51a440e9
+pkgrel=3
+pkgdesc='Assemble and manipulate binary and object files for 32-bit and 64-bit RISC-V'
+arch=(x86_64 powerpc64le powerpc)
 url='https://gnu.org/software/binutils/'
 license=(GPL)
-makedepends=(setconf)
-source=("https://ftp.gnu.org/gnu/binutils/binutils-$pkgver.tar.xz"
-        gold-warn-unsupported.patch
-        fix-incorrect-undefined-symbol.patch
-        "binutils-pr28733.patch::https://sourceware.org/git/?p=binutils-gdb.git;a=patch;h=e4028336b19998e74a51dd0918a8b3922e08a537;hp=df0a549ebdae74ef9d233243b869d424e6a33c73")
-sha512sums=('8bf0b0d193c9c010e0518ee2b2e5a830898af206510992483b427477ed178396cd210235e85fd7bd99a96fc6d5eedbeccbd48317a10f752b7336ada8b2bb826d'
-            '5d827b349b4456f8314776f1545396945c751b822a77604157b3fe436e5ff82bb313af3a215c99fd9d1f1f8ebb9f92033cc1a4968e35734619ad28b9bb3839a7'
-            '36da578519db4665f959a64813173ecbf3f999bc6b3acfb216e24d73a617ded22202e08915d2fa4c86b46c627127bc6e22e6dba07ce89588c0da7771c6f34a58'
-            '302e1fe276fdc54ffc3285b48839777c182014952bc0383c32d1316a818a3a58599ca4a5ac8f7cf55081c1bf8749c8452f8e8572fb29ae4995dafc53abdc5211')
+groups=(risc-v)
+depends=(glibc zlib libelf jansson)
+makedepends=(git setconf)
+source=(git+https://sourceware.org/git/binutils-gdb.git#commit=${_commit}
+	gold-warn-unsupported.patch)
+sha512sums=('SKIP'
+            '5d827b349b4456f8314776f1545396945c751b822a77604157b3fe436e5ff82bb313af3a215c99fd9d1f1f8ebb9f92033cc1a4968e35734619ad28b9bb3839a7')
 
 prepare() {
-  cd binutils-${pkgver}
+  cd ${srcdir}
+  [[ ! -d binutils-gdb ]] && ln -s binutils-$pkgver binutils-gdb                                                                                                                                                                         
 
+  cd "binutils-gdb"
   # Creds @Fedora
   # Change the gold configuration script to only warn about
   # unsupported targets.  This allows the binutils to be built with
   # BPF support enabled.
   patch -Np1 -i "${srcdir}"/gold-warn-unsupported.patch
 
-  # fix incorrect "undefined reference" errors
-  # https://sourceware.org/bugzilla/show_bug.cgi?id=28879
-  patch -Np1 -i "${srcdir}"/fix-incorrect-undefined-symbol.patch
-
-  # riscv64: PR28733, add missing extension info to 'unrecognized opcode' error
-  patch -Np1 -i "${srcdir}"/binutils-pr28733.patch
-
   setconf libiberty/configure ac_cpp "'\$CPP \$CPPFLAGS -O2'"
 }
 
 build() {
-  cd "binutils-$pkgver"
+  cd "binutils-gdb"
 
   unset CPPFLAGS
   ./configure \
@@ -63,14 +57,16 @@ build() {
 check() {
   # * Unset LDFLAGS as testsuite makes assumptions about which ones are active.
   # * Do not abort on errors - manually check log files.
-  make -C "binutils-$pkgver" LDFLAGS="" -k check
+  make -C "binutils-gdb" LDFLAGS="" -k check
 }
 
 package() {
-  make -C "binutils-$pkgver" DESTDIR="$pkgdir" install
+  make -C "binutils-gdb" DESTDIR="$pkgdir" install
 
   # Remove info documents that conflict with host version
   rm -r "$pkgdir/usr/share/info"
+  rm -r "$pkgdir/usr/share/gdb"
+  rm "$pkgdir//usr/include/gdb/jit-reader.h"
 
   rm "$pkgdir"/usr/lib/bfd-plugins/libdep.so
 }
