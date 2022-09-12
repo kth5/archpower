@@ -1,0 +1,42 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Kyle Keen <keenerd@gmail.com>
+
+pkgname=python-jupyter_core
+pkgver=4.11.1
+pkgrel=1
+pkgdesc="Jupyter core package. A base package on which Jupyter projects rely."
+arch=('any')
+url="https://pypi.python.org/pypi/jupyter_core"
+license=('BSD')
+depends=('python-traitlets')
+makedepends=('python-build' 'python-installer' 'python-hatchling')
+checkdepends=('python-pytest' 'python-nose')
+source=("https://files.pythonhosted.org/packages/source/j/jupyter_core/jupyter_core-$pkgver.tar.gz")
+sha256sums=('2e5f244d44894c4154d06aeae3419dd7f1b0ef4494dc5584929b398c61cfd314')
+
+prepare() {
+  cd jupyter_core-$pkgver
+  sed -e '/\/usr\/local\/share\/jupyter/d' -i jupyter_core/paths.py
+}
+
+build() {
+  cd jupyter_core-$pkgver
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd jupyter_core-$pkgver
+  pytest -v \
+    --deselect jupyter_core/tests/test_command.py::test_not_on_path \
+    --deselect jupyter_core/tests/test_command.py::test_path_priority \
+    --deselect jupyter_core/tests/test_command.py::test_argv0 \
+    --deselect jupyter_core/tests/test_paths.py::test_jupyter_path_prefer_env # https://github.com/jupyter/jupyter_core/issues/208
+}
+
+package() {
+  cd jupyter_core-$pkgver
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 COPYING.md "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 examples/jupyter-completion.bash "$pkgdir/usr/share/bash-completion/completions/jupyter"
+  install -Dm644 examples/completions-zsh "$pkgdir/usr/share/zsh/site-functions/_jupyter"
+}
