@@ -9,17 +9,21 @@
 
 pkgname=(ruby ruby-docs ruby-stdlib ruby-bundledgems)
 pkgver=3.0.4
-pkgrel=5
+pkgrel=11
 arch=(x86_64 powerpc64le powerpc riscv64)
 url='https://www.ruby-lang.org/en/'
 license=(BSD custom)
 makedepends=(gdbm openssl libffi doxygen graphviz libyaml ttf-dejavu tk)
-options=(!emptydirs !lto) # Disable LTO until fixes for https://bugs.ruby-lang.org/issues/18062 released
+options=(debug !emptydirs !lto) # Disable LTO until fixes for https://bugs.ruby-lang.org/issues/18062 released
 source=(https://cache.ruby-lang.org/pub/ruby/${pkgver:0:3}/ruby-${pkgver}.tar.xz)
 sha512sums=('53bf7dd403b0c68af9691882ad8ed7422c8d1f496627428fb4c3caf0b0313715524b744c5f453aced2d49e16e55f3f45b46b9a77aa3097dbfcae7caa0208194b')
 
 build() {
   cd ruby-${pkgver}
+
+  case "${CARCH}" in
+    powerpc) LDFLAGS+=' -Wl,--no-warn-rwx-segments -Wl,--no-warn-execstack'
+  esac
 
   ./configure \
     --prefix=/usr \
@@ -62,16 +66,13 @@ package_ruby() {
   rm "${pkgdir}"/usr/bin/gem
 
   # remove bundler as it shipped as a separate package
-  rm -r "${pkgdir}"/usr/lib/ruby/${rubyver}/{bundler,bundler.rb}
   rm "${pkgdir}"/usr/bin/{bundle,bundler}
 
   # remove bundled rdoc gem
-  rm -r "${pkgdir}"/usr/lib/ruby/${rubyver}/{rdoc,rdoc.rb}
   rm "${pkgdir}"/usr/bin/{rdoc,ri}
   rm "${pkgdir}"/usr/share/man/man1/ri.1
 
   # remove irb as it is a separate package now
-  rm -r "${pkgdir}"/usr/lib/ruby/${rubyver}/{irb,irb.rb}
   rm "${pkgdir}"/usr/bin/irb
   rm "${pkgdir}"/usr/share/man/man1/irb.1
 
@@ -86,10 +87,35 @@ package_ruby() {
 
   # remove already packaged stdlib gems (needs to be as dependency in ruby-stdlib)
   local stdlib_gems=(
+    abbrev
+    base64
+    benchmark
+    bigdecimal
     bundler
+    cgi
+    csv
     date
+    delegate
+    did_you_mean
+    digest
+    drb
+    english
+    erb
+    etc
+    fcntl
+    fiddle
+    fileutils
+    find
+    forwardable
+    getoptlong
+    io-console
+    io-nonblock
+    io-wait
+    ipaddr
     irb
     json
+    logger
+    mutex_m
     net-http
     open-uri
     psych
@@ -97,12 +123,21 @@ package_ruby() {
     reline
     stringio
     time
+    tmpdir
     uri
   )
 
   for stdlib_gem in "${stdlib_gems[@]}"; do
-    rm -v "${pkgdir}"/usr/lib/ruby/gems/${rubyver}/specifications/default/${stdlib_gem}-*.gemspec
+    rm --force --recursive --verbose \
+      "${pkgdir}"/usr/lib/ruby/${rubyver}/${stdlib_gem} \
+      "${pkgdir}"/usr/lib/ruby/${rubyver}/${stdlib_gem}.rb \
+      "${pkgdir}"/usr/lib/ruby/${rubyver}/${CARCH}-linux/${stdlib_gem}.so \
+      "${pkgdir}"/usr/lib/ruby/gems/${rubyver}/specifications/default/${stdlib_gem}-*.gemspec
   done
+
+  rm --verbose \
+    "${pkgdir}"/usr/lib/ruby/${rubyver}/English.rb \
+    "${pkgdir}"/usr/lib/ruby/${rubyver}/${CARCH}-linux/io/wait.so
 }
 
 package_ruby-docs() {
@@ -121,39 +156,39 @@ package_ruby-stdlib() {
   pkgdesc='A vast collection of classes and modules that you can require in your code for additional features'
 
   depends=(
-    #ruby-abbrev
-    #ruby-base64
-    #ruby-benchmark
-    #ruby-bigdecimal
+    ruby-abbrev
+    ruby-base64
+    ruby-benchmark
+    ruby-bigdecimal
     ruby-bundler
-    #ruby-cgi
-    #ruby-csv
+    ruby-cgi
+    ruby-csv
     ruby-date
     #ruby-dbm   # removed in 3.1.2
     #ruby-debug   # removed in 3.1.2
-    #ruby-delegate
-    #ruby-did_you_mean
-    #ruby-digest
-    #ruby-drb
-    #ruby-english
-    #ruby-erb
-    #ruby-etc
-    #ruby-fcntl
-    #ruby-fiddle
-    #ruby-fileutils
-    #ruby-find
-    #ruby-forwardable
+    ruby-delegate
+    ruby-did_you_mean
+    ruby-digest
+    ruby-drb
+    ruby-english
+    ruby-erb
+    ruby-etc
+    ruby-fcntl
+    ruby-fiddle
+    ruby-fileutils
+    ruby-find
+    ruby-forwardable
     #ruby-gdbm   # removed in 3.1.2
-    #ruby-getoptlong
-    #ruby-io-console
-    #ruby-io-nonblock
-    #ruby-io-wait
-    #ruby-ipaddr
+    ruby-getoptlong
+    ruby-io-console
+    ruby-io-nonblock
+    ruby-io-wait
+    ruby-ipaddr
     ruby-irb
     ruby-json
-    #ruby-logger
+    ruby-logger
     #ruby-matrix   # removed in 3.1.2
-    #ruby-mutex_m
+    ruby-mutex_m
     #ruby-net-ftp   # removed in 3.1.2
     ruby-net-http
     #ruby-net-imap   # removed in 3.1.2
@@ -191,7 +226,7 @@ package_ruby-stdlib() {
     #ruby-tempfile
     ruby-time
     #ruby-timeout
-    #ruby-tmpdir
+    ruby-tmpdir
     #ruby-tracer   # removed in 3.1.2
     #ruby-tsort
     #ruby-un
