@@ -5,8 +5,8 @@
 
 _gemname='nokogiri'
 pkgname="ruby-${_gemname}"
-pkgver=1.13.6
-pkgrel=1
+pkgver=1.13.8
+pkgrel=2
 pkgdesc='Nokogiri (鋸) is an HTML, XML, SAX, and Reader parser'
 arch=(x86_64 powerpc64le powerpc riscv64)
 url='https://nokogiri.org'
@@ -15,23 +15,42 @@ depends=('ruby' 'ruby-mini_portile2' 'libxslt')
 options=(!emptydirs)
 source=("https://rubygems.org/downloads/${_gemname}-${pkgver}.gem")
 noextract=("${_gemname}-${pkgver}.gem")
-sha512sums=('1928b41b1e8f5e99792b8427b8228343d53deca56d472055b2afdf29d247637acc3403c5183be0f80e64b55ba20747a152ce5eebdaf90a4c431ca54010ce4b3f')
+sha512sums=('5fd9a62e76e7b59342245ae41b15b46a408eabd289afa0ef6238b3d01af5c44c737c1ffd7f17791d7501dd240aa1c53e6d49c2e97580fc226de90f5a60b62e33')
 
 package() {
   CFLAGS+=' -ffat-lto-objects'
 
   local _gemdir="$(ruby -e'puts Gem.default_dir')"
-  local _platform="$(gem env platform | cut -d':' -f2)"
-  local _extension_api_version="$(ruby -e'puts Gem.extension_api_version')"
 
   gem install --ignore-dependencies --no-user-install -i "${pkgdir}/${_gemdir}" -n "${pkgdir}/usr/bin" "${_gemname}-${pkgver}.gem" -- --use-system-libraries
 
   sed -r 's|~>|>=|g' -i "${pkgdir}/${_gemdir}/specifications/${_gemname}-${pkgver}.gemspec"
 
-  rm "${pkgdir}/${_gemdir}/cache/${_gemname}-${pkgver}.gem" \
-      "${pkgdir}/${_gemdir}/gems/${_gemname}-${pkgver}/ext/nokogiri"/{*.o,*.c,*.h} \
-      "${pkgdir}/${_gemdir}/gems/${_gemname}-${pkgver}/ext/nokogiri/Makefile" \
-      "${pkgdir}/${_gemdir}/extensions/${_platform}/${_extension_api_version}/${_gemname}-${pkgver}/gem_make.out"
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "${pkgdir}/${_gemdir}/cache/" \
+    "${pkgdir}/${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "${pkgdir}/${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "${pkgdir}/${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "${pkgdir}/${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
 
   install -D -m644 "${pkgdir}/${_gemdir}/gems/${_gemname}-${pkgver}/LICENSE-DEPENDENCIES.md" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-DEPENDENCIES.md"
   install -D -m644 "${pkgdir}/${_gemdir}/gems/${_gemname}-${pkgver}/LICENSE.md" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE.md"
