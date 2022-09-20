@@ -5,24 +5,35 @@
 
 pkgbase=podman
 pkgname=(podman podman-docker)
-pkgver=4.0.3
-pkgrel=2
+pkgver=4.2.0
+_commit=f61a22df078836b18f0a9004156b7d8771e6d5ba  # refs/tags/v4.2.0
+pkgrel=1
 pkgdesc='Tool and library for running OCI-based containers in pods'
 arch=(x86_64 powerpc64le riscv64)
 url='https://github.com/containers/podman'
 license=(Apache)
-makedepends=(apparmor btrfs-progs device-mapper go go-md2man git gpgme libseccomp systemd)
+makedepends=(apparmor btrfs-progs catatonit device-mapper go go-md2man git gpgme libseccomp systemd)
 # https://github.com/containers/podman/issues/13297
 options=(!lto)
-source=(git+$url#tag=v$pkgver?signed)
+source=(
+  git+$url#tag=$_commit?signed
+  $pkgname-4.2.0-defaultinitpath.patch
+)
 validpgpkeys=(
   'B7DBDCA456F7335E91F1C25CD3624C551D0515C4'  # Matthew Heon <mheon@redhat.com>
 )
-sha256sums=('SKIP')
+sha256sums=('SKIP'
+            'e4d15d2cf45237ddff64d149956e9f9c0ce366bd0bdf8d98de65269f53d4885d')
 
 pkgver() {
   cd $pkgname
   git describe --tags | sed 's/^v//;s/-/+/g'
+}
+
+prepare() {
+  # set default init_path to /usr/lib/podman/catatonit
+  # https://bugs.archlinux.org/task/75493
+  patch -Np1 -d $pkgname -i ../$pkgname-4.2.0-defaultinitpath.patch
 }
 
 build() {
@@ -39,12 +50,11 @@ build() {
 }
 
 package_podman() {
-  depends=(conmon containers-common crun iptables libdevmapper.so libgpgme.so
-  libseccomp.so slirp4netns)
+  depends=(catatonit conmon containers-common crun iptables libdevmapper.so
+  libgpgme.so libseccomp.so slirp4netns)
   optdepends=(
     'apparmor: for AppArmor support'
     'btrfs-progs: support btrfs backend devices'
-    'catatonit: --init flag support'
     'netavark: for a new container-network-stack implementation'
     'podman-compose: for docker-compose compatibility'
     'podman-docker: for Docker-compatible CLI'
