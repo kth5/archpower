@@ -1,41 +1,58 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
 # Contributor: Eric Bélanger <eric@archlinux.org>
 
 pkgbase=flac
 pkgname=('flac' 'flac-doc')
-pkgver=1.3.4
-pkgrel=3
+pkgver=1.4.1
+pkgrel=1
 pkgdesc='Free Lossless Audio Codec'
 url='https://xiph.org/flac/'
 arch=(x86_64 powerpc64le powerpc riscv64)
 license=('BSD' 'GPL')
 depends=('gcc-libs' 'libogg')
-makedepends=('nasm' 'doxygen' 'cmake' 'ninja')
-source=(https://downloads.xiph.org/releases/flac/flac-${pkgver}.tar.xz
-        https://github.com/xiph/flac/commit/b171e767e282909d3f4ef4b7d7fcb9b7d7987ff5.patch)
-sha512sums=('4a626e8a1bd126e234c0e5061e3b46f3a27c2065fdfa228fd8cf00d3c7fa2c05fafb5cec36acce7bfce4914bfd7db0b2a27ee15decf2d8c4caad630f62d44ec9'
-            '9cfe6b3098f119f2db851d73cebaebc9423cacaefd6555857e7453d63e61e6f7241b4b8e9621e87622498cc6f56ee29cfd4df2a19334f1ffb29b9c27c3bfa312')
+makedepends=('cmake' 'ninja' 'doxygen' 'git')
+makedepends_x86_64=('nasm' 'pandoc')
+options=('debug')
+_commit=b6fbd6b3d97e2da4481bdbd25176f263fd6a5e75  # tags/1.4.1
+source=("git+https://github.com/xiph/flac?signed#commit=$_commit")
+b2sums=('SKIP')
+validpgpkeys=('5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23') # https://github.com/web-flow.gpg
+
+pkgver() {
+  cd flac
+  git describe --tags | sed 's/[^-]*-g/r&/;s/-/+/g'
+}
 
 prepare() {
-  cd flac-${pkgver}
+  cd flac
 
-  # https://bugs.archlinux.org/task/74895
-  patch -Np1 -i ../b171e767e282909d3f4ef4b7d7fcb9b7d7987ff5.patch
+  # Shorten tests
+  sed -i 's/FLAC__TEST_LEVEL=1/FLAC__TEST_LEVEL=0/' test/CMakeLists.txt
 }
 
 build() {
-  cmake -S flac-${pkgver} -B build -G Ninja \
+  # no pandoc due to dropped haskell stack in Arch POWER
+  MANPAGES=OFF
+  [[ -f /usr/bin/pandoc ]] && MANPAGES=ON 
+
+  cmake -S flac -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_INSTALL_MANDIR=/usr/share/man/man1 \
     -DBUILD_SHARED_LIBS=ON \
+    -DINSTALL_MANPAGES=${MANPAGES} \
     -DWITH_STACK_PROTECTOR=OFF \
     -DNDEBUG=ON
   cmake --build build
+
+  # Build docs and place them where install expects them
+  cmake --build build --target FLAC-doxygen
+  mv build/doc/doxytmp/html flac/doc/api
 }
 
 check() {
-  FLAC__TEST_LEVEL=0 cmake --build build --target test
+  cd build
+  ctest --output-on-failure --stop-on-failure -j1
 }
 
 package_flac() {
@@ -43,12 +60,12 @@ package_flac() {
 
   DESTDIR="${pkgdir}" cmake --install build
 
-  install -Dm 644 flac-${pkgver}/src/*/*.m4 -t "${pkgdir}/usr/share/aclocal"
+  install -Dm 644 flac/src/*/*.m4 -t "${pkgdir}/usr/share/aclocal"
 
   mkdir -p doc/usr/share
   mv {"${pkgdir}",doc}/usr/share/doc
 
-  install -Dm 644 flac-${pkgver}/COPYING.Xiph -t "${pkgdir}/usr/share/licenses/${pkgname}"
+  install -Dm 644 flac/COPYING.Xiph -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
 
 package_flac-doc() {
@@ -57,7 +74,7 @@ package_flac-doc() {
 
   mv doc/* "$pkgdir"
 
-  install -Dm 644 flac-${pkgver}/COPYING.Xiph -t "${pkgdir}/usr/share/licenses/${pkgname}"
+  install -Dm 644 flac/COPYING.Xiph -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
 
-# vim:set sw=2 et:
+# vim:set sw=2 sts=-1 et:
