@@ -4,23 +4,23 @@
 
 pkgbase=glib2
 pkgname=(glib2 glib2-docs)
-pkgver=2.72.3
+pkgver=2.74.0
 pkgrel=2
 pkgdesc="Low level core library"
 url="https://wiki.gnome.org/Projects/GLib"
 license=(LGPL)
 arch=(x86_64 powerpc64le powerpc riscv64)
-depends=(pcre libffi util-linux-libs zlib libsysprof-capture)
+depends=(pcre2 libffi util-linux-libs zlib libsysprof-capture)
 makedepends=(gettext gtk-doc shared-mime-info python libelf git util-linux
              meson dbus)
-checkdepends=(desktop-file-utils)
-options=(debug staticlibs)
-_commit=dce30492f6087a8e1e288f1706d41142b74ca1ff  # tags/2.72.3^0
+checkdepends=(desktop-file-utils glib2)
+options=(debug staticlibs !distcc)
+_commit=30bd57ecf8aa051de9848ba5a2b140f4810401ff  # tags/2.74.0^0
 source=("git+https://gitlab.gnome.org/GNOME/glib.git#commit=$_commit"
         0001-glib-compile-schemas-Remove-noisy-deprecation-warnin.patch
         glib-compile-schemas.hook gio-querymodules.{hook,script})
 sha256sums=('SKIP'
-            'f410289d8acf787cf0fc512efe5622d4bbd574c032e3ee0efd9cae2155b2c3dc'
+            '6d51eb5856268d79eee01b97a299fa9f99db18b2abb4df56f2ed9e641a09138a'
             '64ae5597dda3cc160fc74be038dbe6267d41b525c0c35da9125fbf0de27f9b25'
             '2a9f9b8235f48e3b7d0f6cfcbc76cd2116c45f28692cac4bd61074c495bd5eb7'
             '92d08db5aa30bda276bc3d718e7ff9dd01dc40dcab45b359182dcc290054e24e')
@@ -35,12 +35,17 @@ prepare() {
 
   # Suppress noise from glib-compile-schemas.hook
   git apply -3 ../0001-glib-compile-schemas-Remove-noisy-deprecation-warnin.patch
+
+  # https://bugs.archlinux.org/task/75980
+  # https://gitlab.gnome.org/GNOME/glib/-/merge_requests/2921
+  git cherry-pick -n 'ea3f17d598d550345e94e4571130e429443e91cb'
 }
 
 build() {
   # Produce more debug info: GLib has a lot of useful macros
-  CFLAGS+=' -g3'
-  CXXFLAGS+=' -g3'
+  # use fat LTO objects for static libraries
+  CFLAGS+=' -ffat-lto-objects -g3'
+  CXXFLAGS+=' -ffat-lto-objects -g3'
 
   CFLAGS+=" -DG_DISABLE_CAST_CHECKS"
   arch-meson glib build \
@@ -89,4 +94,4 @@ package_glib2-docs() {
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 glib/docs/reference/COPYING
 }
 
-# vim:set sw=2 et:
+# vim:set sw=2 sts=-1 et:
