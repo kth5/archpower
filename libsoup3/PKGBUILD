@@ -2,21 +2,39 @@
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Contributor: Jan de Groot <jgc@archlinux.org>
 
-pkgname=libsoup3
-pkgver=3.0.7
+pkgbase=libsoup3
+pkgname=(libsoup3 libsoup3-docs)
+pkgver=3.2.0
 pkgrel=1
 pkgdesc="HTTP client/server library for GNOME"
-url="https://wiki.gnome.org/Projects/libsoup"
+url=https://wiki.gnome.org/Projects/libsoup
 arch=(x86_64 powerpc64le powerpc riscv64)
 license=(LGPL)
-depends=(glib2 glib-networking sqlite krb5 libpsl brotli libnghttp2
-         libsysprof-capture)
-makedepends=(gobject-introspection python vala git gtk-doc meson samba
-             python-quart)
-checkdepends=(apache php-apache)
-optdepends=('samba: Windows Domain SSO')
+depends=(
+  brotli
+  glib-networking 
+  glib2 
+  krb5
+  libnghttp2
+  libpsl
+  libsysprof-capture
+  sqlite
+)
+makedepends=(
+  gi-docgen
+  git
+  gobject-introspection
+  meson
+  python-quart
+  samba
+  vala
+)
+checkdepends=(
+  apache
+  php-apache
+)
 options=(debug)
-_commit=40cabaef1bd71475fcf34a618ad5937cefb76513  # tags/3.0.7^0
+_commit=b3d0ba2eca19d146c6669c760784b13db80b62ce  # tags/3.2.0^0
 source=("git+https://gitlab.gnome.org/GNOME/libsoup.git#commit=$_commit")
 sha256sums=('SKIP')
 
@@ -30,22 +48,40 @@ prepare() {
 }
 
 build() {
-  arch-meson libsoup build \
-    -D gtk_doc=true \
+  local meson_options=(
     -D autobahn=disabled
+  )
+  arch-meson libsoup build "${meson_options[@]}"
   meson compile -C build
 }
 
 check() {
-  meson test -C build --print-errorlogs
+  # Python's output buffering messes with the tests reading stdout lines from
+  # http2-server.py through a pipe
+  PYTHONUNBUFFERED=1 meson test -C build --print-errorlogs
 }
 
-package() {
-  depends+=(libg{lib,object,io}-2.0.so libgssapi_krb5.so libpsl.so
-            libbrotlidec.so)
+package_libsoup3() {
+  depends+=(
+    libbrotlidec.so
+    libgssapi_krb5.so
+    libg{lib,object,io}-2.0.so
+    libpsl.so
+  )
+  optdepends=('samba: Windows Domain SSO')
   provides+=(libsoup-3.0.so)
 
   meson install -C build --destdir "$pkgdir"
+
+  mkdir -p doc/usr/share
+  mv {"$pkgdir",doc}/usr/share/doc
 }
 
-# vim:set sw=2 et:
+package_libsoup3-docs() {
+  pkgdesc+=" (documentation)"
+  depends=()
+
+  mv doc/* "$pkgdir"
+}
+
+# vim:set sw=2 sts=-1 et:
