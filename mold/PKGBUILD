@@ -3,7 +3,7 @@
 # Contributor: Adrian Perez de Castro <aperez@igalia.com>
 
 pkgname=mold
-pkgver=1.4.1
+pkgver=1.5.1
 pkgrel=1
 pkgdesc='A Modern Linker'
 arch=(x86_64 powerpc64le riscv64)
@@ -11,10 +11,10 @@ url='https://github.com/rui314/mold'
 license=('AGPL3')
 # xxhash is bundled
 depends=('gcc-libs' 'mimalloc' 'openssl' 'zlib' 'tbb')
-makedepends=('git' 'python')
+makedepends=('git' 'python' 'cmake')
 checkdepends=('clang' 'libdwarf')
 options=('debug')
-_commit='19d9255d72520678fd5eccca1ee9933b0f2c7e1b'
+_commit='1ed941f3f0c3a7e55ba5d34a9f9f0fe7f67cb90d'
 source=("$pkgname::git+$url.git#commit=$_commit")
 b2sums=('SKIP')
 
@@ -24,40 +24,27 @@ pkgver() {
   git describe --tags | sed 's/^v//'
 }
 
-prepare() {
-  cd "$pkgname"
-
-  # use /usr/lib instead of /usr/libexec
-  sed -i "s/libexec/lib/" Makefile
-}
-
 build() {
-  make \
-    -C "$pkgname" \
-    PREFIX=/usr \
-    LTO=1 \
-    SYSTEM_MIMALLOC=1 \
-    SYSTEM_TBB=1
+  mkdir -p ${srcdir}/.tmp
+  export TMPDIR=${srcdir}/.tmp
+
+  cmake \
+  -S "$pkgname" \
+  -B build \
+  -DCMAKE_BUILD_TYPE='None' \
+  -DCMAKE_INSTALL_PREFIX='/usr' \
+  -DCMAKE_INSTALL_LIBEXECDIR='lib' \
+  -DMOLD_USE_SYSTEM_MIMALLOC=ON \
+  -DMOLD_USE_SYSTEM_TBB=ON \
+  -DMOLD_LTO=ON
+
+  cmake --build build
 }
 
 check() {
-  cd "$pkgname"
-
-  make \
-    PREFIX=/usr \
-    LTO=1 \
-    SYSTEM_MIMALLOC=1 \
-    SYSTEM_TBB=1 \
-    check
+  ctest --test-dir build --output-on-failure
 }
 
 package() {
-  make \
-    -C "$pkgname" \
-    PREFIX=/usr \
-    LTO=1 \
-    SYSTEM_MIMALLOC=1 \
-    SYSTEM_TBB=1 \
-    DESTDIR="$pkgdir" \
-    install
+  DESTDIR="$pkgdir" cmake --install build
 }
