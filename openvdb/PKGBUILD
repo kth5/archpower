@@ -12,7 +12,6 @@ makedepends=('doxygen' 'boost' 'cmake' 'mesa' 'cppunit' 'glfw-x11' 'glu' 'python
 optdepends=('glfw: for tools'
             'glu: for tools'
             'python-numpy: python module')
-options=(!distcc)
 source=("$pkgname-$pkgver.tar.gz::https://github.com/dreamworksanimation/openvdb/archive/v${pkgver}.tar.gz")
 sha512sums=('434be61b03efec5d0022594d81064dce5f67595c1e34934d79e13627e573d2819bf947ca5b433fdca134642975b83eda71b46cf802f57e135d1611dbe2e5757e')
 
@@ -21,6 +20,13 @@ build() {
   case "${CARCH}" in
     powerpc|riscv64) CXXFLAGS+=' -latomic' ;;
   esac
+
+  # if we have less than 24GB RAM, we can't do -j2 even
+  ram=$(free --giga -t | tail -n1 | awk '{print $2}')
+  if [ ${ram} -lt 16 ]; then
+    export MAKEFLAGS="-j1"
+    export NINJAFLAGS="-j1"
+  fi
 
   cmake \
     -Bbuild \
@@ -32,7 +38,7 @@ build() {
     -DOPENVDB_BUILD_DOCS=ON \
     -DOPENVDB_BUILD_UNITTESTS=OFF
 
-  ninja -C build
+  ninja ${NINJAFLAGS} -C build
 }
 
 package() {
