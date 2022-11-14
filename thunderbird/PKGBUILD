@@ -8,7 +8,7 @@
 
 pkgbase=thunderbird
 pkgname=(thunderbird)
-pkgver=91.10.0
+pkgver=102.4.2
 pkgrel=1
 pkgdesc='Standalone mail and news reader from mozilla.org'
 url='https://www.mozilla.org/thunderbird/'
@@ -25,42 +25,44 @@ depends=(
 )
 makedepends=(
   unzip zip diffutils python python-setuptools mesa imake libpulse
-  xorg-server-xvfb autoconf2.13 rust clang llvm cbindgen nodejs
-  gawk perl findutils libotr
+  xorg-server-xvfb autoconf2.13 rust clang llvm cbindgen nodejs lld
+  gawk perl findutils libotr wasi-compiler-rt wasi-libc wasi-libc++ wasi-libc++abi
 )
 makedepends_x86_64=(nasm yasm)
-options=(!emptydirs !makeflags)
-source=(https://ftp.mozilla.org/pub/mozilla.org/thunderbird/releases/$pkgver/source/thunderbird-$pkgver.source.tar.xz{,.asc}
+options=(!emptydirs !makeflags !lto)
+source=(https://archive.mozilla.org/pub/thunderbird/releases/$pkgver/source/thunderbird-$pkgver.source.tar.xz{,.asc}
         thunderbird.desktop
         vendor-prefs.js
         distribution.ini
-        mozconfig.cfg{,.powerpc64le}
-	firefox-powerpc-clang.patch
-	flac-no-ffvpx.patch
-	firefox-pgo.patch
-	metainfo.patch
-	avoid-redefinition.patch
-	skia-sucks1.patch
-	skia-sucks3.patch
-	skia-sucks2.patch
-	fix-image-format-warning.patch
-	sandbox-largefile.patch
-	sandbox-fork.patch
-        fix-cargo-glsl-gcc12.patch)
+        mozconfig.cfg
+        metainfo.patch
+        cbindgen-0.24.patch
+        rustc_version-0.4.0.patch
+        libwebrtc-gn.patch)
+sha256sums=('ffc4a0499ccef41dccd99a683715199e9c839d628240dfb4b5f52bf1e6c902d5'
+            'SKIP'
+            'e44c55501f650a4e80b9c353b81f33e07ca65808db831eff6ca616aded233827'
+            'fa11b4736bbf53ec015f71cd42b1040b22d1a855c562b76927b3f0eccb925c85'
+            'bc3aae2cc00dc9806f54606f98d967366a2ba7223f6a3ad1c658a653ebff5569'
+            '362896dfbe23b9d0958b6fc53031c2483097b2c726aebee0314ac83fa486fdca'
+            '3390d127e5dd70a0ff60895bcb044ec4521dd528cd9d6efc27c4ba58df9cca5c'
+            '4628d136c3beada292e83cd8e89502cac4aa3836851b34259a665582a7713978'
+            '0e9f0b92edd008ae157af41b19691135011ebf8cebd82e21169a9ca12acfbe68'
+            '82d25d789483805cb547a1199eb59798e1ce6cbee7bdbbf53c06a8f251a40140')
 validpgpkeys=(
   14F26682D0916CDD81E37B6D61B7B526D98F0353 # Mozilla Software Releases <release@mozilla.com>
   4360FE2109C49763186F8E21EBE41E90F6F12F6D # Mozilla Software Releases <release@mozilla.com>
 )
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
-# Note: These are for Arch Linux POWER use ONLY. For your own distribution, please
-# get your own set of keys. Feel free to contact alex.bldck@gmail.com for
+# Note: These are for Arch POWER use ONLY. For your own distribution, please
+# get your own set of keys. Feel free to contact foutrelis@archlinux.org for
 # more information.
 _google_api_key=AIzaSyDgkw4O3LM0Jnr2N7Wq2NG7iUVzRU5sBaA
 
 # Mozilla API keys (see https://location.services.mozilla.com/api)
-# Note: These are for Arch Linux POWER use ONLY. For your own distribution, please
-# get your own set of keys. Feel free to contact alex.bldck@gmail.com for
+# Note: These are for Arch POWER use ONLY. For your own distribution, please
+# get your own set of keys. Feel free to contact heftig@archlinux.org for
 # more information.
 _mozilla_api_key=de0473f2-d53f-46da-956c-6aff61bda3ab
 
@@ -74,36 +76,19 @@ prepare() {
     src="${src%%::*}"
     src="${src##*/}"
     [[ $src = *.patch ]] || continue
-    echo "Applying patch $src..."
-    patch -Np0 < "../$src"
+    msg2 "Applying patch $src..."
+    patch -Np1 < "../$src"
   done
 
   printf "%s" "$_google_api_key" >google-api-key
   printf "%s" "$_mozilla_api_key" >mozilla-api-key
-
-  case "${CARCH}" in
-    powerpc64le) cp ../mozconfig.cfg.powerpc64le .mozconfig ;;
-    *) cp ../mozconfig.cfg .mozconfig ;;
-  esac
+  cp ../mozconfig.cfg .mozconfig
   sed "s|@PWD@|${PWD@Q}|g" -i .mozconfig
 
-  # remove pre-built binaries
-  find third_party -type f \( -name '*.so' -o -name '*.o' \) -print -delete || die
-
-  for _name in audio_thread_priority num-traits glslopt; do
-    sed -i 's/\("files":{\)[^}]*/\1/' third_party/rust/${_name}/.cargo-checksum.json
-  done
-
   case "${CARCH}" in
-    powerpc64le)
-      cat >>.mozconfig <<END
-export CC=gcc
-export CXX=g++
-export LDFLAGS="${LDFLAGS} -Wl,-rpath=/usr/lib/thunderbird -latomic"
-mk_add_options MOZ_MAKE_FLAGS="${MAKEFLAGS}"
-ac_add_options --enable-optimize
-END
-                    ;;
+    x86_64)
+      echo "ac_add_options --disable-elf-hack" >> .mozconfig
+    ;;
   esac
 }
 
@@ -112,7 +97,8 @@ build() {
   if [[ -n "${SOURCE_DATE_EPOCH}" ]]; then
     export MOZ_BUILD_DATE=$(date --date "@${SOURCE_DATE_EPOCH}" "+%Y%m%d%H%M%S")
   fi
-  export MACH_USE_SYSTEM_PYTHON=1
+  export MACH_BUILD_PYTHON_NATIVE_PACKAGE_SOURCE=none
+  export MOZBUILD_STATE_PATH="${srcdir}/mozbuild"
   ./mach configure
   ./mach build
   ./mach buildsymbols
@@ -156,22 +142,4 @@ END
     "$pkgdir/usr/lib/$pkgname/thunderbird-bin"
 }
 
-sha256sums=('a0dbf9a8083a4dff8a0506b5f4c6910f681476e2c5fce081beda4493168e66f9'
-            'SKIP'
-            'e44c55501f650a4e80b9c353b81f33e07ca65808db831eff6ca616aded233827'
-            'fa11b4736bbf53ec015f71cd42b1040b22d1a855c562b76927b3f0eccb925c85'
-            'bc3aae2cc00dc9806f54606f98d967366a2ba7223f6a3ad1c658a653ebff5569'
-            '1c5d830f2dd4e8c988fcc038121e7563a44af866d6283ee24274d16f8414d1b6'
-            'ace80afd8dadb000e324e400d5a8f9f2e4ad214b32844bf23236f604c5f88db1'
-            'ad83c0c6195ab742848941be1d9c8f32c1d4a8bc019d8887b42256bafaefb541'
-            '944fc690a0b344ea56ff2b0880ba492ba80338a68f31d0fb205b891a5de42cee'
-            'cd9baa74c6dd7e2a689b072ac039c3fe4618012dd8f11d4ca422369a842d6441'
-            'd1a81bdadc6cc1b96aeb7898e986efbb132a1ce142611b7af2cf744f00cad601'
-            '49c70ba89a886d7426cc44d47795b9a033130087d2d3c5f412112b9a5eb5310d'
-            '9cdffb3f91e0956f4147c8556c80b97bcae448b84ce0d0a0e009a231a9915396'
-            '851503764a3068d36659b9231c9aaa40fe8a15680f7d0a378e9009ae1a776dae'
-            'd98af26b723a8b590822a3d1ab925841b99882c158d3dec7514288c968f2428e'
-            '958cf5016e9845b6ee6e2ed05ad96cc2fc6f74bebbb338a7b7ce29bffd2be716'
-            '3bcbd909aa78bcc4b5b5822d0453c332b8d38bc05e439a670f7fe5a98f75c3f4'
-            '0b6a2fb1b8f87722d29b62908b3e2d274d3deaa602bec795e4fb78b4d5b4ecd2'
-            '420e05220ec0cdca613bc7833fb997c433305705d757cd764a01fdd308995d4d')
+# vim:set sw=2 et:
