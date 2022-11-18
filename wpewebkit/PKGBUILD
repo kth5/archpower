@@ -1,33 +1,69 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
-pkgname=wpewebkit
-pkgver=2.36.8
+pkgbase=wpewebkit
+pkgname=(wpewebkit wpewebkit-docs)
+pkgver=2.38.1
 pkgrel=1
-pkgdesc="Web content engine for embedded devices"
+pkgdesc="Embeddable web content engine"
 url="https://wpewebkit.org"
 arch=(x86_64 powerpc64le powerpc riscv64)
 license=(custom)
-depends=(cairo fontconfig freetype2 glib2 harfbuzz harfbuzz-icu icu libjpeg
-         libepoxy libgcrypt libsoup3 libxml2 zlib libpng sqlite libwebp libwpe
-         atk at-spi2-atk openjpeg2 woff2 libtasn1 libxslt libsystemd bubblewrap
-         libseccomp xdg-dbus-proxy gstreamer gst-plugins-base-libs libxkbcommon
-         wayland wpebackend-fdo)
-makedepends=(cmake ninja gtk-doc python ruby systemd gst-plugins-bad gperf
-             wayland-protocols ruby-digest)
-optdepends=('geoclue: Geolocation support'
-            'gst-plugins-good: media decoding'
-            'gst-plugins-bad: media decoding'
-            'gst-libav: nonfree media decoding')
+depends=(
+  at-spi2-atk
+  atk
+  bubblewrap
+  cairo
+  fontconfig
+  freetype2
+  glib2
+  gst-plugins-base-libs
+  gstreamer
+  harfbuzz
+  harfbuzz-icu
+  icu
+  libepoxy
+  libgcrypt
+  libjpeg
+  libpng
+  libseccomp
+  libsoup3
+  libsystemd
+  libtasn1
+  libwebp
+  libwpe
+  libxkbcommon
+  libxml2
+  libxslt
+  openjpeg2
+  sqlite
+  wayland
+  woff2
+  wpebackend-fdo
+  xdg-dbus-proxy
+  zlib
+)
+makedepends=(
+  cmake
+  gi-docgen
+  gobject-introspection
+  gperf
+  gst-plugins-bad
+  ninja
+  python
+  ruby
+  systemd
+  wayland-protocols
+)
 options=(debug)
-source=($url/releases/$pkgname-$pkgver.tar.xz{,.asc})
-sha256sums=('8d42a349c910b2d0961b8d34fecef29cec3d21e3af5977346c90026692dc75eb'
+source=($url/releases/wpewebkit-$pkgver.tar.xz{,.asc})
+sha256sums=('bfa913aa60c39659983cd906c10a97b2cef1ae0c0574c89ed43dae2a35fefc00'
             'SKIP')
 validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
               '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B') # Adrián Pérez de Castro <aperez@igalia.com>
 
 prepare() {
-  cd $pkgname-$pkgver
+  cd wpewebkit-$pkgver
 }
 
 build() {
@@ -36,26 +72,7 @@ build() {
   CFLAGS+=' -g1'
   CXXFLAGS+=' -g1'
 
-  case "${CARCH}" in
-    powerpc)
-      export LDFLAGS+=' -Wl,--no-keep-memory -Wl,--no-warn-rwx-segments -Wl,--no-warn-execstack'
-      export CFLAGS="${CFLAGS/-O?/-Os}"
-      export CXXFLAGS="${CXXFLAGS/-O?/-Os}"
-      EXTRA_CMAKE_FLAGS="-DENABLE_JIT=OFF
-                         -DUSE_SYSTEMD=OFF
-                         -DPORT=GTK -DUSE_LD_GOLD=OFF
-                         -DUSE_SYSTEM_MALLOC=ON
-                         -DCMAKE_CXX_FLAGS_RELEASE=-DNDEBUG
-                         -DCMAKE_CXX_FLAGS_DEBUG=-DNDEBUG
-                         -DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-DNDEBUG
-                         -DCMAKE_C_FLAGS_RELEASE=-DNDEBUG
-                         -DCMAKE_C_FLAGS_DEBUG=-DNDEBUG
-                         -DCMAKE_C_FLAGS_RELWITHDEBINFO=-DNDEBUG
-                         -DCMAKE_LINKER=${CHOST}-gcc"
-    ;;
-  esac
-
-  cmake -S $pkgname-$pkgver -B build -G Ninja \
+  cmake -S wpewebkit-$pkgver -B build -G Ninja \
     -DPORT=WPE \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
@@ -63,18 +80,25 @@ build() {
     -DCMAKE_INSTALL_LIBEXECDIR=lib \
     -DCMAKE_SKIP_RPATH=ON \
     -DUSE_SOUP2=OFF \
-    -DENABLE_GTKDOC=ON \
+    -DENABLE_DOCUMENTATION=ON \
     -DENABLE_MINIBROWSER=ON
   cmake --build build
 }
 
-package() {
+package_wpewebkit() {
   depends+=(libwpe-1.0.so libWPEBackend-fdo-1.0.so)
   provides+=(libWPEWebKit-1.1.so)
+  optdepends=('geoclue: Geolocation support'
+              'gst-plugins-good: media decoding'
+              'gst-plugins-bad: media decoding'
+              'gst-libav: nonfree media decoding')
 
   DESTDIR="$pkgdir" cmake --install build
 
-  cd $pkgname-$pkgver
+  mkdir -p doc/usr/share
+  mv {"$pkgdir",doc}/usr/share/gtk-doc
+
+  cd wpewebkit-$pkgver
   find Source -name 'COPYING*' -or -name 'LICENSE*' -print0 | sort -z |
     while IFS= read -d $'\0' -r _f; do
       echo "### $_f ###"
@@ -84,4 +108,11 @@ package() {
     install -Dm644 /dev/stdin "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
 
-# vim:set sw=2 et:
+package_wpewebkit-docs() {
+  pkgdesc+=" (documentation)"
+  depends=()
+
+  mv doc/* "$pkgdir"
+}
+
+# vim:set sw=2 sts=-1 et:
