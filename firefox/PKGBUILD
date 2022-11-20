@@ -4,10 +4,10 @@
 # Contributor: Jakub Schmidtke <sjakub@gmail.com>
 
 pkgname=firefox
-pkgver=106.0.2
+pkgver=107.0
 pkgrel=1
 pkgdesc="Standalone web browser from mozilla.org"
-arch=(x86_64 powerpc64le) # riscv64)
+arch=(x86_64 powerpc64le riscv64)
 license=(MPL GPL LGPL)
 url="https://www.mozilla.org/firefox/"
 depends=(gtk3 libxt mime-types dbus-glib ffmpeg nss ttf-font libpulse jemalloc)
@@ -35,8 +35,9 @@ source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-
         lto-thin.patch
         sandbox-fork.patch
         sandbox-largefile.patch
-        libwebrtc-gn.patch)
-sha256sums=('bdf8184f9aadce4fd9613ec63525a96891e2e9dbbef9e4f72193038450a7fd35'
+        libwebrtc-gn.patch
+        makotokato-riscv64-support-and-zenithal-backported.patch)
+sha256sums=('8a562e5a397b57e9bf383c2988308ab494c5d28844e792c658fedea27756584a'
             'SKIP'
             'a6857ad2f2e2091c6c4fdcde21a59fbeb0138914c0e126df64b50a5af5ff63be'
             'a9e5264257041c0b968425b5c97436ba48e8d294e1a0f02c59c35461ea245c33'
@@ -51,7 +52,8 @@ sha256sums=('bdf8184f9aadce4fd9613ec63525a96891e2e9dbbef9e4f72193038450a7fd35'
             '59f29af746912d5bd74f7e253d54ce43696614fb8c2b8385ba0a5ab43f3c0e30'
             'ef9bd794b322482ec7ba217da0cc7cf9e079e05e27bdb37b241b9e16551295ad'
             'b6019e8b9e8e08d6e9ee7b68dc476a7430d18d8d754ab9d0c49ace10fea6f703'
-            '82d25d789483805cb547a1199eb59798e1ce6cbee7bdbbf53c06a8f251a40140')
+            '82d25d789483805cb547a1199eb59798e1ce6cbee7bdbbf53c06a8f251a40140'
+            'cea7997c6613d374535b3450c725f32fd1497d71d66709e1406c4238a01b49d4')
 validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
@@ -97,13 +99,10 @@ prepare() {
 ac_add_options --enable-application=browser
 
 ac_add_options --prefix=/usr
-ac_add_options --enable-release
 ac_add_options --enable-optimize
 ac_add_options --enable-hardening
 ac_add_options --enable-jemalloc
 ac_add_options --enable-linker=bfd
-#ac_add_optioms --without-wasm-sandboxed-libraries
-ac_add_options --with-wasi-sysroot=/usr/share/wasi-sysroot
 export LDFLAGS="${LDFLAGS} -Wl,-rpath=/usr/lib/firefox"
 mk_add_options MOZ_MAKE_FLAGS="${MAKEFLAGS}"
 
@@ -112,7 +111,6 @@ ac_add_options --enable-official-branding
 ac_add_options --enable-update-channel=release
 ac_add_options --with-distribution-id=org.archlinuxpower
 ac_add_options --with-unsigned-addon-scopes=app,system
-export MOZILLA_OFFICIAL=1
 export MOZ_APP_REMOTINGNAME=${pkgname//-/}
 export MOZ_TELEMETRY_REPORTING=1
 export MOZ_REQUIRE_SIGNING=1
@@ -142,12 +140,37 @@ END
       sed -i "s/debug_info = '2'/debug_info = '1'/" \
         build/moz.configure/toolchain.configure
     ;;
+    riscv64) msg2 "no optimizations for ${CARCH}" ;;
     *)
       echo "ac_add_options --enable-rust-simd" >> ${srcdir}/mozconfig
       echo "export RUSTC_OPT_LEVEL=2" >> ${srcdir}/mozconfig
-      echo "export GN=/usr/bin/gn" >> ${srcdir}/mozconfig
       echo "ac_add_options --enable-lto=full" >> ${srcdir}/mozconfig
       echo "ac_add_options MOZ_PGO=1" >> ${srcdir}/mozconfig
+    ;;
+  esac
+
+  case "${CARCH}" in
+    riscv64)
+      echo "ac_add_options --disable-release" >> ${srcdir}/mozconfig
+      echo "ac_add_options --disable-debug" >> ${srcdir}/mozconfig
+      echo "ac_add_options --disable-jit" >> ${srcdir}/mozconfig
+      echo "ac_add_options --without-wasm-sandboxed-libraries" >> ${srcdir}/mozconfig
+      rm -fv ${srcdir}/firefox-${pkgver}/.cargo/config
+    ;;
+    x86_64)
+      echo "ac_add_options --with-wasi-sysroot=/usr/share/wasi-sysroot" >> ${srcdir}/mozconfig
+      echo "ac_add_options --enable-release" >> ${srcdir}/mozconfig
+      echo "ac_add_options --without-wasm-sandboxed-libraries" >> ${srcdir}/mozconfig
+      echo "export MOZILLA_OFFICIAL=1" >> ${srcdir}/mozconfig
+      echo "export MOZ_TELEMETRY_REPORTING=1" >> ${srcdir}/mozconfig
+      echo "export MOZ_REQUIRE_SIGNING=1" >> ${srcdir}/mozconfig
+    ;;
+    *)
+      echo "ac_add_options --enable-release" >> ${srcdir}/mozconfig
+      echo "ac_add_options --without-wasm-sandboxed-libraries" >> ${srcdir}/mozconfig
+      echo "export MOZILLA_OFFICIAL=1" >> ${srcdir}/mozconfig
+      echo "export MOZ_TELEMETRY_REPORTING=1" >> ${srcdir}/mozconfig
+      echo "export MOZ_REQUIRE_SIGNING=1" >> ${srcdir}/mozconfig
     ;;
   esac
 
@@ -159,8 +182,8 @@ build() {
 
   case "${CARCH}" in
     powerpc64le|riscv64)
-      export CC=gcc
-      export CXX=g++
+      export CC=${CHOST}-gcc
+      export CXX=${CHOST}-g++
       ;;
     *)
       export CC=clang
@@ -173,10 +196,7 @@ build() {
   export MOZCONFIG="$srcdir/mozconfig"
   export MOZ_NOSPAM=1
   export MOZBUILD_STATE_PATH="$srcdir/mozbuild"
-  export MOZILLA_OFFICIAL=1
   export MOZ_APP_REMOTINGNAME=${pkgname//-/}
-  export MOZ_TELEMETRY_REPORTING=1
-  export MOZ_REQUIRE_SIGNING=1
   #export MACH_BUILD_PYTHON_NATIVE_PACKAGE_SOURCE=system
 
   # LTO needs more open files
@@ -186,9 +206,9 @@ build() {
   xvfb-run -s "-screen 0 1920x1080x24 -nolisten local" \
   ./mach build
 
-  echo "Building symbol archive..."
-  xvfb-run -s "-screen 0 1920x1080x24 -nolisten local" \
-  ./mach buildsymbols
+  #echo "Building symbol archive..."
+  #xvfb-run -s "-screen 0 1920x1080x24 -nolisten local" \
+  #./mach buildsymbols
 }
 
 package() {
@@ -269,20 +289,3 @@ END
 }
 
 # vim:set sw=2 et:
-
-sha256sums=('905738490cd523ef3d17c48aaac65a1dc19294e8932a245d0f7607be38393fe2'
-            'SKIP'
-            'a6857ad2f2e2091c6c4fdcde21a59fbeb0138914c0e126df64b50a5af5ff63be'
-            'a9e5264257041c0b968425b5c97436ba48e8d294e1a0f02c59c35461ea245c33'
-            'a9b8b4a0a1f4a7b4af77d5fc70c2686d624038909263c795ecc81e0aec7711e9'
-            '0df637d44218524e213814d15d623f27724d8e405390173f6cc385e145110bfe'
-            '958cf5016e9845b6ee6e2ed05ad96cc2fc6f74bebbb338a7b7ce29bffd2be716'
-            '3ebba6c6c59dbf754b522d2535c27eae3e724aab575b8e7be9658e0d33183bcf'
-            '7337e2f9d82d7aa0625f442597989aa93e030750d1a7a87098fbf3d3f06bc69c'
-            '5a0fea05cf1828f102b0b73878a27c0d05b0cf21c81e1a2f463242a0d3121251'
-            'a4ad198fc98acb0a16a013f1ae0a09ab1b96d9b49eadc52045138de5ae2c5ee2'
-            'c36b73c23975ef72b6f562c4e9199e4958ea5083473926562b96ea255c08b148'
-            '59f29af746912d5bd74f7e253d54ce43696614fb8c2b8385ba0a5ab43f3c0e30'
-            'ef9bd794b322482ec7ba217da0cc7cf9e079e05e27bdb37b241b9e16551295ad'
-            'b6019e8b9e8e08d6e9ee7b68dc476a7430d18d8d754ab9d0c49ace10fea6f703'
-            '82d25d789483805cb547a1199eb59798e1ce6cbee7bdbbf53c06a8f251a40140')
