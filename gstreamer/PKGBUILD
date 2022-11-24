@@ -24,8 +24,8 @@ pkgname=(
   gstreamer-docs
 )
 [ "${CARCH}" = 'x86_64' ] && pkgname+=(gst-plugin-msdk)
-pkgver=1.20.3
-pkgrel=1.1
+pkgver=1.20.4
+pkgrel=3
 pkgdesc="Multimedia graph framework"
 url="https://gstreamer.freedesktop.org/"
 arch=(x86_64 powerpc64le powerpc riscv64)
@@ -78,19 +78,22 @@ makedepends_x86_64=(
   libldac svt-hevc
 )
 checkdepends=(xorg-server-xvfb)
+_commit=642730bd67d3c23ac68bd328fbddd191a7a43f25  # tags/1.20.4^0
 source=(
-  "git+https://gitlab.freedesktop.org/gstreamer/gstreamer.git?signed#tag=$pkgver"
-  "https://gstreamer.freedesktop.org/src/gstreamer-docs/gstreamer-docs-$pkgver.tar.xz"{,.asc}
-  0001-openaptx-Support-libfreeaptx.patch
-  0002-wpe-Clean-up-build-script.patch
+  "git+https://gitlab.freedesktop.org/gstreamer/gstreamer.git#commit=$_commit"
+  "https://gstreamer.freedesktop.org/src/gstreamer-docs/gstreamer-docs-${pkgver%%+*}.tar.xz"{,.asc}
+  0001-meson-Add-a-new-option-to-control-the-source-for-orc.patch
+  0002-HACK-meson-Disable-broken-tests.patch
+  0003-HACK-meson-Work-around-broken-detection-of-underscor.patch
 )
 sha256sums=('SKIP'
-            '73fc428a40d6a34c2ceb80e3e572b20f19f8ebe216d566f010de11573063f1bf'
+            '9a40511387c5b14fa8ed4555bda1bb9dd336b4b8a00e18cc97929b4dd930a79a'
             'SKIP'
-            'dafd73f4264a027b207b2907d54f89f5c5731eab3f4806843878f29504f39b03'
-            'bbb07e1e21d385b40a69a0f2ae70ca07ccb41adfa1d35d9648e2e16df7d6d59e')
+            '54115800d579864db41ba9b3f62745696a9e012ca5c7afa990ee6943f0912365'
+            '5cd72310f9f4230ca6bba6a2b972eb783296ab622a2586683cd8623b6907d3ff'
+            '79d3038a0ba0c3958ffa8b5aec8431336b372906c07c0c878c3767bec0acb46f')
 validpgpkeys=(D637032E45B8C6585B9456565D2EEE6F6F349D7C) # Tim Müller <tim@gstreamer-foundation.org>
-options=(!distcc)
+options=(debug)
 
 pkgver() {
   cd gstreamer
@@ -100,21 +103,15 @@ pkgver() {
 prepare() {
   cd gstreamer
 
-  # Build fixes
-  git apply -3 ../0001-openaptx-Support-libfreeaptx.patch
-  git apply -3 ../0002-wpe-Clean-up-build-script.patch
-
   # Fix linking with system orc
-  sed -i "s/get_option('orc')/false/" meson.build
+  git apply -3 ../0001-meson-Add-a-new-option-to-control-the-source-for-orc.patch
 
   # Disable broken tests
-  sed -i "/subdir('tests')/d" subprojects/{gst-editing-services,gstreamer-vaapi}/meson.build
-  sed -i "/subdir('testsuite')/d" subprojects/gst-python/meson.build
-  sed -i "/'gst\/rtspserver'/d" subprojects/gst-rtsp-server/tests/check/meson.build
-  
+  git apply -3 ../0002-HACK-meson-Disable-broken-tests.patch
+
   # Workaround broken detection of underscore prefixes
   # https://github.com/mesonbuild/meson/issues/5482
-  sed -i 's/-DPREFIX/-UPREFIX/' subprojects/gst-plugins-good/gst/deinterlace/meson.build
+  git apply -3 ../0003-HACK-meson-Work-around-broken-detection-of-underscor.patch
 }
 
 build() {
@@ -125,19 +122,20 @@ build() {
     -D gpl=enabled
     -D gst-examples=disabled
     -D libnice=disabled
+    -D orc-source=system
     -D vaapi=enabled
     -D gstreamer:dbghelp=disabled
     -D gstreamer:gobject-cast-checks=disabled
     -D gstreamer:package-name="Arch POWER gstreamer $pkgver-$pkgrel"
-    -D gstreamer:package-origin="https://www.archlinux.org/"
+    -D gstreamer:package-origin="https://archlinuxpower.org/"
     -D gstreamer:ptp-helper-permissions=capabilities
     -D gst-plugins-base:gobject-cast-checks=disabled
     -D gst-plugins-base:package-name="Arch POWER gst-plugins-base $pkgver-$pkgrel"
-    -D gst-plugins-base:package-origin="https://www.archlinux.org/"
+    -D gst-plugins-base:package-origin="https://archlinuxpower.org/"
     -D gst-plugins-base:tremor=disabled
     -D gst-plugins-good:gobject-cast-checks=disabled
     -D gst-plugins-good:package-name="Arch POWER gst-plugins-good $pkgver-$pkgrel"
-    -D gst-plugins-good:package-origin="https://www.archlinux.org/"
+    -D gst-plugins-good:package-origin="https://archlinuxpower.org/"
     -D gst-plugins-good:rpicamsrc=disabled
     -D gst-plugins-bad:directfb=disabled
     -D gst-plugins-bad:flite=disabled
@@ -758,7 +756,7 @@ package_gstreamer-docs() {
   # make sure there are no files left to install
   find root -depth -print0 | xargs -0 rmdir
 
-  cd gstreamer-docs-$pkgver
+  cd gstreamer-docs-${pkgver%%+*} 
 
   mkdir -p "$pkgdir/usr/share"
   cp -a devhelp "$pkgdir/usr/share/devhelp"
