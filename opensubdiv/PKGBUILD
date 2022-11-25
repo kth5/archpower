@@ -2,12 +2,12 @@
 # Maintainer: Sven-Hendrik Haase <svenstaro@archlinux.org>
 pkgname=opensubdiv
 pkgver=3.5.0
-pkgrel=1.1
+pkgrel=2
 pkgdesc="An Open-Source subdivision surface library"
 arch=(x86_64 powerpc64le powerpc riscv64)
 url="http://graphics.pixar.com/opensubdiv"
 license=('APACHE')
-depends=('ptex' 'tbb' 'libxcursor' 'xorg-xrandr' 'libxinerama' 'libxi')
+depends=('ptex' 'intel-tbb' 'libxcursor' 'xorg-xrandr' 'libxinerama' 'libxi')
 makedepends=('cmake' 'doxygen' 'glfw' 'glew' 'python' 'python-pygments' 'python-docutils' 'opencl-headers' 'libglvnd')
 makedepends_x86_64=('cuda')
 source=("https://github.com/PixarAnimationStudios/OpenSubdiv/archive/v${pkgver//./_}.tar.gz"
@@ -29,7 +29,24 @@ build() {
   cd "OpenSubdiv-${pkgver//./_}"
 
   case "${CARCH}" in
-    x86_64) CUDA_ARGS="-DOSD_CUDA_NVCC_FLAGS='--gpu-architecture=compute_53' -DCUDA_HOST_COMPILER=/usr/bin/g++"
+    x86_64) _cmake_options=(
+              -DCUDA_HOST_COMPILER=/usr/bin/g++
+              -DOSD_CUDA_NVCC_FLAGS="-gencode=arch=compute_52,code=sm_52 \
+	                             -gencode=arch=compute_53,code=sm_53 \
+	                             -gencode=arch=compute_60,code=sm_60 \
+	                             -gencode=arch=compute_61,code=sm_61 \
+	                             -gencode=arch=compute_62,code=sm_62 \
+	                             -gencode=arch=compute_70,code=sm_70 \
+	                             -gencode=arch=compute_72,code=sm_72 \
+	                             -gencode=arch=compute_75,code=sm_75 \
+	                             -gencode=arch=compute_80,code=sm_80 \
+	                             -gencode=arch=compute_86,code=sm_86 \
+	                             -gencode=arch=compute_87,code=sm_87 \
+	                             -gencode=arch=compute_89,code=sm_89 \
+	                             -gencode=arch=compute_90,code=sm_90 \
+	                             -gencode=arch=compute_90,code=compute_90"
+	    )
+    ;;
   esac
 
   cmake \
@@ -39,7 +56,7 @@ build() {
       -DNO_TUTORIALS=ON \
       -DCMAKE_BUILD_TYPE=Release \
       -DCUDA_HOST_COMPILER=/usr/bin/g++ \
-      -DCMAKE_INSTALL_PREFIX=/usr ${CUDA_ARGS}
+      -DCMAKE_INSTALL_PREFIX=/usr ${_cmake_options[@]}
 
   make -C build
 }
