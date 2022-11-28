@@ -2,23 +2,33 @@
 # Maintainer: Bruno Pagani <archange@archlinux.org>
 
 pkgname=nodejs-lts-dubnium
-pkgver=10.24.0
-pkgrel=2.4
+pkgver=10.24.1
+pkgrel=1
 pkgdesc="Evented I/O for V8 javascript (LTS release: Dubnium)"
 arch=(x86_64 powerpc64le powerpc)
 url="https://nodejs.org/"
 license=(MIT)
 depends=(openssl zlib icu libuv http-parser c-ares libnghttp2)
-makedepends=(python2 procps-ng)
+makedepends=(python2 procps-ng clang)
 provides=(npm nodejs "nodejs=$pkgver")
 conflicts=(nodejs)
 source=("${url}/dist/v${pkgver}/node-v${pkgver}.tar.xz"
 	icu68.patch
-	ppc32.patch)
+	ppc32.patch
+        atomic.patch
+        fix_disable_cctest.patch
+        system-brotli.patch
+        use_system_node_gyp.patch
+        uv_stable.patch)
 # https://nodejs.org/download/release/latest-dubnium/SHASUMS256.txt.asc
-sha256sums=('158273af66f891b2fca90aec7336c42f7574f467affad02c14e80ca163cb3acc'
+sha256sums=('d72fc2c244603b4668da94081dc4d6067d467fdfa026e06a274012f16600480c'
             'e953185d2d7de61bf8d4ca168fe034cce7a968264c1e7c24d53421fe7d24aace'
-            'c96ef869268f4404df5606f86585faf3b8e86873967ed7a85e1cfc9ba067cf8d')
+            'c96ef869268f4404df5606f86585faf3b8e86873967ed7a85e1cfc9ba067cf8d'
+            'ddffa7cfe35d56174ee80c3b6bcad4785d21e1da9fc9ef41ae328f2242ee5d80'
+            '143f0e2d73a221c86aa0fc8fea46b264b49a1026aad14ca1e4ac2c1bfc2d55e7'
+            'efbd230df42ea85c1b8c5ac22d0b3bc74114b272e9da49f111b8a0ed7484c4b5'
+            'be4f1f2108289274792a2d86ed0146d4649ccfb19193d7207e5490d0f5080c27'
+            '8d395c057c960b470cc4de467e70dc6d6f4b119022c852565398fb4427dc30b3')
 validpgpkeys=(C4F0DFFF4E8C1A8236409D08E73BC641CC11F4C8  # Myles Borins <mylesborins@google.com>
               77984A986EBC2AA786BC0F66B01FBB92821C587A  # Gibson Fahnestock <gibfahn@gmail.com>
               B9AE9905FFD7803F25714661B63B535A4C206CA9  # Evan Lucas <evanlucas@me.com> 
@@ -32,6 +42,11 @@ prepare() {
 
   patch -Np0 -i ${srcdir}/ppc32.patch
   patch -Np0 -i ${srcdir}/icu68.patch
+  patch -Np1 -i ${srcdir}/atomic.patch
+  patch -Np1 -i ${srcdir}/fix_disable_cctest.patch
+  patch -Np1 -i ${srcdir}/system-brotli.patch
+  patch -Np1 -i ${srcdir}/use_system_node_gyp.patch
+  patch -Np1 -i ${srcdir}/uv_stable.patch
 
   echo 'Fixing for python2 name'
   find -type f -exec sed \
@@ -48,7 +63,12 @@ build() {
   cd node-v${pkgver}
 
   case "${CARCH}" in
-    powerpc) CPU=ppc ; LDFLAGS+=" -latomic";;
+    powerpc)
+      CPU=ppc
+      LDFLAGS+=" -latomic"
+      export CC=clang
+      export CXX=clang++
+    ;;
     powerpc64le) CPU=ppc64 ;;
     x86_64) CPU=x64 ;;
   esac

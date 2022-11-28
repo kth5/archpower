@@ -1,0 +1,120 @@
+From 616b7fbcb1a7f53ea21f5ee4e3f80c61951c5728 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Andr=C3=A9=20Draszik?= <git@andred.net>
+Date: Mon, 2 Mar 2020 12:17:35 +0000
+Subject: [PATCH] build: allow use of system-installed brotli
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+brotli is available as a shared library since 2016, so it makes sense
+to allow its use as a system-installed version.
+
+Some of the infrastructure was in place already (node.gyp and
+node.gypi), but some bits in the configure script here were missing.
+
+Add them, keeping the default as before, to use the bundled version.
+
+Refs: https://github.com/google/brotli/pull/421
+Signed-off-by: André Draszik <git@andred.net>
+
+PR-URL: https://github.com/nodejs/node/pull/32046
+Reviewed-By: Anna Henningsen <anna@addaleax.net>
+Reviewed-By: James M Snell <jasnell@gmail.com>
+Reviewed-By: Michael Dawson <michael_dawson@ca.ibm.com>
+Reviewed-By: Ben Noordhuis <info@bnoordhuis.nl>
+Reviewed-By: Richard Lau <riclau@uk.ibm.com>
+---
+ configure.py | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+--- a/configure.py
++++ b/configure.py
+@@ -290,6 +290,27 @@
+     dest='shared_zlib_libpath',
+     help='a directory to search for the shared zlib DLL')
+ 
++shared_optgroup.add_option('--shared-brotli',
++    action='store_true',
++    dest='shared_brotli',
++    help='link to a shared brotli DLL instead of static linking')
++
++shared_optgroup.add_option('--shared-brotli-includes',
++    action='store',
++    dest='shared_brotli_includes',
++    help='directory containing brotli header files')
++
++shared_optgroup.add_option('--shared-brotli-libname',
++    action='store',
++    dest='shared_brotli_libname',
++    default='brotlidec,brotlienc',
++    help='alternative lib name to link to [default: %default]')
++
++shared_optgroup.add_option('--shared-brotli-libpath',
++    action='store',
++    dest='shared_brotli_libpath',
++    help='a directory to search for the shared brotli DLL')
++
+ shared_optgroup.add_option('--shared-cares',
+     action='store_true',
+     dest='shared_libcares',
+@@ -622,24 +643,32 @@
+   else:
+     return 'false'
+ 
++def to_utf8(s):
++  return s if isinstance(s, str) else s.decode("utf-8")
+ 
+ def pkg_config(pkg):
+   """Run pkg-config on the specified package
+   Returns ("-l flags", "-I flags", "-L flags", "version")
+   otherwise (None, None, None, None)"""
+   pkg_config = os.environ.get('PKG_CONFIG', 'pkg-config')
++  args = []  # Print pkg-config warnings on first round.
+   retval = ()
+   for flag in ['--libs-only-l', '--cflags-only-I',
+                '--libs-only-L', '--modversion']:
++    args += [flag]
++    if isinstance(pkg, list):
++      args += pkg
++    else:
++      args += [pkg]
+     try:
+-      proc = subprocess.Popen(
+-          shlex.split(pkg_config) + ['--silence-errors', flag, pkg],
+-          stdout=subprocess.PIPE)
+-      val = proc.communicate()[0].strip()
++      proc = subprocess.Popen(shlex.split(pkg_config) + args,
++                              stdout=subprocess.PIPE)
++      val = to_utf8(proc.communicate()[0]).strip()
+     except OSError as e:
+       if e.errno != errno.ENOENT: raise e  # Unexpected error.
+       return (None, None, None, None)  # No pkg-config/pkgconf installed.
+     retval += (val,)
++    args = ['--silence-errors']
+   return retval
+ 
+ 
+@@ -1136,12 +1165,13 @@
+   version = getnapibuildversion.get_napi_version()
+   output['variables']['napi_build_version'] = version
+ 
+-def configure_library(lib, output):
++def configure_library(lib, output, pkgname=None):
+   shared_lib = 'shared_' + lib
+   output['variables']['node_' + shared_lib] = b(getattr(options, shared_lib))
+ 
+   if getattr(options, shared_lib):
+-    (pkg_libs, pkg_cflags, pkg_libpath, pkg_modversion) = pkg_config(lib)
++    (pkg_libs, pkg_cflags, pkg_libpath, pkg_modversion) = (
++        pkg_config(pkgname or lib))
+ 
+     if options.__dict__[shared_lib + '_includes']:
+       output['include_dirs'] += [options.__dict__[shared_lib + '_includes']]
+@@ -1612,6 +1642,7 @@
+ configure_library('zlib', output)
+ configure_library('http_parser', output)
+ configure_library('libuv', output)
++configure_library('brotli', output, pkgname=['libbrotlidec', 'libbrotlienc'])
+ configure_library('libcares', output)
+ configure_library('nghttp2', output)
+ # stay backwards compatible with shared cares builds
