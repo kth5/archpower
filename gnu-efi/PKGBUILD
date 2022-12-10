@@ -1,29 +1,35 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: David Runge <dvzrv@archlinux.org>
 
 pkgname=gnu-efi
 pkgver=3.0.15
-pkgrel=1
+pkgrel=3
 pkgdesc="Develop EFI applications using the GNU toolchain and the EFI development environment"
-arch=(x86_64 riscv64)
+arch=(x86_64 powerpc64le powerpc riscv64)
 url="https://sourceforge.net/projects/gnu-efi/"
 license=(BSD)
 conflicts=(gnu-efi-libs)
 provides=(gnu-efi-libs)
 replaces=(gnu-efi-libs)
+makedepends=(clang)
 source=(https://download.sourceforge.net/$pkgname/$pkgname-$pkgver.tar.bz2
+        https://gitweb.gentoo.org/repo/gentoo.git/plain/sys-boot/gnu-efi/files/gnu-efi-3.0.9-fix-clang-build.patch
         gnu-efi-rwx-warn.patch)
-options=(!strip !distcc)
+options=(!distcc !strip)
 sha512sums=('64d408b6d115bdc6eebae12fbd6cd907ed5f847f54e506c1e8f8ea5de38a95cf6fac66ab1009bd1d0bd2d54ad45ad598d29bcc303926a5899bf5cc25448cbb2f'
-            '3dbb0952ae8a0a54660d5d32100a6b74c3bfd29f89122cd1c0227d59865c336c33a64cc356409ef71bf1c9b14570c48e91e45a760fc31379b6412d35e4c0d314')
+            '1f77f4a5dcd2f1589cd6950da3462f2508d0ac51c2d2268400414c336ddd41fcf430e79fb702fd5aa99cb4be0bf0fc6eabe9362d736a1223b1c53c2c0b319584'
+            '91d39f01d344101fbfaad059ea6a8b401712601d6936889d19c6af4f17be6310d71a78bf9cff27df289d679b16d9085cf68791c62b88bae7391ffb3c7d17edde')
 b2sums=('0df93d8cacfa1e6d4b7731e32287d4386da9375c5e5c5847df8a29c99d70f5c24b14abc5e44ab9d0a39a6ec96682eb2b5e84d81a5a142d44a50a522a4ae0e3c2'
-        'bc3fc4d622100d6f9e61aee276ba4668c72311064dbe4aeafd77f2f1bb438f585ee9c5b3127b7535be116774c0a986e63515f3b61630196eb4e2543163d41c97')
+        '5b3f60e27982cd9e2cfb385851af4840d0301c1fb590d34b029e18a239a232ecca6a62431e10138d4e12cb44a5f64b415936935c1bdaf601dcf605ebe892de54'
+        'c37f6c4411fc45c570a2a0987396dfbbded33234a115d450274926b3734e182ac408d8d73b42c6f1085124d1ff114fbc55678485b933f8c553449b8f453c3a11')
 
 prepare() {
-  cd ${pkgname}-${pkgver}
-  patch -Np1 -i ${srcdir}/gnu-efi-rwx-warn.patch
-
   # -Werror, not even once
-  sed -e 's/-Werror//g' -i Make.defaults
+  sed -e 's/-Werror//g' -i $pkgname-$pkgver/Make.defaults
+
+  cd ${srcdir}/${pkgname}-${pkgver}
+  patch -Np1 -i ${srcdir}/gnu-efi-rwx-warn.patch
+  patch -Np1 -i ${srcdir}/gnu-efi-3.0.9-fix-clang-build.patch
 }
 
 build() {
@@ -32,8 +38,7 @@ build() {
   # libs, but may be used in unitialized machine state and should therefore not
   # be architecture optmized
   # NOTE: fat-lto-objects is required for non-mangled (static) object files
-  CFLAGS="-O2 -flto -ffat-lto-objects"
-  LDFLAGS+=" -Wl,--no-warn-rwx-segments"
+  CFLAGS="-O2 -flto -ffat-lto-objects -Wl,--no-warn-rwx-segments -Wl,--no-warn-execstack"
   make
   make -C lib
   make -C gnuefi
@@ -46,6 +51,8 @@ build() {
 
 package() {
   cd $pkgname-$pkgver
+  # not quite sure why CFLAGS gets reset
+  CFLAGS="-O2 -flto -ffat-lto-objects"
   make INSTALLROOT="$pkgdir" PREFIX=/usr install
   install -vDm 644 apps/*.efi -t "$pkgdir/usr/share/$pkgname/apps/$CARCH/"
   install -vDm 644 README.efilib -t "$pkgdir/usr/share/licenses/$pkgname/"

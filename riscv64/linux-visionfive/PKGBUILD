@@ -1,10 +1,11 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 pkgbase=linux-visionfive
-pkgver=5.19.0.efb4203c
-pkgrel=3
+pkgver=6.0.9.arch1
+pkgrel=1
 epoch=1
 pkgdesc='Linux kernel for the StarFive VisionFive V1'
-_commit="4333f325dfcc11817be234d93fcc9ce7efb4203c"
+_srctag=v${pkgver%.*}-${pkgver##*.}
+_srcname=archlinux-linux
 url="https://github.com/starfive-tech/linux.git/log/?h=$_srctag"
 arch=(any)
 license=(GPL2)
@@ -14,8 +15,10 @@ makedepends=(
 )
 options=('!strip')
 source=(
-  "${pkgbase}::git+https://github.com/starfive-tech/linux.git#commit=${_commit}"
+  "$_srcname::git+https://github.com/archlinux/linux?signed#tag=$_srctag"
   config         # the main kernel config file
+  "${pkgbase}-force-disable-sv57.patch::https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/kinetic/patch/?id=f38611903ae7808ab1b7427809f478fbe0d20917"
+  jh7100-starfive-visionfive-v1.dtb
 )
 validpgpkeys=(
   'ABAF11C65A2970B130ABE3C479BE3E4300411886'  # Linus Torvalds
@@ -24,7 +27,9 @@ validpgpkeys=(
   'C7E7849466FE2358343588377258734B41C31549'  # David Runge <dvzrv@archlinux.org>
 )
 sha256sums=('SKIP'
-            '1140bc204ba46125fef8a76e41fa260c5781160688fb8d8b1b9d6e54a25424e5')
+            '2c85147a44582d19ddcd53d6c3cc9cbe0130d2f195d5821c8c66fea11da5eb56'
+            '8968d16070c3fb13db839c649a8407680288322a1ba6869bcfee19c8bd87de87'
+            '396ded7d98bd58f472676c457c8ae53686da3d6f8daa8c992ac70ad6fe9b6fa3')
 
 export KBUILD_BUILD_HOST=archpower
 export KBUILD_BUILD_USER=$pkgbase
@@ -32,14 +37,8 @@ export KBUILD_BUILD_TIMESTAMP="$(date -Ru${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EP
 
 export MYARCH="riscv"
 
-pkgver() {
-  cd $pkgbase
-  eval $(head -n4 Makefile | tail -n3 | sed 's@ @@g')
-  echo ${VERSION}.${PATCHLEVEL}.${SUBLEVEL}.${_commit: -8}
-}
-
 prepare() {
-  cd $pkgbase
+  cd ${_srcname}
   echo "Setting version..."
   scripts/setlocalversion --save-scmversion
   echo "-$pkgrel" > localversion.10-pkgrel
@@ -66,7 +65,7 @@ prepare() {
 }
 
 build() {
-  cd $pkgname
+  cd ${_srcname}
   ARCH=${MYARCH} CROSS_COMPILE=riscv64-unknown-linux-gnu- make all
 }
 
@@ -78,7 +77,7 @@ _package() {
   provides=(WIREGUARD-MODULE)
   replaces=(wireguard-arch)
 
-  cd $pkgbase
+  cd ${_srcname}
   local kernver="$(<version)"
   local modulesdir="$pkgdir/usr/lib/modules/$kernver"
 
@@ -93,8 +92,9 @@ _package() {
   echo "Installing modules..."
   ARCH=${MYARCH} CROSS_COMPILE=riscv64-unknown-linux-gnu- make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 modules_install
 
-  echo "Installing device tree..."
-  install -Dm755 arch/riscv/boot/dts/starfive/jh7100-starfive-visionfive-v1.dtb ${pkgdir}/boot/jh7100-starfive-visionfive-v1.dtb 
+  echo "Installing dtbs..."
+  ARCH=${MYARCH} CROSS_COMPILE=riscv64-unknown-linux-gnu- make INSTALL_DTBS_PATH="$pkgdir/usr/share/dtbs/$kernver" dtbs_install
+  install -Dm755 ${srcdir}/jh7100-starfive-visionfive-v1.dtb ${pkgdir}/usr/share/dtbs/$kernver/starfive/jh7100-starfive-visionfive-v1.dtb
 
   # remove build and source links
   rm -f "$modulesdir"/{source,build}
@@ -105,7 +105,7 @@ _package-headers() {
   provides=('linux-headers')
   conflicts=('linux-headers')
 
-  cd $pkgbase
+  cd ${_srcname}
   local builddir="$pkgdir/usr/lib/modules/$(<version)/build"
 
   echo "Installing build files..."
