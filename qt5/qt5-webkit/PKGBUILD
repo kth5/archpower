@@ -1,0 +1,101 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer (aur): Felix Yan <felixonmars@archlinux.org>
+# Maintainer (aur): Antonio Rojas <arojas@archlinux.org>
+# Contributor: Andrea Scarpino <andrea@archlinux.org>
+
+
+# parabola changes and rationale:
+#   - blacklist rescue for webengine clients which support alternate backends (redmine #1167)
+#   - pin to strongly-coupled dependency versions
+
+pkgname=qt5-webkit
+_pkgver=5.212.0-alpha4
+pkgver=${_pkgver/-/}
+pkgrel=18
+arch=(x86_64 armv7h i686 powerpc64le powerpc riscv64)
+url='https://github.com/qtwebkit/qtwebkit'
+license=(GPL3 LGPL3 FDL custom)
+pkgdesc='Classes for a WebKit2 based implementation and a new QML API'
+source=("https://github.com/qtwebkit/qtwebkit/releases/download/qtwebkit-$_pkgver/qtwebkit-$_pkgver.tar.xz"
+         icu68.patch
+         glib-2.68.patch
+         qt5-webkit-python-3.9.patch # https://github.com/qtwebkit/qtwebkit/commit/78360c01.patch
+         qt5-webkit-bison-3.7.patch  # https://github.com/qtwebkit/qtwebkit/commit/d92b11fe.patch
+         jscore_big_endian.diff
+         ppc-llint.patch
+         reduce-exports.patch
+         riscv64.patch
+         no_pdf_image_plugin.diff)
+depends=(qt5-location qt5-sensors qt5-webchannel libwebp libxslt libxcomposite gst-plugins-base hyphen woff2)
+makedepends=(cmake ruby gperf python qt5-doc qt5-tools)
+makedepends_powerpc=(lld)
+optdepends=('gst-plugins-good: Webm codec support')
+sha256sums=('9ca126da9273664dd23a3ccd0c9bebceb7bb534bddd743db31caf6a5a6d4a9e6'
+            '0b40ed924f03ff6081af610bb0ee01560b7bd1fb68f8af02053304a01d4ccdf0'
+            '4969dd03e482155e2490b50307dada81dda7bbc9e5398e3a53c20bc474f7c04e'
+            '6e0cee08e4fa57b04752e80817f33562f48aa42608a3a620930b6040259b4932'
+            '34f37b53ee0bc31c63ce85ebd1ae95543a8ba28483e387b20efd50574bd813be'
+            '8e1aa3994ac6a939cbfdf4a05209a9c20f338ef1ee9501fc74d1da1b7c4a6041'
+            '51a3756bdd5605d58b031edecc2bde4059e4c1c33de959f9b3b2ee9b17e39ab9'
+            '1bdd5391655036672e833892a182234d4827b52d9e1414a3f45847d3f4776d00'
+            '2e08b75a159514e35ff90c8a5bcfc42a39b6f13bec0f332334e9cb7c246cf1db'
+            '70de08deba306a6aa9c4853c2ae75eb09b9f32298bd404c601f2c7ba4d7ca1d9')
+options=(!lto !distcc)
+
+prepare() {
+  cd qtwebkit-$_pkgver
+  patch -p0 -i ../icu68.patch # Fix build with ICU 68.x
+  patch -p1 -i ../glib-2.68.patch # https://github.com/qtwebkit/qtwebkit/issues/1057
+  patch -p1 -i ../qt5-webkit-python-3.9.patch # Fix build with python 3.9
+  patch -p1 -i ../qt5-webkit-bison-3.7.patch # Fix build with bison 3.7
+
+  patch -p1 -i ../jscore_big_endian.diff
+  patch -p1 -i ../ppc-llint.patch
+  patch -p1 -i ../reduce-exports.patch
+  patch -p1 -i ../riscv64.patch
+  patch -p1 -i ../no_pdf_image_plugin.diff
+}
+
+build() {
+  _cmake_options=()
+
+  case "${CARCH}" in
+    powerpc*|riscv64)
+     warning "Detected ${CARCH} and disabling JIT..."
+     _cmake_options+=(-DENABLE_JIT=OFF)
+   ;;
+  esac
+
+  case "${CARCH}" in
+    powerpc64le)
+      warning "Detected ${CARCH} and enabled system malloc (64k & 4k page kernels)..."
+      _cmake_options+=(-DUSE_SYSTEM_MALLOC=ON)
+    ;;
+    powerpc)
+      export LDFLAGS=" -Wl,--no-keep-memory"
+      _cmake_options+=(-DUSE_LD_GOLD=OFF
+                       -DUSE_SYSTEM_MALLOC=ON)
+    ;;
+    riscv64)
+      export CXXFLAGS+=" -latomic"
+      export LDFLAGS+=" -latomic"
+    ;;
+  esac
+
+
+  cmake -B build -S qtwebkit-$_pkgver \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_CXX_FLAGS="${CXXFLAGS} -DNDEBUG" \
+    -DPORT=Qt \
+    -DENABLE_TOOLS=OFF ${_cmake_options[@]}
+  cmake --build build
+}
+
+package() {
+  depends+=(qt5-base)
+
+  DESTDIR="$pkgdir" cmake --install build
+
+  install -d "$pkgdir"/usr/share/licenses
+  ln -s /usr/share/licenses/qt5-base "$pkgdir"/usr/share/licenses/${pkgname}
+}
