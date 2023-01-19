@@ -1,0 +1,129 @@
+From ae9258fbf3b9d434495ef11fc184a91fe7c4ca57 Mon Sep 17 00:00:00 2001
+From: NIIBE Yutaka <gniibe@fsij.org>
+Date: Thu, 15 Sep 2022 13:46:23 +0900
+Subject: [PATCH] build:python: Don't use gpg-error-config/gpgme-config.
+
+* lang/python/setup.py.in: Use @prefix@, @GPGME_CONFIG_LIBS@,
+@GPGME_CONFIG_CFLAGS@, and @GPG_ERROR_CFLAGS@ of configure.
+
+--
+
+GnuPG-bug-id: 6204
+Signed-off-by: NIIBE Yutaka <gniibe@fsij.org>
+---
+ lang/python/setup.py.in | 34 +++++-----------------------------
+ 1 file changed, 5 insertions(+), 29 deletions(-)
+
+diff --git a/lang/python/setup.py.in b/lang/python/setup.py.in
+index 9785a282..6741d3c8 100755
+--- a/lang/python/setup.py.in
++++ b/lang/python/setup.py.in
+@@ -26,77 +26,60 @@ import os
+ import os.path
+ import re
+ import shutil
+ import subprocess
+ import sys
+ 
+ # Out-of-tree build of the gpg bindings.
+-gpg_error_config = ['gpg-error-config']
+-gpgme_config_flags = ['--thread=pthread']
+-gpgme_config = ['gpgme-config'] + gpgme_config_flags
+ gpgme_h = ''
+ include_dirs = [os.getcwd()]
+ library_dirs = []
+ in_tree = False
+ extra_swig_opts = []
+ extra_macros = dict()
+ 
+ top_builddir = os.environ.get('top_builddir')
+ if top_builddir:
+     # In-tree build.
+     in_tree = True
+-    gpgme_config = [os.path.join(top_builddir, 'src/gpgme-config')
+-                    ] + gpgme_config_flags
+     gpgme_h = os.path.join(top_builddir, 'src/gpgme.h')
+     library_dirs = [os.path.join(top_builddir,
+                                  'src/.libs')]  # XXX uses libtool internals
+     extra_macros.update(
+         HAVE_CONFIG_H=1,
+         HAVE_DATA_H=1,
+         IN_TREE_BUILD=1,
+     )
+ 
+ if hasattr(subprocess, 'DEVNULL'):
+     devnull = subprocess.DEVNULL
+ else:
+     devnull = open(os.devnull, 'w')
+ 
+-try:
+-    subprocess.check_call(gpgme_config + ['--version'], stdout=devnull)
+-except:
+-    sys.exit('Could not find gpgme-config.  ' +
+-             'Please install the libgpgme development package.')
+ 
+-
+-def getconfig(what, config=gpgme_config):
+-    confdata = subprocess.Popen(
+-        config + ['--%s' % what], stdout=subprocess.PIPE).communicate()[0]
+-    return [x for x in confdata.decode('utf-8').split() if x != '']
+-
+-
+-version = version_raw = getconfig('version')[0]
++version = version_raw = "@VERSION@"
+ if '-' in version:
+     version = version.split('-')[0]
+ major, minor, patch = map(int, version.split('.'))
+ 
+ if not (major > 1 or (major == 1 and minor >= 7)):
+     sys.exit('Need at least GPGME version 1.7, found {}.'.format(version_raw))
+ 
+ if not gpgme_h:
+-    gpgme_h = os.path.join(getconfig('prefix')[0], 'include', 'gpgme.h')
++    gpgme_h = os.path.join('@prefix@', 'include', 'gpgme.h')
+ 
+ define_macros = []
+-libs = getconfig('libs')
++libs = '@GPGME_CONFIG_LIBS@'.split(' ')
+ 
+ # Define extra_macros for both the SWIG and C code
+ for k, v in extra_macros.items():
+     extra_swig_opts.append('-D{0}={1}'.format(k, v))
+     define_macros.append((k, str(v)))
+ 
+-for item in getconfig('cflags'):
++for item in '@GPGME_CONFIG_CFLAGS@'.split(' '):
+     if item.startswith('-I'):
+         include_dirs.append(item[2:])
+     elif item.startswith('-D'):
+         defitem = item[2:].split('=', 1)
+         if len(defitem) == 2:
+             define_macros.append((defitem[0], defitem[1]))
+         else:
+@@ -178,23 +161,16 @@ class BuildExtFirstHack(build):
+ 
+     def _generate_gpgme_h(self, source_name, sink_name):
+         print('Using gpgme.h from {}'.format(source_name))
+         shutil.copy2(source_name, sink_name)
+ 
+     def _generate_errors_i(self):
+ 
+-        try:
+-            subprocess.check_call(
+-                gpg_error_config + ['--version'], stdout=devnull)
+-        except:
+-            sys.exit('Could not find gpg-error-config.  ' +
+-                     'Please install the libgpg-error development package.')
+-
+         gpg_error_content = self._read_header(
+-            'gpg-error.h', getconfig('cflags', config=gpg_error_config))
++            'gpg-error.h', '@GPG_ERROR_CFLAGS@'.split(' '))
+ 
+         filter_re = re.compile(r'GPG_ERR_[^ ]* =')
+         rewrite_re = re.compile(r' *(.*) = .*')
+ 
+         errors_i_content = ''
+         for line in gpg_error_content.splitlines():
+             if not filter_re.search(line):
+-- 
+2.35.1

@@ -4,9 +4,9 @@
 
 pkgname=clang
 pkgver=14.0.6
-pkgrel=4
+pkgrel=4.1
 pkgdesc="C language family frontend for LLVM"
-arch=(x86_64 powerpc64le powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://clang.llvm.org/"
 license=('custom:Apache 2.0 with LLVM Exception')
 depends=('llvm-libs' 'gcc' 'compiler-rt')
@@ -25,7 +25,10 @@ source=($_source_base/clang-$pkgver.src.tar.xz{,.sig}
         enforce-instantiation-of-constexpr-template-functions.patch
         clang-coroutines-ubsan.patch
         clang-tidy-fix-standalone-build.patch
-        enable-fstack-protector-strong-by-default.patch)
+        enable-fstack-protector-strong-by-default.patch
+        clang-ppc64-elfv2.patch
+        llvm-ppc64-elfv2.patch
+        clang-ppc64-dynamic-linker-path.patch)
 sha256sums=('2b5847b6a63118b9efe5c85548363c81ffe096b66c3b3675e953e26342ae4031'
             'SKIP'
             '7cf3b8ff56c65c4d1eae3c56883fc4a6cbc3ff9f3a1530a74d66e45d27271866'
@@ -35,7 +38,9 @@ sha256sums=('2b5847b6a63118b9efe5c85548363c81ffe096b66c3b3675e953e26342ae4031'
             'eb2916131ae63b3bd1689f6a27dc0c2fadad73a5c5f2c828062c8a2c547e4a0d'
             '2c25ddf0ba6be01949842873fef4d285456321aaccd4ba95db61b69a4c580106'
             '081a7ebc1ae524b13fc6be3dc73feb2c9eb7cf4b99f7f13d9ed37a688311f58a'
-            '7a9ce949579a3b02d4b91b6835c4fb45adc5f743007572fb0e28e6433e48f3a5')
+            '7a9ce949579a3b02d4b91b6835c4fb45adc5f743007572fb0e28e6433e48f3a5'
+            '7bcf1da7fa23b0d45bc6814284ec968d3481d24d05694ea39dd68c881bc8e4a5'
+            'd3b3d13f05b17c62108345aa4ac555c656c3f8dbdb24551004b06ef652bef94d')
 validpgpkeys=('474E22316ABF4785A88C6E8EA2C794A986419D8A') # Tom Stellard <tstellar@redhat.com>
 
 # Utilizing LLVM_DISTRIBUTION_COMPONENTS to avoid
@@ -74,6 +79,10 @@ prepare() {
 
   # https://github.com/llvm/llvm-project/issues/54116
   patch -Np0 -i ../clang-tidy-fix-standalone-build.patch
+
+  patch -Np2 -i ../clang-ppc64-elfv2.patch
+  patch -Np2 -i ../clang-ppc64-dynamic-linker-path.patch
+  patch -Np2 -d "$srcdir/llvm-$pkgver.src" -i ../llvm-ppc64-elfv2.patch
 
   # Attempt to convert script to Python 3
   2to3 -wn --no-diffs \
@@ -119,7 +128,7 @@ build() {
   cmake_args+=(-DLLVM_DISTRIBUTION_COMPONENTS="$distribution_components")
 
   cmake .. "${cmake_args[@]}"
-  ninja -j1
+  ninja
 }
 
 check() {
@@ -160,3 +169,16 @@ package() {
 }
 
 # vim:set ts=2 sw=2 et:
+sha256sums=('2b5847b6a63118b9efe5c85548363c81ffe096b66c3b3675e953e26342ae4031'
+            'SKIP'
+            '7cf3b8ff56c65c4d1eae3c56883fc4a6cbc3ff9f3a1530a74d66e45d27271866'
+            'SKIP'
+            '050922ecaaca5781fdf6631ea92bc715183f202f9d2f15147226f023414f619a'
+            'SKIP'
+            'eb2916131ae63b3bd1689f6a27dc0c2fadad73a5c5f2c828062c8a2c547e4a0d'
+            '2c25ddf0ba6be01949842873fef4d285456321aaccd4ba95db61b69a4c580106'
+            '081a7ebc1ae524b13fc6be3dc73feb2c9eb7cf4b99f7f13d9ed37a688311f58a'
+            '7a9ce949579a3b02d4b91b6835c4fb45adc5f743007572fb0e28e6433e48f3a5'
+            '7bcf1da7fa23b0d45bc6814284ec968d3481d24d05694ea39dd68c881bc8e4a5'
+            'd3b3d13f05b17c62108345aa4ac555c656c3f8dbdb24551004b06ef652bef94d'
+            '654b9eafcd20125319b3c319ab6674a940ddef400821c80813c16011ef8b6086')

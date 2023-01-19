@@ -1,0 +1,88 @@
+From f1802682c3c8794edaca37966405bd1f070f5e01 Mon Sep 17 00:00:00 2001
+From: NIIBE Yutaka <gniibe@fsij.org>
+Date: Wed, 26 Oct 2022 11:02:36 +0900
+Subject: [PATCH] python: Fix configure generating setup.py.
+
+* lang/python/setup.py.in: Handle the case, when substitutions
+may be empty.
+
+--
+
+Reported-by: Andreas Metzler
+Fixes-commit: ae9258fbf3b9d434495ef11fc184a91fe7c4ca57
+GnuPG-bug-id: 6204
+Signed-off-by: NIIBE Yutaka <gniibe@fsij.org>
+---
+ lang/python/setup.py.in | 27 ++++++++++++++++-----------
+ 1 file changed, 16 insertions(+), 11 deletions(-)
+
+diff --git a/lang/python/setup.py.in b/lang/python/setup.py.in
+index 6741d3c8..6f36861d 100755
+--- a/lang/python/setup.py.in
++++ b/lang/python/setup.py.in
+@@ -64,30 +64,34 @@ major, minor, patch = map(int, version.split('.'))
+ if not (major > 1 or (major == 1 and minor >= 7)):
+     sys.exit('Need at least GPGME version 1.7, found {}.'.format(version_raw))
+ 
+ if not gpgme_h:
+     gpgme_h = os.path.join('@prefix@', 'include', 'gpgme.h')
+ 
+ define_macros = []
+-libs = '@GPGME_CONFIG_LIBS@'.split(' ')
++if '@GPGME_CONFIG_LIBS@':
++    libs = '@GPGME_CONFIG_LIBS@'.split(' ')
++else:
++    libs = []
+ 
+ # Define extra_macros for both the SWIG and C code
+ for k, v in extra_macros.items():
+     extra_swig_opts.append('-D{0}={1}'.format(k, v))
+     define_macros.append((k, str(v)))
+ 
+-for item in '@GPGME_CONFIG_CFLAGS@'.split(' '):
+-    if item.startswith('-I'):
+-        include_dirs.append(item[2:])
+-    elif item.startswith('-D'):
+-        defitem = item[2:].split('=', 1)
+-        if len(defitem) == 2:
+-            define_macros.append((defitem[0], defitem[1]))
+-        else:
+-            define_macros.append((defitem[0], None))
++if '@GPGME_CONFIG_CFLAGS@':
++    for item in '@GPGME_CONFIG_CFLAGS@'.split(' '):
++        if item.startswith('-I'):
++            include_dirs.append(item[2:])
++        elif item.startswith('-D'):
++            defitem = item[2:].split('=', 1)
++            if len(defitem) == 2:
++                define_macros.append((defitem[0], defitem[1]))
++            else:
++                define_macros.append((defitem[0], None))
+ 
+ # Adjust include and library locations in case of win32
+ uname_s = os.popen('uname -s').read()
+ if uname_s.startswith('MINGW32'):
+     mnts = [
+         x.split()[0:3:2] for x in os.popen('mount').read().split('\n') if x
+     ]
+@@ -161,16 +165,17 @@ class BuildExtFirstHack(build):
+ 
+     def _generate_gpgme_h(self, source_name, sink_name):
+         print('Using gpgme.h from {}'.format(source_name))
+         shutil.copy2(source_name, sink_name)
+ 
+     def _generate_errors_i(self):
+ 
++        ge_cflags='@GPG_ERROR_CFLAGS@'
+         gpg_error_content = self._read_header(
+-            'gpg-error.h', '@GPG_ERROR_CFLAGS@'.split(' '))
++            'gpg-error.h', ge_cflags.split(' ') if ge_cflags else [])
+ 
+         filter_re = re.compile(r'GPG_ERR_[^ ]* =')
+         rewrite_re = re.compile(r' *(.*) = .*')
+ 
+         errors_i_content = ''
+         for line in gpg_error_content.splitlines():
+             if not filter_re.search(line):
+-- 
+2.35.1

@@ -11,14 +11,15 @@
 pkgname=(gcc gcc-libs gcc-fortran gcc-objc gcc-go libgccjit)
 case ${CARCH} in
   x86_64) pkgname+=(gcc-ada lib32-gcc-libs); libs='libvtv libitm' ;;
-  powerpc*) pkgname+=(gcc-ada); libs='libitm' ;;
+  powerpc64le|powerpc) pkgname+=(gcc-ada); libs='libitm' ;;
+  powerpc64) libs='libitm' ;;
 esac
 pkgver=12.2.0
 _majorver=${pkgver%%.*}
-pkgrel=1
+pkgrel=1.1
 _commit=2ee5e4300186a92ad73f1a1a64cb918dc76c8d67
 pkgdesc='The GNU Compiler Collection'
-arch=(x86_64 powerpc64le powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=(GPL3 LGPL FDL custom)
 url='https://gcc.gnu.org'
 makedepends=(
@@ -73,7 +74,7 @@ prepare() {
   # Do not run fixincludes
   sed -i 's@\./fixinc\.sh@-c true@' gcc/Makefile.in
 
-  # Arch POWER installs x86_64 libraries /lib
+  # Arch POWER installs 64bit libraries /lib
   sed -i '/m64=/s/lib64/lib/' gcc/config/i386/t-linux64
   sed -i 's@/lib64@/lib@g' gcc/config/rs6000/t-*
 
@@ -120,11 +121,18 @@ build() {
 	    )
 	    ada=",ada"
     ;;
-    powerpc*)
+    powerpc64le|powerpc)
 	    _confflags+=(
 	      --disable-multilib
             )
 	    ada=",ada"
+    ;;
+    powerpc64)
+            _confflags+=(
+              --disable-multilib
+              --with-abi=elfv2
+              --enable-secureplt
+            )
     ;;
     riscv64)
 	    _confflags+=(
@@ -194,7 +202,7 @@ package_gcc-libs() {
   provides=($pkgname-multilib libgo.so libgfortran.so
             libubsan.so libasan.so liblsan.so)
   case "${CARCH}" in
-    powerpc64le|x86_64)
+    powerpc64*|x86_64)
       provides+=(libtsan.so)
     ;;      
   esac
@@ -215,7 +223,7 @@ package_gcc-libs() {
   done
 
   case "${CARCH}" in
-    powerpc64le|x86_64)
+    powerpc64*|x86_64)
       make -C $CHOST/libsanitizer/tsan DESTDIR="$pkgdir" install-toolexeclibLTLIBRARIES
     ;;
   esac
@@ -297,7 +305,7 @@ package_gcc() {
 
 
   case "${CARCH}" in
-    powerpc64le)
+    powerpc64*)
       make -C $CHOST/libitm DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
       make -C $CHOST/libsanitizer/tsan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
     ;;    

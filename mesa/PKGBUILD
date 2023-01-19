@@ -9,7 +9,7 @@ pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'lib
 pkgdesc="An open-source implementation of the OpenGL specification"
 pkgver=22.3.2
 pkgrel=1
-arch=(x86_64 powerpc64le powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd' 'elfutils' 'llvm'
              'libomxil-bellagio' 'libclc' 'clang' 'libglvnd' 'libunwind' 'lm_sensors' 'libxrandr'
@@ -22,12 +22,14 @@ source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0001-anv-force-MEDIA_INTERFACE_DESCRIPTOR_LOAD-reemit-aft.patch
         0002-intel-fs-always-mask-the-bottom-bits-of-the-sampler-.patch
         0004-big-endian-flipping.patch
+        add-elf-use-tls.patch
         LICENSE)
 sha512sums=('32934dd23cfcd6165c365597d9a469da0b806b72ea98a200f499344c3b47815db3bf78875b4ea766d2d28d9c70b50c1615d2d3fcbfd4769447fe0a9d3b32951f'
             'SKIP'
             '4ff7c359f08aedb1fb6eb2c6bb34bafa399edfa7916cd6cce7844bb38795e84c0265324e3fc7d37237d4824f029cb04da176bcf476785fd2e35a8b0ce4f8a394'
             '5dd0cb8affa9cfe6e7d94f59b8e23727036fd8ab76938321f8d266315f30611584da6f6277fe2aa920130483302adab5e57e2bc08f1bd3c62ea57b3e4b007305'
             '3417e5c6d7ec564178e1d72431042b0a6ba659321f13a3dda81eda5fa0f2c8bc7c6972cb8266aea84ab05976ffb161659e9988c50ecc418e8bc1e1ce8f93a65f'
+            '3ba0c1df356ae2159fad719a9d7060357e8c4664ef162d9c5825e30ff4e64bfd969641dea408b09aa7b9b62003bcda27b83d8855e8daeb352cc54c780703cfc2'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
@@ -46,12 +48,18 @@ prepare() {
   patch -Np1 -i ../0002-intel-fs-always-mask-the-bottom-bits-of-the-sampler-.patch
 
   patch -Np1 -i ../0004-big-endian-flipping.patch
+  patch -Np1 -i ../add-elf-use-tls.patch
 }
 
 build() {
   # Build only minimal debug info to reduce size
   CFLAGS+=' -g1'
   CXXFLAGS+=' -g1'
+
+  case "${CARCH}" in
+    powerpc64le) _cmake_options=(-Dpower8=true) ;;
+    *) _cmake_options=(-Dpower8=false -D gallium-rusticl=true -D rust_std=2021) ;;
+  esac
 
   arch-meson mesa-$pkgver build \
     -D b_ndebug=true \
@@ -69,8 +77,6 @@ build() {
     -D gallium-va=enabled \
     -D gallium-vdpau=enabled \
     -D gallium-xa=enabled \
-    -D gallium-rusticl=true \
-    -D rust_std=2021 \
     -D gbm=enabled \
     -D gles1=disabled \
     -D gles2=enabled \
@@ -84,7 +90,7 @@ build() {
     -D microsoft-clc=disabled \
     -D video-codecs=vc1dec,h264dec,h264enc,h265dec,h265enc \
     -D valgrind=enabled \
-    -D sse2=false
+    -D sse2=false ${_cmake_options}
 
   # Print config
   meson configure build
