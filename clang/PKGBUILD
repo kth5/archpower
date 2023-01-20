@@ -3,8 +3,8 @@
 # Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
 
 pkgname=clang
-pkgver=14.0.6
-pkgrel=4.1
+pkgver=15.0.7
+pkgrel=1
 pkgdesc="C language family frontend for LLVM"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://clang.llvm.org/"
@@ -17,31 +17,29 @@ optdepends=('openmp: OpenMP support in clang with -fopenmp'
 provides=("clang-analyzer=$pkgver" "clang-tools-extra=$pkgver")
 conflicts=('clang-analyzer' 'clang-tools-extra')
 replaces=('clang-analyzer' 'clang-tools-extra')
-options=('debug')
 _source_base=https://github.com/llvm/llvm-project/releases/download/llvmorg-$pkgver
 source=($_source_base/clang-$pkgver.src.tar.xz{,.sig}
         $_source_base/clang-tools-extra-$pkgver.src.tar.xz{,.sig}
         $_source_base/llvm-$pkgver.src.tar.xz{,.sig}
-        enforce-instantiation-of-constexpr-template-functions.patch
-        clang-coroutines-ubsan.patch
-        clang-tidy-fix-standalone-build.patch
+        $_source_base/cmake-$pkgver.src.tar.xz{,.sig}
         enable-fstack-protector-strong-by-default.patch
         clang-ppc64-elfv2.patch
         llvm-ppc64-elfv2.patch
         clang-ppc64-dynamic-linker-path.patch)
-sha256sums=('2b5847b6a63118b9efe5c85548363c81ffe096b66c3b3675e953e26342ae4031'
+sha256sums=('a6b673ef15377fb46062d164e8ddc4d05c348ff8968f015f7f4af03f51000067'
             'SKIP'
-            '7cf3b8ff56c65c4d1eae3c56883fc4a6cbc3ff9f3a1530a74d66e45d27271866'
+            '809a2ef46d46be3b83ca389356404ac041fa6d8f5496cb02ec35d252afb64fd1'
             'SKIP'
-            '050922ecaaca5781fdf6631ea92bc715183f202f9d2f15147226f023414f619a'
+            '4ad8b2cc8003c86d0078d15d987d84e3a739f24aae9033865c027abae93ee7a4'
             'SKIP'
-            'eb2916131ae63b3bd1689f6a27dc0c2fadad73a5c5f2c828062c8a2c547e4a0d'
-            '2c25ddf0ba6be01949842873fef4d285456321aaccd4ba95db61b69a4c580106'
-            '081a7ebc1ae524b13fc6be3dc73feb2c9eb7cf4b99f7f13d9ed37a688311f58a'
+            '8986f29b634fdaa9862eedda78513969fe9788301c9f2d938f4c10a3e7a3e7ea'
+            'SKIP'
             '7a9ce949579a3b02d4b91b6835c4fb45adc5f743007572fb0e28e6433e48f3a5'
             '7bcf1da7fa23b0d45bc6814284ec968d3481d24d05694ea39dd68c881bc8e4a5'
-            'd3b3d13f05b17c62108345aa4ac555c656c3f8dbdb24551004b06ef652bef94d')
-validpgpkeys=('474E22316ABF4785A88C6E8EA2C794A986419D8A') # Tom Stellard <tstellar@redhat.com>
+            'd3b3d13f05b17c62108345aa4ac555c656c3f8dbdb24551004b06ef652bef94d'
+            '654b9eafcd20125319b3c319ab6674a940ddef400821c80813c16011ef8b6086')
+validpgpkeys=('474E22316ABF4785A88C6E8EA2C794A986419D8A'  # Tom Stellard <tstellar@redhat.com>
+              'D574BD5D1D0E98895E3BF90044F2485E45D59042') # Tobias Hieta <tobias@hieta.se>
 
 # Utilizing LLVM_DISTRIBUTION_COMPONENTS to avoid
 # installing static libraries; inspired by Gentoo
@@ -66,20 +64,13 @@ _get_distribution_components() {
 }
 
 prepare() {
+  mv cmake{-$pkgver.src,}
   cd clang-$pkgver.src
   mkdir build
   mv "$srcdir/clang-tools-extra-$pkgver.src" tools/extra
   patch -Np2 -i ../enable-fstack-protector-strong-by-default.patch
 
-  # https://github.com/llvm/llvm-project/issues/55560
-  patch -Np2 -i ../enforce-instantiation-of-constexpr-template-functions.patch
-
-  # https://github.com/llvm/llvm-project/issues/49689
-  patch -Np2 -i ../clang-coroutines-ubsan.patch
-
-  # https://github.com/llvm/llvm-project/issues/54116
-  patch -Np0 -i ../clang-tidy-fix-standalone-build.patch
-
+  # powerpc64 uses ELFv2
   patch -Np2 -i ../clang-ppc64-elfv2.patch
   patch -Np2 -i ../clang-ppc64-dynamic-linker-path.patch
   patch -Np2 -d "$srcdir/llvm-$pkgver.src" -i ../llvm-ppc64-elfv2.patch
@@ -115,6 +106,7 @@ build() {
     -DLLVM_MAIN_SRC_DIR="$srcdir/llvm-$pkgver.src"
     -DSPHINX_WARNINGS_AS_ERRORS=OFF
   )
+
   case "${CARCH}" in
     powerpc)
       LDFLAGS+=' -Wl,--no-keep-memory'
@@ -169,16 +161,3 @@ package() {
 }
 
 # vim:set ts=2 sw=2 et:
-sha256sums=('2b5847b6a63118b9efe5c85548363c81ffe096b66c3b3675e953e26342ae4031'
-            'SKIP'
-            '7cf3b8ff56c65c4d1eae3c56883fc4a6cbc3ff9f3a1530a74d66e45d27271866'
-            'SKIP'
-            '050922ecaaca5781fdf6631ea92bc715183f202f9d2f15147226f023414f619a'
-            'SKIP'
-            'eb2916131ae63b3bd1689f6a27dc0c2fadad73a5c5f2c828062c8a2c547e4a0d'
-            '2c25ddf0ba6be01949842873fef4d285456321aaccd4ba95db61b69a4c580106'
-            '081a7ebc1ae524b13fc6be3dc73feb2c9eb7cf4b99f7f13d9ed37a688311f58a'
-            '7a9ce949579a3b02d4b91b6835c4fb45adc5f743007572fb0e28e6433e48f3a5'
-            '7bcf1da7fa23b0d45bc6814284ec968d3481d24d05694ea39dd68c881bc8e4a5'
-            'd3b3d13f05b17c62108345aa4ac555c656c3f8dbdb24551004b06ef652bef94d'
-            '654b9eafcd20125319b3c319ab6674a940ddef400821c80813c16011ef8b6086')
