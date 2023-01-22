@@ -5,10 +5,13 @@
 # Contributor: Andreas Radke <andyrtr@archlinux.org>
 
 pkgbase=mesa
-pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
+pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-virtio' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
+case "${CARCH}" in
+  x86_64) pkgname+=('vulkan-intel') ;;
+esac
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=22.3.2
-pkgrel=1
+pkgver=22.3.3
+pkgrel=3
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd' 'elfutils' 'llvm'
@@ -17,19 +20,19 @@ makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence
 makedepends+=('rust' 'rust-bindgen' 'spirv-tools' 'spirv-llvm-translator') # rusticl dependencies
 url="https://www.mesa3d.org/"
 license=('custom')
-options=('debug' '!lto')
+options=('!lto')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0001-anv-force-MEDIA_INTERFACE_DESCRIPTOR_LOAD-reemit-aft.patch
-        0002-intel-fs-always-mask-the-bottom-bits-of-the-sampler-.patch
+        0002-iris-Retry-DRM_IOCTL_I915_GEM_EXECBUFFER2-on-ENOMEM.patch
+        0003-Revert-iris-Avoid-abort-if-kernel-can-t-allocate-mem.patch
         0004-big-endian-flipping.patch
-        add-elf-use-tls.patch
         LICENSE)
-sha512sums=('32934dd23cfcd6165c365597d9a469da0b806b72ea98a200f499344c3b47815db3bf78875b4ea766d2d28d9c70b50c1615d2d3fcbfd4769447fe0a9d3b32951f'
+sha512sums=('dcf166bc7c80e6ad09337e0188219e5ea4bdc558bc4b4ca35ce30d5421568f6b5328e5508b3175a2696521214e466354d8652ade22468ce448d9f61d5709c8a1'
             'SKIP'
-            '4ff7c359f08aedb1fb6eb2c6bb34bafa399edfa7916cd6cce7844bb38795e84c0265324e3fc7d37237d4824f029cb04da176bcf476785fd2e35a8b0ce4f8a394'
-            '5dd0cb8affa9cfe6e7d94f59b8e23727036fd8ab76938321f8d266315f30611584da6f6277fe2aa920130483302adab5e57e2bc08f1bd3c62ea57b3e4b007305'
+            '6150324d4e4b974bd2398157decaceef69bb0867d878d60fb9f4d15fa2fc52948edd27b787846cc1e552a331f7e91953bd3c4a4500d5445df1dba1fe3326bcfe'
+            '33067a6fab6c078cb829b6266ab5e328929923ace7c580c3b347f25682b4427a5f7cfd52234311636fc23e03beb021c543020d3deb30bf8515f58bf78173bde8'
+            '94f25da531a1ccbb630f0b1ccd80fe85aae60cba7b6e29b2761d4014b79f611eb4b89b2e29e2501231620ee381bc91e546ad2158cf76ec2d6c678d048553eba0'
             '3417e5c6d7ec564178e1d72431042b0a6ba659321f13a3dda81eda5fa0f2c8bc7c6972cb8266aea84ab05976ffb161659e9988c50ecc418e8bc1e1ce8f93a65f'
-            '3ba0c1df356ae2159fad719a9d7060357e8c4664ef162d9c5825e30ff4e64bfd969641dea408b09aa7b9b62003bcda27b83d8855e8daeb352cc54c780703cfc2'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
@@ -45,10 +48,13 @@ prepare() {
   # https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/17247
   # https://github.com/HansKristian-Work/vkd3d-proton/issues/1200
   patch -Np1 -i ../0001-anv-force-MEDIA_INTERFACE_DESCRIPTOR_LOAD-reemit-aft.patch
-  patch -Np1 -i ../0002-intel-fs-always-mask-the-bottom-bits-of-the-sampler-.patch
+
+  # https://gitlab.freedesktop.org/drm/intel/-/issues/6851
+  # https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/20449
+  patch -Np1 -i ../0002-iris-Retry-DRM_IOCTL_I915_GEM_EXECBUFFER2-on-ENOMEM.patch
+  patch -Np1 -i ../0003-Revert-iris-Avoid-abort-if-kernel-can-t-allocate-mem.patch
 
   patch -Np1 -i ../0004-big-endian-flipping.patch
-  patch -Np1 -i ../add-elf-use-tls.patch
 }
 
 build() {
@@ -57,17 +63,35 @@ build() {
   CXXFLAGS+=' -g1'
 
   case "${CARCH}" in
-    powerpc64le) _cmake_options=(-Dpower8=true) ;;
-    *) _cmake_options=(-Dpower8=false -D gallium-rusticl=true -D rust_std=2021) ;;
+    powerpc64le)
+      _cmake_options=(-Dpower8=true -D gallium-rusticl=true -D rust_std=2021 ) ;;
+    powerpc64)
+      _cmake_options=(-Dpower8=false -D gallium-rusticl=false) ;;
+    *)
+      _cmake_options=(-Dpower8=false -D gallium-rusticl=true -D rust_std=2021) ;;
+  esac
+
+  case "${CARCH}" in
+    x86_64)
+      _cmake_options+=(
+        -D gallium-drivers=r300,r600,radeonsi,nouveau,virgl,svga,swrast,i915,iris,crocus,zink,d3d12
+        -D vulkan-drivers=amd,intel,intel_hasvk,swrast,virtio-experimental
+        -D vulkan-layers=device-select,intel-nullhw,overlay
+      )
+    ;;
+    *)
+      _cmake_options+=(
+        -D gallium-drivers=r300,r600,radeonsi,nouveau,virgl,swrast,zink,d3d12
+        -D vulkan-drivers=amd,swrast,virtio-experimental
+        -D vulkan-layers=device-select,overlay
+      )
+    ;;
   esac
 
   arch-meson mesa-$pkgver build \
     -D b_ndebug=true \
     -D b_lto=false \
     -D platforms=x11,wayland \
-    -D gallium-drivers=r300,r600,radeonsi,nouveau,virgl,swrast,zink,d3d12 \
-    -D vulkan-drivers=amd,swrast \
-    -D vulkan-layers=device-select,overlay \
     -D dri3=enabled \
     -D egl=enabled \
     -D gallium-extra-hud=true \
@@ -89,8 +113,7 @@ build() {
     -D shared-glapi=enabled \
     -D microsoft-clc=disabled \
     -D video-codecs=vc1dec,h264dec,h264enc,h265dec,h265enc \
-    -D valgrind=enabled \
-    -D sse2=false ${_cmake_options}
+    -D valgrind=enabled ${_cmake_options[@]}
 
   # Print config
   meson configure build
@@ -129,13 +152,25 @@ package_vulkan-mesa-layers() {
 
 package_opencl-mesa() {
   pkgdesc="OpenCL support with clover and rusticl for mesa drivers"
-  depends=('libdrm' 'libclc' 'clang' 'expat')
+  depends=('libdrm' 'libclc' 'clang' 'expat' 'spirv-llvm-translator')
   optdepends=('opencl-headers: headers necessary for OpenCL development')
   provides=('opencl-driver')
 
   _install fakeinstall/etc/OpenCL
   _install fakeinstall/usr/lib/lib*OpenCL*
   _install fakeinstall/usr/lib/gallium-pipe
+
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
+}
+
+package_vulkan-intel() {
+  pkgdesc="Intel's Vulkan mesa driver"
+  depends=('wayland' 'libx11' 'libxshmfence' 'libdrm' 'zstd' 'systemd-libs')
+  optdepends=('vulkan-mesa-layers: additional vulkan layers')
+  provides=('vulkan-driver')
+
+  _install fakeinstall/usr/share/vulkan/icd.d/intel_*.json
+  _install fakeinstall/usr/lib/libvulkan_intel*.so
 
   install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
 }
@@ -167,10 +202,23 @@ package_vulkan-swrast() {
   install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
 }
 
+package_vulkan-virtio() {
+  pkgdesc="Venus Vulkan mesa driver for Virtual Machines"
+  depends=('wayland' 'libx11' 'libxshmfence' 'libdrm' 'zstd' 'systemd-libs')
+  optdepends=('vulkan-mesa-layers: additional vulkan layers')
+  provides=('vulkan-driver')
+
+  _install fakeinstall/usr/share/vulkan/icd.d/virtio_icd*.json
+  _install fakeinstall/usr/lib/libvulkan_virtio.so
+
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
+}
+
 package_libva-mesa-driver() {
-  pkgdesc="VA-API implementation for gallium"
+  pkgdesc="VA-API drivers"
   depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'libelf' 'libxshmfence')
   depends+=('libexpat.so')
+  provides=('libva-driver')
 
   _install fakeinstall/usr/lib/dri/*_drv_video.so
 
@@ -178,9 +226,10 @@ package_libva-mesa-driver() {
 }
 
 package_mesa-vdpau() {
-  pkgdesc="Mesa VDPAU drivers"
+  pkgdesc="VDPAU drivers"
   depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'libelf' 'libxshmfence')
   depends+=('libexpat.so')
+  provides=('vdpau-driver')
 
   _install fakeinstall/usr/lib/vdpau
 
