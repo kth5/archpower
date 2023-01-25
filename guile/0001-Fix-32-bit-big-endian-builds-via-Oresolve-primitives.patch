@@ -1,0 +1,73 @@
+From 08dd23cbf0a331b9a7094ea90bf7ff62f0cdc33b Mon Sep 17 00:00:00 2001
+From: Rob Browning <rlb@defaultvalue.org>
+Date: Tue, 20 Feb 2018 23:58:09 -0600
+Subject: Fix 32-bit big endian builds via -Oresolve-primitives -Ocps
+
+Specify -Oresolve-primitives -Ocps during bootstrapping builds to fix
+build failures on 32-bit big endian architectures.
+
+Thanks to John David Anglin for reporting the problem and investigating
+the problem, and to John Paul Adrian Glaubitz for helping devise the
+solution.
+
+Bug: https://debbugs.gnu.org/45214
+Bug-Debian: https://bugs.debian.org/977223
+---
+ bootstrap/Makefile.am |  9 ++++++++-
+ configure.ac          |  3 +++
+ stage0/Makefile.am    | 10 +++++++++-
+ 3 files changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/bootstrap/Makefile.am b/bootstrap/Makefile.am
+index a4634c447..0aa548c26 100644
+--- a/bootstrap/Makefile.am
++++ b/bootstrap/Makefile.am
+@@ -22,7 +22,14 @@
+ 
+ 
+ GUILE_WARNINGS = -W0
+-GUILE_OPTIMIZATIONS = -O1
++
++if !DEB_GUILE_32_BIT_BIG_ENDIAN
++  $(info Note: not adjusting GUILE_OPTIMIZATIONS for 32-bit big-endian architecture)
++  GUILE_OPTIMIZATIONS = -O1
++else
++  $(info Note: adjusting GUILE_OPTIMIZATIONS for 32-bit big-endian architecture)
++  GUILE_OPTIMIZATIONS = -O1 -Oresolve-primitives -Ocps
++endif
+ 
+ include $(top_srcdir)/am/bootstrap.am
+ 
+diff --git a/stage0/Makefile.am b/stage0/Makefile.am
+index 12029fb45..4228f607d 100644
+--- a/stage0/Makefile.am
++++ b/stage0/Makefile.am
+@@ -22,7 +22,15 @@
+ 
+ 
+ GUILE_WARNINGS = -W0
+-GUILE_OPTIMIZATIONS = -O1
++
++if !DEB_GUILE_32_BIT_BIG_ENDIAN
++  $(info Note: not adjusting GUILE_OPTIMIZATIONS for 32-bit big-endian architecture)
++  GUILE_OPTIMIZATIONS = -O1
++else
++  $(info Note: adjusting GUILE_OPTIMIZATIONS for 32-bit big-endian architecture)
++  GUILE_OPTIMIZATIONS = -O1 -Oresolve-primitives -Ocps
++endif
++
+ GUILE_BOOTSTRAP_STAGE = stage0
+ 
+ include $(top_srcdir)/am/bootstrap.am
+--- a/configure.ac.orig	2023-01-24 16:02:21.533578824 +0100
++++ b/configure.ac	2023-01-24 16:02:59.829532714 +0100
+@@ -376,6 +376,9 @@
+ AC_MSG_RESULT($SCM_PREBUILT_BINARIES)
+ AC_SUBST([SCM_PREBUILT_BINARIES])
+ 
++AM_CONDITIONAL([DEB_GUILE_32_BIT_BIG_ENDIAN],                                                                                                                                                                                             
++  [test "$SCM_PREBUILT_BINARIES" = 32-bit-big-endian]) 
++
+ AC_HEADER_SYS_WAIT
+ AC_HEADER_DIRENT
+ 
