@@ -5,9 +5,9 @@
 
 pkgname=x265
 pkgver=3.5
-pkgrel=3
+pkgrel=3.1
 pkgdesc='Open Source H265/HEVC video encoder'
-arch=(x86_64 powerpc64le powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url=https://bitbucket.org/multicoreware/x265_git
 license=(GPL)
 depends=(gcc-libs)
@@ -30,9 +30,21 @@ pkgver() {
 
 build() {
   case "${CARCH}" in
-    powerpc)    PLATFORM_FLAGS="-DENABLE_ALTIVEC=ON" ;;
-    powerpc64e) PLATFORM_FLAGS="-DENABLE_ALTIVEC=ON -DENABLE_PIC=ON" ;;
-    *)          PLATFORM_FLAGS="" ;;
+    powerpc64le) 
+      cmake_options_12=(-DENABLE_ALTIVEC=OFF -DCPU_POWER8=ON)
+      cmake_options_10=(-DENABLE_ALTIVEC=OFF -DCPU_POWER8=ON)
+      cmake_options=(-DENABLE_ALTIVEC=ON -DCPU_POWER8=ON -DENABLE_PIC=ON)
+    ;;
+    powerpc64)
+      cmake_options_12=(-DENABLE_ALTIVEC=OFF -DCPU_POWER8=OFF)
+      cmake_options_10=(-DENABLE_ALTIVEC=OFF -DCPU_POWER8=OFF)
+      cmake_options=(-DENABLE_ALTIVEC=OFF -DCPU_POWER8=OFF -DENABLE_PIC=ON)
+    ;;
+    powerpc)
+      cmake_options_12=(-DENABLE_ALTIVEC=OFF -DCPU_POWER8=OFF)
+      cmake_options_10=(-DENABLE_ALTIVEC=OFF -DCPU_POWER8=OFF)
+      cmake_options=(-DENABLE_ALTIVEC=ON -DCPU_POWER8=OFF -DENABLE_PIC=ON)
+    ;;
   esac
 
 
@@ -43,7 +55,7 @@ build() {
     -DEXPORT_C_API=FALSE \
     -DENABLE_CLI=FALSE \
     -DENABLE_SHARED=FALSE \
-    -Wno-dev ${PLATFORM_FLAGS}
+    -Wno-dev ${cmake_options_12[@]}
   ninja -C build-12
 
   cmake -S x265_git/source -B build-10 -G Ninja \
@@ -52,7 +64,7 @@ build() {
     -DEXPORT_C_API=FALSE \
     -DENABLE_CLI=FALSE \
     -DENABLE_SHARED=FALSE \
-    -Wno-dev ${PLATFORM_FLAGS}
+    -Wno-dev ${cmake_options_10[@]}
   ninja -C build-10
 
   cmake -S x265_git/source -B build -G Ninja \
@@ -63,7 +75,7 @@ build() {
     -DEXTRA_LINK_FLAGS='-L .' \
     -DLINKED_10BIT=TRUE \
     -DLINKED_12BIT=TRUE \
-    -Wno-dev ${PLATFORM_FLAGS}
+    -Wno-dev ${cmake_options[@]}
   ln -s ../build-10/libx265.a build/libx265_main10.a
   ln -s ../build-12/libx265.a build/libx265_main12.a
   ninja -C build
