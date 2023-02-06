@@ -1,0 +1,49 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: T.J. Townsend <blakkheim@archlinux.org>
+# Contributor: Adrian Perez de Castro <aperez@igalia.com>
+
+pkgname=signify
+pkgver=31
+pkgrel=1
+pkgdesc='OpenBSD tool to cryptographically sign and verify files'
+url='https://github.com/aperezdc/signify'
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+license=('BSD')
+depends=('glibc' 'libbsd>=0.8')
+source=(${url}/releases/download/v${pkgver}/${pkgname}-${pkgver}.tar.xz{,.asc}
+        LICENSE)
+sha512sums=('f39597ea278a7eb10b786909752fde59e16405f0bc76c9906f8014e9e7f6801b4733479eec765fb960b6062359954caf54a3460ff67258a9cff93fa978951962'
+            'SKIP'
+            'a587ef19d5481a81945475a2c1dde0fbf8022e0a28db06389c73df1b7118fb94399f5e4523b91df3d846707dcaffff482ae6e58902b6620bf7b2019a8e15efec')
+validpgpkeys=(
+  '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B' # Adrián Pérez de Castro <aperez@igalia.com>
+)
+
+prepare() {
+  cd ${pkgname}-${pkgver}
+  # using O_NOFOLLOW doesn't lock anything down here, swapping files
+  # without symlinks is still equally open to TOCTOU and it doesn't even
+  # matter here. lets prefere supporting symlinked target files.
+  sed -E 's/\| ?O_NOFOLLOW//g' -i ./*.c
+}
+
+build () {
+  cd ${pkgname}-${pkgver}
+  make PREFIX=/usr \
+    LTO=1 \
+    EXTRA_CFLAGS="${CFLAGS} ${CPPFLAGS}" \
+    EXTRA_LDFLAGS="${LDFLAGS}" \
+    GIT_TAG=''
+}
+
+package () {
+  cd ${pkgname}-${pkgver}
+  make PREFIX=/usr \
+    DESTDIR="${pkgdir}" \
+    GIT_TAG='' install
+  install -Dm 644 README.md CHANGELOG.md -t "${pkgdir}/usr/share/doc/${pkgname}"
+  install -Dm 644 "${srcdir}/LICENSE" -t "${pkgdir}/usr/share/licenses/${pkgname}"
+}
+
+# vim: ts=2 sw=2 et:
