@@ -8,7 +8,7 @@
 # toolchain build order: linux-api-headers->glibc->binutils->gcc->glibc->binutils->gcc
 # NOTE: libtool requires rebuilt with each new gcc version
 
-pkgname=(gcc gcc-libs gcc-fortran gcc-objc gcc-go libgccjit)
+pkgname=(gcc gcc-libs gcc-fortran gcc-objc gcc-go lto-dump libgccjit)
 case ${CARCH} in
   x86_64) pkgname+=(gcc-ada lib32-gcc-libs); libs='libvtv libitm' ;;
   powerpc64le|powerpc) pkgname+=(gcc-ada); libs='libitm' ;;
@@ -16,8 +16,8 @@ case ${CARCH} in
 esac
 pkgver=12.2.1
 _majorver=${pkgver%%.*}
-pkgrel=1
-_commit=eec3a65ed638a1c58fa08ddf508d2d60b64d311d
+_commit=fb2d50f72caf3b84b315bc760368670680999749
+pkgrel=2
 pkgdesc='The GNU Compiler Collection'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=(GPL3 LGPL FDL custom)
@@ -50,7 +50,7 @@ checkdepends=(
   python-pytest
   tcl
 )
-options=(!emptydirs !lto debug)
+options=(!emptydirs !lto)
 _libdir=usr/lib/gcc/$CHOST/${pkgver%%+*}
 source=(git+https://sourceware.org/git/gcc.git#commit=${_commit}
         c89 c99
@@ -109,6 +109,7 @@ build() {
       --disable-libstdcxx-pch
       --disable-werror
       --with-build-config=bootstrap-lto
+      --enable-libstdcxx-backtrace
       --enable-link-serialization=1
   )
 
@@ -129,7 +130,6 @@ build() {
             _confflags+=(
               --disable-multilib
               --with-abi=elfv2
-              --enable-secureplt
             )
     ;;
     riscv64)
@@ -498,6 +498,20 @@ package_lib32-gcc-libs() {
       "$pkgdir/usr/share/licenses/lib32-gcc-libs/RUNTIME.LIBRARY.EXCEPTION"
   fi
 }
+
+package_lto-dump() {
+  pkgdesc="Dump link time optimization object files"
+  depends=("gcc=$pkgver-$pkgrel" libisl.so)
+
+  cd gcc-build
+  make -C gcc DESTDIR="$pkgdir" lto.install-{common,man,info}
+
+  # Install Runtime Library Exception
+  install -d "$pkgdir/usr/share/licenses/$pkgname/"
+  ln -s /usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION \
+    "$pkgdir/usr/share/licenses/$pkgname/"
+}
+
 
 package_libgccjit() {
   pkgdesc="Just-In-Time Compilation with GCC backend"
