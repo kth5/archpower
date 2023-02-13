@@ -4,54 +4,36 @@
 # Contributor: Sarah Hay <sarah@archlinux.org>
 
 pkgbase=gpgme
-pkgname=(gpgme python-gpgme)
-#FIXME
-[ ! "${CARCH}" = 'powerpc64' ] && pkgname+=(qgpgpme)
+pkgname=(gpgme qgpgme python-gpgme)
 pkgver=1.18.0
-pkgrel=2
+pkgrel=2.1
 _python_ver=3.10
 pkgdesc='A C wrapper library for GnuPG'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://www.gnupg.org/related_software/gpgme/'
 license=('LGPL')
-makedepends=('libgpg-error' 'gnupg' 'python' 'swig')
-makedepends_powerpc=(qt5-base)
-makedepends_powerpc64le=(qt5-base)
-makedepends_riscv64=(qt5-base)
-makedepends_x86_64=(qt5-base)
-options=('debug')
-validpgpkeys=('6DAA6E64A76D2840571B4902528897B826403ADA') # Werner Koch (dist signing 2020)
+makedepends=('libgpg-error' 'gnupg' 'qt5-base' 'python' 'swig')
+validpgpkeys=('6DAA6E64A76D2840571B4902528897B826403ADA'  # Werner Koch (dist signing 2020)
+              'AC8E115BF73E2D8D47FA9908E98E9B2D19C6C8BD') # Niibe Yutaka (GnuPG Release Key)
 source=("https://www.gnupg.org/ftp/gcrypt/${pkgbase}/${pkgbase}-${pkgver}.tar.bz2"{,.sig}
-	python310.patch
-        gpgme-no-gpg-error-config.patch
-        gpgme-python-fix-configure-setup.py.patch)
+        '0001-python-3-10.patch'
+        '0002-python-setup.patch')
 sha256sums=('361d4eae47ce925dba0ea569af40e7b52c645c4ae2e65e5621bf1b6cdd8b0e9e'
             'SKIP'
             '5de2f6bcb6b30642d0cbc3fbd86803c9460d732f44a526f44cedee8bb78d291a'
-            'd4f2eb5698f89c8ca857ff086a02f56efb23eaa42d1c95143ae6144244f9dd2e'
-            'cc839212d12ab80c04256f8e6c7e848ef9900907c55d1980c27063a98e3f36bd')
+            '84fb13e9afa549027469e0d1a1bad69bf786b63ef6359a5d65320bd226dcccc7')
 
 prepare() {
   cd ${pkgbase}-${pkgver}
-  patch -Np1 -i ../python310.patch
-  patch -Np1 -i ../gpgme-no-gpg-error-config.patch
-  patch -Np1 -i ../gpgme-python-fix-configure-setup.py.patch
+
+  patch -Np1 -i ../0001-python-3-10.patch
+  patch -Np1 -i ../0002-python-setup.patch
 }
 
 build() {
   cd ${pkgbase}-${pkgver}
 
-  _pyarch=${CARCH}
-  case "${CARCH}" in
-    powerpc)     _pyarch=ppc; export CFLAGS+=' -D_FILE_OFFSET_BITS=64 -DLARGEFILE_SOURCE=1' ;;
-    powerpc64)   _pyarch=ppc64 ;;
-    powerpc64le) _pyarch=ppc64le ;;
-  esac
-
-  export CXXFLAGS+=' -D_GLIBCXX_USE_C99_STDIO=1'
-
   ./configure \
-    --build=${CHOST} \
     --prefix=/usr \
     --disable-fd-passing \
     --disable-static \
@@ -60,7 +42,7 @@ build() {
 
   # ensure reproducibility of .pyc files
   touch -d @$SOURCE_DATE_EPOCH lang/python/version.py
-  touch -d @$SOURCE_DATE_EPOCH lang/python/python${_python_ver}-gpg/lib.linux-${_pyarch}-${_python_ver}/gpg/gpgme.py
+  touch -d @$SOURCE_DATE_EPOCH lang/python/python${_python_ver}-gpg/lib.linux-*-${_python_ver}/gpg/gpgme.py
 
   # .pyc files will be created if check() is used - generate them here
 
@@ -88,13 +70,9 @@ package_gpgme() {
 
   make DESTDIR="${pkgdir}" install
 
-
-  #FIXME
-  if [ ! "${CARCH}" = 'powerpc64' ]; then
-    # split qgpgme
-    rm -r "${pkgdir}"/usr/include/{qgpgme,QGpgME}/
-    rm -r "${pkgdir}"/usr/lib/{cmake/QGpgme/,libqgpgme.*}
-  fi
+  # split qgpgme
+  rm -r "${pkgdir}"/usr/include/{qgpgme,QGpgME}/
+  rm -r "${pkgdir}"/usr/lib/{cmake/QGpgme/,libqgpgme.*}
   rm -r "${pkgdir}"/usr/lib/python*
 }
 
