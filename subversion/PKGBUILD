@@ -1,29 +1,31 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Angel Velasquez <angvp@archlinux.org>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Angel Velasquez <angvp@archlinux.org>
 # Contributor: Stéphane Gaudreault <stephane@archlinux.org>
 # Contributor: Paul Mattal <paul@archlinux.org>
 # Contributor: Jason Chu <jason@archlinux.org>
 
 pkgname=subversion
 pkgver=1.14.2
-pkgrel=1.1
+pkgrel=6
 pkgdesc="A Modern Concurrent Version Control System"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://subversion.apache.org/"
 license=('APACHE')
-depends=('file' 'libutf8proc' 'serf' 'sqlite' 'systemd')
-#FIXME
-makedepends=('apache' 'python' 'python-py3c' 'perl' 'swig' #'java-environment>=8'
-             'libgnome-keyring' 'ruby')
+depends=('glibc' 'file' 'libutf8proc' 'serf' 'sqlite' 'systemd' 'apr' 'apr-util'
+         'zlib' 'lz4' 'expat' 'libsasl')
+makedepends=('apache' 'python' 'python-py3c' 'perl' 'swig' 'java-environment>=8'
+             'libgnome-keyring' 'kwallet' 'kdelibs4support' 'ruby')
 optdepends=('libgnome-keyring: for GNOME Keyring for auth credentials'
+            'kwallet: for KWallet for auth credentials'
             'bash-completion: for svn bash completion'
             'python: for some hook scripts'
+            'java-environment: for Java support'
             'ruby: for some hook scripts')
 checkdepends=('ruby-test-unit')
 provides=('svn')
 backup=('etc/xinetd.d/svn' 'etc/conf.d/svnserve')
-options=('!makeflags' '!emptydirs')
+options=('!makeflags' '!emptydirs' '!distcc')
 source=(https://www.apache.org/dist/subversion/subversion-${pkgver}.tar.bz2{,.asc}
         svn
         svnserve.conf
@@ -65,15 +67,20 @@ prepare() {
 
 build() {
    cd ${pkgname}-${pkgver}
-   ./configure --prefix=/usr --with-apxs \
-               --with-gnome-keyring --without-kwallet \
+   ./configure --prefix=/usr \
+               --with-apxs \
+               --enable-javahl \
+               --with-jdk=/usr/lib/jvm/default \
+               --with-gnome-keyring \
+               --with-kwallet \
                --with-apache-libexecdir=/usr/lib/httpd/modules \
                --with-ruby-sitedir=/usr/lib/ruby/vendor_ruby \
                --disable-static
 
    make LT_LDFLAGS="-L$Fdestdir/usr/lib"
-   make swig_pydir=/usr/lib/python3.10/site-packages/libsvn \
-     swig_pydir_extra=/usr/lib/python3.10/site-packages/svn swig-py swig-pl swig-rb
+   local python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+   make swig_pydir=/usr/lib/python${python_version}/site-packages/libsvn \
+     swig_pydir_extra=/usr/lib/python${python_version}/site-packages/svn swig-py swig-pl javahl swig-rb
 }
 
 check() {
@@ -89,7 +96,7 @@ package() {
    make DESTDIR="${pkgdir}" INSTALLDIRS=vendor \
      swig_pydir=/usr/lib/python3.10/site-packages/libsvn \
      swig_pydir_extra=/usr/lib/python3.10/site-packages/svn \
-     install install-swig-py install-swig-pl install-swig-rb
+     install install-swig-py install-swig-pl install-javahl install-swig-rb
 
    install -dm755 "${pkgdir}"/usr/share/subversion
    cp -a tools/hook-scripts "${pkgdir}"/usr/share/subversion/
@@ -113,3 +120,5 @@ package() {
       ln -sf subversion "${pkgdir}"/usr/share/bash-completion/completions/${i}
    done
 }
+
+# vim: ts=2 sw=2 et:
