@@ -6,37 +6,64 @@
 # Contributor: Ben <contrasutra@myrealbox.com>
 
 pkgname=elinks
-pkgver=0.15.1
-pkgrel=2
-pkgdesc="An advanced and well-established feature-rich text mode web browser."
-arch=(x86_64 powerpc64le powerpc riscv64)
+pkgver=0.16.0
+pkgrel=1
+pkgdesc="Advanced, feature-rich text mode web browser"
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="http://elinks.or.cz"
 license=('GPL')
-depends=('bzip2' 'expat>=2.0' 'gpm>=1.20.4' 'openssl' 'lua' 'libidn'
+depends=('bzip2' 'expat>=2.0' 'gpm>=1.20.4' 'openssl' 'lua' 'libevent' 'libidn'
 	 'gc' 'tre' 'zlib')
-source=("elinks-$pkgver.tgz::https://github.com/rkd77/elinks/archive/v$pkgver.tar.gz")
-md5sums=('5a55aceb06d6cfee0dd0520103a23c3b')
+makedepends=('git' 'meson')
+source=("elinks-$pkgver.tgz::https://github.com/rkd77/elinks/archive/v$pkgver.tar.gz"
+        elinks-0.16.0-fix-build-mujs.patch
+        elinks-0.16.0-fix-tests.patch)
+sha256sums=('5494a73737eeb182fe2333b74e9b6192170f583c7722a0650dcd14ef088b9dfb'
+            '4074a069758cb8f4c0f8bce5e15b67843bad9552e814a827d504d0194f3907ad'
+            '3dfbddc66cf8ca366f8b01516badb1df1f364bc44286c785375007770bff98a7')
 
 # todo: make it work with a modern 'js' package
 # (upstream has no interest in writing that)
 
-build() {
+prepare() {
   cd elinks-$pkgver
+  patch -Np1 -i ${srcdir}/elinks-0.16.0-fix-build-mujs.patch
+  patch -Np1 -i ${srcdir}/elinks-0.16.0-fix-tests.patch
+
   sed -i 's/Terminal=1/Terminal=true/' "contrib/debian/$pkgname.desktop"
-  [ -x configure ] || sh autogen.sh
-  ./configure --prefix=/usr --mandir=/usr/share/man \
-              --sysconfdir=/etc \
-              --disable-smb --without-x --enable-cgi \
-              --enable-leds --enable-256-colors --enable-html-highlight \
-              --with-zlib --with-luapkg=lua54 --build=${CHOST}
-  make
+}
+
+build() {
+  meson_options=(
+    -Dopenssl=true
+    -Dgnutls=false
+    -Dterminfo=true
+    -Dtrue-color=true
+    -Dipv6=true
+    -Dlibevent=true
+    -D88-colors=true
+    -D256-colors=true
+    -Dgettext=true
+    -Dpython=false
+    -Dquickjs=false
+    -Druby=false
+    -Dluapkg=lua54
+  )
+
+  case "${CARCH}" in
+    riscv64) meson_options+=(-Dgpm=false) ;;
+    *) meson_options+=(-Dgpm=true) ;;
+  esac
+
+  arch-meson elinks-$pkgver build "${meson_options[@]}"
+  meson configure build
+  meson compile -C build 
 }
 
 package() {
-  cd elinks-$pkgver
-  make DESTDIR="$pkgdir" install
+  DESTDIR="$pkgdir" meson install -C build
   rm -f "$pkgdir/usr/share/locale/locale.alias"
 
-  install -D -m644 "contrib/debian/$pkgname.desktop" \
-    "$pkgdir/usr/share/applications/$pkgname.desktop"
+  #install -D -m644 "contrib/debian/$pkgname.desktop" \
+  #  "$pkgdir/usr/share/applications/$pkgname.desktop"
 }
