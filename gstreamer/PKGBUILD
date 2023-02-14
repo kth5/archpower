@@ -1,4 +1,3 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Contributor: Jan de Groot <jgc@archlinux.org>
 
@@ -11,6 +10,7 @@ pkgname=(
   gst-plugins-good
   gst-plugins-bad
   gst-plugin-gtk
+  gst-plugin-msdk
   gst-plugin-opencv
   gst-plugin-qmlgl
   gst-plugin-va
@@ -23,12 +23,11 @@ pkgname=(
   gst-python
   gstreamer-docs
 )
-[ "${CARCH}" = 'x86_64' ] && pkgname+=(gst-plugin-msdk)
-pkgver=1.20.4
-pkgrel=3
+pkgver=1.20.5
+pkgrel=5
 pkgdesc="Multimedia graph framework"
 url="https://gstreamer.freedesktop.org/"
-arch=(x86_64 powerpc64le powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=(LGPL)
 makedepends=(
   # superproject
@@ -38,11 +37,11 @@ makedepends=(
   valgrind libunwind gobject-introspection bash-completion gtk3 libcap python
 
   # gst-plugins-base
-  cdparanoia graphene libvisual opus libtheora libxv sdl2 qt5-base qt5-tools
-  zlib libglvnd wayland wayland-protocols libx11 libgudev libdrm mesa orc
+  cdparanoia graphene opus libtheora libxv sdl2 qt5-base qt5-tools zlib libglvnd
+  wayland wayland-protocols libx11 libgudev libdrm mesa orc
 
   # gst-plugins-good
-  v4l-utils aalib flac jack2 lame libcaca libdv mpg123 libraw1394
+  nasm v4l-utils aalib flac jack2 lame libcaca libdv mpg123 libraw1394
   libavc1394 libiec61883 qt5-declarative qt5-x11extras qt5-wayland libpulse
   libshout taglib twolame libvpx wavpack cairo libsoup3
 
@@ -51,8 +50,8 @@ makedepends=(
   libltc bluez-libs libavtp libbs2b bzip2 chromaprint libdca faac faad2
   libfdk-aac fluidsynth libgme libkate liblrdf ladspa libde265 lilv lv2
   libmicrodns mjpegtools libmpcdec neon openal libdvdnav rtmpdump sbc soundtouch
-  spandsp libsrtp zvbi libnice webrtc-audio-processing wildmidi
-  zxing-cpp zbar nettle libxml2 gsm libopenmpt wpewebkit libfreeaptx
+  spandsp libsrtp svt-hevc zvbi libnice webrtc-audio-processing wildmidi
+  zxing-cpp zbar nettle libxml2 gsm libopenmpt wpewebkit libldac libfreeaptx
   qrencode json-glib libva libxkbcommon-x11
 
   # gst-plugins-ugly
@@ -67,33 +66,24 @@ makedepends=(
   # gst-python
   python-gobject
 )
-makedepends_powerpc64le=(
-  # gst-plugins-bad
-  libldac
-)
-makedepends_x86_64=(
-  # gst-plugins-good
-  nasm
-  # gst-plugins-bad
-  libldac svt-hevc
-)
 checkdepends=(xorg-server-xvfb)
-_commit=642730bd67d3c23ac68bd328fbddd191a7a43f25  # tags/1.20.4^0
+_commit=f7806a854aad960eae3288db4a67a574f92428fe  # tags/1.20.5^0
 source=(
   "git+https://gitlab.freedesktop.org/gstreamer/gstreamer.git#commit=$_commit"
   "https://gstreamer.freedesktop.org/src/gstreamer-docs/gstreamer-docs-${pkgver%%+*}.tar.xz"{,.asc}
   0001-meson-Add-a-new-option-to-control-the-source-for-orc.patch
   0002-HACK-meson-Disable-broken-tests.patch
-  0003-HACK-meson-Work-around-broken-detection-of-underscor.patch
+  0003-Support-zxing-c-2.0.patch
+  0004-meson-Use-implicit-builtin-dirs-in-pkgconfig-generat.patch
 )
 sha256sums=('SKIP'
-            '9a40511387c5b14fa8ed4555bda1bb9dd336b4b8a00e18cc97929b4dd930a79a'
+            'b3177d9320e2a1d872b85adf1a29cd4fad995adb4a41a478372419bdd8c87a95'
             'SKIP'
-            '54115800d579864db41ba9b3f62745696a9e012ca5c7afa990ee6943f0912365'
-            '5cd72310f9f4230ca6bba6a2b972eb783296ab622a2586683cd8623b6907d3ff'
-            '79d3038a0ba0c3958ffa8b5aec8431336b372906c07c0c878c3767bec0acb46f')
+            'c2b2fb2ebbb36527f5a43178597367485d95fe58268be043f8a9ebe962147bd9'
+            '2b44fe7562d876d41878c9b513f9d36fbac43fa1c42db3ad2df309ced644de87'
+            '4c96b339cf9d76785532bcd6067e73f2f45d03d593b1475da18a0d229d1a9f31'
+            '8e4e90dbb0b29ee8ec4afee0482a86392858619178c55b9eebda4992f3e92da2')
 validpgpkeys=(D637032E45B8C6585B9456565D2EEE6F6F349D7C) # Tim Müller <tim@gstreamer-foundation.org>
-options=(debug)
 
 pkgver() {
   cd gstreamer
@@ -103,15 +93,24 @@ pkgver() {
 prepare() {
   cd gstreamer
 
+  # Fix build with opencv 4.7
+  git cherry-pick -n 8d5ac30955cf052a12ef8c87c0cae6d124d4d7b6
+
+  # Fix build with zxing-cpp 1.4
+  git cherry-pick -n 7cfc3130a7906c199861d2ef331a07d749a4b769
+
   # Fix linking with system orc
   git apply -3 ../0001-meson-Add-a-new-option-to-control-the-source-for-orc.patch
 
   # Disable broken tests
   git apply -3 ../0002-HACK-meson-Disable-broken-tests.patch
 
-  # Workaround broken detection of underscore prefixes
-  # https://github.com/mesonbuild/meson/issues/5482
-  git apply -3 ../0003-HACK-meson-Work-around-broken-detection-of-underscor.patch
+  # Fix build with zxing-cpp 2.0
+  git apply -3 ../0003-Support-zxing-c-2.0.patch
+
+  # Fix pkgconfig variables
+  # https://bugs.archlinux.org/task/77031
+  git apply -3 ../0004-meson-Use-implicit-builtin-dirs-in-pkgconfig-generat.patch
 }
 
 build() {
@@ -126,16 +125,17 @@ build() {
     -D vaapi=enabled
     -D gstreamer:dbghelp=disabled
     -D gstreamer:gobject-cast-checks=disabled
-    -D gstreamer:package-name="Arch POWER gstreamer $pkgver-$pkgrel"
-    -D gstreamer:package-origin="https://archlinuxpower.org/"
+    -D gstreamer:package-name="Arch Linux gstreamer $pkgver-$pkgrel"
+    -D gstreamer:package-origin="https://www.archlinux.org/"
     -D gstreamer:ptp-helper-permissions=capabilities
     -D gst-plugins-base:gobject-cast-checks=disabled
-    -D gst-plugins-base:package-name="Arch POWER gst-plugins-base $pkgver-$pkgrel"
-    -D gst-plugins-base:package-origin="https://archlinuxpower.org/"
+    -D gst-plugins-base:package-name="Arch Linux gst-plugins-base $pkgver-$pkgrel"
+    -D gst-plugins-base:package-origin="https://www.archlinux.org/"
+    -D gst-plugins-base:libvisual=disabled
     -D gst-plugins-base:tremor=disabled
     -D gst-plugins-good:gobject-cast-checks=disabled
-    -D gst-plugins-good:package-name="Arch POWER gst-plugins-good $pkgver-$pkgrel"
-    -D gst-plugins-good:package-origin="https://archlinuxpower.org/"
+    -D gst-plugins-good:package-name="Arch Linux gst-plugins-good $pkgver-$pkgrel"
+    -D gst-plugins-good:package-origin="https://www.archlinux.org/"
     -D gst-plugins-good:rpicamsrc=disabled
     -D gst-plugins-bad:directfb=disabled
     -D gst-plugins-bad:flite=disabled
@@ -148,34 +148,27 @@ build() {
     -D gst-plugins-bad:openh264=disabled
     -D gst-plugins-bad:openni2=disabled
     -D gst-plugins-bad:opensles=disabled
-    -D gst-plugins-bad:package-name="Arch POWER gst-plugins-bad $pkgver-$pkgrel"
-    -D gst-plugins-bad:package-origin="https://archlinuxpower.org/"
+    -D gst-plugins-bad:package-name="Arch Linux gst-plugins-bad $pkgver-$pkgrel"
+    -D gst-plugins-bad:package-origin="https://www.archlinux.org/"
     -D gst-plugins-bad:tinyalsa=disabled
     -D gst-plugins-bad:voaacenc=disabled
     -D gst-plugins-bad:voamrwbenc=disabled
     -D gst-plugins-bad:wasapi2=disabled
     -D gst-plugins-bad:wasapi=disabled
     -D gst-plugins-ugly:gobject-cast-checks=disabled
-    -D gst-plugins-ugly:package-name="Arch POWER gst-plugins-ugly $pkgver-$pkgrel"
-    -D gst-plugins-ugly:package-origin="https://archlinuxpower.org/"
-    -D gst-libav:package-name="Arch POWER gst-libav $pkgver-$pkgrel"
-    -D gst-libav:package-origin="https://archlinuxpower.org/"
+    -D gst-plugins-ugly:package-name="Arch Linux gst-plugins-ugly $pkgver-$pkgrel"
+    -D gst-plugins-ugly:package-origin="https://www.archlinux.org/"
+    -D gst-libav:package-name="Arch Linux gst-libav $pkgver-$pkgrel"
+    -D gst-libav:package-origin="https://www.archlinux.org/"
     -D gst-rtsp-server:gobject-cast-checks=disabled
-    -D gst-rtsp-server:package-name="Arch POWER gst-rtsp-server $pkgver-$pkgrel"
-    -D gst-rtsp-server:package-origin="https://archlinuxpower.org/"
+    -D gst-rtsp-server:package-name="Arch Linux gst-rtsp-server $pkgver-$pkgrel"
+    -D gst-rtsp-server:package-origin="https://www.archlinux.org/"
     -D gst-editing-services:validate=disabled
-    -D gstreamer-vaapi:package-origin="https://archlinuxpower.org/"
+    -D gstreamer-vaapi:package-origin="https://www.archlinux.org/"
   )
 
-  case "${CARCH}" in
-    powerpc64le) meson_options+=(-D gst-plugins-bad:msdk=disabled
-                                 -D gst-plugins-bad:svthevcenc=disabled) ;;
-    powerpc|riscv64) meson_options+=(-D gst-plugins-bad:msdk=disabled
-                                     -D gst-plugins-bad:svthevcenc=disabled
-                                     -D gst-plugins-bad:ldac=disabled) ;;
-  esac
-
   arch-meson gstreamer build "${meson_options[@]}"
+  meson configure build  # Print config
   meson compile -C build
 }
 
@@ -185,7 +178,7 @@ check() (
 
   # Flaky due to timeouts
   xvfb-run -s '-nolisten local' \
-    meson test -C build --print-errorlogs || :
+    meson test -C build --print-errorlogs
 )
 
 _install() {
@@ -389,14 +382,12 @@ package_gst-plugins-base() {
   pkgdesc+=" - base plugins"
   depends=(
     "gst-plugins-base-libs=$pkgver"
-    alsa-lib cdparanoia libvisual libvorbis libtheora pango opus graphene libpng
-    libjpeg
+    alsa-lib cdparanoia libvorbis libtheora pango opus graphene libpng libjpeg
   )
 
   cd root; local files=(
     usr/lib/gstreamer-1.0/libgstalsa.so
     usr/lib/gstreamer-1.0/libgstcdparanoia.so
-    usr/lib/gstreamer-1.0/libgstlibvisual.so
     usr/lib/gstreamer-1.0/libgstogg.so
     usr/lib/gstreamer-1.0/libgstopengl.so
     usr/lib/gstreamer-1.0/libgstopus.so
@@ -504,11 +495,9 @@ package_gst-plugins-bad() {
     libkate liblrdf lilv libmodplug mjpegtools libmpcdec neon openal openexr
     openjpeg2 opus libdvdnav libdvdread librsvg rtmpdump sbc libsndfile libltc
     soundtouch spandsp srt libsrtp zvbi vulkan-icd-loader libxcb wayland libwebp
-    libnice webrtc-audio-processing wildmidi x265 zbar gsm libopenmpt
-    libfreeaptx qrencode json-glib libavtp libmicrodns zxing-cpp
+    libnice webrtc-audio-processing wildmidi x265 zbar gsm libopenmpt libldac
+    libfreeaptx qrencode json-glib libavtp libmicrodns svt-hevc zxing-cpp
   )
-  depends_powerpc64le=(libldac)
-  depends_x86_64=(libldac svt-hevc)
 
   cd root; local files=(
     usr/lib/gstreamer-1.0/libgstaes.so
@@ -535,6 +524,7 @@ package_gst-plugins-bad() {
     usr/lib/gstreamer-1.0/libgsthls.so
     usr/lib/gstreamer-1.0/libgstkate.so
     usr/lib/gstreamer-1.0/libgstladspa.so
+    usr/lib/gstreamer-1.0/libgstldac.so
     usr/lib/gstreamer-1.0/libgstlv2.so
     usr/lib/gstreamer-1.0/libgstmicrodns.so
     usr/lib/gstreamer-1.0/libgstmodplug.so
@@ -560,6 +550,7 @@ package_gst-plugins-bad() {
     usr/lib/gstreamer-1.0/libgstspandsp.so
     usr/lib/gstreamer-1.0/libgstsrt.so
     usr/lib/gstreamer-1.0/libgstsrtp.so
+    usr/lib/gstreamer-1.0/libgstsvthevcenc.so
     usr/lib/gstreamer-1.0/libgstteletext.so
     usr/lib/gstreamer-1.0/libgsttimecode.so
     usr/lib/gstreamer-1.0/libgstttmlsubs.so
@@ -572,17 +563,7 @@ package_gst-plugins-bad() {
     usr/lib/gstreamer-1.0/libgstx265.so
     usr/lib/gstreamer-1.0/libgstzbar.so
     usr/lib/gstreamer-1.0/libgstzxing.so
-  );
- 
-  case "${CARCH}" in 
-    powerpc64le) files+=(usr/lib/gstreamer-1.0/libgstldac.so) ;;
-    x86_64)
-        files+=(usr/lib/gstreamer-1.0/libgstsvthevcenc.so
-                usr/lib/gstreamer-1.0/libgstldac.so)
-    ;;
-  esac
- 
-  _install
+  ); _install
 }
 
 package_gst-plugin-gtk() {
@@ -754,9 +735,10 @@ package_gstreamer-docs() {
   license=(GPL3 LGPL custom:BSD custom:CC-BY-SA-4.0 custom:MIT custom:OPL)
 
   # make sure there are no files left to install
+  find root -depth ! -type d
   find root -depth -print0 | xargs -0 rmdir
 
-  cd gstreamer-docs-${pkgver%%+*} 
+  cd gstreamer-docs-${pkgver%%+*}
 
   mkdir -p "$pkgdir/usr/share"
   cp -a devhelp "$pkgdir/usr/share/devhelp"
@@ -764,4 +746,4 @@ package_gstreamer-docs() {
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 COPYING LICENSE*
 }
 
-# vim:set sw=2 et:
+# vim:set sw=2 sts=-1 et:
