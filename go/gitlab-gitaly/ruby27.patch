@@ -1,82 +1,45 @@
-commit 97a8954f6d7764a0f010875093395d42578e309f
+commit 4f8b635c102f6c66b2aa0a87659f08ac4ee7f756
 Author: Anatol Pomozov <anatol.pomozov@gmail.com>
 Date:   Tue Jun 21 09:37:26 2022 -0700
 
     Pin sources to ruby2.7 package
 
 diff --git a/Makefile b/Makefile
-index 117498e19..74e3254ec 100644
+index 18440fb3f..a871ae254 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -374,7 +374,7 @@ race-go: test-go
+@@ -405,7 +405,7 @@ race-go: test-go
  .PHONY: rspec
  ## Run Ruby tests.
- rspec: prepare-tests
+ rspec: build prepare-tests
 -	${Q}cd ${GITALY_RUBY_DIR} && PATH='${SOURCE_DIR}/internal/testhelper/testdata/home/bin:${PATH}' bundle exec rspec
 +	${Q}cd ${GITALY_RUBY_DIR} && PATH='${SOURCE_DIR}/internal/testhelper/testdata/home/bin:${PATH}' bundle-2.7 exec rspec
  
- # This is a workaround for our unprivileged CI builds. We manually execute the
- # build target as privileged user, but then run the rspec target unprivileged.
-@@ -425,7 +425,7 @@ clean-ruby-vendor-go:
+ .PHONY: verify
+ ## Verify that various files conform to our expectations.
+@@ -463,7 +463,7 @@ clean-ruby-vendor-go:
  .PHONY: rubocop
  ## Run Rubocop.
- rubocop: ${SOURCE_DIR}/.ruby-bundle
+ rubocop: ${RUBY_BUNDLE_FILE}
 -	${Q}cd ${GITALY_RUBY_DIR} && bundle exec rubocop --parallel --config ${GITALY_RUBY_DIR}/.rubocop.yml ${GITALY_RUBY_DIR} ${SOURCE_DIR}/_support/test-boot
 +	${Q}cd ${GITALY_RUBY_DIR} && bundle-2.7 exec rubocop --parallel --config ${GITALY_RUBY_DIR}/.rubocop.yml ${GITALY_RUBY_DIR} ${SOURCE_DIR}/_support/test-boot
  
  .PHONY: cover
  ## Generate coverage report via Go tests.
-@@ -497,7 +497,9 @@ libgit2: ${LIBGIT2_INSTALL_DIR}/lib/libgit2.a
+@@ -545,7 +545,7 @@ libgit2: ${LIBGIT2_INSTALL_DIR}/lib/libgit2.a
  # step. Both Omnibus and CNG assume it is in the Gitaly root, not in
  # _build. Hence the '../' in front.
- ${SOURCE_DIR}/.ruby-bundle: ${GITALY_RUBY_DIR}/Gemfile.lock ${GITALY_RUBY_DIR}/Gemfile
+ ${RUBY_BUNDLE_FILE}: ${GITALY_RUBY_DIR}/Gemfile.lock ${GITALY_RUBY_DIR}/Gemfile
 -	${Q}cd ${GITALY_RUBY_DIR} && bundle install
-+	${Q}cd ${GITALY_RUBY_DIR} && bundle-2.7 config set --local deployment "true"
-+	${Q}cd ${GITALY_RUBY_DIR} && bundle-2.7 config # for debugging
 +	${Q}cd ${GITALY_RUBY_DIR} && bundle-2.7 install
  	${Q}touch $@
  
  ${SOURCE_DIR}/NOTICE: ${BUILD_DIR}/NOTICE
-diff --git a/_support/generate-proto-ruby b/_support/generate-proto-ruby
-index 6ddb15cbb..bf4bc51f0 100755
---- a/_support/generate-proto-ruby
-+++ b/_support/generate-proto-ruby
-@@ -20,7 +20,7 @@ def main
-     # locations. `protoc` requires this.
-     proto_include_abs = File.absolute_path(File.join('..', PROTO_INCLUDE))
- 
--    run!(%W[bundle exec grpc_tools_ruby_protoc -I #{proto_include_abs} --ruby_out=../#{ruby_lib_gitaly} --grpc_out=../#{ruby_lib_gitaly}] + PROTO_FILES)
-+    run!(%W[bundle-2.7 exec grpc_tools_ruby_protoc -I #{proto_include_abs} --ruby_out=../#{ruby_lib_gitaly} --grpc_out=../#{ruby_lib_gitaly}] + PROTO_FILES)
-   end
- 
-   write_ruby_requires
-diff --git a/internal/gitaly/linguist/linguist.go b/internal/gitaly/linguist/linguist.go
-index 4ac9abfd2..29b6add09 100644
---- a/internal/gitaly/linguist/linguist.go
-+++ b/internal/gitaly/linguist/linguist.go
-@@ -87,7 +87,7 @@ func (inst *Instance) Color(language string) string {
- }
- 
- func (inst *Instance) startGitLinguist(ctx context.Context, repoPath string, commitID string) (*command.Command, error) {
--	bundle, err := exec.LookPath("bundle")
-+	bundle, err := exec.LookPath("bundle-2.7")
- 	if err != nil {
- 		return nil, fmt.Errorf("finding bundle executable: %w", err)
- 	}
-@@ -127,7 +127,7 @@ func openLanguagesJSON(cfg config.Cfg) (io.ReadCloser, error) {
- 	// We use a symlink because we cannot trust Bundler to not print garbage
- 	// on its stdout.
- 	rubyScript := `FileUtils.ln_sf(Bundler.rubygems.find_name('github-linguist').first.full_gem_path, ARGV.first)`
--	cmd := exec.Command("bundle", "exec", "ruby", "-rfileutils", "-e", rubyScript, linguistPathSymlink.Name())
-+	cmd := exec.Command("bundle-2.7", "exec", "ruby-2.7", "-rfileutils", "-e", rubyScript, linguistPathSymlink.Name())
- 	cmd.Dir = cfg.Ruby.Dir
- 
- 	// We have learned that in practice the command we are about to run is a
 diff --git a/internal/gitaly/rubyserver/rubyserver.go b/internal/gitaly/rubyserver/rubyserver.go
-index 5ac213e72..5d71ddeed 100644
+index 7e661954a..4650546ff 100644
 --- a/internal/gitaly/rubyserver/rubyserver.go
 +++ b/internal/gitaly/rubyserver/rubyserver.go
-@@ -190,7 +190,7 @@ func (s *Server) start() error {
+@@ -191,7 +191,7 @@ func (s *Server) start() error {
  		// Use 'ruby-cd' to make sure gitaly-ruby has the same working directory
  		// as the current process. This is a hack to sort-of support relative
  		// Unix socket paths.
@@ -86,7 +49,7 @@ index 5ac213e72..5d71ddeed 100644
  		events := make(chan supervisor.Event)
  		check := func() error { return ping(socketPath) }
 diff --git a/ruby/bin/gitaly-ruby b/ruby/bin/gitaly-ruby
-index c0f17b1e5..31121e12e 100755
+index 11cfa231b..d7493f723 100755
 --- a/ruby/bin/gitaly-ruby
 +++ b/ruby/bin/gitaly-ruby
 @@ -1,4 +1,4 @@
@@ -104,4 +67,17 @@ index 9c60fcd42..15f0cb05a 100755
 +#!/usr/bin/env ruby-2.7
  
  # This script lets you run `bundle exec` in one directory, and then changes into another.
+ 
+diff --git a/tools/protogem/build-proto-gem b/tools/protogem/build-proto-gem
+index ee5fc94df..6b36fafc5 100755
+--- a/tools/protogem/build-proto-gem
++++ b/tools/protogem/build-proto-gem
+@@ -41,7 +41,7 @@ def generate_sources(output_dir, version)
+   proto_files = Dir[File.join(proto_dir, '*.proto')].sort
+ 
+   run!(
+-    %W[bundle exec grpc_tools_ruby_protoc -I #{proto_dir} --ruby_out=#{proto_output_dir} --grpc_out=#{proto_output_dir}] + proto_files,
++    %W[bundle-2.7 exec grpc_tools_ruby_protoc -I #{proto_dir} --ruby_out=#{proto_output_dir} --grpc_out=#{proto_output_dir}] + proto_files,
+     File.join(SOURCE_DIR, 'tools', 'protogem')
+   )
  
