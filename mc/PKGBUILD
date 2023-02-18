@@ -5,11 +5,12 @@
 # Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
 
 pkgname=mc
-pkgver=4.8.28
-pkgrel=1
-pkgdesc="A file manager that emulates Norton Commander"
-arch=(x86_64 powerpc64le powerpc riscv64)
-url="https://midnight-commander.org/"
+pkgver=4.8.29
+_commit=e99f44c5e7ec2060195239b0448afa27e477a0ff # git rev-parse ${pkgver}
+pkgrel=2
+pkgdesc='A file manager that emulates Norton Commander'
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+url='https://midnight-commander.org/'
 license=('GPL')
 depends=(
   'e2fsprogs'
@@ -20,6 +21,8 @@ depends=(
   'which'
 )
 makedepends=(
+  'aspell'
+  'git'
   'libxt'
   'libx11'
   'unzip'
@@ -37,7 +40,6 @@ optdepends=(
   'python: to access uc1541 or s3 storage'
   'python-boto: s3+ extfs'
   'python-pytz: s3+ extfs'
-  'samba: VFS support'
   'unace: uace extfs'
   'unarj: uarj extfs'
   'unrar: urar extfs'
@@ -55,28 +57,32 @@ backup=(
 )
 options=('!emptydirs')
 source=(
-  "http://ftp.midnight-commander.org/${pkgname}-${pkgver}.tar.xz"
+  #"https://ftp.osuosl.org/pub/midnightcommander/${pkgname}-${pkgver}.tar.xz"
+  "git+https://github.com/MidnightCommander/mc.git?signed#tag=${_commit}"
   'mc-python3.patch'
 )
-sha512sums=('ca3b3a57281e9387cb52bf1fcfc3f39a4d5f438aafc256dc492c192678824f67c983a852c759664efc5bc6d0de471c9b3929834f8301f6302ca1ebeee513fdfd'
-            '2f30b55403127b569b3c809439c81d230857abf5e799cbb334de3c3e8cc88ad90f58059f046e00ca95f3573a4e734047b922bf268c2776de534a98e62868d8b8')
-b2sums=('f4218e6c166df85b7b3736f0fd1414c9507c72074f06001f12b114ce6c6fbbf3688ab850aa70f5063eb3920736f878e113eb39a5d261ccfc3ffa9dab473a8436'
-        '185d66e3de256bb59a1e7e01e778b9ba76705d3f9980862e7c67e0a3b142cc357c679360347afc188985fa551c6d7476dd824d6ba0c09e3d1e68fa1cbcb96ab7')
+sha256sums=('SKIP'
+            '78df8592c86445fa6249433e8587889e3923c0bb8b604cae32d5e739d2cc025c')
+validpgpkeys=(CC37C2244E2FF0ED548D5DD5F722EE79BCBBE0EF) # Yury V. Zaytsev <yury@shurup.com>
 
 prepare() {
-  cd "$pkgname-$pkgver"
+  cd mc
 
-  patch -p1 < "$srcdir"/mc-python3.patch
+  # port to Python 3
+  # ref: https://github.com/MidnightCommander/mc/pull/149
+  patch -p1 -i "$srcdir/mc-python3.patch"
+
+  ./autogen.sh
 }
 
 build() {
-  cd "$pkgname-$pkgver"
+  cd mc
 
   ./configure \
     --prefix=/usr \
     --libexecdir=/usr/lib \
     --sysconfdir=/etc \
-    --enable-vfs-smb \
+    --enable-aspell \
     --with-screen=slang \
     --with-x
 
@@ -84,11 +90,11 @@ build() {
 }
 
 package() {
-  cd "$pkgname-$pkgver"
+  cd mc
 
   make DESTDIR="$pkgdir" install
 
-  # Replace mc.keymap symlink with target file to fix backup mechanism (FS#50889).
+  # FS#50889: Replace mc.keymap symlink with target file to fix backup mechanism.
   rm "$pkgdir/etc/mc/mc.keymap"
   cp "$pkgdir"/etc/mc/mc{.default,}.keymap
 }
