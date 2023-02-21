@@ -12,14 +12,15 @@ pkgname=(
   pipewire-alsa
   pipewire-jack
   pipewire-pulse
-  #gst-plugin-pipewire
+  pipewire-roc
+  gst-plugin-pipewire
   pipewire-zeroconf
   pipewire-v4l2
   pipewire-x11-bell
 )
-_commit=bba452695eb673461c5cf626eec57728991eadf7  # tags/0.3.64
-pkgver=0.3.64
-pkgrel=1
+_commit=9558a5d5e0360d8af822431c76ee858a8c7495ac  # tags/0.3.65
+pkgver=0.3.65
+pkgrel=6
 epoch=1
 pkgdesc="Low-latency audio/video router and processor"
 url="https://pipewire.org"
@@ -34,11 +35,12 @@ makedepends=(
   git
   glib2
   graphviz
-  #gst-plugins-base
-  #libcamera
+  gst-plugins-base
+  libcamera
   libcanberra
   libfdk-aac
   libfreeaptx
+  liblc3
   libpulse
   libsndfile
   libusb
@@ -50,10 +52,12 @@ makedepends=(
   opus
   python-docutils
   readline
+  roc-toolkit
   rtkit
   sbc
   sdl2
   systemd
+  tinycompress
   valgrind
   webrtc-audio-processing
 )
@@ -61,7 +65,6 @@ makedepends_powerpc64le=(libldac)
 makedepends_riscv64=(libldac)
 makedepends_x86_64=(libldac)
 checkdepends=(desktop-file-utils)
-options=(debug)
 source=(git+https://gitlab.freedesktop.org/pipewire/pipewire.git#commit=$_commit)
 sha256sums=('SKIP')
 
@@ -73,27 +76,27 @@ pkgver() {
 prepare() {
   cd pipewire
 
+  # Actually install module-combine-stream
+  git cherry-pick -n fba7083f8ceb210c7c20aceafeb5c9a8767cf705
+
   # remove export of LD_LIBRARY_PATH for pw-jack as it would add /usr/lib
   sed -i '/LD_LIBRARY_PATH/d' pipewire-jack/src/pw-jack.in
 }
 
 build() {
   local meson_options=(
+    -D bluez5-codec-lc3=enabled
     -D bluez5-codec-lc3plus=disabled
+    -D compress-offload=enabled
     -D docs=enabled
     -D jack-devel=true
     -D jack=disabled
     -D libjack-path=/usr/lib
-    -D roc=disabled
     -D session-managers=[]
     -D udevrulesdir=/usr/lib/udev/rules.d
-    -D gstreamer=disabled
-    -D gstreamer-device-provider=disabled
-    -D libcamera=disabled
   )
-
   case "${CARCH}" in
-    powerpc|powerpc64|riscv64) meson_options+=(-D bluez5-codec-ldac=disabled) ;;
+    powerpc|powerpc64) meson_options+=(-D bluez5-codec-ldac=disabled) ;;
   esac
 
   arch-meson pipewire build "${meson_options[@]}"
@@ -119,8 +122,8 @@ _ver=${pkgver:0:3}
 package_pipewire() {
   license+=(LGPL)  # libspa-alsa
   depends=(
-    #libcamera.so
-    #libcamera-base.so
+    libcamera-base.so
+    libcamera.so
     libdbus-1.so
     libglib-2.0.so
     libncursesw.so
@@ -135,6 +138,7 @@ package_pipewire() {
     'pipewire-docs: Documentation'
     'pipewire-jack: JACK support'
     'pipewire-pulse: PulseAudio replacement'
+    'pipewire-roc: ROC streaming'
     'pipewire-session-manager: Session manager'
     'pipewire-v4l2: V4L2 interceptor'
     'pipewire-x11-bell: X11 bell'
@@ -193,7 +197,9 @@ package_pipewire() {
     _pick pulse usr/share/man/man1/pipewire-pulse.1
     _pick pulse usr/share/pipewire/pipewire-pulse.conf
 
-    #_pick gst usr/lib/gstreamer-1.0
+    _pick roc usr/lib/pipewire-$_ver/libpipewire-module-roc*.so
+
+    _pick gst usr/lib/gstreamer-1.0
 
     _pick zeroconf usr/lib/pipewire-$_ver/libpipewire-module-{raop,zeroconf}-*.so
 
@@ -231,11 +237,13 @@ package_pipewire-audio() {
     libbluetooth.so
     libfdk-aac.so
     libfreeaptx.so
+    liblc3.so
     liblilv-0.so
     libopus.so
     libpipewire-$_ver.so
     libsbc.so
     libsndfile.so
+    libtinycompress.so
     libusb-1.0.so
     libwebrtc_audio_processing.so
     pipewire
@@ -317,6 +325,18 @@ package_pipewire-pulse() {
 
   install -Dm644 /dev/null \
     "$pkgdir/usr/share/pipewire/media-session.d/with-pulseaudio"
+
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 pipewire/COPYING
+}
+
+package_pipewire-roc() {
+  pkgdesc+=" - ROC streaming support"
+  depends=(
+    libpipewire-$_ver.so
+    roc-toolkit libroc.so
+  )
+
+  mv roc/* "$pkgdir"
 
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 pipewire/COPYING
 }
