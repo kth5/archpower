@@ -8,28 +8,27 @@
 
 pkgname=vtk
 pkgver=9.1.0
-pkgrel=25
+pkgrel=26
 pkgdesc="Software system for 3D computer graphics, image processing, and visualization"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://www.vtk.org/"
 license=(BSD)
 depends=(gcc-libs double-conversion pugixml tbb)
-makedepends=(adios2 cmake boost doxygen ffmpeg gdal git gnuplot
-             liblas libxt openmpi openvdb openvr
-             postgresql python-matplotlib qt5-base qt5-tools
-             qt5-x11extras tk unixodbc wget
+makedepends=(adios2 cmake boost doxygen ffmpeg gdal git gnuplot java-environment=19
+             liblas libxt mariadb-libs openmpi openvdb openvr
+             postgresql-libs python-matplotlib qt5-base qt5-tools
+             qt5-x11extras tk unixodbc wget qt5-webkit
              cgns double-conversion eigen expat fmt freetype2 gl2ps glew hdf5 libjpeg
              jsoncpp libharu proj libxml2 lz4 xz python-mpi4py netcdf libogg
-             libpng rapidjson sqlite libtheora libtiff utf8cpp zfp zlib
-             mariadb)
-makedepends_powerpc=('java-environment=11' pdal qt5-webkit)
-makedepends_powerpc64le=('java-environment=11' openmp pdal qt5-webkit)
-makedepends_riscv64=('java-environment=11' qt5-quickcontrols{,2} pdal)
-makedepends_x86_64=('java-environment=11' openimagedenoise ospray pdal qt5-webkit)
+             libpng rapidjson sqlite libtheora libtiff utf8cpp zfp zlib)
+makedepends_powerpc64=(openmp)
+makedepends_powerpc64le=(openmp)
+makedepeneds_riscv64=(openmp)
+makedepends_x86_64=(openimagedenoise ospray)
 # pegtl https://gitlab.kitware.com/vtk/vtk/-/issues/18151
 optdepends=('gnuplot: plotting tools'
             'graphviz: drawing tools'
-            'java-runtime=11: java bindings'
+            'java-runtime>=19: java bindings'
             'python: python bindings'
             'python-mpi4py: OpenMPI python support'
             'python-matplotlib: for Matplotlib rendering'
@@ -52,7 +51,7 @@ optdepends=('gnuplot: plotting tools'
             openvdb
             openvr
             pdal
-            postgresql
+            postgresql-libs
             proj
             sqlite
             unixodbc)
@@ -132,8 +131,11 @@ build() {
          -DVTK_ENABLE_OSPRAY=OFF
          -DVTK_SMP_ENABLE_OPENMP=ON
          -DVTK_WRAP_JAVA=OFF
-       ) ;;
-
+         -DVTK_MODULE_ENABLE_VTK_IOPDAL=NO
+       )
+       CFLAGS='-O2 -pipe'
+       CXXFLAGS='-O2 -pipe'
+    ;;
     *) _cmake_options+=(
 	 -DVTKOSPRAY_ENABLE_DENOISER=OFF
          -DVTKm_ENABLE_OPENMP=ON
@@ -184,12 +186,16 @@ package() {
     powerpc64le) MYARCH=ppc64le ;;
   esac
 
-  # Move the vtk.jar to the arch-specific location…
-  install -dv "${pkgdir}"/usr/share/java/vtk
-  mv -v "${pkgdir}"/usr/lib/java/vtk.jar "${pkgdir}"/usr/share/java/vtk
-  # …and the libs to the proper place
-  mv "${pkgdir}"/usr/lib/java/vtk-Linux-$MYARCH/*.so "${pkgdir}"/usr/lib/
-  rmdir "${pkgdir}"/usr/lib/java/{vtk-Linux-$MYARCH/,}
+  case "${CARCH}" in
+    powerpc|powerpc64le|riscv64|x86_64)
+      # Move the vtk.jar to the arch-specific location…
+      install -dv "${pkgdir}"/usr/share/java/vtk
+      mv -v "${pkgdir}"/usr/lib/java/vtk.jar "${pkgdir}"/usr/share/java/vtk
+      # …and the libs to the proper place
+      mv "${pkgdir}"/usr/lib/java/vtk-Linux-$MYARCH/*.so "${pkgdir}"/usr/lib/
+      rmdir "${pkgdir}"/usr/lib/java/{vtk-Linux-$MYARCH/,}
+    ;;
+  esac
 
   # byte-compile python modules since the CMake build does not do it
   local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
