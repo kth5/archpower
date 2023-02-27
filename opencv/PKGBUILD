@@ -9,7 +9,7 @@ pkgname=(opencv opencv-samples python-opencv)
 pkgver=4.7.0
 pkgrel=2
 pkgdesc='Open Source Computer Vision Library'
-arch=(x86_64 powerpc64le powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=(BSD)
 url='https://opencv.org/'
 depends=(tbb openexr gst-plugins-base libdc1394 cblas lapack libgphoto2 openjpeg2 ffmpeg protobuf)
@@ -24,19 +24,37 @@ optdepends=('opencv-samples: samples'
             'java-runtime: Java interface')
 source=(https://github.com/opencv/opencv/archive/$pkgver/$pkgname-$pkgver.tar.gz
         https://github.com/opencv/opencv_contrib/archive/$pkgver/opencv_contrib-$pkgver.tar.gz
-        vtk9.patch)
+        vtk9.patch
+        opencv-4.4.0-disable-native-cpuflag-detect.patch
+        opencv-4.5.0-link-with-cblas-for-lapack.patch
+        opencv-4.6.0-fix-build-examples.patch
+        undef-altivec-macros-cpp.patch)
 sha256sums=('8df0079cdbe179748a18d44731af62a245a45ebf5085223dc03133954c662973'
             '42df840cf9055e59d0e22c249cfb19f04743e1bdad113d31b1573d3934d62584'
-            'f35a2d4ea0d6212c7798659e59eda2cb0b5bc858360f7ce9c696c77d3029668e')
+            'f35a2d4ea0d6212c7798659e59eda2cb0b5bc858360f7ce9c696c77d3029668e'
+            '6104241e1b6c22147de5bc28315675f5b33941589b6dc500283ac1bc0bd21eee'
+            '0c543f6be7914d2fac08fc30c81c849a7f55ab1e6f5be460a8d15e991b51cdd6'
+            'a166515fc7964754d600add5f13edc35e7606da76663c9ee0a8a4503208d4db6'
+            'fe704361e20cefc11ebe9f57447359719cb3d81d9722b80a9d935c968d77c658')
 
 prepare() {
   patch -d $pkgname-$pkgver -p1 < vtk9.patch # Don't require all vtk optdepends
+
+  cd ${pkgname}-${pkgver}
+  patch -Np1 -i ${srcdir}/opencv-4.4.0-disable-native-cpuflag-detect.patch
+  patch -Np1 -i ${srcdir}/opencv-4.5.0-link-with-cblas-for-lapack.patch
+  patch -Np1 -i ${srcdir}/opencv-4.6.0-fix-build-examples.patch
+  patch -Np1 -i ${srcdir}/undef-altivec-macros-cpp.patch
 }
 
 build() {
   case "${CARCH}" in
    powerpc) export CXXFLAGS=' -latomic' ;;
+   powerpc64) export CFLAGS="-O2 -pipe"; export CXXFLAGS="-O2 -pipe" ;; 
   esac
+
+  JAVA_ANT_ENCODING="iso-8859-1"
+  export ANT_OPTS+=" -Dfile.encoding=iso-8859-1"
 
   export JAVA_HOME="/usr/lib/jvm/default"
   # cmake's FindLAPACK doesn't add cblas to LAPACK_LIBRARIES, so we need to specify them manually
