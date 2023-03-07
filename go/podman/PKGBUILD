@@ -5,9 +5,9 @@
 
 pkgbase=podman
 pkgname=(podman podman-docker)
-pkgver=4.4.0
-_commit=3443f453e28169a88848f90a7ce3137fc4a4bebf	#refs/tags/v4.4.0^{}
-pkgrel=2
+pkgver=4.4.2
+_commit=74afe26887f814d1c39925a1624851ef3590e79c  #refs/tags/v4.4.2^{}
+pkgrel=1
 pkgdesc='Tool and library for running OCI-based containers in pods'
 arch=(x86_64 powerpc64le riscv64)
 url='https://github.com/containers/podman'
@@ -34,13 +34,11 @@ pkgver() {
 prepare() {
   # set default init_path to /usr/lib/podman/catatonit
   # https://bugs.archlinux.org/task/75493
+  # https://github.com/containers/common/issues/1110
   patch -Np1 -d $pkgname -i ../$pkgname-4.2.0-defaultinitpath.patch
 }
 
 build() {
-  mkdir ${srcdir}/.tmp
-  export TMPDIR=${srcdir}/.tmp
-
   # NOTE: the BUILDTAGS may change over time
   export BUILDTAGS='apparmor seccomp systemd'
   export CGO_CPPFLAGS="${CPPFLAGS}"
@@ -48,6 +46,8 @@ build() {
   export CGO_CXXFLAGS="${CXXFLAGS}"
   export CGO_LDFLAGS="${LDFLAGS}"
   export GOFLAGS="-buildmode=pie -trimpath"
+  mkdir ${srcdir}/tmp
+  export TMPDIR=${srcdir}/tmp
 
   make -j1 EXTRA_LDFLAGS='-s -w -linkmode=external' PREFIX=/usr -C $pkgbase
   make docker-docs -C $pkgbase
@@ -60,13 +60,12 @@ package_podman() {
     'apparmor: for AppArmor support'
     'btrfs-progs: support btrfs backend devices'
     'cni-plugins: for an alternative container-network-stack implementation'
+    'fuse-overlayfs: for storage driver in rootless environment'
     'podman-compose: for docker-compose compatibility'
     'podman-docker: for Docker-compatible CLI'
   )
 
   make install install.completions DESTDIR="$pkgdir" PREFIX=/usr LIBEXECDIR=/usr/lib -C $pkgbase
-  # remove man pages provided by containers-common
-  rm -rvf "$pkgdir/usr/share/man/man5"
 }
 
 package_podman-docker() {
