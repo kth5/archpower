@@ -3,9 +3,15 @@
 # Contributor: Jan de Groot <jgc@archlinux.org>
 
 pkgbase=harfbuzz
-pkgname=(harfbuzz harfbuzz-icu)
-pkgver=6.0.0
-pkgrel=1.1
+pkgname=(
+  harfbuzz
+  harfbuzz-cairo
+  harfbuzz-icu
+  harfbuzz-utils
+  harfbuzz-docs
+)
+pkgver=7.1.0
+pkgrel=1
 pkgdesc="OpenType text shaping engine"
 url="https://www.freedesktop.org/wiki/Software/HarfBuzz"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
@@ -28,7 +34,7 @@ checkdepends=(
   python-fonttools
   python-setuptools
 )
-_commit=afcae83a064843d71d47624bc162e121cc56c08b  # tags/6.0.0^0
+_commit=60841e26187576bff477c1a09ee2ffe544844abc  # tags/7.1.0^0
 source=("git+https://github.com/harfbuzz/harfbuzz#commit=$_commit")
 sha256sums=('SKIP')
 
@@ -71,27 +77,43 @@ _pick() {
 
 package_harfbuzz() {
   depends=(
-    freetype2
-    glib2
-    graphite
     libfreetype.so
     libglib-2.0.so
     libgobject-2.0.so
+    libgraphite2.so
   )
+  optdepends=('harfbuzz-utils: utilities')
   provides=(libharfbuzz{,-subset,-gobject}.so)
-  optdepends=(
-    'cairo: hb-view program'
-    'chafa: hb-view program'
-  )
 
   meson install -C build --destdir "$pkgdir"
 
   ( cd "$pkgdir"
 
+    _pick hb-cairo usr/lib/libharfbuzz-cairo*
+    _pick hb-cairo usr/lib/pkgconfig/harfbuzz-cairo.pc
+    _pick hb-cairo usr/include/harfbuzz/hb-cairo.h
+
     _pick hb-icu usr/lib/libharfbuzz-icu*
     _pick hb-icu usr/lib/pkgconfig/harfbuzz-icu.pc
     _pick hb-icu usr/include/harfbuzz/hb-icu.h
+
+    _pick hb-utils usr/bin
+
+    _pick hb-docs usr/share/gtk-doc
   )
+
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 harfbuzz/COPYING
+}
+
+package_harfbuzz-cairo() {
+  pkgdesc+=" - Cairo integration"
+  depends=(
+    libcairo.so
+    libharfbuzz.so
+  )
+  provides=(libharfbuzz-cairo.so)
+
+  mv hb-cairo/* "$pkgdir"
 
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 harfbuzz/COPYING
 }
@@ -99,13 +121,42 @@ package_harfbuzz() {
 package_harfbuzz-icu() {
   pkgdesc+=" - ICU integration"
   depends=(
-    "harfbuzz=$pkgver-$pkgrel"
     libharfbuzz.so
     libicuuc.so
   )
   provides=(libharfbuzz-icu.so)
 
   mv hb-icu/* "$pkgdir"
+
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 harfbuzz/COPYING
+}
+
+package_harfbuzz-utils() {
+  pkgdesc+=" - Utilities"
+  depends=(
+    harfbuzz
+    harfbuzz-cairo
+    libcairo.so
+    libchafa.so
+    libfreetype.so
+    libglib-2.0.so
+    libgobject-2.0.so
+    libharfbuzz-cairo.so
+    libharfbuzz-gobject.so
+    libharfbuzz-subset.so
+    libharfbuzz.so
+  )
+
+  mv hb-utils/* "$pkgdir"
+
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 harfbuzz/COPYING
+}
+
+package_harfbuzz-docs() {
+  pkgdesc+=" - Documentation"
+  depends=()
+
+  mv hb-docs/* "$pkgdir"
 
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 harfbuzz/COPYING
 }
