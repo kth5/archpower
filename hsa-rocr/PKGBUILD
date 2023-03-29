@@ -1,0 +1,51 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Torsten Keßler <tpkessler at archlinux dot org>
+# Contributor: acxz <akashpatel2008 at yahoo dot com>
+# Contributor: Olaf Leidinger <oleid@mescharet.de>
+# Contributor: Bruno Filipe <bmilreu@gmail.com>
+# Contributor: Jakub Okoński <jakub@okonski.org>
+# Contributor: Ranieri Althoff <ranisalt+aur at gmail.com>
+
+pkgname=hsa-rocr
+pkgver=5.4.3
+pkgrel=1
+pkgdesc='HSA Runtime API and runtime for ROCm'
+arch=(x86_64 powerpc64le powerpc64 riscv64)
+url='https://rocmdocs.amd.com/en/latest/Installation_Guide/ROCR-Runtime.html'
+license=('custom:NCSAOSL')
+depends=('libelf' 'hsakmt-roct' 'rocm-device-libs')
+makedepends=('cmake' 'rocm-llvm' 'xxd')
+_git='https://github.com/RadeonOpenCompute/ROCR-Runtime'
+source=("${pkgname}-${pkgver}.tar.gz::$_git/archive/rocm-$pkgver.tar.gz"
+        "hsa-rocr-glibcxx.patch")
+sha256sums=('a600eed848d47a7578c60da7e64eb92f29bbce2ec67932b251eafd4c2974cb67'
+            '07a41e8a6b29d0baaea7b83c60d62b769d8ed738ed9c63acda43d7a3b466c393')
+_dirname="$(basename "$_git")-$(basename "${source[0]}" .tar.gz)"
+options=(!lto)
+
+prepare() {
+    cd "$_dirname"
+    patch -Np1 -i "$srcdir/hsa-rocr-glibcxx.patch"
+}
+
+build() {
+  # Silence warnings on optional libraries,
+  # https://github.com/RadeonOpenCompute/ROCR-Runtime/issues/89#issuecomment-613788944
+  CXXFLAGS="$CXXFLAGS -DNDEBUG" \
+  cmake \
+    -Wno-dev \
+    -B build \
+    -S "$_dirname/src" \
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_INSTALL_PREFIX=/opt/rocm \
+    -DCMAKE_PREFIX_PATH=/opt/rocm
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+
+  install -Dm644 "$_dirname/LICENSE.txt" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  echo "/opt/rocm/hsa/lib" > "$pkgname.conf"
+  install -Dm644 "$pkgname.conf" "$pkgdir/etc/ld.so.conf.d/$pkgname.conf"
+}
