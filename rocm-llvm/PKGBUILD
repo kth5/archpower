@@ -1,0 +1,86 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Torsten Keßler <tpkessler at archlinux dot org>
+# Contributor: acxz <akashpatel2008 at yahoo dot com>
+
+pkgname=rocm-llvm
+pkgdesc='Radeon Open Compute - LLVM toolchain (llvm, clang, lld)'
+pkgver=5.4.3
+pkgrel=1
+arch=(x86_64 powerpc64le powerpc64 riscv64)
+url='https://docs.amd.com/bundle/ROCm-Compiler-Reference-Guide-v5.4/page/Introduction_to_Compiler_Reference_Guide.html'
+license=('custom:Apache 2.0 with LLVM Exception')
+makedepends=('cmake' 'python' 'ninja')
+_git='https://github.com/RadeonOpenCompute/llvm-project'
+source=("${pkgname}-${pkgver}.tar.gz::$_git/archive/rocm-$pkgver.tar.gz"
+        llvm-ppc64-elfv2.patch
+        clang-ppc64-dynamic-linker-path.patch
+        clang-ppc64-elfv2.patch)
+sha256sums=('a844d3cc01613f6284a75d44db67c495ac1e9b600eacbb1eb13d2649f5d5404d'
+            'd3b3d13f05b17c62108345aa4ac555c656c3f8dbdb24551004b06ef652bef94d'
+            '654b9eafcd20125319b3c319ab6674a940ddef400821c80813c16011ef8b6086'
+            '7bcf1da7fa23b0d45bc6814284ec968d3481d24d05694ea39dd68c881bc8e4a5')
+options=(staticlibs !lto !debug)
+_dirname="$(basename "$_git")-$(basename "${source[0]}" .tar.gz)"
+
+prepare() {
+  cd ${srcdir}/${_dirname}/llvm
+  patch -Np2 -i ${srcdir}/llvm-ppc64-elfv2.patch
+
+  cd ${srcdir}/${_dirname}/clang 
+  patch -Np2 -i ${srcdir}/clang-ppc64-elfv2.patch
+  patch -Np2 -i ${srcdir}/clang-ppc64-dynamic-linker-path.patch
+}
+
+build() {
+  case "${CARCH}" in
+    powerpc|riscv64)
+      CFLAGS+=' -latomic'
+      CXXFLAGS+=' -latomic'
+    ;;
+  esac
+
+    cmake \
+        -G Ninja \
+        -B build \
+        -S "$_dirname/llvm" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX='/opt/rocm/llvm' \
+        -DLLVM_HOST_TRIPLE=$CHOST \
+        -DLLVM_ENABLE_PROJECTS='llvm;clang;compiler-rt;lld' \
+        -DLLVM_TARGETS_TO_BUILD='AMDGPU;X86;PowerPC;RISCV' \
+        -DCLANG_DEFAULT_LINKER=lld \
+        -DLLVM_INSTALL_UTILS=ON \
+        -DLLVM_ENABLE_BINDINGS=OFF \
+        -DLLVM_LINK_LLVM_DYLIB=OFF \
+        -DLLVM_BUILD_LLVM_DYLIB=OFF \
+        -DLLVM_LINK_LLVM_DYLIB=OFF \
+        -DLLVM_ENABLE_ASSERTIONS=ON \
+        -DOCAMLFIND=NO \
+        -DLLVM_ENABLE_OCAMLDOC=OFF \
+        -DLLVM_INCLUDE_BENCHMARKS=OFF \
+        -DLLVM_BUILD_TESTS=ON \
+        -DLLVM_INCLUDE_TESTS=ON \
+        -DCLANG_INCLUDE_TESTS=ON \
+        -DLLVM_BINUTILS_INCDIR=/usr/include
+    cmake --build build
+}
+
+check() {
+    LD_LIBRARY_PATH="$PWD/build/lib" \
+    cmake --build build --target check-llvm{,-unit} check-clang{,-unit} check-lld
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+
+    # https://bugs.archlinux.org/task/28479
+    install -d "$pkgdir/opt/rocm/llvm/lib/bfd-plugins"
+    ln -s /opt/rocm/llvm/lib/LLVMgold.so "$pkgdir/opt/rocm/llvm/lib/bfd-plugins/LLVMgold.so"
+
+    cd "$_dirname"
+    install -Dm644 llvm/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/llvm-LICENSE"
+    install -Dm644 clang/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/clang-LICENSE"
+    install -Dm644 clang-tools-extra/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/clang-tools-extra-LICENSE"
+    install -Dm644 compiler-rt/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/compiler-rt-LICENSE"
+    install -Dm644 lld/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/lld-LICENSE"
+}
