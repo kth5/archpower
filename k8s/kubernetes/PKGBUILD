@@ -13,14 +13,23 @@ pkgname=(
   kubelet
   kubernetes-control-plane-common
 )
-pkgver=1.25.2
+pkgver=1.26.2
 pkgrel=1
 pkgdesc="Production-Grade Container Scheduling and Management"
-arch=(x86_64 powerpc64le)
+arch=(x86_64 powerpc64le riscv64)
 url="https://kubernetes.io/"
 license=(Apache)
-makedepends=(cni-plugins conntrack-tools ethtool git go go-md2man iptables-nft
-socat rsync)
+makedepends=(
+  cni-plugins
+  conntrack-tools
+  ethtool
+  git
+  go
+  go-md2man
+  iptables-nft
+  socat
+  rsync
+)
 source=(
   https://github.com/$pkgbase/$pkgbase/archive/v$pkgver/$pkgbase-$pkgver.tar.gz
   $pkgbase-1.24.0-static_cgo_enabled.patch
@@ -40,7 +49,7 @@ source=(
   kube-scheduler.env
   kube-scheduler.service
 )
-sha512sums=('3b88af0efd0024b3bbacae4f9f1b13a6d7ef2bc47fc8329e7073cb347b2bb9db1aebc2ae1298dfad60d673469478121c96320ef3bd68e26e41f56aead0eae7ec'
+sha512sums=('c14f3ba25ae3608ca8d28ab75c2f6a3636970d5851ef1c09259d6be4bce17af131f9adcc0be8e51f4197dc16650461bac8faae7b7ef24f899c1a0ad193ed0a6b'
             'e98921d111fabf2c353df589dea0fab57b0b174079483b4092741cc50553a3b765cea4c784e42ad9ab90827581cac028af4fc7a2db5acde1877446882393ae78'
             '5f7132636b6afe9f00dc450c58073c0829942fa44070e7ec5a2c227c485c83f076bdea081d207f926b44d02700be65bf19a61f5d8d1472edd480f980e6ffbc3a'
             'ed5ba22b37eaa9f4950ff3b57d60dd7866fcd5b8bd5197eab3170470528e8d91379483d3eb724589e695184f9b0ed506ebaee73ecca0dc40afdb5f35e79d178a'
@@ -57,7 +66,7 @@ sha512sums=('3b88af0efd0024b3bbacae4f9f1b13a6d7ef2bc47fc8329e7073cb347b2bb9db1ae
             'dd4efa137462905f9e29a99d69b747ae35e58ba8152794bfa417325953dd5059bad96fabfabf73ce1ee2310dc4ab4d1b95c8d931d33b81c67addcb614a51be54'
             'ba277f765959ddb8aa0dee5a86cd9df1f40fb3f6ea1001f24825dbf21bd9342981d13894301170431729f76e710f70c23481e4061c64be29517ff497490f1ef3'
             '2c25c0e11a7b2d6d61e03f9afe7ba21f9497495ab02e85f2623ce8c71019fb8a1af16197ab3968d5da050c2188c3e67372aa43322ac91af84f7da61bf73596bc')
-b2sums=('a8c2e5388b95bea40d8c4d672963b231b72dea308dacc0ab20cb91b214eead8ff73b225c565c527bf24e0a9f16638e41b12eb58e026892e371ffd43e6c50d278'
+b2sums=('ca14778ab5a1d1bdfb935d80eea269adb0414b5613d8e70b9c790711a284b79c8f89cdd22af73b9127fbf9f036b0aa317fbd97bc1df735aead0903d951fe5f4a'
         '94a21e3923396b5a97a1e713419bab1f897ce8a4eedbbc2c0ed82fd1fd909bb69183c349322d2a774afd26c4beeb9972a57c6d4f67ef527c7e0ca7ea20651d43'
         'dbab30d7e1b566027fec9d6a95dd41ed8f64399c39aac07fb4513ce21050eeeb4a226adfd513f76921c305945dfa4a140602ede574dd5eb4cd287e0f2df21714'
         '27a8dcbbe06fa7aea122fc87ca663710ae2179c995270d94e22c905422e2639f3c9c81eef6723467c76366062381d8bd65e84ef79f47fed7c240973a55f5cb0e'
@@ -75,12 +84,6 @@ b2sums=('a8c2e5388b95bea40d8c4d672963b231b72dea308dacc0ab20cb91b214eead8ff73b225
         '4f35d3b5296839dd68885b924a41725a3479c2725c77887038c7d402a6aa754e37fe0d3697e746a1b65a5236f9e927df01e99a66d37d227cb801965575403788'
         '95a5345e044b8fe9be01fc6230f20b3b12118c6f1fcc3e7ebbfd4d3a3d205dfb492ff0c11397d3dae9abc0cbba83c659ea23803b71c8e240dddc30bf4791dbc5')
 
-case "${CARCH}" in
-  x86_64) export GOARCH=amd64 ;;
-  powerpc64le) export GOARCH=ppc64le ;;
-  riscv64) export GOARCH=riscv64 ;;
-esac
-
 prepare() {
   # set static builds CGO_ENABLED=1 for full RELRO
   patch -Np1 -d $pkgbase-$pkgver -i ../$pkgbase-1.24.0-static_cgo_enabled.patch
@@ -91,6 +94,7 @@ build() {
   export CGO_CFLAGS="$CFLAGS"
   export CGO_CXXFLAGS="$CXXFLAGS"
   export CGO_LDFLAGS="$LDFLAGS"
+  # NOTE: -mod=readonly in GOFLAGS breaks the build
   export GOFLAGS="-buildmode=pie -trimpath -ldflags=-linkmode=external -modcacherw"
   # NOTE: this also ensures the binaries have full RELRO
   export GOLDFLAGS="-linkmode=external"
@@ -122,7 +126,7 @@ package_kubeadm() {
   depends=(glibc crictl)
   install=$pkgname.install
 
-  install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/${GOARCH}/$pkgname -t "$pkgdir/usr/bin"
+  install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/*/$pkgname -t "$pkgdir/usr/bin"
   # man pages
   install -vDm 644 $pkgbase-$pkgver/docs/man/man1/$pkgname* -t "$pkgdir/usr/share/man/man1/"
   # service override for kubelet.service
@@ -137,7 +141,7 @@ package_kubectl() {
   depends=(glibc)
   groups=(kubernetes-tools)
 
-  install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/${GOARCH}/$pkgname -t "$pkgdir/usr/bin"
+  install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/*/$pkgname -t "$pkgdir/usr/bin"
   # man pages
   install -vDm 644 $pkgbase-$pkgver/docs/man/man1/$pkgname* -t "$pkgdir/usr/share/man/man1"
   # shell completion
@@ -157,7 +161,7 @@ package_kubelet() {
   backup=(etc/$pkgbase/$pkgname.env)
   install=$pkgname.install
 
-  install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/${GOARCH}/$pkgname -t "$pkgdir/usr/bin"
+  install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/*/$pkgname -t "$pkgdir/usr/bin"
   # man pages
   install -vDm 644 $pkgbase-$pkgver/docs/man/man1/$pkgname* -t "$pkgdir/usr/share/man/man1/"
   # config
@@ -178,7 +182,7 @@ package_kube-apiserver() {
   groups=(kubernetes-control-plane)
   backup=(etc/$pkgbase/$pkgname.env)
 
-  install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/${GOARCH}/$pkgname -t "$pkgdir/usr/bin"
+  install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/*/$pkgname -t "$pkgdir/usr/bin"
   # man pages
   install -vDm 644 $pkgbase-$pkgver/docs/man/man1/$pkgname* -t "$pkgdir/usr/share/man/man1/"
   # config
@@ -193,7 +197,7 @@ package_kube-controller-manager() {
   groups=(kubernetes-control-plane)
   backup=(etc/$pkgbase/$pkgname.env)
 
-  install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/${GOARCH}/$pkgname -t "$pkgdir/usr/bin"
+  install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/*/$pkgname -t "$pkgdir/usr/bin"
   # man pages
   install -vDm 644 $pkgbase-$pkgver/docs/man/man1/$pkgname* -t "$pkgdir/usr/share/man/man1/"
   # config
@@ -208,7 +212,7 @@ package_kube-proxy() {
   groups=(kubernetes-control-plane kubernetes-node)
   backup=(etc/$pkgbase/$pkgname.env)
 
-  install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/${GOARCH}/$pkgname -t "$pkgdir/usr/bin/"
+  install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/*/$pkgname -t "$pkgdir/usr/bin/"
   # man pages
   install -vDm 644 $pkgbase-$pkgver/docs/man/man1/$pkgname* -t "$pkgdir/usr/share/man/man1/"
   # config
@@ -225,7 +229,7 @@ package_kube-scheduler() {
   groups=(kubernetes-control-plane)
   backup=(etc/$pkgbase/$pkgname.env)
 
-  install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/${GOARCH}/$pkgname -t "$pkgdir/usr/bin"
+  install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/*/$pkgname -t "$pkgdir/usr/bin"
   # man pages
   install -vDm 644 $pkgbase-$pkgver/docs/man/man1/$pkgname* -t "$pkgdir/usr/share/man/man1/"
   # config
