@@ -1,0 +1,85 @@
+diff -ruN mkinitcpio-35.2.orig/functions mkinitcpio-35.2/functions
+--- mkinitcpio-35.2.orig/functions	2023-04-21 16:46:24.860545564 +0200
++++ mkinitcpio-35.2/functions	2023-04-21 16:53:01.539587928 +0200
+@@ -149,6 +149,14 @@
+     printf '%s' "$kver"
+ }
+ 
++kver_powerpc() {
++    local kver
++
++    read -r kver _ < \
++      <(strings "$1" | grep '^Linux version [0-9]' | awk '{print $3}') 
++    printf '%s' "$kver"
++}
++
+ detect_compression() {
+     local bytes
+ 
+@@ -235,11 +243,17 @@
+ 
+     local arch
+     arch="$(uname -m)"
+-    if [[ $arch == @(i?86|x86_64) ]]; then
+-        kver="$(kver_x86 "$1")"
+-    else
++    case "$arch" in
++       i?86|x86_64)
++         kver="$(kver_x86 "$1")"
++       ;;
++       ppc*)
++         kver="$(kver_powerpc "$1")"
++       ;;
++       *)
+         kver="$(kver_generic "$1")"
+-    fi
++       ;;
++    esac
+ 
+     [[ "$kver" =~ $re ]] || return 1
+ 
+@@ -893,7 +907,7 @@
+     ln -s "/run"    "$buildroot/var/run"
+ 
+     case "$arch" in
+-        x86_64)
++        riscv64|ppc64*|x86_64)
+             ln -s "lib"     "$buildroot/usr/lib64"
+             ln -s "usr/lib" "$buildroot/lib64"
+             ;;
+diff -ruN mkinitcpio-35.2.orig/man/lsinitcpio.1.adoc mkinitcpio-35.2/man/lsinitcpio.1.adoc
+--- mkinitcpio-35.2.orig/man/lsinitcpio.1.adoc	2023-04-21 16:46:24.860545564 +0200
++++ mkinitcpio-35.2/man/lsinitcpio.1.adoc	2023-04-21 16:46:29.436073204 +0200
+@@ -54,7 +54,7 @@
+ Bugs
+ ----
+ Upon writing this manpage, there were no noticeable bugs present. Please visit
+-<http://bugs.archlinux.org/> for an up to date list.
++<https://github.com/kth5/archpower/issues> for an up to date list.
+ 
+ See Also
+ --------
+diff -ruN mkinitcpio-35.2.orig/man/mkinitcpio.8.adoc mkinitcpio-35.2/man/mkinitcpio.8.adoc
+--- mkinitcpio-35.2.orig/man/mkinitcpio.8.adoc	2023-04-21 16:46:24.860545564 +0200
++++ mkinitcpio-35.2/man/mkinitcpio.8.adoc	2023-04-21 16:46:29.436073204 +0200
+@@ -489,7 +489,7 @@
+ Bugs
+ ----
+ Upon writing this manpage, there were no noticeable bugs present. Please visit
+-<http://bugs.archlinux.org/> for an up to date list.
++<https://github.com/kth5/archpower/issues> for an up to date list.
+ 
+ Authors
+ -------
+diff -ruN mkinitcpio-35.2.orig/mkinitcpio mkinitcpio-35.2/mkinitcpio
+--- mkinitcpio-35.2.orig/mkinitcpio	2023-04-21 16:46:24.860545564 +0200
++++ mkinitcpio-35.2/mkinitcpio	2023-04-21 16:48:38.318767166 +0200
+@@ -133,7 +133,7 @@
+     error "invalid kernel specified: '%s'" "$1"
+ 
+     arch="$(uname -m)"
+-    if [[ "$arch" != @(i?86|x86_64) ]]; then
++    if [[ "$arch" != @(i?86|x86_64|ppc|ppc64|ppc64le|riscv64) ]]; then
+         error "kernel version extraction from image not supported for '%s' architecture" "$arch"
+         error "there's a chance the generic version extractor may work with a valid uncompressed kernel image"
+     fi
