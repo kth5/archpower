@@ -6,8 +6,8 @@ pkgname=(
   wpewebkit
   wpewebkit-docs
 )
-pkgver=2.40.0
-pkgrel=2
+pkgver=2.40.1
+pkgrel=1
 pkgdesc="Embeddable web content engine"
 url="https://wpewebkit.org"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
@@ -65,13 +65,15 @@ makedepends=(
 )
 source=(
   $url/releases/wpewebkit-$pkgver.tar.xz{,.asc}
-  wpewebkit-2.38.5-gcc-13.patch
   wpewebkit-2.40.0-respect-RUBY.patch
+  reduce-memory-overheads.patch
+  prefer-pthread.patch
 )
-sha256sums=('a8ec2bcfa1613768ab3ce7f65cac4f214835266c2ff59440d72180baec3086b6'
+sha256sums=('c6b25e168b70f2121305ed078d0790e0aa4b0c73fce44e32ed42d4e5dd137ccb'
             'SKIP'
-            'a00b7f01e36b225e79c49d9c0973b5890d74096b15c41e7d03f32dd0ba6f452c'
-            'b16dd34b9e91c4ca342b4b0c9a4b31affd7a84297a69f7d01eb48e6112c88962')
+            'b16dd34b9e91c4ca342b4b0c9a4b31affd7a84297a69f7d01eb48e6112c88962'
+            '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864'
+            'dc1a43f9514dc7ade2d5a2987f6e25f0f6fdaeda246614c916d1974050224475')
 validpgpkeys=(
   'D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
   '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B'  # Adrián Pérez de Castro <aperez@igalia.com>
@@ -80,8 +82,9 @@ validpgpkeys=(
 prepare() {
   cd wpewebkit-$pkgver
 
-  patch -Np1 -i ${srcdir}/wpewebkit-2.38.5-gcc-13.patch
   patch -Np1 -i ${srcdir}/wpewebkit-2.40.0-respect-RUBY.patch
+  patch -Np1 -i ${srcdir}/reduce-memory-overheads.patch
+  patch -Np1 -i ${srcdir}/prefer-pthread.patch
 }
 
 build() {
@@ -97,6 +100,16 @@ build() {
     -DENABLE_DOCUMENTATION=ON
     -DENABLE_MINIBROWSER=ON
   )
+
+  case "${CARCH}" in
+    powerpc) 
+      cmake_options+=(
+        -DENABLE_WEBGL=OFF
+        -DFORCE_32BIT=ON
+      )
+      export LDFLAGS+=" -Wl,--no-keep-memory"
+    ;;
+  esac
 
   # Produce minimal debug info: 4.3 GB of debug data makes the
   # build too slow and is too much to package for debuginfod
