@@ -3,8 +3,11 @@
 # Contributor: Eric Bélanger <eric@archlinux.org>
 
 pkgbase=webkit2gtk-4.1
-pkgname=(webkit2gtk-4.1 webkit2gtk-4.1-docs)
-pkgver=2.38.5
+pkgname=(
+  webkit2gtk-4.1
+  webkit2gtk-4.1-docs
+)
+pkgver=2.40.1
 pkgrel=1
 pkgdesc="Web content engine for GTK"
 url="https://webkitgtk.org"
@@ -19,6 +22,7 @@ depends=(
   fontconfig
   freetype2
   glib2
+  gst-plugins-bad-libs
   gst-plugins-base-libs
   gstreamer
   gtk3
@@ -26,7 +30,10 @@ depends=(
   harfbuzz-icu
   hyphen
   icu
+  libavif
+  libdrm
   libegl
+  libepoxy
   libgcrypt
   libgl
   libgles
@@ -43,10 +50,12 @@ depends=(
   libwebp
   libwpe
   libx11
+  libxcomposite
   libxext
   libxml2
   libxslt
   libxt
+  mesa
   openjpeg2
   sqlite
   wayland
@@ -65,62 +74,75 @@ makedepends=(
   python
   ruby
   systemd
+  unifdef
   wayland-protocols
 )
-source=($url/releases/webkitgtk-$pkgver.tar.xz{,.asc})
-sha256sums=('40c20c43022274df5893f22b1054fa894c3eea057389bb08aee08c5b0bb0c1a7'
-            'SKIP')
-validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
-              '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B') # Adrián Pérez de Castro <aperez@igalia.com>
+source=(
+  $url/releases/webkitgtk-$pkgver.tar.xz{,.asc}
+  reduce-memory-overheads.patch
+)
+sha256sums=('64e526984f8cd2161ef03ae949af99c002ff333d615e6386b460164a3c1b7ef6'
+            'SKIP'
+            '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864')
+validpgpkeys=(
+  'D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
+  '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B'  # Adrián Pérez de Castro <aperez@igalia.com>
+)
 
 prepare() {
   cd webkitgtk-$pkgver
+
+  patch -Np1 -i ${srcdir}/reduce-memory-overheads.patch
 }
 
 build() {
+  local cmake_options=(
+    -DPORT=GTK
+    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_INSTALL_PREFIX=/usr
+    -DCMAKE_INSTALL_LIBDIR=lib
+    -DCMAKE_INSTALL_LIBEXECDIR=lib
+    -DCMAKE_SKIP_RPATH=ON
+    -DUSE_AVIF=ON
+    -DUSE_SOUP2=OFF
+    -DENABLE_DOCUMENTATION=ON
+    -DENABLE_MINIBROWSER=ON
+  )
+
+  case "${CARCH}" in
+    powerpc) 
+      cmake_options+=(
+        -DENABLE_WEBGL=OFF
+        -DFORCE_32BIT=ON
+      )
+      export LDFLAGS+=" -Wl,--no-keep-memory"
+    ;;
+  esac
+
   # Produce minimal debug info: 4.3 GB of debug data makes the
   # build too slow and is too much to package for debuginfod
   CFLAGS+=' -g1'
   CXXFLAGS+=' -g1'
-  case "${CARCH}" in
-    powerpc)
-      export LDFLAGS+=' -Wl,--no-keep-memory -Wl,--no-warn-rwx-segments -Wl,--no-warn-execstack'
-      export CFLAGS="${CFLAGS/-O?/-Os}"
-      export CXXFLAGS="${CXXFLAGS/-O?/-Os}"
-      EXTRA_CMAKE_FLAGS="-DENABLE_JIT=OFF
-                         -DUSE_SYSTEMD=OFF
-                         -DPORT=GTK -DUSE_LD_GOLD=OFF
-                         -DUSE_SYSTEM_MALLOC=ON
-                         -DCMAKE_CXX_FLAGS_RELEASE=-DNDEBUG
-                         -DCMAKE_CXX_FLAGS_DEBUG=-DNDEBUG
-                         -DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-DNDEBUG
-                         -DCMAKE_C_FLAGS_RELEASE=-DNDEBUG
-                         -DCMAKE_C_FLAGS_DEBUG=-DNDEBUG
-                         -DCMAKE_C_FLAGS_RELWITHDEBINFO=-DNDEBUG
-                         -DCMAKE_LINKER=${CHOST}-gcc"
-    ;;
-  esac
 
-  cmake -S webkitgtk-$pkgver -B build -G Ninja \
-    -DPORT=GTK \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_INSTALL_LIBDIR=lib \
-    -DCMAKE_INSTALL_LIBEXECDIR=lib \
-    -DCMAKE_SKIP_RPATH=ON \
-    -DUSE_SOUP2=OFF \
-    -DENABLE_DOCUMENTATION=ON \
-    -DENABLE_MINIBROWSER=ON ${EXTRA_CMAKE_FLAGS}
+  cmake -S webkitgtk-$pkgver -B build -G Ninja "${cmake_options[@]}"
   cmake --build build
 }
 
 package_webkit2gtk-4.1() {
-  depends+=(libwpe-1.0.so libWPEBackend-fdo-1.0.so)
-  provides+=(libjavascriptcoregtk-4.1.so libwebkit2gtk-4.1.so)
-  optdepends=('geoclue: Geolocation support'
-              'gst-plugins-good: media decoding'
-              'gst-plugins-bad: media decoding'
-              'gst-libav: nonfree media decoding')
+  depends+=(
+    libWPEBackend-fdo-1.0.so
+    libwpe-1.0.so
+  )
+  provides+=(
+    libjavascriptcoregtk-4.1.so
+    libwebkit2gtk-4.1.so
+  )
+  optdepends=(
+    'geoclue: Geolocation support'
+    'gst-libav: nonfree media decoding'
+    'gst-plugins-bad: media decoding'
+    'gst-plugins-good: media decoding'
+  )
 
   DESTDIR="$pkgdir" cmake --install build
 
