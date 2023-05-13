@@ -2,48 +2,39 @@
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 # Contributor: Roger Duran <rogerduran@gmail.com>
 
-#FIXME: does not build without haskell toolchain, wtf?
-
 pkgname=python-xcffib
-pkgver=0.12.1
-pkgrel=5
+pkgver=1.3.0
+_commit=76b0c03597ee59fd4109a671d8c536842f904b4c
+pkgrel=1
 pkgdesc="Python3 drop in replacement for xpyb, an XCB python binding"
 arch=(any)
 url="https://pypi.python.org/pypi/xcffib"
 license=('Apache')
-depends=('python-six' 'python-cffi' 'libxcb')
-makedepends=('python-setuptools' 'python-cffi' 'python-six' 'libxcb' 'python-pip')
-makedepends_x86_64=('haskell-xcffib')
-checkdepends=('python-nose' 'xorg-server-xvfb' 'xorg-xeyes')
-source=("https://github.com/tych0/xcffib/archive/v$pkgver/$pkgname-$pkgver.tar.gz")
-sha512sums=('ff3650d484863921c0ce00bf1ce5d4c43fc919f3f54f1cca06d93a33a183682434294a6db45f113d794316054c4884427519a1c24f9c18f7ced1b1d74695bbd7')
+depends=('python-cffi' 'libxcb')
+makedepends=('git' 'python-setuptools' 'parallel' 'python-wheel')
+checkdepends=('python-pytest' 'xorg-server-xvfb' 'xorg-xeyes')
+source=("git+https://github.com/tych0/xcffib.git#commit=$_commit")
+sha512sums=('SKIP')
+
+prepare() {
+  cd xcffib
+  # Remove redundant six import
+  git cherry-pick -n 96eb6d4a6fa0b1404bf4ba072d0bb8f9e58af306
+}
 
 build() {
-  cd xcffib-$pkgver
-  case "${CARCH}" in
-    x86_64)
-      make xcffib GEN=xcffibgen CABAL=true
-      python setup.py build
-    ;;
-  esac
+  cd xcffib
+  make xcffib CABAL=false
+  make
+  python setup.py build
 }
 
 check() {
-  cd xcffib-$pkgver
-  xvfb-run nosetests3
+  cd xcffib
+  xvfb-run pytest
 }
 
 package() {
-  cd xcffib-$pkgver
-  case "${CARCH}" in
-    x86_64)
-      python setup.py install --root="$pkgdir/" --optimize=1
-    ;;
-    *)
-      pip install --target=${pkgdir}/usr/lib/python3.10/site-packages/ xcffib==${pkgver}
-      for obj in $(find ${pkgdir}//usr/lib/python3.10/site-packages/ -maxdepth 1 -not -name "xcffi*" | tail -n+2); do
-        rm -rfv ${obj}
-      done
-    ;;
-  esac
+  cd xcffib
+  python setup.py install --root="$pkgdir/" --optimize=1
 }
