@@ -1,0 +1,273 @@
+
+# HG changeset patch
+# User Nazım Can Altınova <canaltinova@gmail.com>
+# Date 1676296366 0
+# Node ID 8d310a8b6460a18313dc50a7c612f7f6703718ad
+# Parent  dee626e0693967f3f7be9fd4be3737c2fe5cb3ea
+Bug 1807652 - Rename some methods to not conflict with aliases r=mstange
+
+We have some aliases with the names of LockedRWFromAnyThread and
+LockedRWOnThread. We also had some methods with the same name. clang and gcc
+that were before version 12 weren't complaining about that. But apparently
+starting from gcc 13, it became an error. This patch renames the methods so we
+don't conflict with these aliases anymore.
+
+Differential Revision: https://phabricator.services.mozilla.com/D169507
+
+diff --git a/tools/profiler/core/platform.cpp b/tools/profiler/core/platform.cpp
+--- a/tools/profiler/core/platform.cpp
++++ b/tools/profiler/core/platform.cpp
+@@ -1173,17 +1173,17 @@ class ActivePS {
+       ProfiledThreadData* profiledThreadData =
+           offThreadRef.UnlockedRWForLockedProfilerRef().GetProfiledThreadData(
+               aLock);
+       if (!profiledThreadData) {
+         // This thread was not profiled, continue with the next one.
+         continue;
+       }
+       ThreadRegistry::OffThreadRef::RWFromAnyThreadWithLock lockedThreadData =
+-          offThreadRef.LockedRWFromAnyThread();
++          offThreadRef.GetLockedRWFromAnyThread();
+       MOZ_RELEASE_ASSERT(array.append(ProfiledThreadListElement{
+           profiledThreadData->Info().RegisterTime(),
+           lockedThreadData->GetJSContext(), profiledThreadData}));
+     }
+ 
+     for (auto& t : sInstance->mDeadProfiledThreads) {
+       MOZ_RELEASE_ASSERT(array.append(ProfiledThreadListElement{
+           t->Info().RegisterTime(), (JSContext*)nullptr, t.get()}));
+@@ -4205,17 +4205,17 @@ void SamplerThread::Run() {
+             // get incorrectly duplicated when the thread is sleeping.
+             if (!runningTimesDiff.IsEmpty()) {
+               profiler_get_core_buffer().PutObjects(
+                   ProfileBufferEntry::Kind::RunningTimes, runningTimesDiff);
+             }
+ 
+             if (threadStackSampling) {
+               ThreadRegistry::OffThreadRef::RWFromAnyThreadWithLock
+-                  lockedThreadData = offThreadRef.LockedRWFromAnyThread();
++                  lockedThreadData = offThreadRef.GetLockedRWFromAnyThread();
+               // Suspend the thread and collect its stack data in the local
+               // buffer.
+               mSampler.SuspendAndSampleAndResumeThread(
+                   lock, lockedThreadData.DataCRef(), now,
+                   [&](const Registers& aRegs, const TimeStamp& aNow) {
+                     DoPeriodicSample(lock, lockedThreadData.DataCRef(), aRegs,
+                                      samplePos, bufferRangeStart,
+                                      localProfileBuffer);
+@@ -4919,17 +4919,17 @@ static ProfilingStack* locked_register_t
+   VTUNE_REGISTER_THREAD(aOffThreadRef.UnlockedConstReaderCRef().Info().Name());
+ 
+   if (ActivePS::Exists(aLock)) {
+     ThreadProfilingFeatures threadProfilingFeatures =
+         ActivePS::ProfilingFeaturesForThread(
+             aLock, aOffThreadRef.UnlockedConstReaderCRef().Info());
+     if (threadProfilingFeatures != ThreadProfilingFeatures::NotProfiled) {
+       ThreadRegistry::OffThreadRef::RWFromAnyThreadWithLock
+-          lockedRWFromAnyThread = aOffThreadRef.LockedRWFromAnyThread();
++          lockedRWFromAnyThread = aOffThreadRef.GetLockedRWFromAnyThread();
+ 
+       ProfiledThreadData* profiledThreadData = ActivePS::AddLiveProfiledThread(
+           aLock, MakeUnique<ProfiledThreadData>(
+                      aOffThreadRef.UnlockedConstReaderCRef().Info()));
+       lockedRWFromAnyThread->SetProfilingFeaturesAndData(
+           threadProfilingFeatures, profiledThreadData, aLock);
+ 
+       if (ActivePS::FeatureJS(aLock)) {
+@@ -5785,17 +5785,17 @@ static void locked_profiler_start(PSLock
+   for (ThreadRegistry::OffThreadRef offThreadRef : lockedRegistry) {
+     const ThreadRegistrationInfo& info =
+         offThreadRef.UnlockedConstReaderCRef().Info();
+ 
+     ThreadProfilingFeatures threadProfilingFeatures =
+         ActivePS::ProfilingFeaturesForThread(aLock, info);
+     if (threadProfilingFeatures != ThreadProfilingFeatures::NotProfiled) {
+       ThreadRegistry::OffThreadRef::RWFromAnyThreadWithLock lockedThreadData =
+-          offThreadRef.LockedRWFromAnyThread();
++          offThreadRef.GetLockedRWFromAnyThread();
+       ProfiledThreadData* profiledThreadData = ActivePS::AddLiveProfiledThread(
+           aLock, MakeUnique<ProfiledThreadData>(info));
+       lockedThreadData->SetProfilingFeaturesAndData(threadProfilingFeatures,
+                                                     profiledThreadData, aLock);
+       lockedThreadData->GetNewCpuTimeInNs();
+       if (ActivePS::FeatureJS(aLock)) {
+         lockedThreadData->StartJSSampling(ActivePS::JSFlags(aLock));
+         if (ThreadRegistration::LockedRWOnThread* lockedRWOnThread =
+@@ -6009,17 +6009,17 @@ void profiler_ensure_started(PowerOfTwo3
+   ThreadRegistry::LockedRegistry lockedRegistry;
+   for (ThreadRegistry::OffThreadRef offThreadRef : lockedRegistry) {
+     if (offThreadRef.UnlockedRWForLockedProfilerRef().ProfilingFeatures() ==
+         ThreadProfilingFeatures::NotProfiled) {
+       continue;
+     }
+ 
+     ThreadRegistry::OffThreadRef::RWFromAnyThreadWithLock lockedThreadData =
+-        offThreadRef.LockedRWFromAnyThread();
++        offThreadRef.GetLockedRWFromAnyThread();
+ 
+     lockedThreadData->ClearProfilingFeaturesAndData(aLock);
+ 
+     if (ActivePS::FeatureJS(aLock)) {
+       lockedThreadData->StopJSSampling();
+       if (ThreadRegistration::LockedRWOnThread* lockedRWOnThread =
+               lockedThreadData.GetLockedRWOnThread();
+           lockedRWOnThread) {
+@@ -6352,17 +6352,17 @@ static void locked_unregister_thread(
+     // down.
+     return;
+   }
+ 
+   // We don't call StopJSSampling() here; there's no point doing that for a JS
+   // thread that is in the process of disappearing.
+ 
+   ThreadRegistration::OnThreadRef::RWOnThreadWithLock lockedThreadData =
+-      aOnThreadRef.LockedRWOnThread();
++      aOnThreadRef.GetLockedRWOnThread();
+ 
+   ProfiledThreadData* profiledThreadData =
+       lockedThreadData->GetProfiledThreadData(lock);
+   lockedThreadData->ClearProfilingFeaturesAndData(lock);
+ 
+   MOZ_RELEASE_ASSERT(
+       lockedThreadData->Info().ThreadId() == profiler_current_thread_id(),
+       "Thread being unregistered has changed its TID");
+@@ -6873,17 +6873,17 @@ void profiler_clear_js_context() {
+             aOnThreadRef.UnlockedReaderAndAtomicRWOnThreadCRef().GetJSContext();
+         if (!cx) {
+           return;
+         }
+ 
+         // The profiler mutex must be locked before the ThreadRegistration's.
+         PSAutoLock lock;
+         ThreadRegistration::OnThreadRef::RWOnThreadWithLock lockedThreadData =
+-            aOnThreadRef.LockedRWOnThread();
++            aOnThreadRef.GetLockedRWOnThread();
+ 
+         if (ProfiledThreadData* profiledThreadData =
+                 lockedThreadData->GetProfiledThreadData(lock);
+             profiledThreadData && ActivePS::Exists(lock) &&
+             ActivePS::FeatureJS(lock)) {
+           profiledThreadData->NotifyAboutToLoseJSContext(
+               cx, CorePS::ProcessStartTime(), ActivePS::Buffer(lock));
+ 
+diff --git a/tools/profiler/public/ProfilerThreadRegistration.h b/tools/profiler/public/ProfilerThreadRegistration.h
+--- a/tools/profiler/public/ProfilerThreadRegistration.h
++++ b/tools/profiler/public/ProfilerThreadRegistration.h
+@@ -209,24 +209,24 @@ class ThreadRegistration {
+       RWOnThreadWithLock(LockedRWOnThread& aLockedRWOnThread,
+                          DataMutex& aDataMutex)
+           : mLockedRWOnThread(aLockedRWOnThread), mDataLock(aDataMutex) {}
+ 
+       LockedRWOnThread& mLockedRWOnThread;
+       DataLock mDataLock;
+     };
+ 
+-    [[nodiscard]] RWOnThreadWithLock LockedRWOnThread() {
++    [[nodiscard]] RWOnThreadWithLock GetLockedRWOnThread() {
+       return RWOnThreadWithLock{mThreadRegistration->mData,
+                                 mThreadRegistration->mDataMutex};
+     }
+ 
+     template <typename F>
+     auto WithLockedRWOnThread(F&& aF) {
+-      RWOnThreadWithLock lockedData = LockedRWOnThread();
++      RWOnThreadWithLock lockedData = GetLockedRWOnThread();
+       return std::forward<F>(aF)(lockedData.DataRef());
+     }
+ 
+     // This is needed to allow OnThreadPtr::operator-> to return a temporary
+     // OnThreadRef object, for which `->` must work; Here it provides a pointer
+     // to itself, so that the next follow-up `->` will work as member accessor.
+     OnThreadRef* operator->() && { return this; }
+ 
+diff --git a/tools/profiler/public/ProfilerThreadRegistry.h b/tools/profiler/public/ProfilerThreadRegistry.h
+--- a/tools/profiler/public/ProfilerThreadRegistry.h
++++ b/tools/profiler/public/ProfilerThreadRegistry.h
+@@ -172,24 +172,24 @@ class ThreadRegistry {
+                               ThreadRegistration::DataMutex& aDataMutex)
+           : mLockedRWFromAnyThread(aLockedRWFromAnyThread),
+             mDataLock(aDataMutex) {}
+ 
+       LockedRWFromAnyThread& mLockedRWFromAnyThread;
+       ThreadRegistration::DataLock mDataLock;
+     };
+ 
+-    [[nodiscard]] RWFromAnyThreadWithLock LockedRWFromAnyThread() {
++    [[nodiscard]] RWFromAnyThreadWithLock GetLockedRWFromAnyThread() {
+       return RWFromAnyThreadWithLock{mThreadRegistration->mData,
+                                      mThreadRegistration->mDataMutex};
+     }
+ 
+     template <typename F>
+     auto WithLockedRWFromAnyThread(F&& aF) {
+-      RWFromAnyThreadWithLock lockedData = LockedRWFromAnyThread();
++      RWFromAnyThreadWithLock lockedData = GetLockedRWFromAnyThread();
+       return std::forward<F>(aF)(lockedData.DataRef());
+     }
+ 
+    private:
+     // Only ThreadRegistry should construct an OnThreadRef.
+     friend class ThreadRegistry;
+     explicit OffThreadRef(ThreadRegistration& aThreadRegistration)
+         : mThreadRegistration(&aThreadRegistration) {}
+diff --git a/tools/profiler/tests/gtest/GeckoProfiler.cpp b/tools/profiler/tests/gtest/GeckoProfiler.cpp
+--- a/tools/profiler/tests/gtest/GeckoProfiler.cpp
++++ b/tools/profiler/tests/gtest/GeckoProfiler.cpp
+@@ -617,17 +617,17 @@ TEST(GeckoProfiler, ThreadRegistration_D
+           });
+       EXPECT_FALSE(TR::IsDataMutexLockedOnCurrentThread());
+ 
+       // non-const LockedRWOnThread
+ 
+       EXPECT_FALSE(TR::IsDataMutexLockedOnCurrentThread());
+       {
+         TR::OnThreadRef::RWOnThreadWithLock rwOnThreadWithLock =
+-            aOnThreadRef.LockedRWOnThread();
++            aOnThreadRef.GetLockedRWOnThread();
+         EXPECT_TRUE(TR::IsDataMutexLockedOnCurrentThread());
+         TestConstLockedRWOnThread(rwOnThreadWithLock.DataCRef(),
+                                   beforeRegistration, afterRegistration,
+                                   &onStackChar);
+         TestLockedRWOnThread(rwOnThreadWithLock.DataRef(), beforeRegistration,
+                              afterRegistration, &onStackChar);
+       }
+       EXPECT_FALSE(TR::IsDataMutexLockedOnCurrentThread());
+@@ -1016,17 +1016,17 @@ TEST(GeckoProfiler, ThreadRegistry_DataA
+             });
+         EXPECT_FALSE(TR::IsDataMutexLockedOnCurrentThread());
+ 
+         // non-const LockedRWFromAnyThread
+ 
+         EXPECT_FALSE(TR::IsDataMutexLockedOnCurrentThread());
+         {
+           TRy::OffThreadRef::RWFromAnyThreadWithLock rwFromAnyThreadWithLock =
+-              aOffThreadRef.LockedRWFromAnyThread();
++              aOffThreadRef.GetLockedRWFromAnyThread();
+           if (profiler_current_thread_id() == testThreadId) {
+             EXPECT_TRUE(TR::IsDataMutexLockedOnCurrentThread());
+           }
+           TestLockedRWFromAnyThread(rwFromAnyThreadWithLock.DataRef(),
+                                     beforeRegistration, afterRegistration,
+                                     &onStackChar, testThreadId);
+         }
+         EXPECT_FALSE(TR::IsDataMutexLockedOnCurrentThread());
+@@ -1153,17 +1153,17 @@ TEST(GeckoProfiler, ThreadRegistration_R
+         ++otherThreadLoops;
+ 
+         TRy::WithOffThreadRef(testThreadId, [&](TRy::OffThreadRef
+                                                     aOffThreadRef) {
+           if (otherThreadLoops % 1000 == 0) {
+             PR_Sleep(PR_MillisecondsToInterval(1));
+           }
+           TRy::OffThreadRef::RWFromAnyThreadWithLock rwFromAnyThreadWithLock =
+-              aOffThreadRef.LockedRWFromAnyThread();
++              aOffThreadRef.GetLockedRWFromAnyThread();
+           ++otherThreadReads;
+           if (otherThreadReads % 1000 == 0) {
+             PR_Sleep(PR_MillisecondsToInterval(1));
+           }
+         });
+       }
+     });
+ 
+
