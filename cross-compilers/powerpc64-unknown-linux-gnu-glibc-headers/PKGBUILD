@@ -8,15 +8,15 @@
 
 _target=powerpc64-unknown-linux-gnu
 pkgname=${_target}-glibc-headers
-pkgver=2.36
-_commit=93967a2a7bbdcedb73e0b246713580c7c84d001e
-pkgrel=7
+pkgver=2.37
+_commit=7c32cb7dd88cf100b0b412163896e30aa2ee671a
+pkgrel=3
 pkgdesc="GNU C Library headers (${_target})"
 arch=('any')
 url="http://www.gnu.org/software/libc/"
 license=(GPL LGPL)
-depends=("${_target}-linux-api-headers>=5.18.15")
-makedepends=("${_target}-gcc-stage1>=12.2.0" "python")
+depends=("${_target}-linux-api-headers>=6.3")
+makedepends=("${_target}-gcc-stage1>=13.1.1" "python")
 options=(!buildflags !strip staticlibs)
 source=(git+https://sourceware.org/git/glibc.git#commit=${_commit}
         sdt-config.h
@@ -61,6 +61,11 @@ build() {
       --disable-werror
   )
 
+  case "${CARCH}" in
+    x86_64) _configure_flags+=(--enable-cet --enable-multi-arch) ;;
+    *)      _configure_flags+=(--disable-multi-arch); CFLAGS='-O2 -pipe' ;;
+  esac
+
   cd glibc-build
 
   echo "slibdir=/lib" >> configparms
@@ -87,6 +92,10 @@ build() {
 
   # make some libs and stubs
   make csu/subdir_lib
+
+  case "${CARCH}" in
+    powerpc64) sed 's@RTLDLIST=.*@RTLDLIST="/usr/lib/ld64.so.2"@g' -i ${pkgdir}/usr/bin/ldd ;;
+  esac
 }
 
 package() {
