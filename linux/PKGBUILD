@@ -2,51 +2,79 @@
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
 pkgbase=linux
-pkgver=6.2.13.arch1
-pkgrel=2
+pkgver=6.3.5.arch1
+pkgrel=1
 pkgdesc='Linux'
 _srctag=v${pkgver%.*}-${pkgver##*.}
 url="https://github.com/archlinux/linux/commits/$_srctag"
-arch=(powerpc64le powerpc)
+arch=(x86_64 powerpc64le powerpc)
 license=(GPL2)
 makedepends=(
-  bc libelf pahole cpio perl tar xz
-  xmlto python-sphinx python-sphinx_rtd_theme graphviz imagemagick texlive-latexextra
+  bc
+  cpio
+  gettext
   git
+  libelf
+  pahole
+  perl
+  tar
+  xz
+
+  # htmldocs
+  graphviz
+  imagemagick
+  python-sphinx
+  texlive-latexextra
 )
 options=('!strip')
 _srcname=archlinux-linux
 source=(
   "$_srcname::git+https://github.com/archlinux/linux?signed#tag=$_srctag"
-  config         # the main kernel config file
+  config  # the main kernel config file
   config.ppc32
-  linux-powerpc-binutils-2.38.patch
-  ppc-radeon-qw-pm.patch
 )
 validpgpkeys=(
-  'ABAF11C65A2970B130ABE3C479BE3E4300411886'  # Linus Torvalds
-  '647F28654894E3BD457199BE38DBBDC86092693E'  # Greg Kroah-Hartman
-  'A2FF3A36AAA56654109064AB19802F8B0D70FC30'  # Jan Alexander Steffens (heftig)
-  'C7E7849466FE2358343588377258734B41C31549'  # David Runge <dvzrv@archlinux.org>
+  ABAF11C65A2970B130ABE3C479BE3E4300411886  # Linus Torvalds
+  647F28654894E3BD457199BE38DBBDC86092693E  # Greg Kroah-Hartman
+  A2FF3A36AAA56654109064AB19802F8B0D70FC30  # Jan Alexander Steffens (heftig)
+  C7E7849466FE2358343588377258734B41C31549  # David Runge <dvzrv@archlinux.org>
 )
-sha256sums=('SKIP'
-            '84261fc1f85332e46e6fc497407450de5fcaae6ee1c9e9345878ba5f0a8aef6e'
-            '5611d387f20b93b1f008aec1e2a5a75abed9942d5664cfbd2ed1afd1bb0ee4ee'
-            'c30e372bcf445bb40521a1568c69fc9d6d3c08c2d1a8a3e539c9b186b7b5ff38'
-            '07dbbf3e8f743e8d2ad90891a8b567392271db139e339529df1ab4387e0e6400')
+b2sums=('SKIP'
+        '81b24b173ad15ddb8c6aa3e4f3fd690c5872f5b7149d19e6f147afe7e082d4336d0b9c75f527e94b1b4831525cca5cfc6f72ddad5ef58f46b7f169eda5acbe13'
+        '2ad4f17e5a481c1a98776cd0d2cbd78e1e0aa22528af578aa230b9840453149ac688236210998c530575e97ed0bf2199e90b838747e66f2451e261c71a4524d6')
 
 export KBUILD_BUILD_HOST=archpower
 export KBUILD_BUILD_USER=$pkgbase
 export KBUILD_BUILD_TIMESTAMP="$(date -Ru${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH})"
-export KARCH="powerpc"
+
+case "${CARCH}" in
+  powerpc*) export MYARCH=powerpc ;;
+  x86_64)   export MYARCH=x86 ;;
+esac
+
+_make() {
+  test -s version
+  make KERNELRELEASE="$(<version)" "$@"
+}
 
 prepare() {
   cd $_srcname
 
+  defconfig="defconfig"
+  config="config"
+  case "${CARCH}" in
+    powerpc)
+      defconfig="pmac32_defconfig"
+      config="config.ppc32"
+    ;;
+  esac
+
   echo "Setting version..."
-  scripts/setlocalversion --save-scmversion
   echo "-$pkgrel" > localversion.10-pkgrel
   echo "${pkgbase#linux}" > localversion.20-pkgname
+  make ${defconfig}
+  make -s kernelrelease > version
+  make mrproper
 
   local src
   for src in "${source[@]}"; do
@@ -58,41 +86,52 @@ prepare() {
   done
 
   echo "Setting config..."
-  cp ../config .config
-  [ "${CARCH}" == "powerpc" ] && cp ../config.ppc32 .config
-  make oldconfig
+  cp ../${config} .config
+  _make olddefconfig
+  diff -u ../config .config || :
 
-  make -s kernelrelease > version
   echo "Prepared $pkgbase version $(<version)"
 }
 
 build() {
   cd $_srcname
-  make htmldocs all
+  _make htmldocs all
 }
 
 _package() {
   pkgdesc="The $pkgdesc kernel and modules"
-  depends=(coreutils kmod initramfs)
-  optdepends=('wireless-regdb: to set the correct wireless channels of your country'
-              'linux-firmware: firmware images needed for some devices')
-  provides=(VIRTUALBOX-GUEST-MODULES WIREGUARD-MODULE)
-  replaces=(virtualbox-guest-modules-arch wireguard-arch)
+  depends=(
+    coreutils
+    initramfs
+    kmod
+  )
+  optdepends=(
+    'wireless-regdb: to set the correct wireless channels of your country'
+    'linux-firmware: firmware images needed for some devices'
+  )
+  provides=(
+    KSMBD-MODULE
+    VIRTUALBOX-GUEST-MODULES
+    WIREGUARD-MODULE
+  )
+  replaces=(
+    virtualbox-guest-modules-arch
+    wireguard-arch
+  )
 
   cd $_srcname
-  local kernver="$(<version)"
-  local modulesdir="$pkgdir/usr/lib/modules/$kernver"
+  local modulesdir="$pkgdir/usr/lib/modules/$(<version)"
 
   echo "Installing boot image..."
   # systemd expects to find the kernel here to allow hibernation
   # https://github.com/systemd/systemd/commit/edda44605f06a41fb86b7ab8128dcf99161d2344
-  install -Dm644 "$(make -s image_name)" "$modulesdir/vmlinuz"
+  install -Dm644 "$(_make -s image_name)" "$modulesdir/vmlinuz"
 
   # Used by mkinitcpio to name the kernel
   echo "$pkgbase" | install -Dm644 /dev/stdin "$modulesdir/pkgbase"
 
   echo "Installing modules..."
-  make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
+  _make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
     DEPMOD=/doesnt/exist modules_install  # Suppress depmod
 
   # remove build and source links
@@ -110,21 +149,22 @@ _package-headers() {
   install -Dt "$builddir" -m644 .config Makefile Module.symvers System.map \
     localversion.* version vmlinux
   install -Dt "$builddir/kernel" -m644 kernel/Makefile
-  install -Dt "$builddir/arch/${KARCH}" -m644 arch/${KARCH}/Makefile
+  install -Dt "$builddir/arch/${MYARCH}" -m644 arch/${MYARCH}/Makefile
   cp -t "$builddir" -a scripts
 
-  if [ "${CARCH}" == "x86_64" ]; then
-    # required when STACK_VALIDATION is enabled
-    install -Dt "$builddir/tools/objtool" tools/objtool/objtool
-
+  case "${CARCH}" in
+    x86_64)
+      # required when STACK_VALIDATION is enabled
+      install -Dt "$builddir/tools/objtool" tools/objtool/objtool
     # required when DEBUG_INFO_BTF_MODULES is enabled
     install -Dt "$builddir/tools/bpf/resolve_btfids" tools/bpf/resolve_btfids/resolve_btfids
-  fi
+    ;;
+  esac
 
   echo "Installing headers..."
   cp -t "$builddir" -a include
-  cp -t "$builddir/arch/${KARCH}" -a arch/${KARCH}/include
-  install -Dt "$builddir/arch/${KARCH}/kernel" -m644 arch/${KARCH}/kernel/asm-offsets.s
+  cp -t "$builddir/arch/${MYARCH}" -a arch/${MYARCH}/include
+  install -Dt "$builddir/arch/${MYARCH}/kernel" -m644 arch/${MYARCH}/kernel/asm-offsets.s
 
   install -Dt "$builddir/drivers/md" -m644 drivers/md/*.h
   install -Dt "$builddir/net/mac80211" -m644 net/mac80211/*.h
@@ -146,7 +186,7 @@ _package-headers() {
   echo "Removing unneeded architectures..."
   local arch
   for arch in "$builddir"/arch/*/; do
-    [[ $arch = */${KARCH}/ ]] && continue
+    [[ $arch = */${MYARCH}/ ]] && continue
     echo "Removing $(basename "$arch")"
     rm -r "$arch"
   done
@@ -163,7 +203,7 @@ _package-headers() {
   echo "Stripping build tools..."
   local file
   while read -rd '' file; do
-    case "$(file -bi "$file")" in
+    case "$(file -Sib "$file")" in
       application/x-sharedlib\;*)      # Libraries (.so)
         strip -v $STRIP_SHARED "$file" ;;
       application/x-archive\;*)        # Libraries (.a)
@@ -202,7 +242,11 @@ _package-docs() {
   ln -sr "$builddir/Documentation" "$pkgdir/usr/share/doc/$pkgbase"
 }
 
-pkgname=("$pkgbase" "$pkgbase-headers" "$pkgbase-docs")
+pkgname=(
+  "$pkgbase"
+  "$pkgbase-headers"
+  "$pkgbase-docs"
+)
 for _p in "${pkgname[@]}"; do
   eval "package_$_p() {
     $(declare -f "_package${_p#$pkgbase}")
