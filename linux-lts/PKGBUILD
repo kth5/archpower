@@ -2,15 +2,15 @@
 # Maintainer: Andreas Radke <andyrtr@archlinux.org>
 
 pkgbase=linux-lts
-pkgver=5.10.178
+pkgver=6.1.32
 pkgrel=1
 pkgdesc='LTS Linux'
 url="https://www.kernel.org/"
 arch=(powerpc64le powerpc)
 license=(GPL2)
 makedepends=(
-  bc libelf pahole cpio perl tar xz python-six
-  xmlto python-sphinx python-sphinx_rtd_theme graphviz imagemagick texlive-latexextra
+  bc libelf pahole cpio perl tar xz gettext
+  xmlto python-sphinx graphviz imagemagick texlive-latexextra
 )
 options=('!strip')
 _srcname=linux-$pkgver
@@ -18,33 +18,34 @@ source=(
   https://cdn.kernel.org/pub/linux/kernel/v${pkgver%%.*}.x/${_srcname}.tar.{xz,sign}
   config         # the main kernel config file
   config.ppc32
-  amdgpu-dcn30-ppc64.patch
-  ppc-stack-traces-early-boot.patch
-  ppc-vas-on-4k.patch
-  ppc32-cpu-hotplug.patch
-  ppc64le-fix-static-keys.patch
+  0001-ZEN-Add-sysctl-and-CONFIG-to-disallow-unprivileged-C.patch
   linux-powerpc-binutils-2.38.patch
+  ppc32-cpu-hotplug.patch
+  ppc64-be-elfv2.patch
+  ppc-vas-on-4k.patch
 )
 validpgpkeys=(
   'ABAF11C65A2970B130ABE3C479BE3E4300411886'  # Linus Torvalds
   '647F28654894E3BD457199BE38DBBDC86092693E'  # Greg Kroah-Hartman
 )
-# https://www.kernel.org/pub/linux/kernel/v5.x/sha256sums.asc
-sha256sums=('1acfade3715e560f00fb30615d5471e24b3940b549381558787aee9734e7a8af'
+# https://www.kernel.org/pub/linux/kernel/v6.x/sha256sums.asc
+sha256sums=('7c88b7a09ba2b9e47b78eba2b32b1db6a4d89636f7ddd586545f9671a2521a6c'
             'SKIP'
-            '8185ec01454b5ea28517e5de186bcf310f4f403b0328d879c5fe2d7c38a27cba'
-            '072b5927d04f715311276c32fbaf302ccd9bdef44727086e120cf4d290be4217'
-            '4cd851daa6c11d426bd42f3d29dbd6540437f30566381dae6663f4070b9b77c8'
-            '0ef28fe4f3810d579425f84b507aaae06c34ba921db25d78017f2ee5de06d22d'
-            'ae8f204127bb86ae202d50c3a01f524c24b194b1ea159fa51e2f07e1f94fead3'
+            'b8f72331926d55103f56a492187f6adbc5bfd35656d99311a194f6eb1d5a81eb'
+            '4863657de2a706ac9698fe27b31b502e21651b23ae4ef354be7028e1ec976d4b'
+            '1bd8388fcb6ed4eec46450c65eb7a0889a8c541f164a39e3064633981a7a4a3d'
+            'd8b441038c901e31af7db6eee4de1ebd4d2cf2b98fa4701a93d02d3eaf3b5142'
             'f12714da37052b0a8816c259a0d488c73da0dc21bb66cf271c2c8580785e6143'
-            'c262e8670e94fca76d63425ae614d6d87cce5c40ac7b01c25123208abf8e4867'
-            'd8b441038c901e31af7db6eee4de1ebd4d2cf2b98fa4701a93d02d3eaf3b5142')
+            'be85e1289cd44fbc78c8bd4112462de0562d640dafdb9ca98fe4f351a34fb5e2'
+            '816f3fdac5bd1266d057cca546f620510fe137f956f523d565202cede0ebbd74')
 
 export KBUILD_BUILD_HOST=archpower
 export KBUILD_BUILD_USER=$pkgbase
 export KBUILD_BUILD_TIMESTAMP="$(date -Ru${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH})"
-export KARCH=powerpc
+
+case "${CARCH}" in
+  powerpc*) export MYARCH=powerpc ;;
+esac
 
 prepare() {
   cd $_srcname
@@ -63,12 +64,18 @@ prepare() {
     patch -Np1 < "../$src"
   done
 
-  echo "Setting config..."
+  config="config"
   case "${CARCH}" in
-    powerpc64le) cp ../config .config ;;
-    powerpc)     cp ../config.ppc32 .config ;;
+    powerpc)
+      defconfig="pmac32_defconfig"
+      config="config.ppc32"
+    ;;
   esac
-  make oldconfig
+
+  echo "Setting config..."
+  cp ../${config} .config
+  make olddefconfig
+  diff -u ../config .config || :
 
   make -s kernelrelease > version
   echo "Prepared $pkgbase version $(<version)"
@@ -84,7 +91,7 @@ _package() {
   depends=(coreutils kmod initramfs)
   optdepends=('wireless-regdb: to set the correct wireless channels of your country'
               'linux-firmware: firmware images needed for some devices')
-  provides=(VIRTUALBOX-GUEST-MODULES WIREGUARD-MODULE)
+  provides=(VIRTUALBOX-GUEST-MODULES WIREGUARD-MODULE KSMBD-MODULE)
   replaces=(wireguard-lts)
 
   cd $_srcname
@@ -118,21 +125,22 @@ _package-headers() {
   install -Dt "$builddir" -m644 .config Makefile Module.symvers System.map \
     localversion.* version vmlinux
   install -Dt "$builddir/kernel" -m644 kernel/Makefile
-  install -Dt "$builddir/arch/${KARCH}" -m644 arch/${KARCH}/Makefile
+  install -Dt "$builddir/arch/${MYARCH}" -m644 arch/${MYARCH}/Makefile
   cp -t "$builddir" -a scripts
 
-  if [ "${CARCH}" == "x86_64" ]; then
-    # add objtool for external module building and enabled VALIDATION_STACK option
-    install -Dt "$builddir/tools/objtool" tools/objtool/objtool
-
-    # add xfs and shmem for aufs building
-    mkdir -p "$builddir"/{fs/xfs,mm}
-  fi
+  case "${CARCH}" in
+    x86_64)
+      # required when STACK_VALIDATION is enabled
+      install -Dt "$builddir/tools/objtool" tools/objtool/objtool
+    # required when DEBUG_INFO_BTF_MODULES is enabled
+    install -Dt "$builddir/tools/bpf/resolve_btfids" tools/bpf/resolve_btfids/resolve_btfids
+    ;;
+  esac
 
   echo "Installing headers..."
   cp -t "$builddir" -a include
-  cp -t "$builddir/arch/${KARCH}" -a arch/${KARCH}/include
-  install -Dt "$builddir/arch/${KARCH}/kernel" -m644 arch/${KARCH}/kernel/asm-offsets.s
+  cp -t "$builddir/arch/${MYARCH}" -a arch/${MYARCH}/include
+  install -Dt "$builddir/arch/${MYARCH}/kernel" -m644 arch/${MYARCH}/kernel/asm-offsets.s
 
   install -Dt "$builddir/drivers/md" -m644 drivers/md/*.h
   install -Dt "$builddir/net/mac80211" -m644 net/mac80211/*.h
@@ -154,7 +162,7 @@ _package-headers() {
   echo "Removing unneeded architectures..."
   local arch
   for arch in "$builddir"/arch/*/; do
-    [[ $arch = */${KARCH}/ ]] && continue
+    [[ $arch = */${MYARCH}/ ]] && continue
     echo "Removing $(basename "$arch")"
     rm -r "$arch"
   done
@@ -171,7 +179,7 @@ _package-headers() {
   echo "Stripping build tools..."
   local file
   while read -rd '' file; do
-    case "$(file -bi "$file")" in
+    case "$(file -Sib "$file")" in
       application/x-sharedlib\;*)      # Libraries (.so)
         strip -v $STRIP_SHARED "$file" ;;
       application/x-archive\;*)        # Libraries (.a)
