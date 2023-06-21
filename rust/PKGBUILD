@@ -10,15 +10,19 @@ pkgname=(
   rust
   rust-src
 )
+case "${CARCH}" in
+  powerpc64le) pkgname+=(rust-wasm) ;;
+  x86_64) pkgname+=(lib32-rust-libs rust-musl rust-wasm) ;;
+esac
 epoch=1
-pkgver=1.69.0
-pkgrel=3.1
+pkgver=1.70.0
+pkgrel=1
 pkgdesc="Systems programming language focused on safety, speed and concurrency"
 url=https://www.rust-lang.org/
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=(
-  MIT
   Apache
+  MIT
 )
 options=(
   !debug
@@ -27,32 +31,67 @@ options=(
   !strip
 )
 depends=(
-  gcc-libs
-  llvm-libs
   curl
-  libssh2
   gcc
+  gcc-libs
+  libssh2
+  llvm-libs
 )
 makedepends=(
-  rust 
+  cmake
   libffi
+  lld
+  llvm
+  ninja
   perl
   python
-  cmake
-  ninja
-  wasi-libc lld llvm)
-makedepends_x86_64=(lib32-gcc-libs musl)
-checkdepends=(procps-ng gdb)
+  rust
+  wasi-libc
+)
+makedepends_x86_64=(
+  lib32-gcc-libs
+  musl
+)
+checkdepends=(
+  gdb
+  procps-ng
+)
 source=(
   "https://static.rust-lang.org/dist/rustc-$pkgver-src.tar.gz"{,.asc}
-  0001-Use-ELFv2-ABI-on-all-powerpc64-targets.patch
+  0001-cargo-Change-libexec-dir.patch
+  0001-bootstrap-Change-libexec-dir.patch
+  0002-compiler-Change-LLVM-targets.patch
+  0003-compiler-Use-wasm-ld-for-wasm-targets.patch
+  xxxx-Use-ELFv2-ABI-on-all-powerpc64-targets.patch
 )
-sha256sums=('fb05971867ad6ccabbd3720279f5a94b99f61024923187b56bb5c455fa3cf60f'
-            'SKIP'
-            '586419a41dd6788e18f1ca7a59a43fcad495bdee977b6889d478a77aa8076436')
-validpgpkeys=(108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE  # Rust Language (Tag and Release Signing Key) <rust-key@rust-lang.org>
-              474E22316ABF4785A88C6E8EA2C794A986419D8A  # Tom Stellard <tstellar@redhat.com>
-              B6C8F98282B944E3B0D5C2530FC3042E345AD05D) # Hans Wennborg <hans@chromium.org>
+b2sums=('5b1fd44eaa10bf2ab76f64a3bb5c20ee4008031d05a49b0a32b3a9cb2e97d5684cf0c9a6b6883089afca6cab7a37a0a9cfa06d928ed3e6a3b6484b605e18a0f3'
+        'SKIP'
+        '6de8373ee24ad9a5ae12b44a1288d474c8b8a1461ba54ccadbecefc87d034b6ef763b2909e2f1452fca30488504cabacad972c6ae78b240f74e47c0e01f25136'
+        '0b1c8f41144b2c9fc6528c67e6ac5ac0f4ccbbdddc3fd3ede0b83033f1745efc603c6dbc90eb64d0518832d8daf3f82e60bbcd042ff94effab1b5a499758dace'
+        '972b67b9ed47b9ff0d9f5156232ed63103a9d40617325ab99be000753c420a228a89a1ca098fa978fef14dc7eb11bb222b85d63a5d2aec444b8ebfdfca07fc67'
+        '445802d26028848549781b9be7430f2f1cedcd0d1f960c61dbce870a66a867aff3b0c9905b4f81b6cefefd74d83a868742ec735dd9046943068ac98117d22987'
+        'a12ab3f62987d3de257ef4bb66220559efe46c92f0d9820390ed36bf404c56f05253619b5c46e37b44dc30386f54ef3c856124a1cc1a8b854b7f6426183b2d6d')
+validpgpkeys=(
+  108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE  # Rust Language (Tag and Release Signing Key) <rust-key@rust-lang.org>
+  474E22316ABF4785A88C6E8EA2C794A986419D8A  # Tom Stellard <tstellar@redhat.com>
+)
+
+prepare() {
+  cd rustc-$pkgver-src
+
+  # Patch bootstrap and cargo so credential helpers
+  # are in /usr/lib instead of /usr/libexec
+  patch -d src/tools/cargo -Np1 < ../0001-cargo-Change-libexec-dir.patch
+  patch -Np1 -i ../0001-bootstrap-Change-libexec-dir.patch
+
+  # Use our *-pc-linux-gnu targets, making LTO with clang simpler
+  patch -Np1 -i ../0002-compiler-Change-LLVM-targets.patch
+
+  # Use our wasm-ld
+  patch -Np1 -i ../0003-compiler-Use-wasm-ld-for-wasm-targets.patch
+
+  # Ensure powerpc64 uses ELFv2
+  patch -Np1 -i ../xxxx-Use-ELFv2-ABI-on-all-powerpc64-targets.patch
 
 _jemalloc='true'
 case "${CARCH}" in
@@ -91,14 +130,8 @@ case "${CARCH}" in
     _config_target_extras='[target.x86_64-unknown-linux-musl]
 sanitizers = false
 musl-root = "/usr/lib/musl"'
-    pkgname+=(rust-wasmi lib32-rust-libs rust-musl)
   ;;
 esac
-
-prepare() {
-  cd rustc-$pkgver-src
-
-  patch -Np1 -i ../0001-Use-ELFv2-ABI-on-all-powerpc64-targets.patch
 
   cat >config.toml <<END
 changelog-seen = 2
@@ -116,7 +149,9 @@ rustc = "/usr/bin/rustc"
 rustfmt = "/usr/bin/rustfmt"
 locked-deps = true
 vendor = true
-tools = [${_build_tools}]
+tools = [
+  ${_build_tools}
+]
 sanitizers = true
 profiler = true
 
@@ -133,7 +168,7 @@ description = "Arch POWER $pkgbase $epoch:$pkgver-$pkgrel"
 rpath = false
 backtrace-on-ice = true
 remap-debuginfo = true
-jemalloc = ${_jemalloc} 
+jemalloc = ${_jemalloc}
 
 # LLVM crashes when passing an object through ThinLTO twice.  This is triggered
 # when using rust code in cross-language LTO if libstd was built using ThinLTO.
@@ -148,6 +183,10 @@ deny-warnings = false
 compression-formats = ["gz"]
 
 [target.${_rust_target}]
+cc = "/usr/bin/gcc"
+cxx = "/usr/bin/g++"
+ar = "/usr/bin/gcc-ar"
+ranlib = "/usr/bin/gcc-ranlib"
 llvm-config = "/usr/bin/llvm-config"
 
 ${_config_target_extras}
@@ -161,9 +200,6 @@ sanitizers = false
 profiler = false
 wasi-root = "/usr/share/wasi-sysroot"
 END
-
-  cd src/bootstrap
-  cargo update -p cc
 }
 
 _pick() {
@@ -192,7 +228,6 @@ build() {
   # rustbuild always installs copies of the shared libraries to /usr/lib,
   # overwrite them with symlinks to the per-architecture versions
   ln -srft usr/lib   usr/lib/rustlib/${_rust_target}/lib/*.so
-
   case "${CARCH}" in
     x86_64)
       mkdir -p usr/lib32
@@ -211,30 +246,43 @@ build() {
       _pick dest-i686 usr/lib/rustlib/i686-unknown-linux-gnu usr/lib32
       _pick dest-musl usr/lib/rustlib/x86_64-unknown-linux-musl
     ;;
-  esac
-
-  case "${CARCH}" in
-    powerpc64le|x86_64 ) _pick dest-wasm usr/lib/rustlib/wasm32-* ;;
+    powerpc64le)
+     _pick dest-wasm usr/lib/rustlib/wasm32-*
+    ;;
   esac
   _pick dest-src  usr/lib/rustlib/src
 }
 
 package_rust() {
-  optdepends=('lldb: rust-lldb script'
-              'gdb: rust-gdb script')
-  provides=(cargo rustfmt)
-  conflicts=(cargo rustfmt 'rust-docs<1:1.56.1-3')
-  replaces=(cargo rustfmt cargo-tree 'rust-docs<1:1.56.1-3')
+  optdepends=(
+    'gdb: rust-gdb script'
+    'lldb: rust-lldb script'
+  )
+  provides=(
+    cargo
+    rustfmt
+  )
+  conflicts=(
+    cargo
+    'rust-docs<1:1.56.1-3'
+    rustfmt
+  )
+  replaces=(
+    cargo
+    cargo-tree
+    'rust-docs<1:1.56.1-3'
+    rustfmt
+  )
 
   cp -a dest-rust/* "$pkgdir"
-
-  mkdir -p "$pkgdir/usr/share/licenses"
-  ln -s rust "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 package_lib32-rust-libs() {
   pkgdesc="32-bit target and libraries for Rust"
-  depends=(rust lib32-gcc-libs)
+  depends=(
+    lib32-gcc-libs
+    rust
+  )
   provides=(lib32-rust)
   conflicts=(lib32-rust)
   replaces=(lib32-rust)
@@ -257,7 +305,10 @@ package_rust-musl() {
 
 package_rust-wasm() {
   pkgdesc="WebAssembly targets for Rust"
-  depends=(rust lld)
+  depends=(
+    lld
+    rust
+  )
 
   cp -a dest-wasm/* "$pkgdir"
 
