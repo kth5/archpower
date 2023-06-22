@@ -3,7 +3,8 @@
 # Maintainer: Orhun Parmaksız <orhun@archlinux.org>
 
 pkgname=rust-bindgen
-pkgver=0.65.1
+_pkgname=bindgen
+pkgver=0.66.1
 pkgrel=1
 pkgdesc='Automatically generates Rust FFI bindings to C (and some C++) libraries'
 url='https://github.com/rust-lang/rust-bindgen'
@@ -12,27 +13,33 @@ makedepends=('cargo')
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=('BSD')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/rust-lang/rust-bindgen/archive/v$pkgver.tar.gz")
-sha256sums=('e4f3491ad342a662fda838c34de03c47ef2fa3019952adbfb94fe4109c06ccf2')
+sha512sums=('71e1ec6ce4933a7a5451aa5baa47f885b9ec6b692bf2a2b3d8c1f2cce2c3cd3d941f8b8e4dfd7c776e954a9d3824b67c435897521f726553b63a2f1cb81bba99')
 
 prepare() {
   cd $pkgname-$pkgver
-
   case "${CARCH}" in
     riscv64) CARCH=riscv64gc ;;
   esac
 
   cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+  mkdir -p completions
 }
 
 build() {
   cd $pkgname-$pkgver
   cargo build --release --frozen
+  local _completion="target/release/$_pkgname --generate-shell-completions"
+  $_completion bash > "completions/$_pkgname"
+  $_completion fish > "completions/$_pkgname.fish"
+  $_completion zsh  > "completions/_$_pkgname"
 }
 
 package() {
   cd $pkgname-$pkgver
-  install -Dm755 target/release/bindgen "$pkgdir"/usr/bin/bindgen
-
+  install -Dm755 "target/release/$_pkgname" "$pkgdir"/usr/bin/bindgen
   install -Dm644 README.md "$pkgdir"/usr/share/doc/$pkgname/README.md
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  install -Dm664 "completions/$_pkgname" -t "$pkgdir/usr/share/bash-completion/completions/"
+  install -Dm664 "completions/$_pkgname.fish" -t "$pkgdir/usr/share/fish/vendor_completions.d/"
+  install -Dm664 "completions/_$_pkgname" -t "$pkgdir/usr/share/zsh/site-functions/"
 }
