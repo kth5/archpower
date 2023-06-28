@@ -5,25 +5,25 @@
 
 pkgbase=util-linux
 pkgname=(util-linux util-linux-libs)
-_pkgmajor=2.39
-_realver=${_pkgmajor}
-pkgver=${_realver/-/}
+_tag='722ea47989cef5d892711614c4a2767213b177d8' # git rev-parse v${_tag_name}
+_tag_name=2.39.1
+pkgver=${_tag_name/-/}
 pkgrel=1
 pkgdesc='Miscellaneous system utilities for Linux'
-url='https://github.com/karelzak/util-linux'
+url='https://github.com/util-linux/util-linux'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-makedepends=('asciidoctor' 'libcap-ng' 'libxcrypt' 'python' 'systemd')
+makedepends=('git' 'meson' 'asciidoctor' 'bash-completion' 'libcap-ng'
+             'libutempter' 'libxcrypt' 'python' 'systemd')
 license=('GPL2')
 options=('strip')
 validpgpkeys=('B0C64D14301CC6EFAEDF60E4E4B71D5EEC39C284')  # Karel Zak
-source=("https://www.kernel.org/pub/linux/utils/util-linux/v${_pkgmajor}/${pkgbase}-${_realver}.tar."{xz,sign}
+source=("git+https://github.com/util-linux/util-linux#tag=${_tag}?signed"
         pam-{login,common,runuser,su}
         'util-linux.sysusers'
         '60-rfkill.rules'
         'rfkill-unblock_.service'
         'rfkill-block_.service')
-sha256sums=('32b30a336cda903182ed61feb3e9b908b762a5e66fe14e43efb88d37162075cb'
-            'SKIP'
+sha256sums=('SKIP'
             '99cd77f21ee44a0c5e57b0f3670f711a00496f198fc5704d7e44f5d817c81a0f'
             '57e057758944f4557762c6def939410c04ca5803cbdd2bfa2153ce47ffe7a4af'
             '48d6fba767631e3dd3620cf02a71a74c5d65a525d4c4ce4b5a0b7d9f41ebfea1'
@@ -33,25 +33,51 @@ sha256sums=('32b30a336cda903182ed61feb3e9b908b762a5e66fe14e43efb88d37162075cb'
             '8ccec10a22523f6b9d55e0d6cbf91905a39881446710aa083e935e8073323376'
             'a22e0a037e702170c7d88460cc9c9c2ab1d3e5c54a6985cd4a164ea7beff1b36')
 
+_backports=(
+)
+
+_reverts=(
+)
+
+prepare() {
+  cd "${pkgbase}"
+
+  local _c _l
+  for _c in "${_backports[@]}"; do
+    if [[ "${_c}" == *..* ]]; then _l='--reverse'; else _l='--max-count=1'; fi
+    git log --oneline "${_l}" "${_c}"
+    git cherry-pick --mainline 1 --no-commit "${_c}"
+  done
+  for _c in "${_reverts[@]}"; do
+    if [[ "${_c}" == *..* ]]; then _l='--reverse'; else _l='--max-count=1'; fi
+    git log --oneline "${_l}" "${_c}"
+    git revert --mainline 1 --no-commit "${_c}"
+  done
+
+  # do not mark dirty
+  sed -i '/dirty=/c dirty=' tools/git-version-gen
+}
+
 build() {
-  cd "${pkgbase}-${_realver}"
+  local _meson_options=(
+    -Dfs-search-path=/usr/bin:/usr/local/bin
 
-  ./configure \
-    --prefix=/usr \
-    --libdir=/usr/lib \
-    --bindir=/usr/bin \
-    --sbindir=/usr/bin \
-    --localstatedir=/var \
-    --enable-usrdir-path \
-    --enable-fs-paths-default=/usr/bin:/usr/local/bin \
-    --enable-vipw \
-    --enable-newgrp \
-    --enable-chfn-chsh \
-    --enable-write \
-    --enable-mesg \
-    --with-python=3
+    -Dlibuser=disabled
+    -Dncurses=disabled
+    -Dncursesw=enabled
+    -Deconf=disabled
 
-  make
+    -Dbuild-chfn-chsh=enabled
+    -Dbuild-line=disabled
+    -Dbuild-mesg=enabled
+    -Dbuild-newgrp=enabled
+    -Dbuild-vipw=enabled
+    -Dbuild-write=enabled
+  )
+
+  arch-meson "${pkgbase}" build "${_meson_options[@]}"
+
+  meson compile -C build
 }
 
 package_util-linux() {
@@ -59,7 +85,7 @@ package_util-linux() {
   provides=('rfkill' 'hardlink')
   replaces=('rfkill' 'hardlink')
   depends=('pam' 'shadow' 'coreutils' 'systemd-libs' 'libsystemd.so'
-           'libudev.so' 'libcap-ng' 'libxcrypt' 'libcrypt.so' 'util-linux-libs'
+           'libudev.so' 'libcap-ng' 'libutempter' 'libxcrypt' 'libcrypt.so' 'util-linux-libs'
            'libmagic.so' 'libncursesw.so')
   optdepends=('words: default dictionary for look')
   backup=(etc/pam.d/chfn
@@ -72,7 +98,7 @@ package_util-linux() {
 
   _python_stdlib="$(python -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"])')"
 
-  make -C "${pkgbase}-${_realver}" DESTDIR="${pkgdir}" usrsbin_execdir=/usr/bin install
+  DESTDIR="${pkgdir}" meson install -C build
 
   # remove static libraries
   rm "${pkgdir}"/usr/lib/lib*.a*
