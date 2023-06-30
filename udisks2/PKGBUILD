@@ -4,41 +4,44 @@
 
 pkgname=udisks2
 pkgver=2.9.4
-pkgrel=1
+pkgrel=4
 pkgdesc="Disk Management Service, version 2"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url="https://www.freedesktop.org/wiki/Software/udisks"
+url="https://www.freedesktop.org/wiki/Software/udisks/"
 license=('GPL2')
-depends=('polkit' 'libatasmart' 'libgudev' 'libblockdev')
-makedepends=('docbook-xsl' 'gobject-introspection' 'parted' 'gtk-doc')
-optdepends=('gptfdisk: GUID partition table support'
-            'ntfs-3g: NTFS filesystem management support'
-            'dosfstools: VFAT filesystem management support')
+depends=('acl' 'polkit' 'glib2' 'gcc-libs' 'glibc' 'libatasmart' 'libgudev' 'libblockdev'
+         'systemd-libs' 'util-linux-libs')
+makedepends=('gobject-introspection' 'gtk-doc')
 backup=('etc/udisks2/udisks2.conf')
-source=("https://github.com/storaged-project/udisks/archive/udisks-$pkgver.tar.gz")
-sha512sums=('5b266cbc29f55d4c4a5100147793becf32a95f94bc7e184796bd2505a4e958a6bce9e5ffa584e4a89c7b874ed14ba6d9d096659565d0f51d860ef216d0cbd435')
+source=("https://github.com/storaged-project/udisks/releases/download/udisks-$pkgver/udisks-$pkgver.tar.bz2"
+        'udisk2-2.9.4-do-not-free-static-daemon-resources.patch::https://patch-diff.githubusercontent.com/raw/storaged-project/udisks/pull/926.patch')
+sha512sums=('35f5429bc2a7092aa659cba9296837d127e2b17c23ab23111d0d9b230d15ef5a6965e112b1f3829748a69a52fb5b09722153f86f1ef70977b3ad7b7a4ec40ec5'
+            'a14cd7c6c52d585b145e96a8b111bd173a06c3bb58dc55db5e099677f24464f23caede27c260ddebcad07a6a9b0872878054a749346c2142e6dd3bdb240c9202')
 
 prepare() {
-  cd udisks-udisks-$pkgver
-  NOCONFIGURE=1 ./autogen.sh
+  cd udisks-$pkgver
+  # https://bugs.archlinux.org/task/76345
+  # https://github.com/storaged-project/udisks/pull/926
+  patch -Np1 -i ../udisk2-2.9.4-do-not-free-static-daemon-resources.patch
 }
 
 build() {
-  cd udisks-udisks-$pkgver
+  cd udisks-$pkgver
   ./configure --prefix=/usr --sysconfdir=/etc \
       --sbindir=/usr/bin --libexecdir=/usr/lib \
       --with-systemdsystemunitdir=/usr/lib/systemd/system \
       --localstatedir=/var --disable-static \
       --enable-gtk-doc enable_available_modules=yes
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
 }
 
 check() {
-  cd udisks-udisks-$pkgver
+  cd udisks-$pkgver
   make check
 }
 
 package() {
-  cd udisks-udisks-$pkgver
+  cd udisks-$pkgver
   make DESTDIR="$pkgdir" install
 }
