@@ -3,29 +3,49 @@
 # Contributor: Ionut Biru <ibiru@archlinux.org>
 
 pkgbase=p11-kit
-pkgname=(p11-kit libp11-kit)
-pkgver=0.24.1
-pkgrel=1.1
+pkgname=(
+  p11-kit
+  libp11-kit
+  p11-kit-docs
+)
+pkgver=0.25.0
+pkgrel=1
 pkgdesc="Loads and enumerates PKCS#11 modules"
 url="https://p11-glue.freedesktop.org"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=(BSD)
-makedepends=(gtk-doc meson libtasn1 libffi systemd bash-completion)
+depends=(
+  glibc
+  libffi
+  libtasn1
+)
+makedepends=(
+  bash-completion
+  gtk-doc
+  meson
+  systemd
+)
 source=(https://github.com/p11-glue/p11-kit/releases/download/$pkgver/p11-kit-$pkgver.tar.xz{,.sig})
-sha256sums=('d8be783efd5cd4ae534cee4132338e3f40f182c3205d23b200094ec85faaaef8'
-            'SKIP')
-validpgpkeys=('C0F67099B808FB063E2C81117BFB1108D92765AF'  # Stef Walter
-              '462225C3B46F34879FC8496CD605848ED7E69871') # Daiki Ueno
+b2sums=('6ffce977f86c516a327afe50f4cc5a36e86ba7f43c6cb555db419d9e4ba7543a9f1847ba83da348cd6d7bbebe55dfa26cfe3a3aaa3e1d5420a4b8dc6cbbff088'
+        'SKIP')
+validpgpkeys=(
+  C0F67099B808FB063E2C81117BFB1108D92765AF  # Stef Walter <stef@thewalter.net>
+  462225C3B46F34879FC8496CD605848ED7E69871  # Daiki Ueno <ueno@unixuser.org>
+  5D46CB0F763405A7053556F47A75A648B3F9220C  # Zoltan Fridrich <zfridric@redhat.com>
+)
 
 prepare() {
   cd p11-kit-$pkgver
 }
 
 build() {
-  arch-meson p11-kit-$pkgver build \
-    -D gtk_doc=true \
-    -D man=true \
+  local meson_options=(
+    -D gtk_doc=true
+    -D man=true
     -D trust_paths=/etc/ca-certificates/trust-source:/usr/share/ca-certificates/trust-source
+  )
+
+  arch-meson p11-kit-$pkgver build "${meson_options[@]}"
   meson compile -C build
 }
 
@@ -44,24 +64,29 @@ _pick() {
 }
 
 package_p11-kit() {
-  depends=("libp11-kit=$pkgver-$pkgrel" coreutils libp11-kit.so libsystemd.so)
+  depends=(
+    "libp11-kit=$pkgver-$pkgrel"
+    coreutils
+    libp11-kit.so
+    libsystemd.so
+  )
   install=p11-kit.install
 
   meson install -C build --destdir "$pkgdir"
   ln -srf "$pkgdir/usr/bin/update-ca-trust" "$pkgdir/usr/lib/p11-kit/trust-extract-compat"
 
-  # Split libp11-kit
   _pick lib "$pkgdir"/usr/include
   _pick lib "$pkgdir"/usr/lib/{p11-kit-proxy.so,libp11-kit.*}
   _pick lib "$pkgdir"/usr/lib/{pkcs11,pkgconfig}
-  _pick lib "$pkgdir"/usr/share/{locale,p11-kit}
+  _pick lib "$pkgdir"/usr/share/p11-kit
+
+  _pick doc "$pkgdir"/usr/share/gtk-doc
 
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 p11-kit-$pkgver/COPYING
 }
 
 package_libp11-kit() {
   pkgdesc+=" (library)"
-  depends=(glibc libtasn1 libffi)
   provides=(libp11-kit.so)
 
   mv lib/* "$pkgdir"
@@ -69,4 +94,13 @@ package_libp11-kit() {
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 p11-kit-$pkgver/COPYING
 }
 
-# vim:set sw=2 et:
+package_p11-kit-docs() {
+  pkgdesc+=" (documentation)"
+  depends=()
+
+  mv doc/* "$pkgdir"
+
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 p11-kit-$pkgver/COPYING
+}
+
+# vim:set sw=2 sts=-1 et:
