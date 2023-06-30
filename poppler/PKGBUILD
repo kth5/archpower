@@ -4,29 +4,42 @@
 
 pkgbase=poppler
 pkgname=('poppler' 'poppler-glib' 'poppler-qt5' 'poppler-qt6')
-pkgver=23.03.0
+pkgver=23.06.0
 pkgrel=1
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=('GPL')
-makedepends=('libjpeg' 'gcc-libs' 'cairo' 'fontconfig' 'openjpeg2' 'gtk3' 'pkgconfig' 'lcms2' 
-             'gobject-introspection' 'icu' 'qt5-base' 'qt6-base' 'git' 'nss' 'gtk-doc' 'curl' 'poppler-data'
+makedepends=('libjpeg' 'gcc-libs' 'cairo' 'fontconfig' 'openjpeg2' 
+             'gtk3' 'pkgconfig' 'lcms2' 'gobject-introspection' 'icu'
+             'qt5-base' 'qt6-base' 'git' 'nss' 'gpgme' 'gtk-doc' 'curl' 'poppler-data'
              'cmake' 'python' 'boost')
 options=('!emptydirs')
 url="https://poppler.freedesktop.org/"
 # https://gitlab.freedesktop.org/poppler/poppler
 source=(https://poppler.freedesktop.org/${pkgbase}-${pkgver}.tar.xz{,.sig}
-        test::git+https://anongit.freedesktop.org/git/poppler/test/#commit=920c89f8f43bdfe8966c8e397e7f67f5302e9435)
-sha256sums=('b04148bf849c1965ada7eff6be4685130e3a18a84e0cce73bf9bc472ec32f2b4'
+        fix-signature-test-failure.patch::https://gitlab.freedesktop.org/poppler/poppler/-/commit/def45c82b36ec393fbaf16d9873db23bc9659b80.patch
+        test::git+https://anongit.freedesktop.org/git/poppler/test/#commit=e3cdc82782941a8d7b8112f83b4a81b3d334601a)
+sha256sums=('d38c6b2f31c8f6f3727fb60a011a0e6c567ebf56ef1ccad36263ca9ed6448a65'
+            'SKIP'
             'SKIP'
             'SKIP')
 validpgpkeys=('CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7') # "Albert Astals Cid <aacid@kde.org>"
 
 prepare() {
   mkdir build
+  # Don't fail signature basics tests if backend is not configured
+  cd ${pkgbase}-${pkgver}
+  patch -Np1 -i ../fix-signature-test-failure.patch
 }
 
 build() {
   cd build
+  case "${CARCH}" in
+    powerpc)
+      export CFLAGS+=' -D_FILE_OFFSET_BITS=64'
+      export CXXFLAGS+=' -D_FILE_OFFSET_BITS=64'
+    ;;
+  esac
+
   cmake ../${pkgbase}-${pkgver} \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX:PATH=/usr \
@@ -43,7 +56,9 @@ check() {
 
 package_poppler() {
   pkgdesc="PDF rendering library based on xpdf 3.0"
-  depends=('libjpeg' 'gcc-libs' 'cairo' 'fontconfig' 'openjpeg2' 'lcms2' 'nss' 'curl')
+  depends=('libjpeg' 'gcc-libs' 'cairo' 'fontconfig' 
+           'openjpeg2' 'lcms2' 'nss' 'curl' 'gpgme'
+           'nspr' 'libpng' 'freetype2' 'zlib' 'libtiff' 'glibc')
   optdepends=('poppler-data: highly recommended encoding data to display PDF documents with certain encodings and characters')
   provides=('libpoppler.so' 'libpoppler-cpp.so')
   conflicts=("poppler-qt3<${pkgver}" "poppler-qt4<${pkgver}")
@@ -61,7 +76,7 @@ package_poppler() {
 
 package_poppler-glib() {
   pkgdesc="Poppler glib bindings"
-  depends=("poppler=${pkgver}" 'glib2')
+  depends=("poppler=${pkgver}" 'glib2' 'gcc-libs' 'freetype2' 'cairo' 'glibc')
   provides=('libpoppler-glib.so')
 
   cd build
@@ -75,7 +90,7 @@ package_poppler-glib() {
 
 package_poppler-qt5() {
   pkgdesc="Poppler Qt5 bindings"
-  depends=("poppler=${pkgver}" 'qt5-base')
+  depends=("poppler=${pkgver}" 'qt5-base' 'lcms2' 'freetype2' 'gcc-libs' 'glibc')
   provides=('libpoppler-qt5.so')
 
   cd build
@@ -86,7 +101,7 @@ package_poppler-qt5() {
 
 package_poppler-qt6() {
   pkgdesc="Poppler Qt6 bindings"
-  depends=("poppler=${pkgver}" 'qt6-base')
+  depends=("poppler=${pkgver}" 'qt6-base' 'lcms2' 'freetype2' 'gcc-libs' 'glibc')
   provides=('libpoppler-qt6.so')
 
   cd build
