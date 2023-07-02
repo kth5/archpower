@@ -1,0 +1,759 @@
+From 33b5788ef7534cf9b3492dda5fd15056042f3e1b Mon Sep 17 00:00:00 2001
+From: nicm <nicm>
+Date: Tue, 25 Apr 2023 09:31:50 +0000
+Subject: [PATCH 1/3] Tidy tparm wrapper functions to have more obvious names
+ and check tparm return value.
+
+(cherry picked from commit 8f34504736cf3547992c4ba948c1e65f3813715c)
+---
+ tmux.h     |  26 ++++++------
+ tty-term.c |  47 ++++++++++++++++-----
+ tty.c      | 118 ++++++++++++++++++++++++++---------------------------
+ 3 files changed, 108 insertions(+), 83 deletions(-)
+
+diff --git a/tmux.h b/tmux.h
+index 53084b8b..5a90352e 100644
+--- a/tmux.h
++++ b/tmux.h
+@@ -2250,12 +2250,12 @@ void	tty_margin_off(struct tty *);
+ void	tty_cursor(struct tty *, u_int, u_int);
+ void	tty_clipboard_query(struct tty *);
+ void	tty_putcode(struct tty *, enum tty_code_code);
+-void	tty_putcode1(struct tty *, enum tty_code_code, int);
+-void	tty_putcode2(struct tty *, enum tty_code_code, int, int);
+-void	tty_putcode3(struct tty *, enum tty_code_code, int, int, int);
+-void	tty_putcode_ptr1(struct tty *, enum tty_code_code, const void *);
+-void	tty_putcode_ptr2(struct tty *, enum tty_code_code, const void *,
+-	    const void *);
++void	tty_putcode_i(struct tty *, enum tty_code_code, int);
++void	tty_putcode_ii(struct tty *, enum tty_code_code, int, int);
++void	tty_putcode_iii(struct tty *, enum tty_code_code, int, int, int);
++void	tty_putcode_s(struct tty *, enum tty_code_code, const char *);
++void	tty_putcode_ss(struct tty *, enum tty_code_code, const char *,
++	    const char *);
+ void	tty_puts(struct tty *, const char *);
+ void	tty_putc(struct tty *, u_char);
+ void	tty_putn(struct tty *, const void *, size_t, u_int);
+@@ -2318,15 +2318,15 @@ int		 tty_term_read_list(const char *, int, char ***, u_int *,
+ void		 tty_term_free_list(char **, u_int);
+ int		 tty_term_has(struct tty_term *, enum tty_code_code);
+ const char	*tty_term_string(struct tty_term *, enum tty_code_code);
+-const char	*tty_term_string1(struct tty_term *, enum tty_code_code, int);
+-const char	*tty_term_string2(struct tty_term *, enum tty_code_code, int,
++const char	*tty_term_string_i(struct tty_term *, enum tty_code_code, int);
++const char	*tty_term_string_ii(struct tty_term *, enum tty_code_code, int,
+ 		     int);
+-const char	*tty_term_string3(struct tty_term *, enum tty_code_code, int,
++const char	*tty_term_string_iii(struct tty_term *, enum tty_code_code, int,
+ 		     int, int);
+-const char	*tty_term_ptr1(struct tty_term *, enum tty_code_code,
+-		     const void *);
+-const char	*tty_term_ptr2(struct tty_term *, enum tty_code_code,
+-		     const void *, const void *);
++const char	*tty_term_string_s(struct tty_term *, enum tty_code_code,
++		     const char *);
++const char	*tty_term_string_ss(struct tty_term *, enum tty_code_code,
++		     const char *, const char *);
+ int		 tty_term_number(struct tty_term *, enum tty_code_code);
+ int		 tty_term_flag(struct tty_term *, enum tty_code_code);
+ const char	*tty_term_describe(struct tty_term *, enum tty_code_code);
+diff --git a/tty-term.c b/tty-term.c
+index fdf0c4fa..32dd849a 100644
+--- a/tty-term.c
++++ b/tty-term.c
+@@ -760,35 +760,60 @@ tty_term_string(struct tty_term *term, enum tty_code_code code)
+ }
+ 
+ const char *
+-tty_term_string1(struct tty_term *term, enum tty_code_code code, int a)
++tty_term_string_i(struct tty_term *term, enum tty_code_code code, int a)
+ {
+-	return (tparm((char *) tty_term_string(term, code), a, 0, 0, 0, 0, 0, 0, 0, 0));
++	const char	*x = tty_term_string(term, code), *s;
++
++	s = tparm((char *)x, a);
++	if (s == NULL)
++		fatalx("could not expand %s", tty_term_codes[code].name);
++	return (s);
+ }
+ 
+ const char *
+-tty_term_string2(struct tty_term *term, enum tty_code_code code, int a, int b)
++tty_term_string_ii(struct tty_term *term, enum tty_code_code code, int a, int b)
+ {
+-	return (tparm((char *) tty_term_string(term, code), a, b, 0, 0, 0, 0, 0, 0, 0));
++	const char	*x = tty_term_string(term, code), *s;
++
++	s = tparm((char *)x, a, b);
++	if (s == NULL)
++		fatalx("could not expand %s", tty_term_codes[code].name);
++	return (s);
+ }
+ 
+ const char *
+-tty_term_string3(struct tty_term *term, enum tty_code_code code, int a, int b,
++tty_term_string_iii(struct tty_term *term, enum tty_code_code code, int a, int b,
+     int c)
+ {
+-	return (tparm((char *) tty_term_string(term, code), a, b, c, 0, 0, 0, 0, 0, 0));
++	const char	*x = tty_term_string(term, code), *s;
++
++	s = tparm((char *)x, a, b, c);
++	if (s == NULL)
++		fatalx("could not expand %s", tty_term_codes[code].name);
++	return (s);
+ }
+ 
+ const char *
+-tty_term_ptr1(struct tty_term *term, enum tty_code_code code, const void *a)
++tty_term_string_s(struct tty_term *term, enum tty_code_code code, const char *a)
+ {
+-	return (tparm((char *) tty_term_string(term, code), (long)a, 0, 0, 0, 0, 0, 0, 0, 0));
++	const char	*x = tty_term_string(term, code), *s;
++
++	s = tparm((char *)x, (long)a);
++	if (s == NULL)
++		fatalx("could not expand %s", tty_term_codes[code].name);
++	return (s);
+ }
+ 
+ const char *
+-tty_term_ptr2(struct tty_term *term, enum tty_code_code code, const void *a,
+-    const void *b)
++tty_term_string_ss(struct tty_term *term, enum tty_code_code code, const char *a,
++    const char *b)
+ {
+-	return (tparm((char *) tty_term_string(term, code), (long)a, (long)b, 0, 0, 0, 0, 0, 0, 0));
++	const char	*x = tty_term_string(term, code), *s;
++
++	s = tparm((char *)x, (long)a, (long)b);
++	if (s == NULL)
++		fatalx("could not expand %s", tty_term_codes[code].name);
++	return (s);
+ }
+ 
+ int
+diff --git a/tty.c b/tty.c
+index 49cf9795..a4d744d0 100644
+--- a/tty.c
++++ b/tty.c
+@@ -399,7 +399,7 @@ tty_stop_tty(struct tty *tty)
+ 	if (tcsetattr(c->fd, TCSANOW, &tty->tio) == -1)
+ 		return;
+ 
+-	tty_raw(tty, tty_term_string2(tty->term, TTYC_CSR, 0, ws.ws_row - 1));
++	tty_raw(tty, tty_term_string_ii(tty->term, TTYC_CSR, 0, ws.ws_row - 1));
+ 	if (tty_acs_needed(tty))
+ 		tty_raw(tty, tty_term_string(tty->term, TTYC_RMACS));
+ 	tty_raw(tty, tty_term_string(tty->term, TTYC_SGR0));
+@@ -409,7 +409,7 @@ tty_stop_tty(struct tty *tty)
+ 		if (tty_term_has(tty->term, TTYC_SE))
+ 			tty_raw(tty, tty_term_string(tty->term, TTYC_SE));
+ 		else if (tty_term_has(tty->term, TTYC_SS))
+-			tty_raw(tty, tty_term_string1(tty->term, TTYC_SS, 0));
++			tty_raw(tty, tty_term_string_i(tty->term, TTYC_SS, 0));
+ 	}
+ 	if (tty->mode & MODE_BRACKETPASTE)
+ 		tty_raw(tty, tty_term_string(tty->term, TTYC_DSBP));
+@@ -506,42 +506,42 @@ tty_putcode(struct tty *tty, enum tty_code_code code)
+ }
+ 
+ void
+-tty_putcode1(struct tty *tty, enum tty_code_code code, int a)
++tty_putcode_i(struct tty *tty, enum tty_code_code code, int a)
+ {
+ 	if (a < 0)
+ 		return;
+-	tty_puts(tty, tty_term_string1(tty->term, code, a));
++	tty_puts(tty, tty_term_string_i(tty->term, code, a));
+ }
+ 
+ void
+-tty_putcode2(struct tty *tty, enum tty_code_code code, int a, int b)
++tty_putcode_ii(struct tty *tty, enum tty_code_code code, int a, int b)
+ {
+ 	if (a < 0 || b < 0)
+ 		return;
+-	tty_puts(tty, tty_term_string2(tty->term, code, a, b));
++	tty_puts(tty, tty_term_string_ii(tty->term, code, a, b));
+ }
+ 
+ void
+-tty_putcode3(struct tty *tty, enum tty_code_code code, int a, int b, int c)
++tty_putcode_iii(struct tty *tty, enum tty_code_code code, int a, int b, int c)
+ {
+ 	if (a < 0 || b < 0 || c < 0)
+ 		return;
+-	tty_puts(tty, tty_term_string3(tty->term, code, a, b, c));
++	tty_puts(tty, tty_term_string_iii(tty->term, code, a, b, c));
+ }
+ 
+ void
+-tty_putcode_ptr1(struct tty *tty, enum tty_code_code code, const void *a)
++tty_putcode_s(struct tty *tty, enum tty_code_code code, const char *a)
+ {
+ 	if (a != NULL)
+-		tty_puts(tty, tty_term_ptr1(tty->term, code, a));
++		tty_puts(tty, tty_term_string_s(tty->term, code, a));
+ }
+ 
+ void
+-tty_putcode_ptr2(struct tty *tty, enum tty_code_code code, const void *a,
+-    const void *b)
++tty_putcode_ss(struct tty *tty, enum tty_code_code code, const char *a,
++    const char *b)
+ {
+ 	if (a != NULL && b != NULL)
+-		tty_puts(tty, tty_term_ptr2(tty->term, code, a, b));
++		tty_puts(tty, tty_term_string_ss(tty->term, code, a, b));
+ }
+ 
+ static void
+@@ -603,7 +603,7 @@ tty_putc(struct tty *tty, u_char ch)
+ 			 * it works on sensible terminals as well.
+ 			 */
+ 			if (tty->term->flags & TERM_NOAM)
+-				tty_putcode2(tty, TTYC_CUP, tty->cy, tty->cx);
++				tty_putcode_ii(tty, TTYC_CUP, tty->cy, tty->cx);
+ 		} else
+ 			tty->cx++;
+ 	}
+@@ -682,7 +682,7 @@ tty_force_cursor_colour(struct tty *tty, int c)
+ 	else {
+ 		colour_split_rgb(c, &r, &g, &b);
+ 		xsnprintf(s, sizeof s, "rgb:%02hhx/%02hhx/%02hhx", r, g, b);
+-		tty_putcode_ptr1(tty, TTYC_CS, s);
++		tty_putcode_s(tty, TTYC_CS, s);
+ 	}
+ 	tty->ccolour = c;
+ }
+@@ -743,7 +743,7 @@ tty_update_cursor(struct tty *tty, int mode, struct screen *s)
+ 			if (tty_term_has(tty->term, TTYC_SE))
+ 				tty_putcode(tty, TTYC_SE);
+ 			else
+-				tty_putcode1(tty, TTYC_SS, 0);
++				tty_putcode_i(tty, TTYC_SS, 0);
+ 		}
+ 		if (cmode & (MODE_CURSOR_BLINKING|MODE_CURSOR_VERY_VISIBLE))
+ 			tty_putcode(tty, TTYC_CVVIS);
+@@ -751,27 +751,27 @@ tty_update_cursor(struct tty *tty, int mode, struct screen *s)
+ 	case SCREEN_CURSOR_BLOCK:
+ 		if (tty_term_has(tty->term, TTYC_SS)) {
+ 			if (cmode & MODE_CURSOR_BLINKING)
+-				tty_putcode1(tty, TTYC_SS, 1);
++				tty_putcode_i(tty, TTYC_SS, 1);
+ 			else
+-				tty_putcode1(tty, TTYC_SS, 2);
++				tty_putcode_i(tty, TTYC_SS, 2);
+ 		} else if (cmode & MODE_CURSOR_BLINKING)
+ 			tty_putcode(tty, TTYC_CVVIS);
+ 		break;
+ 	case SCREEN_CURSOR_UNDERLINE:
+ 		if (tty_term_has(tty->term, TTYC_SS)) {
+ 			if (cmode & MODE_CURSOR_BLINKING)
+-				tty_putcode1(tty, TTYC_SS, 3);
++				tty_putcode_i(tty, TTYC_SS, 3);
+ 			else
+-				tty_putcode1(tty, TTYC_SS, 4);
++				tty_putcode_i(tty, TTYC_SS, 4);
+ 		} else if (cmode & MODE_CURSOR_BLINKING)
+ 			tty_putcode(tty, TTYC_CVVIS);
+ 		break;
+ 	case SCREEN_CURSOR_BAR:
+ 		if (tty_term_has(tty->term, TTYC_SS)) {
+ 			if (cmode & MODE_CURSOR_BLINKING)
+-				tty_putcode1(tty, TTYC_SS, 5);
++				tty_putcode_i(tty, TTYC_SS, 5);
+ 			else
+-				tty_putcode1(tty, TTYC_SS, 6);
++				tty_putcode_i(tty, TTYC_SS, 6);
+ 		} else if (cmode & MODE_CURSOR_BLINKING)
+ 			tty_putcode(tty, TTYC_CVVIS);
+ 		break;
+@@ -833,7 +833,7 @@ tty_emulate_repeat(struct tty *tty, enum tty_code_code code,
+     enum tty_code_code code1, u_int n)
+ {
+ 	if (tty_term_has(tty->term, code))
+-		tty_putcode1(tty, code, n);
++		tty_putcode_i(tty, code, n);
+ 	else {
+ 		while (n-- > 0)
+ 			tty_putcode(tty, code1);
+@@ -1122,7 +1122,7 @@ tty_clear_line(struct tty *tty, const struct grid_cell *defaults, u_int py,
+ 		/* Section of line. Use ECH if possible. */
+ 		if (tty_term_has(tty->term, TTYC_ECH)) {
+ 			tty_cursor(tty, px, py);
+-			tty_putcode1(tty, TTYC_ECH, nx);
++			tty_putcode_i(tty, TTYC_ECH, nx);
+ 			return;
+ 		}
+ 	}
+@@ -1263,7 +1263,7 @@ tty_clear_area(struct tty *tty, const struct grid_cell *defaults, u_int py,
+ 		    tty_term_has(tty->term, TTYC_INDN)) {
+ 			tty_region(tty, py, py + ny - 1);
+ 			tty_margin_off(tty);
+-			tty_putcode1(tty, TTYC_INDN, ny);
++			tty_putcode_i(tty, TTYC_INDN, ny);
+ 			return;
+ 		}
+ 
+@@ -1278,7 +1278,7 @@ tty_clear_area(struct tty *tty, const struct grid_cell *defaults, u_int py,
+ 		    tty_term_has(tty->term, TTYC_INDN)) {
+ 			tty_region(tty, py, py + ny - 1);
+ 			tty_margin(tty, px, px + nx - 1);
+-			tty_putcode1(tty, TTYC_INDN, ny);
++			tty_putcode_i(tty, TTYC_INDN, ny);
+ 			return;
+ 		}
+ 	}
+@@ -1579,7 +1579,7 @@ tty_sync_start(struct tty *tty)
+ 
+ 	if (tty_term_has(tty->term, TTYC_SYNC)) {
+ 		log_debug("%s sync start", tty->client->name);
+-		tty_putcode1(tty, TTYC_SYNC, 1);
++		tty_putcode_i(tty, TTYC_SYNC, 1);
+ 	}
+ }
+ 
+@@ -1594,7 +1594,7 @@ tty_sync_end(struct tty *tty)
+ 
+ 	if (tty_term_has(tty->term, TTYC_SYNC)) {
+  		log_debug("%s sync end", tty->client->name);
+-		tty_putcode1(tty, TTYC_SYNC, 2);
++		tty_putcode_i(tty, TTYC_SYNC, 2);
+ 	}
+ }
+ 
+@@ -1793,7 +1793,7 @@ tty_cmd_reverseindex(struct tty *tty, const struct tty_ctx *ctx)
+ 	if (tty_term_has(tty->term, TTYC_RI))
+ 		tty_putcode(tty, TTYC_RI);
+ 	else
+-		tty_putcode1(tty, TTYC_RIN, 1);
++		tty_putcode_i(tty, TTYC_RIN, 1);
+ }
+ 
+ void
+@@ -1872,7 +1872,7 @@ tty_cmd_scrollup(struct tty *tty, const struct tty_ctx *ctx)
+ 			tty_cursor(tty, 0, 0);
+ 		else
+ 			tty_cursor(tty, 0, tty->cy);
+-		tty_putcode1(tty, TTYC_INDN, ctx->num);
++		tty_putcode_i(tty, TTYC_INDN, ctx->num);
+ 	}
+ }
+ 
+@@ -1902,7 +1902,7 @@ tty_cmd_scrolldown(struct tty *tty, const struct tty_ctx *ctx)
+ 	tty_cursor_pane(tty, ctx, ctx->ocx, ctx->orupper);
+ 
+ 	if (tty_term_has(tty->term, TTYC_RIN))
+-		tty_putcode1(tty, TTYC_RIN, ctx->num);
++		tty_putcode_i(tty, TTYC_RIN, ctx->num);
+ 	else {
+ 		for (i = 0; i < ctx->num; i++)
+ 			tty_putcode(tty, TTYC_RI);
+@@ -2101,7 +2101,7 @@ tty_set_selection(struct tty *tty, const char *buf, size_t len)
+ 
+ 	b64_ntop(buf, len, encoded, size);
+ 	tty->flags |= TTY_NOBLOCK;
+-	tty_putcode_ptr2(tty, TTYC_MS, "", encoded);
++	tty_putcode_ss(tty, TTYC_MS, "", encoded);
+ 
+ 	free(encoded);
+ }
+@@ -2246,7 +2246,7 @@ tty_region(struct tty *tty, u_int rupper, u_int rlower)
+ 			tty_cursor(tty, 0, tty->cy);
+ 	}
+ 
+-	tty_putcode2(tty, TTYC_CSR, tty->rupper, tty->rlower);
++	tty_putcode_ii(tty, TTYC_CSR, tty->rupper, tty->rlower);
+ 	tty->cx = tty->cy = UINT_MAX;
+ }
+ 
+@@ -2274,7 +2274,7 @@ tty_margin(struct tty *tty, u_int rleft, u_int rright)
+ 	if (tty->rleft == rleft && tty->rright == rright)
+ 		return;
+ 
+-	tty_putcode2(tty, TTYC_CSR, tty->rupper, tty->rlower);
++	tty_putcode_ii(tty, TTYC_CSR, tty->rupper, tty->rlower);
+ 
+ 	tty->rleft = rleft;
+ 	tty->rright = rright;
+@@ -2282,7 +2282,7 @@ tty_margin(struct tty *tty, u_int rleft, u_int rright)
+ 	if (rleft == 0 && rright == tty->sx - 1)
+ 		tty_putcode(tty, TTYC_CLMG);
+ 	else
+-		tty_putcode2(tty, TTYC_CMG, rleft, rright);
++		tty_putcode_ii(tty, TTYC_CMG, rleft, rright);
+ 	tty->cx = tty->cy = UINT_MAX;
+ }
+ 
+@@ -2392,7 +2392,7 @@ tty_cursor(struct tty *tty, u_int cx, u_int cy)
+ 		 * the cursor with CUB/CUF.
+ 		 */
+ 		if ((u_int) abs(change) > cx && tty_term_has(term, TTYC_HPA)) {
+-			tty_putcode1(tty, TTYC_HPA, cx);
++			tty_putcode_i(tty, TTYC_HPA, cx);
+ 			goto out;
+ 		} else if (change > 0 &&
+ 		    tty_term_has(term, TTYC_CUB) &&
+@@ -2402,12 +2402,12 @@ tty_cursor(struct tty *tty, u_int cx, u_int cy)
+ 				tty_putcode(tty, TTYC_CUB1);
+ 				goto out;
+ 			}
+-			tty_putcode1(tty, TTYC_CUB, change);
++			tty_putcode_i(tty, TTYC_CUB, change);
+ 			goto out;
+ 		} else if (change < 0 &&
+ 		    tty_term_has(term, TTYC_CUF) &&
+ 		    !tty_use_margin(tty)) {
+-			tty_putcode1(tty, TTYC_CUF, -change);
++			tty_putcode_i(tty, TTYC_CUF, -change);
+ 			goto out;
+ 		}
+ 	} else if (cx == thisx) {
+@@ -2440,21 +2440,21 @@ tty_cursor(struct tty *tty, u_int cx, u_int cy)
+ 		    (change < 0 && cy - change > tty->rlower) ||
+ 		    (change > 0 && cy - change < tty->rupper)) {
+ 			    if (tty_term_has(term, TTYC_VPA)) {
+-				    tty_putcode1(tty, TTYC_VPA, cy);
++				    tty_putcode_i(tty, TTYC_VPA, cy);
+ 				    goto out;
+ 			    }
+ 		} else if (change > 0 && tty_term_has(term, TTYC_CUU)) {
+-			tty_putcode1(tty, TTYC_CUU, change);
++			tty_putcode_i(tty, TTYC_CUU, change);
+ 			goto out;
+ 		} else if (change < 0 && tty_term_has(term, TTYC_CUD)) {
+-			tty_putcode1(tty, TTYC_CUD, -change);
++			tty_putcode_i(tty, TTYC_CUD, -change);
+ 			goto out;
+ 		}
+ 	}
+ 
+ absolute:
+ 	/* Absolute movement. */
+-	tty_putcode2(tty, TTYC_CUP, cy, cx);
++	tty_putcode_ii(tty, TTYC_CUP, cy, cx);
+ 
+ out:
+ 	tty->cx = cx;
+@@ -2533,13 +2533,13 @@ tty_attributes(struct tty *tty, const struct grid_cell *gc,
+ 		    !tty_term_has(tty->term, TTYC_SMULX))
+ 			tty_putcode(tty, TTYC_SMUL);
+ 		else if (changed & GRID_ATTR_UNDERSCORE_2)
+-			tty_putcode1(tty, TTYC_SMULX, 2);
++			tty_putcode_i(tty, TTYC_SMULX, 2);
+ 		else if (changed & GRID_ATTR_UNDERSCORE_3)
+-			tty_putcode1(tty, TTYC_SMULX, 3);
++			tty_putcode_i(tty, TTYC_SMULX, 3);
+ 		else if (changed & GRID_ATTR_UNDERSCORE_4)
+-			tty_putcode1(tty, TTYC_SMULX, 4);
++			tty_putcode_i(tty, TTYC_SMULX, 4);
+ 		else if (changed & GRID_ATTR_UNDERSCORE_5)
+-			tty_putcode1(tty, TTYC_SMULX, 5);
++			tty_putcode_i(tty, TTYC_SMULX, 5);
+ 	}
+ 	if (changed & GRID_ATTR_BLINK)
+ 		tty_putcode(tty, TTYC_BLINK);
+@@ -2593,14 +2593,14 @@ tty_colours(struct tty *tty, const struct grid_cell *gc)
+ 				if (have_ax)
+ 					tty_puts(tty, "\033[39m");
+ 				else if (tc->fg != 7)
+-					tty_putcode1(tty, TTYC_SETAF, 7);
++					tty_putcode_i(tty, TTYC_SETAF, 7);
+ 				tc->fg = gc->fg;
+ 			}
+ 			if (COLOUR_DEFAULT(gc->bg) && !COLOUR_DEFAULT(tc->bg)) {
+ 				if (have_ax)
+ 					tty_puts(tty, "\033[49m");
+ 				else if (tc->bg != 0)
+-					tty_putcode1(tty, TTYC_SETAB, 0);
++					tty_putcode_i(tty, TTYC_SETAB, 0);
+ 				tc->bg = gc->bg;
+ 			}
+ 		}
+@@ -2768,12 +2768,12 @@ tty_colours_fg(struct tty *tty, const struct grid_cell *gc)
+ 			xsnprintf(s, sizeof s, "\033[%dm", gc->fg);
+ 			tty_puts(tty, s);
+ 		} else
+-			tty_putcode1(tty, TTYC_SETAF, gc->fg - 90 + 8);
++			tty_putcode_i(tty, TTYC_SETAF, gc->fg - 90 + 8);
+ 		goto save;
+ 	}
+ 
+ 	/* Otherwise set the foreground colour. */
+-	tty_putcode1(tty, TTYC_SETAF, gc->fg);
++	tty_putcode_i(tty, TTYC_SETAF, gc->fg);
+ 
+ save:
+ 	/* Save the new values in the terminal current cell. */
+@@ -2800,12 +2800,12 @@ tty_colours_bg(struct tty *tty, const struct grid_cell *gc)
+ 			xsnprintf(s, sizeof s, "\033[%dm", gc->bg + 10);
+ 			tty_puts(tty, s);
+ 		} else
+-			tty_putcode1(tty, TTYC_SETAB, gc->bg - 90 + 8);
++			tty_putcode_i(tty, TTYC_SETAB, gc->bg - 90 + 8);
+ 		goto save;
+ 	}
+ 
+ 	/* Otherwise set the background colour. */
+-	tty_putcode1(tty, TTYC_SETAB, gc->bg);
++	tty_putcode_i(tty, TTYC_SETAB, gc->bg);
+ 
+ save:
+ 	/* Save the new values in the terminal current cell. */
+@@ -2841,10 +2841,10 @@ tty_colours_us(struct tty *tty, const struct grid_cell *gc)
+ 	 * non-RGB version may be wrong.
+ 	 */
+ 	if (tty_term_has(tty->term, TTYC_SETULC))
+-		tty_putcode1(tty, TTYC_SETULC, c);
++		tty_putcode_i(tty, TTYC_SETULC, c);
+ 	else if (tty_term_has(tty->term, TTYC_SETAL) &&
+ 	    tty_term_has(tty->term, TTYC_RGB))
+-		tty_putcode1(tty, TTYC_SETAL, c);
++		tty_putcode_i(tty, TTYC_SETAL, c);
+ 
+ save:
+ 	/* Save the new values in the terminal current cell. */
+@@ -2858,18 +2858,18 @@ tty_try_colour(struct tty *tty, int colour, const char *type)
+ 
+ 	if (colour & COLOUR_FLAG_256) {
+ 		if (*type == '3' && tty_term_has(tty->term, TTYC_SETAF))
+-			tty_putcode1(tty, TTYC_SETAF, colour & 0xff);
++			tty_putcode_i(tty, TTYC_SETAF, colour & 0xff);
+ 		else if (tty_term_has(tty->term, TTYC_SETAB))
+-			tty_putcode1(tty, TTYC_SETAB, colour & 0xff);
++			tty_putcode_i(tty, TTYC_SETAB, colour & 0xff);
+ 		return (0);
+ 	}
+ 
+ 	if (colour & COLOUR_FLAG_RGB) {
+ 		colour_split_rgb(colour & 0xffffff, &r, &g, &b);
+ 		if (*type == '3' && tty_term_has(tty->term, TTYC_SETRGBF))
+-			tty_putcode3(tty, TTYC_SETRGBF, r, g, b);
++			tty_putcode_iii(tty, TTYC_SETRGBF, r, g, b);
+ 		else if (tty_term_has(tty->term, TTYC_SETRGBB))
+-			tty_putcode3(tty, TTYC_SETRGBB, r, g, b);
++			tty_putcode_iii(tty, TTYC_SETRGBB, r, g, b);
+ 		return (0);
+ 	}
+ 
+@@ -2953,7 +2953,7 @@ tty_clipboard_query(struct tty *tty)
+ 
+ 	if ((~tty->flags & TTY_STARTED) || (tty->flags & TTY_OSC52QUERY))
+ 		return;
+-	tty_putcode_ptr2(tty, TTYC_MS, "", "?");
++	tty_putcode_ss(tty, TTYC_MS, "", "?");
+ 
+ 	tty->flags |= TTY_OSC52QUERY;
+ 	evtimer_set(&tty->clipboard_timer, tty_clipboard_query_callback, tty);
+-- 
+2.40.1
+
+
+From de51c8eb81b9db49fa34a8ea7886c9fe4164f46d Mon Sep 17 00:00:00 2001
+From: Nicholas Marriott <nicholas.marriott@gmail.com>
+Date: Fri, 28 Apr 2023 06:44:40 +0100
+Subject: [PATCH 2/3] Use ncurses' new tparm_s function (added in 6.4-20230424)
+ instead of tparm so it does not object to string arguments in capabilities it
+ doesn't already know.
+
+(cherry picked from commit 39d41d0810d4e8ae6ce8d27776dfbb96722d9319)
+---
+ configure.ac |  4 ++++
+ tty-term.c   | 48 +++++++++++++++++++++++++++++++++++++++---------
+ 2 files changed, 43 insertions(+), 9 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 2b8b3b11..3c3c1873 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -344,6 +344,10 @@ else
+ 		AC_MSG_ERROR("curses not found")
+ 	fi
+ fi
++AC_CHECK_FUNCS([ \
++	tiparm \
++	tiparm_s \
++])
+ 
+ # Look for utempter.
+ AC_ARG_ENABLE(
+diff --git a/tty-term.c b/tty-term.c
+index 32dd849a..18b17420 100644
+--- a/tty-term.c
++++ b/tty-term.c
+@@ -764,7 +764,13 @@ tty_term_string_i(struct tty_term *term, enum tty_code_code code, int a)
+ {
+ 	const char	*x = tty_term_string(term, code), *s;
+ 
+-	s = tparm((char *)x, a);
++#if defined(HAVE_TIPARM_S)
++	s = tiparm_s(1, 0, x, a);
++#elif defined(HAVE_TIPARM)
++	s = tiparm(x, a);
++#else
++	s = tparm((char *)x, a, 0, 0, 0, 0, 0, 0, 0, 0);
++#endif
+ 	if (s == NULL)
+ 		fatalx("could not expand %s", tty_term_codes[code].name);
+ 	return (s);
+@@ -775,19 +781,31 @@ tty_term_string_ii(struct tty_term *term, enum tty_code_code code, int a, int b)
+ {
+ 	const char	*x = tty_term_string(term, code), *s;
+ 
+-	s = tparm((char *)x, a, b);
++#if defined(HAVE_TIPARM_S)
++	s = tiparm_s(2, 0, x, a, b);
++#elif defined(HAVE_TIPARM)
++	s = tiparm(x, a, b);
++#else
++	s = tparm((char *)x, a, b, 0, 0, 0, 0, 0, 0, 0);
++#endif
+ 	if (s == NULL)
+ 		fatalx("could not expand %s", tty_term_codes[code].name);
+ 	return (s);
+ }
+ 
+ const char *
+-tty_term_string_iii(struct tty_term *term, enum tty_code_code code, int a, int b,
+-    int c)
++tty_term_string_iii(struct tty_term *term, enum tty_code_code code, int a,
++    int b, int c)
+ {
+ 	const char	*x = tty_term_string(term, code), *s;
+ 
+-	s = tparm((char *)x, a, b, c);
++#if defined(HAVE_TIPARM_S)
++	s = tiparm_s(3, 0, x, a, b, c);
++#elif defined(HAVE_TIPARM)
++	s = tiparm(x, a, b, c);
++#else
++	s = tparm((char *)x, a, b, c, 0, 0, 0, 0, 0, 0);
++#endif
+ 	if (s == NULL)
+ 		fatalx("could not expand %s", tty_term_codes[code].name);
+ 	return (s);
+@@ -798,19 +816,31 @@ tty_term_string_s(struct tty_term *term, enum tty_code_code code, const char *a)
+ {
+ 	const char	*x = tty_term_string(term, code), *s;
+ 
+-	s = tparm((char *)x, (long)a);
++#if defined(HAVE_TIPARM_S)
++	s = tiparm_s(1, 1, x, a);
++#elif defined(HAVE_TIPARM)
++	s = tiparm(x, a);
++#else
++	s = tparm((char *)x, (long)a, 0, 0, 0, 0, 0, 0, 0, 0);
++#endif
+ 	if (s == NULL)
+ 		fatalx("could not expand %s", tty_term_codes[code].name);
+ 	return (s);
+ }
+ 
+ const char *
+-tty_term_string_ss(struct tty_term *term, enum tty_code_code code, const char *a,
+-    const char *b)
++tty_term_string_ss(struct tty_term *term, enum tty_code_code code,
++    const char *a, const char *b)
+ {
+ 	const char	*x = tty_term_string(term, code), *s;
+ 
+-	s = tparm((char *)x, (long)a, (long)b);
++#if defined(HAVE_TIPARM_S)
++	s = tiparm_s(2, 3, x, a, b);
++#elif defined(HAVE_TIPARM)
++	s = tiparm(x, a, b);
++#else
++	s = tparm((char *)x, (long)a, b, 0, 0, 0, 0, 0, 0, 0);
++#endif
+ 	if (s == NULL)
+ 		fatalx("could not expand %s", tty_term_codes[code].name);
+ 	return (s);
+-- 
+2.40.1
+
+
+From 732135ed357566d65749fde1967f5639026d9418 Mon Sep 17 00:00:00 2001
+From: nicm <nicm>
+Date: Fri, 28 Apr 2023 05:59:35 +0000
+Subject: [PATCH 3/3] Do not fatal if tparm fails, instead just log it (not
+ working sequences are better than exiting).
+
+(cherry picked from commit bf636d9575806134ca7efd917ee0d54e9330ae86)
+---
+ tty-term.c | 30 ++++++++++++++++++++----------
+ 1 file changed, 20 insertions(+), 10 deletions(-)
+
+diff --git a/tty-term.c b/tty-term.c
+index 18b17420..e489f610 100644
+--- a/tty-term.c
++++ b/tty-term.c
+@@ -771,8 +771,10 @@ tty_term_string_i(struct tty_term *term, enum tty_code_code code, int a)
+ #else
+ 	s = tparm((char *)x, a, 0, 0, 0, 0, 0, 0, 0, 0);
+ #endif
+-	if (s == NULL)
+-		fatalx("could not expand %s", tty_term_codes[code].name);
++	if (s == NULL) {
++		log_debug("could not expand %s", tty_term_codes[code].name);
++		return ("");
++	}
+ 	return (s);
+ }
+ 
+@@ -788,8 +790,10 @@ tty_term_string_ii(struct tty_term *term, enum tty_code_code code, int a, int b)
+ #else
+ 	s = tparm((char *)x, a, b, 0, 0, 0, 0, 0, 0, 0);
+ #endif
+-	if (s == NULL)
+-		fatalx("could not expand %s", tty_term_codes[code].name);
++	if (s == NULL) {
++		log_debug("could not expand %s", tty_term_codes[code].name);
++		return ("");
++	}
+ 	return (s);
+ }
+ 
+@@ -806,8 +810,10 @@ tty_term_string_iii(struct tty_term *term, enum tty_code_code code, int a,
+ #else
+ 	s = tparm((char *)x, a, b, c, 0, 0, 0, 0, 0, 0);
+ #endif
+-	if (s == NULL)
+-		fatalx("could not expand %s", tty_term_codes[code].name);
++	if (s == NULL) {
++		log_debug("could not expand %s", tty_term_codes[code].name);
++		return ("");
++	}
+ 	return (s);
+ }
+ 
+@@ -823,8 +829,10 @@ tty_term_string_s(struct tty_term *term, enum tty_code_code code, const char *a)
+ #else
+ 	s = tparm((char *)x, (long)a, 0, 0, 0, 0, 0, 0, 0, 0);
+ #endif
+-	if (s == NULL)
+-		fatalx("could not expand %s", tty_term_codes[code].name);
++	if (s == NULL) {
++		log_debug("could not expand %s", tty_term_codes[code].name);
++		return ("");
++	}
+ 	return (s);
+ }
+ 
+@@ -841,8 +849,10 @@ tty_term_string_ss(struct tty_term *term, enum tty_code_code code,
+ #else
+ 	s = tparm((char *)x, (long)a, b, 0, 0, 0, 0, 0, 0, 0);
+ #endif
+-	if (s == NULL)
+-		fatalx("could not expand %s", tty_term_codes[code].name);
++	if (s == NULL) {
++		log_debug("could not expand %s", tty_term_codes[code].name);
++		return ("");
++	}
+ 	return (s);
+ }
+ 
+-- 
+2.40.1
+
