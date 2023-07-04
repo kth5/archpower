@@ -3,7 +3,7 @@
 
 pkgname=avisynthplus
 pkgver=3.7.2
-pkgrel=1
+pkgrel=2
 pkgdesc='An improved version of the AviSynth frameserver'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://avs-plus.net/'
@@ -11,25 +11,36 @@ license=('GPL')
 depends=('gcc-libs' 'hicolor-icon-theme')
 optdepends=('devil: for ImageSeq plugin')
 makedepends=('cmake' 'devil')
+provides=('libavisynth.so')
 source=("https://github.com/AviSynth/AviSynthPlus/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz"
+        '010-avisynthplus-gcc13-fix-001.patch'::'https://github.com/AviSynth/AviSynthPlus/commit/3d03c8a7290450d66445e5c7eb9ca1fe3576790a.patch'
+        '020-avisynthplus-gcc13-fix-002.patch'
         'avisynthplus.xml')
 sha256sums=('6159fd976dffa62d5db5277cbb0b3b7f7a4ee92fc8667edd32da9840a669ccc1'
+            '8470f66e005bdce795b274f904e54806af3a4a8b08c67f72e53b081deb101fac'
+            '2f2a6b852ce29a5b7a65bc9b9c00daed31f7d1237df08cfacb90a785c4425e53'
             'c4b270a3df7fbe1c153400215169c4ae4cae3b7a8710c843393e3a6ed0fd8a3e')
+
+prepare() {
+    patch -d "AviSynthPlus-${pkgver}" -Np1 -i "${srcdir}/010-avisynthplus-gcc13-fix-001.patch"
+    patch -d "AviSynthPlus-${pkgver}" -Np1 -i "${srcdir}/020-avisynthplus-gcc13-fix-002.patch"
+}
 
 build() {
     case "${CARCH}" in
-        powerpc|riscv64) _cmake_options+=(-DCMAKE_CXX_FLAGS="-latomic") ;;
+      powerpc|riscv64) _cmake_options+=(-DCMAKE_CXX_FLAGS="-latomic") ;;
     esac
 
     cmake -B build -S "AviSynthPlus-${pkgver}" \
+        -G 'Unix Makefiles' \
         -DCMAKE_BUILD_TYPE:STRING='None' \
         -DCMAKE_INSTALL_PREFIX:PATH='/usr' \
         -Wno-dev ${_cmake_options[@]}
-    make -C build
+    cmake --build build
 }
 
 package() {
-    make -C build DESTDIR="$pkgdir" install
+    DESTDIR="$pkgdir" cmake --install build
     install -D -m644 avisynthplus.xml -t "${pkgdir}/usr/share/mime/packages"
     
     local _icon
