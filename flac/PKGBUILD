@@ -1,56 +1,44 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
 # Contributor: Eric Bélanger <eric@archlinux.org>
 
 pkgbase=flac
 pkgname=('flac' 'flac-doc')
-pkgver=1.4.2
+pkgver=1.4.3
 pkgrel=1
 pkgdesc='Free Lossless Audio Codec'
 url='https://xiph.org/flac/'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=('BSD' 'GPL')
 depends=('gcc-libs' 'libogg')
-makedepends=('cmake' 'ninja' 'doxygen' 'git')
-makedepends_x86_64=('nasm' 'pandoc')
-options=('debug')
-_commit=b32e5cbf9818ca23dd22aaa75522042c16ea7d17  # tags/1.4.2
-source=("git+https://github.com/xiph/flac?signed#commit=$_commit")
-b2sums=('SKIP')
-validpgpkeys=('5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23') # https://github.com/web-flow.gpg
+makedepends=('cmake' 'ninja' 'doxygen')
+makedepends_x86_64=('nasm')
+source=(https://github.com/xiph/flac/releases/download/${pkgver}/flac-${pkgver}.tar.xz)
+b2sums=('c4f441aeaa0493433347b8a110ca01865fd40d5b21150174372af2fee4fa5c3397a67add31138e92999eab9d9abe6c46a5ac29e13cbac60093fbff6d7a672ad3')
 
-pkgver() {
-  cd flac
-  git describe --tags | sed 's/[^-]*-g/r&/;s/-/+/g'
-}
+# https://github.com/xiph/flac/releases
+sha256sums=('6c58e69cd22348f441b861092b825e591d0b822e106de6eb0ee4d05d27205b70')
 
 prepare() {
-  cd flac
-
-  # Fix GStreamer
-  # https://bugs.archlinux.org/task/76120
-  git cherry-pick -n 3d55a9dc6c14317b4766db96bb52e2fd95e920a9
+  cd flac-${pkgver}
 
   # Shorten tests
   sed -i 's/FLAC__TEST_LEVEL=1/FLAC__TEST_LEVEL=0/' test/CMakeLists.txt
 }
 
 build() {
-  # no pandoc due to dropped haskell stack in Arch POWER
-  MANPAGES=OFF
-  [[ -f /usr/bin/pandoc ]] && MANPAGES=ON 
-
-  cmake -S flac -B build -G Ninja \
+  cmake -S flac-${pkgver} -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DBUILD_SHARED_LIBS=ON \
-    -DINSTALL_MANPAGES=${MANPAGES} \
+    -DINSTALL_MANPAGES=ON \
     -DWITH_STACK_PROTECTOR=OFF \
     -DNDEBUG=ON
   cmake --build build
 
   # Build docs and place them where install expects them
   cmake --build build --target FLAC-doxygen
-  mv build/doc/doxytmp/html flac/doc/api
+  mv build/doc/doxytmp/html flac-${pkgver}/doc/api
 }
 
 check() {
@@ -63,12 +51,12 @@ package_flac() {
 
   DESTDIR="${pkgdir}" cmake --install build
 
-  install -Dm 644 flac/src/*/*.m4 -t "${pkgdir}/usr/share/aclocal"
+  install -Dm 644 flac-${pkgver}/src/*/*.m4 -t "${pkgdir}/usr/share/aclocal"
 
   mkdir -p doc/usr/share
   mv {"${pkgdir}",doc}/usr/share/doc
 
-  install -Dm 644 flac/COPYING.Xiph -t "${pkgdir}/usr/share/licenses/${pkgname}"
+  install -Dm 644 flac-${pkgver}/COPYING.Xiph -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
 
 package_flac-doc() {
@@ -77,7 +65,7 @@ package_flac-doc() {
 
   mv doc/* "$pkgdir"
 
-  install -Dm 644 flac/COPYING.Xiph -t "${pkgdir}/usr/share/licenses/${pkgname}"
+  install -Dm 644 flac-${pkgver}/COPYING.Xiph -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
 
 # vim:set sw=2 sts=-1 et:
