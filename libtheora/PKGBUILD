@@ -1,36 +1,51 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Tom Killian <tom@archlinux.org>
+# Maintainer: Balló György <ballogyor+arch at gmail dot com>
+# Contributor: Tom Killian <tom@archlinux.org>
 # Committer: dorphell <dorphell@archlinux.org>
 
 pkgname=libtheora
 pkgver=1.1.1
-pkgrel=5
-pkgdesc="An open video codec developed by the Xiph.org"
+pkgrel=6
+pkgdesc='Standard encoder and decoder library for the Theora video compression format'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url="https://www.theora.org/"
+url='https://www.theora.org/'
 license=('BSD')
-depends=('libogg')
-makedepends=('libvorbis')
-source=(https://downloads.xiph.org/releases/theora/libtheora-${pkgver}.tar.bz2
-        libtheora-1.1.1-libpng16.patch)
-sha256sums=('b6ae1ee2fa3d42ac489287d3ec34c5885730b1296f0801ae577a35193d3affbc'
-            'e4c9a8dc798c596ed32a2a720020ae27a0e72f5add1a47cb8fadebe0e7180d7e')
+depends=('glibc' 'libogg')
+makedepends=('libpng' 'libvorbis' 'sdl12-compat')
+options=(!ccache)
+source=("https://downloads.xiph.org/releases/theora/$pkgname-$pkgver.tar.xz"
+        'libtheora-1.1.1-libpng16.patch'
+        'libtheora-1.1.1-fix-UB.patch'
+        'libtheora-1.1.1-underlinking.patch'
+        'libtheora-1.0_beta2-flags.patch')
 
 prepare() {
-  cd ${pkgname}-${pkgver}
-  patch -Np0 -i ../libtheora-1.1.1-libpng16.patch
+  cd $pkgname-$pkgver
+  patch -Np1 -i ../libtheora-1.1.1-libpng16.patch
+  patch -Np1 -i ../libtheora-1.1.1-fix-UB.patch
+  patch -Np1 -i ../libtheora-1.1.1-underlinking.patch
+  patch -Np1 -i ../libtheora-1.0_beta2-flags.patch
 }
 
 build() {
-  cd ${pkgname}-${pkgver}
-  ./configure --build=$CHOST --prefix=/usr --enable-shared --disable-static
+  cd $pkgname-$pkgver
+  LDFLAGS+=' -lm' \
+  ./configure --prefix=/usr --build=${CHOST}
   make
 }
 
-package() {
-  cd ${pkgname}-${pkgver}
-  make DESTDIR="${pkgdir}" install
-
-  install -m755 -d "${pkgdir}/usr/share/licenses/${pkgname}"
-  install -m644 LICENSE COPYING "${pkgdir}/usr/share/licenses/${pkgname}/"
+check() {
+  cd $pkgname-$pkgver
+  make check
 }
+
+package() {
+  cd $pkgname-$pkgver
+  make DESTDIR="$pkgdir" install
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname/" LICENSE COPYING
+}
+sha256sums=('f36da409947aa2b3dcc6af0a8c2e3144bc19db2ed547d64e9171c59c66561c61'
+            'a435a75416af642f567e0c90818d59ee186f652d3cde5db619de11b827b612e1'
+            '374cc9708e0fe305493a5184de4191244eb249397820286afdbf2e0d5913a86d'
+            '4fb4394eed49894a863eedbd086256b1184f90fff6a8eadcd0a8514232da884d'
+            'bef315bb5071bd68572c2768944e4bd4d0d94b59ab75ce447679c76f20a0d328')
