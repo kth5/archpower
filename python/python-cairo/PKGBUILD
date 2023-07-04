@@ -2,23 +2,28 @@
 # Contributor: Angel Velasquez <angvp@archlinux.org>  
 # Contributor: Jan de Groot <jgc@archlinux.org>
 
-pkgname=python-cairo
+pkgbase=python-cairo
+pkgname=(python-cairo python-cairo-docs)
 pkgver=1.23.0
-pkgrel=4
+pkgrel=6
 pkgdesc="Python bindings for the cairo graphics library"
 url="https://pycairo.readthedocs.io/en/latest/"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=(LGPL2.1 MPL)
 depends=(cairo python)
-makedepends=(meson)
+makedepends=(meson python-sphinx python-sphinx_rtd_theme)
 checkdepends=(python-pytest)
-source=(https://github.com/pygobject/pycairo/releases/download/v$pkgver/pycairo-$pkgver.tar.gz{,.sig})
+source=(https://github.com/pygobject/pycairo/releases/download/v$pkgver/pycairo-$pkgver.tar.gz{,.sig}
+        pycairo-sphinx6.patch)
 sha256sums=('9b61ac818723adc04367301317eb2e814a83522f07bbd1f409af0dada463c44c'
-            'SKIP')
+            'SKIP'
+            '5fa2e013da5d2a985c244b0b9d18a08435c207149f94a21f97837e79e15b71c0')
 validpgpkeys=(0EBF782C5D53F7E5FB02A66746BD761F7A49B0EC) # Christoph Reiter <reiter.christoph@gmail.com>
 
 prepare() {
   cd pycairo-$pkgver
+  # https://github.com/pygobject/pycairo/pull/318
+  patch -Np1 -i ../pycairo-sphinx6.patch
 }
 
 build() {
@@ -30,12 +35,20 @@ check() {
   meson test -C build --print-errorlogs
 }
 
-package() {
+package_python-cairo() {
   meson install -C build --destdir="$pkgdir"
 
   # compile Python bytecode
   python -m compileall -d /usr/lib "$pkgdir/usr/lib"
   python -O -m compileall -d /usr/lib "$pkgdir/usr/lib"
+}
+
+package_python-cairo-docs() {
+  pkgdesc="Developer documentation for Pycairo"
+  depends=()
+
+  python -m sphinx -b html pycairo-$pkgver/docs "$pkgdir/usr/share/doc/pycairo/html"
+  rm -r "$pkgdir/usr/share/doc/pycairo/html/.doctrees"
 }
 
 # vim:set sw=2 sts=-1 et:
