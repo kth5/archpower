@@ -1,38 +1,57 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Giovanni Scafora <giovanni@archlinux.org>
+# Maintainer: Caleb Maclennan <caleb@alerque.com>
+# Maintainer: Jelle van der Waa <jelle@vdwaa.nl>
+# Contributor: Giovanni Scafora <giovanni@archlinux.org>
 # Contributor: BlackEagle < ike DOT devolder AT gmail DOT com >
 # Contributor: Preecha Patumchareonpol <yumyai at gmail.com> 
 
-pkgname=podofo
-pkgver=0.9.8
-pkgrel=5
-pkgdesc="A C++ library to work with the PDF file format"
+pkgbase=podofo
+pkgname=(podofo{,-tools})
+pkgver=0.10.1
+pkgrel=1
+pkgdesc='A C++ library to work with the PDF file format'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url="http://podofo.sourceforge.net"
-license=('GPL')
-depends=('lua' 'openssl' 'fontconfig' 'libtiff' 'libidn' 'libjpeg-turbo')
-makedepends=('cmake')
-source=("https://downloads.sourceforge.net/${pkgname}/${pkgname}-${pkgver}.tar.gz")
-md5sums=('f6d3d5f917c7150c44fc6a15848442dd')
-sha256sums=('5de607e15f192b8ad90738300759d88dea0f5ccdce3bf00048a0c932bc645154')
+url="http://$pkgname.sourceforge.net"
+_url="https://github.com/$pkgname/$pkgname"
+license=(LGPL2.1)
+depends=(fontconfig
+         freetype2
+         libidn
+         libjpeg-turbo
+         libpng
+         libtiff
+         libxml2
+         lua
+         openssl
+         zlib)
+makedepends=(cmake)
+_archive="$pkgname-$pkgver"
+source=("$_url/archive/$pkgver/$_archive.tar.gz")
+sha256sums=('9b2bb5d54185a547e440413ca2e9ec3ea9c522fec81dfeb9a23dbc3d65fbaa55')
 
 build() {
-  cd ${pkgname}-${pkgver}
-
-  mkdir -p "test/TokenizerTest/objects"
-
-  mkdir build
-  cd build
-  cmake -DCMAKE_INSTALL_PREFIX=/usr .. \
-        -DFREETYPE_INCLUDE_DIR=/usr/include/freetype2 \
-        -DPODOFO_BUILD_SHARED=1 \
-        -DPODOFO_HAVE_JPEG_LIB=1 \
-        -DPODOFO_HAVE_PNG_LIB=1 \
-        -DPODOFO_HAVE_TIFF_LIB=1
-  make
+	cd "$_archive"
+	cmake -B build \
+		-D CMAKE_INSTALL_PREFIX=/usr \
+		-D PODOFO_BUILD_TOOLS=True \
+		-D PODOFO_HAVE_JPEG_LIB=True \
+		-D PODOFO_HAVE_PNG_LIB=True \
+		-D PODOFO_HAVE_TIFF_LIB=True
+	make -C build
 }
 
-package() {
-  cd ${pkgname}-${pkgver}/build
-  make DESTDIR="${pkgdir}" install
+package_podofo() {
+	provides=(libpodofo.so)
+	cd "$_archive"
+	make -C build DESTDIR="$pkgdir" install
+	local toolspkg="$pkgdir-tools"
+	mkdir -p "$toolspkg/usr/"
+	mv "$pkgdir/usr/bin" $toolspkg/usr
+}
+
+package_podofo-tools() {
+	license=(GPL2)
+	depends+=(libpodofo.so)
+	cd "$_archive"
+	install -Dm0644 -t "$pkgdir/usr/share/man/man1" man/*.1
 }
