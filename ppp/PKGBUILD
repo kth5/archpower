@@ -3,8 +3,8 @@
 # Contributor: Thomas Baechler <thomas@archlinux.org>
 
 pkgname=ppp
-pkgver=2.4.9
-pkgrel=3
+pkgver=2.5.0
+pkgrel=1
 pkgdesc="A daemon which implements the Point-to-Point Protocol for dial-up networking"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://www.samba.org/ppp/"
@@ -12,7 +12,6 @@ license=('GPL' 'BSD')
 depends=('glibc' 'libpcap' 'libxcrypt' 'openssl')
 backup=(etc/ppp/{chap-secrets,pap-secrets,options,ip-up,ip-down,ip-down.d/00-dns.sh,ip-up.d/00-dns.sh,ipv6-up.d/00-iface-config.sh})
 source=(https://download.samba.org/pub/ppp/ppp-$pkgver.tar.gz{,.asc}
-        ppp-2.4.6-makefiles.patch
         options
         ip-up
         ip-down
@@ -23,9 +22,8 @@ source=(https://download.samba.org/pub/ppp/ppp-$pkgver.tar.gz{,.asc}
         ipv6-up.d.iface-config.sh
         ppp.systemd
         LICENSE)
-sha512sums=('5721b1915f2d02b895508601120d09ff17a76cbab62cbcb7d0216837bdf84f10f345311b77f346b120bda3b488ae10d7d942c4d7d5f1e369d0a002f3071099f1'
+sha512sums=('094368ea2aa6c6e8dfba4443509857a7c1c7ff839bb6d6657743802477208c01e87db31593cef0932d3725c640e9c103179da6b742825034cda82bd31ddcc2ed'
             'SKIP'
-            '90b6b7c40cece43ed90a69aa1a2fa11c23da85045105354e7440cdb0d059f9ea660b58bf9d3045e32ffb05a8e65ff3d5a101002ac1f48f3f608b1706d6bc5c81'
             '4324a9abe79b20735b87de2158bb73b6449415a4760f06a06b648dfb53517f8d9907b094a88d1b492b24c8720cfd9b17d491fbe236fbd51ba9042af60483b231'
             'bdaaac792dd448ff31da6da2749d8c2f9c4e0311b1d4639de7c68038fcaa333cc28e25f5a6308de0ecb24b60b2e7284a811482df990da5f54d5581a746964f3c'
             '92f3a5e383f2c888938e891ba831042e7f8c026b0ddf5ce8c3523d06ac32fa81742e638a4c665975cbc79868b98806d92574ee2ee8e034e33b065a90ee3ab28b'
@@ -39,30 +37,17 @@ sha512sums=('5721b1915f2d02b895508601120d09ff17a76cbab62cbcb7d0216837bdf84f10f34
 validpgpkeys=('631E179E370CD727A7F2A33A9E4295D605F66CE9'  # Paul Mackerras (Signing key) <paulus@samba.org>
               'DE8E01561D8276A4DBFAEFCC040F1D49EC9DBB8C') # Paul Mackerras <paulus@ozlabs.org>
 
-prepare() {
-  cd $pkgname-$pkgver
-
-  patch -p1 -i "$srcdir"/ppp-2.4.6-makefiles.patch
-
-  # enable active filter
-  sed -i "s:^#FILTER=y:FILTER=y:" pppd/Makefile.linux
-  # enable ipv6 support
-  sed -i "s:^#HAVE_INET6=y:HAVE_INET6=y:" pppd/Makefile.linux
-  # Enable Microsoft proprietary Callback Control Protocol
-  sed -i "s:^#CBCP=y:CBCP=y:" pppd/Makefile.linux
-}
-
 build() {
   cd $pkgname-$pkgver
 
-  # -D_GNU_SOURCE is needed for IPv6 to work apparently
-  CFLAGS="$CPPFLAGS $CFLAGS -D_GNU_SOURCE" LDFLAGS="$LDFLAGS" ./configure --prefix=/usr
+  ./configure --prefix=/usr --sbindir=/usr/bin --sysconfdir=/etc --runstatedir=/run \
+              --enable-systemd --enable-cbcp --enable-multilink
   make
 }
 
 package() {
   cd $pkgname-$pkgver
-  make INSTROOT="$pkgdir" install
+  make DESTDIR="$pkgdir" install
 
   install -D -m644 ../options "$pkgdir"/etc/ppp/options
   install -D -m755 ../ip-up   "$pkgdir"/etc/ppp/ip-up
