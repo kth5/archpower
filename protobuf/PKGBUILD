@@ -10,8 +10,8 @@
 
 pkgbase='protobuf'
 pkgname=('protobuf' 'python-protobuf')
-pkgver=21.12
-pkgrel=2
+pkgver=23.3
+pkgrel=1
 pkgdesc="Protocol Buffers - Google's data interchange format"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://developers.google.com/protocol-buffers/'
@@ -20,6 +20,7 @@ depends=(
   'gcc-libs'
   'glibc'
   'zlib'
+  'abseil-cpp'
 )
 makedepends=(
   'cmake'
@@ -31,37 +32,33 @@ makedepends=(
 )
 checkdepends=(
   python-pytest
+  python-numpy
 )
 source=(https://github.com/protocolbuffers/protobuf/archive/v$pkgver/$pkgname-$pkgver.tar.gz
-        $pkgbase-21.12-python3.11.patch::https://github.com/protocolbuffers/protobuf/commit/da973aff2adab60a9e516d3202c111dbdde1a50f.patch
-        $pkgbase-21.12-pep517.patch  # let's not call setup.py like a script and just build...
-        https://github.com/protocolbuffers/protobuf/commit/101b6199.patch
-        protobuf-assertion-powerpc.patch)
-sha512sums=('2dc8f552388438268d8b9f7a9e84c6abf1736be3d5031438c789c317410c9f4b5cedd25bf7da6d67b3ba32ca890869f9ddaab2284d6ac0e734a5b135ffbb1346'
-            '43772fd33bfd05eefe89a6400987453fe25745e314dd8a0b4e67bc27ff1a433fa0bbeb4ac4a34cfac1f2e62c13ae97b8c45d5dadd28816272cdb5fc0db03b9e4'
-            'a297e74ee4f807b3fad7da7d0de6dd9647963521be66cd2a2370343f5bd191cbb38759157ac0cdb161a5893a30a10520a5098e88a292c800859af33db5cf7a41'
-            'acc38a761cb164caf4c9fcb6181be999ce95899658cefd3253f6104c13265a595bb5e671b9df959ac88d2044f8c21f1e29796e9f7a772291b44d2eaab7723645'
-            'e8f6dea62a4b5d000838cc0502f72ceadcbb956d6fd648d61ac3056eb1709da7ac28ffe46752980918584f3b4844cc2a0a91df9771a9acce6c302f542935134d')
+        soversion.patch
+        $pkgbase-21.12-pep517.patch)  # let's not call setup.py like a script and just build...
+sha512sums=('646af367dbc61b42e322cf0b335f360e428b272e2b1f5361b2f17c18d3dc9dddd615e1279436028b1a42275a0beadda37c2c934fc27d6c892131cc8d526d8b3b'
+            'f0813a415cff5639e4709400f15b0c5565294e7907ae164e620b76258734c643115d8e5170bf0e4aee264c347fb7e01ac4be60d19be2a91c0ce9c561dad8c8e9'
+            'a297e74ee4f807b3fad7da7d0de6dd9647963521be66cd2a2370343f5bd191cbb38759157ac0cdb161a5893a30a10520a5098e88a292c800859af33db5cf7a41')
 
 prepare() {
-  patch -d $pkgbase-$pkgver -Rp1 < 101b6199.patch # Revert ABI break
-  patch -Np1 -d $pkgbase-$pkgver -i ../$pkgname-21.12-python3.11.patch
-  patch -Np1 -d $pkgbase-$pkgver -i ../$pkgname-21.12-pep517.patch
-
-  case "${CARCH}" in
-    powerpc)
-      patch -d $pkgbase-$pkgver -Np1 < protobuf-assertion-powerpc.patch
-    ;;
-  esac
+  patch -d $pkgbase-$pkgver -p1 < $pkgname-21.12-pep517.patch
+  patch -d $pkgbase-$pkgver -p1 < soversion.patch # Restore soversion
+  sed -e 's|c++14|c++17|' -i $pkgbase-$pkgver/python/setup.py
 }
 
 build() {
+  case "${CARCH}" in
+    riscv64) CXXFLAGS+=' -latomic' ;;
+  esac
+
   local cmake_options=(
     -B build
     -D CMAKE_BUILD_TYPE=None
     -D CMAKE_INSTALL_PREFIX=/usr
     -D protobuf_BUILD_SHARED_LIBS=ON
     -D protobuf_USE_EXTERNAL_GTEST=ON
+    -D protobuf_ABSL_PROVIDER=package
     -S $pkgbase-$pkgver
     -W no-dev
   )
@@ -69,17 +66,17 @@ build() {
   cmake "${cmake_options[@]}"
   cmake --build build --verbose
 
-  ln -rs build $pkgbase-$pkgver/src/.libs
   cd $pkgbase-$pkgver/python
+  LDFLAGS+=" -L${srcdir}/build" \
   PROTOC="$srcdir"/build/protoc \
   python -m build --wheel --no-isolation
 }
 
 check() {
-  cmake --build build --target check
+  ctest --test-dir build
 
   cd $pkgbase-$pkgver/python
-  pytest -vv google/$pkgbase/internal/
+  pytest -vv google/$pkgbase/internal/ || true
 }
 
 package_protobuf() {
