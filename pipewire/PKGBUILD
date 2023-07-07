@@ -11,6 +11,7 @@ pkgname=(
   pipewire-docs
   pipewire-audio
   pipewire-alsa
+  pipewire-ffado
   pipewire-jack
   pipewire-pulse
   pipewire-roc
@@ -19,9 +20,9 @@ pkgname=(
   pipewire-v4l2
   pipewire-x11-bell
 )
-_commit=9f7d60c1e84cc0481afc3f6ccf76e127567943a8  # tags/0.3.70
-pkgver=0.3.70
-pkgrel=2
+_commit=4cc22d60d2280fb3c771e6a246e79c90819fd485  # tags/0.3.72
+pkgver=0.3.72
+pkgrel=1
 epoch=1
 pkgdesc="Low-latency audio/video router and processor"
 url="https://pipewire.org"
@@ -40,6 +41,7 @@ makedepends=(
   libcamera
   libcanberra
   libfdk-aac
+  libffado
   libfreeaptx
   liblc3
   libmysofa
@@ -59,7 +61,6 @@ makedepends=(
   sbc
   sdl2
   systemd
-  tinycompress
   valgrind
   webrtc-audio-processing
 )
@@ -67,8 +68,8 @@ makedepends_powerpc64le=(libldac)
 makedepends_riscv64=(libldac)
 makedepends_x86_64=(libldac)
 checkdepends=(desktop-file-utils)
-source=(git+https://gitlab.freedesktop.org/pipewire/pipewire.git#commit=$_commit)
-sha256sums=('SKIP')
+source=("git+https://gitlab.freedesktop.org/pipewire/pipewire.git#commit=$_commit")
+b2sums=('SKIP')
 
 pkgver() {
   cd pipewire
@@ -95,6 +96,7 @@ build() {
     -D session-managers=[]
     -D udevrulesdir=/usr/lib/udev/rules.d
   )
+
   case "${CARCH}" in
     powerpc|powerpc64) meson_options+=(-D bluez5-codec-ldac=disabled) ;;
   esac
@@ -138,6 +140,7 @@ package_pipewire() {
     'pipewire-alsa: ALSA configuration'
     'pipewire-audio: Audio support'
     'pipewire-docs: Documentation'
+    'pipewire-ffado: FireWire support'
     'pipewire-jack: JACK support'
     'pipewire-pulse: PulseAudio replacement'
     'pipewire-roc: ROC streaming'
@@ -171,7 +174,7 @@ package_pipewire() {
     _pick docs usr/share/doc
 
     _pick audio usr/bin/pipewire-{aes67,avb}
-    _pick audio usr/bin/pw-{cat,play,record,midi{play,record},dsdplay}
+    _pick audio usr/bin/pw-{cat,{,enc}play,record,midi{play,record},dsdplay}
     _pick audio usr/bin/pw-{loopback,mididump}
     _pick audio usr/bin/spa-{acp-tool,resample}
     _pick audio usr/lib/alsa-lib
@@ -180,9 +183,10 @@ package_pipewire() {
     _pick audio usr/lib/pipewire-$_ver/libpipewire-module-fallback-sink.so
     _pick audio usr/lib/pipewire-$_ver/libpipewire-module-filter-chain.so
     _pick audio usr/lib/pipewire-$_ver/libpipewire-module-loopback.so
+    _pick audio usr/lib/pipewire-$_ver/libpipewire-module-netjack2-*.so
     _pick audio usr/lib/pipewire-$_ver/libpipewire-module-pipe-tunnel.so
     _pick audio usr/lib/pipewire-$_ver/libpipewire-module-protocol-simple.so
-    _pick audio usr/lib/pipewire-$_ver/libpipewire-module-rtp-*.so
+    _pick audio usr/lib/pipewire-$_ver/libpipewire-module-rtp-{sap,sink,source}.so
     _pick audio usr/lib/spa-0.2/{aec,alsa,audio*,avb,bluez5}
     _pick audio usr/lib/systemd/user/filter-chain.service
     _pick audio usr/share/alsa
@@ -190,6 +194,8 @@ package_pipewire() {
     _pick audio usr/share/pipewire/filter-chain*
     _pick audio usr/share/pipewire/pipewire-{aes67,avb}.conf
     _pick audio usr/share/spa-0.2/bluez5
+
+    _pick ffado usr/lib/pipewire-$_ver/libpipewire-module-ffado*.so
 
     _pick jack usr/bin/pw-jack
     _pick jack usr/include/jack
@@ -210,6 +216,7 @@ package_pipewire() {
     _pick gst usr/lib/gstreamer-1.0
 
     _pick zeroconf usr/lib/pipewire-$_ver/libpipewire-module-{raop,zeroconf}-*.so
+    _pick zeroconf usr/lib/pipewire-$_ver/libpipewire-module-rtp-session.so
 
     _pick v4l2 usr/bin/pw-v4l2 usr/lib/pipewire-$_ver/v4l2
 
@@ -258,20 +265,17 @@ package_pipewire-audio() {
     libfdk-aac.so
     libfreeaptx.so
     liblc3.so
+    libldacBT_enc.so
     liblilv-0.so
     libmysofa.so
     libopus.so
     libpipewire-$_ver.so
     libsbc.so
     libsndfile.so
-    libtinycompress.so
     libusb-1.0.so
     libwebrtc_audio_processing.so
     pipewire
   )
-  depends_powerpc64le=(libldacBT_enc.so)
-  depends_riscv64=(libldacBT_enc.so)
-  depends_x86_64=(libldacBT_enc.so)
 
   mv audio/* "$pkgdir"
 
@@ -298,6 +302,20 @@ package_pipewire-alsa() {
 
   install -Dm644 /dev/null \
     "$pkgdir/usr/share/pipewire/media-session.d/with-alsa"
+
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 pipewire/COPYING
+}
+
+package_pipewire-ffado() {
+  pkgdesc+=" - FireWire support"
+  depends=(
+    libffado.so
+    libpipewire-$_ver.so
+    pipewire
+    pipewire-audio
+  )
+
+  mv ffado/* "$pkgdir"
 
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 pipewire/COPYING
 }
@@ -389,6 +407,7 @@ package_pipewire-zeroconf() {
     libpipewire-$_ver.so
     openssl
     pipewire
+    pipewire-audio
   )
 
   mv zeroconf/* "$pkgdir"
