@@ -1,23 +1,35 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Jan de Groot <jgc@archlinux.org>
+# Maintainer: Balló György <ballogyor+arch at gmail dot com>
+# Contributor: Jan de Groot <jgc@archlinux.org>
 # Contributor: Ionut Biru <ibiru@archlinux.org>
 
 pkgname=liblouis
-pkgver=3.25.0
-pkgrel=2
-pkgdesc="Open-source braille translator and back-translator"
+pkgver=3.26.0
+pkgrel=1
+pkgdesc='Braille translator and back-translator library'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url="http://liblouis.org/"
-license=('GPL3')
-depends=(glibc)
-makedepends=(help2man python perl)
-source=(https://github.com/liblouis/liblouis/releases/download/v$pkgver/liblouis-$pkgver.tar.gz)
-sha256sums=('d720aa5fcd51de925a28ae801b8b2ca76ee67e2360b40055c679bce8e565f251')
+url='https://liblouis.io/'
+license=('LGPL3' 'GPL3')
+depends=('glibc')
+makedepends=('help2man' 'libyaml' 'python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+optdepends=('libyaml: lou_checkyaml command'
+            'python: Python bindings')
+source=("https://github.com/liblouis/liblouis/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
+sha256sums=('ca9446c57fbce16a856f99a1abf69ae2e8671d4d8ab44cfb353bb651a820b73e')
 
 build() {
   cd $pkgname-$pkgver
-  ./configure --prefix=/usr --disable-static --enable-ucs4
+  ./configure --prefix=/usr --enable-ucs4
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
+
+  cd python
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd $pkgname-$pkgver
+  make check
 }
 
 package() {
@@ -25,7 +37,5 @@ package() {
   make DESTDIR="$pkgdir" install
 
   cd python
-  LD_PRELOAD+=":$srcdir/$pkgname-$pkgver/liblouis/.libs/liblouis.so"
-  python setup.py install --root="$pkgdir" --prefix="/usr" --optimize=1
+  python -m installer --destdir="$pkgdir" dist/*.whl
 }
-# vim:set ts=2 sw=2 et:
