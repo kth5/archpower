@@ -1,0 +1,343 @@
+Submitted By:            Xi Ruoyao <xry111 at xry111 dot site>
+Date:                    2023-05-14
+Initial Package Version: 102.12.0esr
+Upstream Status:         Applied for nightly, but not ESR
+Origin:
+ - The first patch comes from
+   - https://github.com/rust-lang/rust-bindgen/pull/2319
+   - https://github.com/rust-lang/rust-bindgen/pull/2339
+   And they are integrated into mozilla at
+   - https://hg.mozilla.org/mozilla-central/rev/bd3481bf45fb
+ - The second patch comes from
+   - https://hg.mozilla.org/mozilla-central/rev/61f052c26dd1
+   - https://hg.mozilla.org/mozilla-central/rev/9fffd4b92c43
+ - The third patch comes from
+   - https://hg.mozilla.org/mozilla-central/rev/1a15f95b880f
+ - The fourth patch comes from
+   - https://github.com/mozilla/mp4parse-rust/commit/8d58b2d5fc7f
+   And it's integrated into mozilla at
+   - https://hg.mozilla.org/mozilla-central/rev/a651d4323066
+   A hack is added for Cargo.{toml,lock} to suppress sha256 check
+
+Description:             The first patch updates the bundled rust-bindgen
+                         crate to be compatible with Clang/LLVM 16.
+                         Without this patch, you will encounter "not a valid
+                         Ident" errors when building Firefox, and it will
+                         come out of fallback.rs in proc-macro2. This
+                         references mfbt/Vector.h (symlinked to 
+                         firefox-build-dir/dist/include/mozilla/Vector.h) in
+                         it's error output, but it is because LLVM changed
+                         how it reports anonymous items.
+
+                         The second patch adds missing "#include <cstdint>"
+                         for three C++ headers and source files.  Without
+                         this patch, it will fail to build with C++ headers
+                         from GCC 13.
+
+                         The third and fourth patches work around build
+                         failures with Rustc-1.70.0.
+
+From 8e0b55b6029226d448ffc1c5465bf475ea0852c5 Mon Sep 17 00:00:00 2001
+From: Xi Ruoyao <xry111@xry111.site>
+Date: Sun, 14 May 2023 03:37:24 +0800
+Subject: [PATCH 1/4] cbindgen patch
+
+---
+ third_party/rust/bindgen/src/clang.rs         |  5 ++++
+ third_party/rust/bindgen/src/ir/comp.rs       |  3 +-
+ third_party/rust/bindgen/src/ir/ty.rs         | 30 +++++++++++--------
+ third_party/rust/bindgen/src/ir/var.rs        |  8 ++---
+ 5 files changed, 29 insertions(+), 19 deletions(-)
+
+diff --git a/third_party/rust/bindgen/src/clang.rs b/third_party/rust/bindgen/src/clang.rs
+index 488660c434..ef74ac08c2 100644
+--- a/third_party/rust/bindgen/src/clang.rs
++++ b/third_party/rust/bindgen/src/clang.rs
+@@ -54,6 +54,11 @@ impl Cursor {
+         unsafe { clang_isDeclaration(self.kind()) != 0 }
+     }
+ 
++    /// Is this cursor's referent an anonymous record or so?
++    pub fn is_anonymous(&self) -> bool {
++        unsafe { clang_Cursor_isAnonymous(self.x) != 0 }
++    }
++
+     /// Get this cursor's referent's spelling.
+     pub fn spelling(&self) -> String {
+         unsafe { cxstring_into_string(clang_getCursorSpelling(self.x)) }
+diff --git a/third_party/rust/bindgen/src/ir/comp.rs b/third_party/rust/bindgen/src/ir/comp.rs
+index 22c124fa36..b715616c5e 100644
+--- a/third_party/rust/bindgen/src/ir/comp.rs
++++ b/third_party/rust/bindgen/src/ir/comp.rs
+@@ -1372,8 +1372,7 @@ impl CompInfo {
+ 
+                     // A declaration of an union or a struct without name could
+                     // also be an unnamed field, unfortunately.
+-                    if cur.spelling().is_empty() &&
+-                        cur.kind() != CXCursor_EnumDecl
++                    if cur.is_anonymous() && cur.kind() != CXCursor_EnumDecl
+                     {
+                         let ty = cur.cur_type();
+                         let offset = cur.offset_of_field().ok();
+diff --git a/third_party/rust/bindgen/src/ir/ty.rs b/third_party/rust/bindgen/src/ir/ty.rs
+index e6eecc3c50..f3e1193ce2 100644
+--- a/third_party/rust/bindgen/src/ir/ty.rs
++++ b/third_party/rust/bindgen/src/ir/ty.rs
+@@ -737,7 +737,12 @@ impl Type {
+ 
+         let layout = ty.fallible_layout(ctx).ok();
+         let cursor = ty.declaration();
+-        let mut name = cursor.spelling();
++        let is_anonymous = cursor.is_anonymous();
++        let mut name = if is_anonymous {
++            None
++        } else {
++            Some(cursor.spelling()).filter(|n| !n.is_empty())
++        };
+ 
+         debug!(
+             "from_clang_ty: {:?}, ty: {:?}, loc: {:?}",
+@@ -771,7 +776,7 @@ impl Type {
+             if is_canonical_objcpointer && is_template_type_param {
+                 // Objective-C generics are just ids with fancy name.
+                 // To keep it simple, just name them ids
+-                name = "id".to_owned();
++                name = Some("id".to_owned());
+             }
+         }
+ 
+@@ -900,7 +905,7 @@ impl Type {
+                                         return Err(ParseError::Recurse);
+                                     }
+                                 } else {
+-                                    name = location.spelling();
++                                    name = Some(location.spelling());
+                                 }
+ 
+                                 let complex = CompInfo::from_ty(
+@@ -942,7 +947,7 @@ impl Type {
+                                                 CXType_Typedef
+                                             );
+ 
+-                                            name = current.spelling();
++                                            name = Some(location.spelling());
+ 
+                                             let inner_ty = cur
+                                                 .typedef_type()
+@@ -1126,10 +1131,10 @@ impl Type {
+                 CXType_Enum => {
+                     let enum_ = Enum::from_ty(ty, ctx).expect("Not an enum?");
+ 
+-                    if name.is_empty() {
++                    if !is_anonymous {
+                         let pretty_name = ty.spelling();
+                         if clang::is_valid_identifier(&pretty_name) {
+-                            name = pretty_name;
++                            name = Some(pretty_name);
+                         }
+                     }
+ 
+@@ -1144,12 +1149,12 @@ impl Type {
+                     )
+                     .expect("Not a complex type?");
+ 
+-                    if name.is_empty() {
++                    if !is_anonymous {
+                         // The pretty-printed name may contain typedefed name,
+                         // but may also be "struct (anonymous at .h:1)"
+                         let pretty_name = ty.spelling();
+                         if clang::is_valid_identifier(&pretty_name) {
+-                            name = pretty_name;
++                            name = Some(pretty_name);
+                         }
+                     }
+ 
+@@ -1161,8 +1166,7 @@ impl Type {
+                         location,
+                         None,
+                         ctx,
+-                    )
+-                    .expect("Not able to resolve vector element?");
++                    )?;
+                     TypeKind::Vector(inner, ty.num_elements().unwrap())
+                 }
+                 CXType_ConstantArray => {
+@@ -1189,7 +1193,9 @@ impl Type {
+                 CXType_ObjCClass | CXType_ObjCInterface => {
+                     let interface = ObjCInterface::from_ty(&location, ctx)
+                         .expect("Not a valid objc interface?");
+-                    name = interface.rust_name();
++                    if !is_anonymous {
++                        name = Some(interface.rust_name());
++                    }
+                     TypeKind::ObjCInterface(interface)
+                 }
+                 CXType_Dependent => {
+@@ -1207,7 +1213,7 @@ impl Type {
+             }
+         };
+ 
+-        let name = if name.is_empty() { None } else { Some(name) };
++        name = name.filter(|n| !n.is_empty());
+ 
+         let is_const = ty.is_const() ||
+             (ty.kind() == CXType_ConstantArray &&
+diff --git a/third_party/rust/bindgen/src/ir/var.rs b/third_party/rust/bindgen/src/ir/var.rs
+index c6f121d74e..30fb0b5ee8 100644
+--- a/third_party/rust/bindgen/src/ir/var.rs
++++ b/third_party/rust/bindgen/src/ir/var.rs
+@@ -301,11 +301,11 @@ impl ClangSubItemParser for Var {
+                 let ty = match Item::from_ty(&ty, cursor, None, ctx) {
+                     Ok(ty) => ty,
+                     Err(e) => {
+-                        assert_eq!(
+-                            ty.kind(),
+-                            CXType_Auto,
++                        assert!(
++                            matches!(ty.kind(), CXType_Auto | CXType_Unexposed),
+                             "Couldn't resolve constant type, and it \
+-                             wasn't an nondeductible auto type!"
++                             wasn't an nondeductible auto type or unexposed \
++                             type!"
+                         );
+                         return Err(e);
+                     }
+-- 
+2.40.1
+
+From 2c22f8cc4756d3e492fe6be4be634fb592b4b0e3 Mon Sep 17 00:00:00 2001
+From: Xi Ruoyao <xry111@xry111.site>
+Date: Sun, 14 May 2023 03:37:04 +0800
+Subject: [PATCH 2/4] add missing <cstdint>
+
+---
+ dom/media/webrtc/sdp/RsdparsaSdpGlue.cpp               | 1 +
+ gfx/2d/Rect.h                                          | 1 +
+ toolkit/components/telemetry/pingsender/pingsender.cpp | 1 +
+ 3 files changed, 3 insertions(+)
+
+diff --git a/dom/media/webrtc/sdp/RsdparsaSdpGlue.cpp b/dom/media/webrtc/sdp/RsdparsaSdpGlue.cpp
+index 8c8a0369c3..d43b4a1e0d 100644
+--- a/dom/media/webrtc/sdp/RsdparsaSdpGlue.cpp
++++ b/dom/media/webrtc/sdp/RsdparsaSdpGlue.cpp
+@@ -3,6 +3,7 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
++#include <cstdint>
+ #include <string>
+ 
+ #include "sdp/RsdparsaSdpInc.h"
+diff --git a/gfx/2d/Rect.h b/gfx/2d/Rect.h
+index 4875ad6714..f52437bbdc 100644
+--- a/gfx/2d/Rect.h
++++ b/gfx/2d/Rect.h
+@@ -15,6 +15,7 @@
+ #include "mozilla/Maybe.h"
+ 
+ #include <cmath>
++#include <cstdint>
+ 
+ namespace mozilla {
+ 
+diff --git a/toolkit/components/telemetry/pingsender/pingsender.cpp b/toolkit/components/telemetry/pingsender/pingsender.cpp
+index 01fdb63c29..ceda3b1945 100644
+--- a/toolkit/components/telemetry/pingsender/pingsender.cpp
++++ b/toolkit/components/telemetry/pingsender/pingsender.cpp
+@@ -3,6 +3,7 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
++#include <cstdint>
+ #include <cstdlib>
+ #include <cstring>
+ #include <ctime>
+-- 
+2.40.1
+
+# HG changeset patch
+# User Emilio Cobos Álvarez <emilio@crisal.io>
+# Date 1682520906 0
+# Node ID 1a15f95b880f3d4b5a427c750932c53a01b4897a
+# Parent  17ea6f29654b2ff39d374073cec3e7116c1ec548
+[PATCH 3/4] Bug 1829964 - Allow ambiguous glob reexports for now in autogenerated bindings. r=glandium
+
+I started looking into removing these glob re-exports, but I couldn't
+convince myself that the result was particularly better...
+
+Differential Revision: https://phabricator.services.mozilla.com/D176473
+
+diff --git a/layout/style/ServoBindings.toml b/layout/style/ServoBindings.toml
+--- a/layout/style/ServoBindings.toml
++++ b/layout/style/ServoBindings.toml
+@@ -35,16 +35,17 @@ headers = [
+     "mozilla/SizeOfState.h",
+     "nsCSSProps.h",
+     "nsMappedAttributes.h",
+     "nsNameSpaceManager.h",
+ ]
+ raw-lines = [
+     # FIXME(emilio): Incrementally remove these "pub use"s. Probably
+     # mozilla::css and mozilla::dom are easier.
++    "#[allow(unknown_lints, ambiguous_glob_reexports)]",
+     "pub use self::root::*;",
+     "pub use self::root::mozilla::*;",
+     "pub use self::root::mozilla::css::*;",
+     "pub use self::root::mozilla::dom::*;",
+ ]
+ hide-types = [
+     ".*char_traits",
+     ".*incompatible_char_type",
+
+From 8b5b652d38e007e736bb442ccd5aa5ed699db100 Mon Sep 17 00:00:00 2001
+From: Matthew Gregan <kinetik@flim.org>
+Date: Thu, 16 Jun 2022 13:54:02 +1200
+Subject: [PATCH 4/4] Fix `unstable-name-collisions` warning by using fully
+ qualified path.
+
+---
+ mp4parse/src/lib.rs | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/third_party/rust/mp4parse/src/lib.rs b/third_party/rust/mp4parse/src/lib.rs
+index 567ee21d..4f3d7153 100644
+--- a/third_party/rust/mp4parse/src/lib.rs
++++ b/third_party/rust/mp4parse/src/lib.rs
+@@ -3506,8 +3506,13 @@ macro_rules! impl_mul {
+             type Output = $output;
+ 
+             fn mul(self, rhs: $rhs) -> Self::Output {
+-                static_assertions::const_assert!(<$output>::MAX <= <$inner>::MAX as u64);
+-                static_assertions::const_assert!(<$lhs>::MAX * <$rhs>::MAX <= <$output>::MAX);
++                static_assertions::const_assert!(
++                    <$output as UpperBounded>::MAX <= <$inner>::MAX as u64
++                );
++                static_assertions::const_assert!(
++                    <$lhs as UpperBounded>::MAX * <$rhs as UpperBounded>::MAX
++                        <= <$output as UpperBounded>::MAX
++                );
+ 
+                 let lhs: $inner = self.get().into();
+                 let rhs: $inner = rhs.get().into();
+
+--- firefox-102.12.0.orig/Cargo.lock	2023-05-30 01:34:26.000000000 +0800
++++ firefox-102.12.0/Cargo.lock	2023-06-04 18:52:58.494327811 +0800
+@@ -3407,7 +3407,6 @@
+ [[package]]
+ name = "mp4parse"
+ version = "0.13.0"
+-source = "git+https://github.com/mozilla/mp4parse-rust?rev=3bfc47d9a571d0842676043ba60716318e946c06#3bfc47d9a571d0842676043ba60716318e946c06"
+ dependencies = [
+  "bitreader",
+  "byteorder",
+
+--- firefox-102.12.0.orig/Cargo.toml	2023-05-30 01:34:26.000000000 +0800
++++ firefox-102.12.0/Cargo.toml	2023-06-04 18:52:44.365719856 +0800
+@@ -128,3 +128,7 @@
+ # Patch fallible_collections for issues with rustc 1.65.
+ [patch.crates-io.fallible_collections]
+ path = "third_party/rust/fallible_collections"
++
++# Patch mp4parse for issues with rustc-1.70.
++[patch."https://github.com/mozilla/mp4parse-rust"]
++mp4parse = { path = "third_party/rust/mp4parse" }
