@@ -1,59 +1,107 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Kyle Keen <keenerd@gmail.com>
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+# Contributor: Kyle Keen <keenerd@gmail.com>
+
 pkgname=zeromq
 pkgver=4.3.4
-_cppver=4.8.0
-pkgrel=2
-pkgdesc="Fast messaging system built on sockets. C and C++ bindings. aka 0MQ, ZMQ."
+pkgrel=4
+pkgdesc='Fast messaging system built on sockets. C and C++ bindings. aka 0MQ, ZMQ.'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url="http://www.zeromq.org"
+url='http://www.zeromq.org'
 license=('LGPL')
-depends=('gcc-libs' 'util-linux' 'libsodium' 'libpgm')
-makedepends=('asciidoc' 'xmlto')
+depends=(
+  'glibc'
+  'gnutls'
+  'gcc-libs'
+  'util-linux'
+  'libsodium'
+  'libpgm'
+)
+makedepends=(
+  'git'
+  'cmake'
+  'asciidoc'
+  'xmlto'
+)
+optdepends=('cppzmq: C++ binding for libzmq')
 provides=('libzmq.so')
-options=('staticlibs')
-# "http://download.zeromq.org/$pkgname-$pkgver.tar.gz"
-source=("https://github.com/zeromq/libzmq/releases/download/v$pkgver/zeromq-$pkgver.tar.gz"
-        "zmq.hpp.$_cppver.tgz::https://github.com/zeromq/cppzmq/archive/v$_cppver.tar.gz")
-        #"zmq.hpp.$pkgver::https://raw.githubusercontent.com/zeromq/cppzmq/b0e6d4b/zmq.hpp")
-sha256sums=('c593001a89f5a85dd2ddf564805deb860e02471171b3f204944857336295c3e5'
-            '4c07600e3ef311e24d9cf1917122067b48bd447cb7de86c5d23a29826a204649')
+_commit='4097855ddaaa65ed7b5e8cb86d143842a594eebd'
+source=(
+  "$pkgname::git+https://github.com/zeromq/libzmq#commit=$_commit"
+  'fix-doc-install.patch'
+)
+sha512sums=('SKIP'
+            'fcaf3e6147b9a759f8ba3cc71365d78d0b16e93c025eae4b9ebcbf4c832d09db81b61840b6c9b69bb4fbffcb8a0c7221598d866158902ff878bf150e23aa73e6')
+b2sums=('SKIP'
+        '98aed4ff26fd1da40b7a1a4d5b101c7906a0f95bc0cfec936879418a857bfe7d4c8b6951de2247d1301ce9273dfe30442b3a03b9cc84f4d6ea737fdff46d43c6')
+
+pkgver() {
+  cd "$pkgname"
+
+  git describe --tags | sed 's/^v//'
+}
 
 prepare() {
-  cd "$srcdir/$pkgname-$pkgver"
-  # Needed for new libsodium
-  sed -i 's/libzmq_werror="yes"/libzmq_werror="no"/' configure
+  cd "$pkgname"
 
-  sed -i 's/openpgm-5.1/openpgm-5.3/' configure configure.ac
-  sed -i 's/CXXFLAGS="-Wno-long-long/CXXFLAGS="-Wno-unused-function -Wno-long-long/' configure
+  # FTBFS: undefined references (openpgm)
+  git cherry-pick --no-commit 5381be6c71f2a34fea40a29c12e3f6f8dcf3bad2
+
+  # FTBFS: gcc 13
+  git cherry-pick --no-commit 438d5d88392baffa6c2c5e0737d9de19d6686f0d
+
+  # install documentation to correct directory
+  patch -p1 -i "$srcdir/fix-doc-install.patch"
 }
 
 build() {
-  cd "$srcdir/$pkgname-$pkgver"
-  ./configure prefix=/usr --with-pgm --with-libsodium \
-    --with-documentation --enable-static --disable-Werror
-  make -Wno-unused-function -Wnoerror=unused-function
+  cmake \
+    -S "$pkgname" \
+    -B build \
+    -D CMAKE_BUILD_TYPE=None \
+    -D CMAKE_INSTALL_PREFIX=/usr \
+    -D CMAKE_CURRENT_BINARY_DIR=/usr \
+    -D BUILD_SHARED=ON \
+    -D BUILD_STATIC=OFF \
+    -D ENABLE_CPACK=OFF \
+    -D ZMQ_BUILD_TESTS=ON \
+    -D WITH_OPENPGM=ON \
+    -D OPENPGM_PKGCONFIG_NAME=openpgm-5.3 \
+    -D WITH_LIBBSD=ON \
+    -D WITH_DOC=ON \
+    -W no-dev
+
+  cmake --build build
+
+  # https://github.com/zeromq/libzmq/issues/4160
+  # manpages aren't created when using cmake, so this script does the job
+  cd "$pkgname/doc"
+  for FILE in ./*.txt; do
+    asciidoc \
+      -d manpage \
+      -b docbook \
+      -f asciidoc.conf \
+      -azmq_version="$pkgver" \
+      "${FILE}"
+
+    xmlto man "${FILE%.txt}.xml"
+  done
 }
 
 check() {
-  cd "$srcdir/$pkgname-$pkgver"
-
-  # this will fail if zmq.hpp is out of date
-  LANG=C gcc -c ../cppzmq-$_cppver/zmq.hpp -L ./.libs/ -I ./include/ -o ./test.o
-  rm -f test.o
-
-  if [[ $CARCH == 'i686' ]]; then
-    return 0
-  fi
-  make -k check
+  # -j1: due to segfaults when running simultaneous tests
+  ctest \
+    --test-dir build \
+    --output-on-failure \
+    -j1 \
+    -E "test_(diffserv|security_curve|zmq_poll_fd|connect_rid|heartbeats)"
 }
-
 
 package() {
-  cd "$srcdir/$pkgname-$pkgver"
-  make DESTDIR="$pkgdir" install
-  cd "$srcdir/cppzmq-$_cppver"
-  install -Dm644 zmq.hpp "$pkgdir/usr/include/zmq.hpp"
-  install -Dm644 zmq_addon.hpp "$pkgdir/usr/include/zmq_addon.hpp"
-}
+  DESTDIR="$pkgdir" cmake --install build
 
+  # manpages
+  cd "$pkgname"
+  install -vDm644 -t "$pkgdir/usr/share/man/man3" doc/*.3
+  install -vDm644 -t "$pkgdir/usr/share/man/man7" doc/*.7
+}
