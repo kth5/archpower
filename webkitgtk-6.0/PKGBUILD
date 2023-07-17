@@ -1,0 +1,168 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+# Contributor: Eric Bélanger <eric@archlinux.org>
+
+pkgbase=webkitgtk-6.0
+pkgname=(
+  webkitgtk-6.0
+  webkitgtk-6.0-docs
+)
+pkgver=2.40.3
+pkgrel=1
+pkgdesc="Web content engine for GTK"
+url="https://webkitgtk.org"
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+license=(custom)
+depends=(
+  at-spi2-core
+  atk
+  bubblewrap
+  cairo
+  enchant
+  fontconfig
+  freetype2
+  glib2
+  gst-plugins-bad-libs
+  gst-plugins-base-libs
+  gstreamer
+  gtk4
+  harfbuzz
+  harfbuzz-icu
+  hyphen
+  icu
+  libavif
+  libdrm
+  libegl
+  libepoxy
+  libgcrypt
+  libgl
+  libgles
+  libjpeg
+  libmanette
+  libpng
+  libseccomp
+  libsecret
+  libsoup3
+  libsystemd
+  libtasn1
+  libwebp
+  libwpe
+  libx11
+  libxcomposite
+  libxml2
+  libxslt
+  libxt
+  mesa
+  openjpeg2
+  sqlite
+  wayland
+  woff2
+  wpebackend-fdo
+  xdg-dbus-proxy
+  zlib
+)
+makedepends=(
+  cmake
+  gi-docgen
+  gobject-introspection
+  gperf
+  gst-plugins-bad
+  ninja
+  python
+  ruby
+  systemd
+  unifdef
+  wayland-protocols
+)
+source=(
+  $url/releases/webkitgtk-$pkgver.tar.xz{,.asc}
+  reduce-memory-overheads.patch
+)
+sha256sums=('cc0aa83f40dbc64c1c6ae42ec6b85af4be2a9dbf524cfcb95f89a367fb5098dd'
+            'SKIP'
+            '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864')
+b2sums=('b88b3d9bb6729de8a1b667575acbc9e42c39a222c191ef666f1a58fc593047de1530c597fc2cbc657da845f6262bd4014995fea0cd9776ef60b931769a89594d'
+        'SKIP'
+        'cc16462ce22df999b47ef477d4272ef3df2fbbfe5cdc585f3ce47e56cde65a1d7dd1105e6e7bbff41695f79b6394bc3e403e53a669bb7f456c733ed216372c9b')
+validpgpkeys=(
+  'D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
+  '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B'  # Adrián Pérez de Castro <aperez@igalia.com>
+)
+
+prepare() {
+  cd webkitgtk-$pkgver
+  patch -Np1 -i ${srcdir}/reduce-memory-overheads.patch
+}
+
+build() {
+  local cmake_options=(
+    -DPORT=GTK
+    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_INSTALL_PREFIX=/usr
+    -DCMAKE_INSTALL_LIBDIR=lib
+    -DCMAKE_INSTALL_LIBEXECDIR=lib
+    -DCMAKE_SKIP_RPATH=ON
+    -DUSE_AVIF=ON
+    -DUSE_GTK4=ON
+    -DENABLE_DOCUMENTATION=ON
+    -DENABLE_MINIBROWSER=ON
+  )
+
+  case "${CARCH}" in
+    powerpc) 
+      cmake_options+=(
+        -DENABLE_WEBGL=OFF
+        -DFORCE_32BIT=ON
+      )
+      export LDFLAGS+=" -Wl,--no-keep-memory"
+    ;;
+  esac
+
+  # Produce minimal debug info: 4.3 GB of debug data makes the
+  # build too slow and is too much to package for debuginfod
+  CFLAGS+=' -g1'
+  CXXFLAGS+=' -g1'
+
+  cmake -S webkitgtk-$pkgver -B build -G Ninja "${cmake_options[@]}"
+  cmake --build build
+}
+
+package_webkitgtk-6.0() {
+  depends+=(
+    libWPEBackend-fdo-1.0.so
+    libwpe-1.0.so
+  )
+  provides+=(
+    libjavascriptcoregtk-6.0.so
+    libwebkitgtk-6.0.so
+  )
+  optdepends=(
+    'geoclue: Geolocation support'
+    'gst-libav: nonfree media decoding'
+    'gst-plugins-bad: media decoding'
+    'gst-plugins-good: media decoding'
+  )
+
+  DESTDIR="$pkgdir" cmake --install build
+
+  mkdir -p doc/usr/share
+  mv {"$pkgdir",doc}/usr/share/gtk-doc
+
+  cd webkitgtk-$pkgver
+  find Source -name 'COPYING*' -or -name 'LICENSE*' -print0 | sort -z |
+    while IFS= read -d $'\0' -r _f; do
+      echo "### $_f ###"
+      cat "$_f"
+      echo
+    done |
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+package_webkitgtk-6.0-docs() {
+  pkgdesc+=" (documentation)"
+  depends=()
+
+  mv doc/* "$pkgdir"
+}
+
+# vim:set sw=2 sts=-1 et:
