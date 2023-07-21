@@ -3,8 +3,11 @@
 # Contributor: Jan de Groot <jgc@archlinux.org>
 
 pkgbase=librsvg
-pkgname=(librsvg librsvg-docs)
-pkgver=2.56.1
+pkgname=(
+  librsvg
+  librsvg-docs
+)
+pkgver=2.56.2
 pkgrel=1
 epoch=2
 pkgdesc="SVG rendering library"
@@ -29,9 +32,11 @@ makedepends=(
   vala
 )
 checkdepends=(ttf-dejavu)
-_commit=c0d8ee415cd4ee268264ef2c7bfa53f576599cfa  # tags/2.56.1^0
-source=("git+https://gitlab.gnome.org/GNOME/librsvg.git#commit=$_commit")
-sha256sums=('SKIP')
+_commit=5c74c40bb3f4f7e6c347e7712e0293188e70c6ed  # tags/2.56.2^0
+source=(
+  "git+https://gitlab.gnome.org/GNOME/librsvg.git#commit=$_commit"
+)
+b2sums=('SKIP')
 
 pkgver() {
   cd librsvg
@@ -50,8 +55,15 @@ export CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
 export CARGO_PROFILE_RELEASE_DEBUG=2
 
 build() {
+  local configure_options=(
+    --prefix=/usr
+    --disable-static
+    --enable-gtk-doc
+    --enable-vala
+  )
+
   cd librsvg
-  ./configure --prefix=/usr --disable-static --enable-vala --enable-gtk-doc
+  ./configure "${configure_options[@]}"
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0 /g' libtool
   make
 }
@@ -59,7 +71,8 @@ build() {
 check() {
   # Test suite is very dependent on the versions of
   # Cairo, Pango, FreeType and HarfBuzz
-  make -C librsvg check || :
+  # Tests need nightly features
+  RUSTC_BOOTSTRAP=1 make -C librsvg check || :
 }
 
 package_librsvg() {
