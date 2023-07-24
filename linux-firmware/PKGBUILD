@@ -1,4 +1,3 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Thomas Bächler <thomas@archlinux.org>
 
 pkgbase=linux-firmware
@@ -7,7 +6,7 @@ pkgname=(linux-firmware-whence linux-firmware amd-ucode
 )
 _tag=20230625
 pkgver=20230625.ee91452d
-pkgrel=1
+pkgrel=4
 pkgdesc="Firmware files for Linux"
 url="https://git.kernel.org/?p=linux/kernel/git/firmware/linux-firmware.git;a=summary"
 license=('GPL2' 'GPL3' 'custom')
@@ -19,6 +18,7 @@ sha256sums=('SKIP')
 validpgpkeys=('4CDE8575E547BF835FE15807A31B6BD72486CFD6') # Josh Boyer <jwboyer@fedoraproject.org>
 
 _backports=(
+  d3f66064cf43bd7338a79174bd0ff60c4ecbdf6d
 )
 
 prepare() {
@@ -74,18 +74,16 @@ package_linux-firmware() {
 
   cd ${pkgbase}
 
-  make DESTDIR="${pkgdir}" FIRMWAREDIR=/usr/lib/firmware install-xz
-
-  # useless (FS#46591)
-  # Trigger a microcode reload for configurations not using early updates
-  #echo 'w /sys/devices/system/cpu/microcode/reload - - - - 1' |
-  #  install -Dm644 /dev/stdin "${pkgdir}/usr/lib/tmpfiles.d/${pkgname}.conf"
+  ZSTD_CLEVEL=19 make DESTDIR="${pkgdir}" FIRMWAREDIR=/usr/lib/firmware install-zst
 
   install -Dt "${pkgdir}/usr/share/licenses/${pkgname}" -m644 LICEN*
 
-  # split
   cd "${pkgdir}"
 
+  # remove arm64 firmware https://bugs.archlinux.org/task/76583
+  rm usr/lib/firmware/mrvl/prestera/mvsw_prestera_fw_arm64-v4.1.img.zst
+
+  # split
   _pick linux-firmware-nfp usr/lib/firmware/netronome
   _pick linux-firmware-nfp usr/share/licenses/${pkgname}/LICENCE.Netronome
 
@@ -132,10 +130,8 @@ package_linux-firmware-mellanox() {
 package_linux-firmware-marvell() {
   pkgdesc+=" - marvell / Firmware for Marvell devices"
   depends=('linux-firmware-whence')
-  
+
   mv -v linux-firmware-marvell/* "${pkgdir}"
-  # remove arm64 firmware #76583
-  rm "${pkgdir}"/usr/lib/firmware/mrvl/prestera/mvsw_prestera_fw_arm64-v4.1.img.xz
 }
 
 package_linux-firmware-qcom() {
