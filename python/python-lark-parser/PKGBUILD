@@ -1,40 +1,68 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer:
+# Contributor: Felix Yan <felixonmars@archlinux.org>
 
+_name=lark
 pkgname=python-lark-parser
+_commit=7d9cfa6ed09a2b125e97e3a1810d9c6443f1718e  # refs/tags/1.1.5
 pkgver=1.1.5
-_nearley_commit=326831689826cb1b9a4d21d1ce0d5db9278e9636 
-pkgrel=3
+pkgrel=4
 pkgdesc="A modern parsing library"
 url="https://github.com/lark-parser/lark"
-license=('MIT')
+license=(MIT)
 arch=(any)
-depends=('python-typing_extensions')
-makedepends=('python-setuptools')
-checkdepends=('python-js2py')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/lark-parser/lark/archive/$pkgver.tar.gz"
-        "nearley-$_nearley_commit.tar.gz::https://github.com/kach/nearley/archive/$_nearley_commit.tar.gz")
-sha512sums=('bf9a9892eb5e6da4c8129b4c23c5663d7cb1feaf947db629fe97887093eb6e51de59f2078422611af4eeef5c548cd63c86132970412609a95288d0df7c01c0a6'
-            '88849bfa609c112a7687d8aba1fc140b1b6be119f7001869e7c05019e87c31874a6d0c9fb2c68b5729c4b4427ff05e36057857cea11bd51d2b5d89e7710196b7')
+depends=(
+  python
+  python-typing_extensions
+)
+makedepends=(
+  git
+  python-build
+  python-installer
+  python-setuptools
+  python-wheel
+)
+checkdepends=(
+  python-js2py
+)
+optdepends=(
+  'python-atomicwrites: for atomic_cache'
+  # 'python-interegular: for interegular support'  # TODO: package
+  'python-regex: for regex support'
+  'python-js2py: for nearley support'
+)
+provides=(python-lark)
+source=(
+  git+$url#commit=$_commit
+  $_name-nearly::git+https://github.com/Hardmath123/nearley
+)
+sha512sums=('SKIP'
+            'SKIP')
 
 prepare() {
-  rmdir lark-$pkgver/tests/test_nearley/nearley
-  ln -s "$srcdir"/nearley-$_nearley_commit lark-$pkgver/tests/test_nearley/nearley
+  cd $_name
+  git submodule init
+  git config submodule.tests/test_nearley/nearley.url "$srcdir/$_name-nearly"
+  git -c protocol.file.allow=always submodule update
+}
+
+pkgver() {
+  cd $_name
+  git describe --tags --abbrev=7 | sed 's/\([^-]*-g\)/r\1/;s/-/./g'
 }
 
 build() {
-  cd lark-$pkgver
-  python setup.py build
+  cd $_name
+  python -m build --wheel --no-isolation
 }
 
 check() {
-  cd lark-$pkgver
+  cd $_name
   python -m tests
 }
 
 package() {
-  cd lark-$pkgver
-  python setup.py install --root="$pkgdir" --optimize=1
-
-  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  cd $_name
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
 }
