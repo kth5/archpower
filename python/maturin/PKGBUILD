@@ -1,0 +1,84 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+
+pkgbase=maturin
+pkgname=(
+  maturin
+  python-maturin
+)
+pkgver=1.1.0
+pkgrel=1
+pkgdesc="Build and publish crates with pyo3, rust-cpython and cffi bindings"
+url="https://github.com/PyO3/maturin"
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+license=(Apache)
+makedepends=(
+  bzip2
+  gcc-libs
+  git
+  glibc
+  python-build
+  python-installer
+  python-setuptools
+  python-setuptools-rust
+  python-wheel
+  rust
+)
+# disable LTO until ring can be built with it: https://github.com/briansmith/ring/issues/1444
+options=(!lto)
+source=($url/archive/v$pkgver/$pkgname-v$pkgver.tar.gz)
+sha512sums=('1e35288bd671d9133a10fd3c4cdebc7488aa58b5d42e8c12e867d8dff662b80d8d149bb28bc0292debd1225a2e2f15b2ae91df1dba8efe85a1d94cdfb22d12e2')
+b2sums=('fe32c1e244548d95808d24aa4faa3d1fe6c5dce6bc1529167df9f09eac10e0342a087529788034bb4d8b43a13153016df3342c6839c2ff9ae51bafa32170b8be')
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+prepare() {
+  cd $pkgname-$pkgver
+
+  case "${CARCH}" in
+    riscv64) CARCH=riscv64gc ;;
+  esac
+
+  cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+}
+
+build() {
+  cd $pkgname-$pkgver
+  python -m build --wheel --no-isolation
+}
+
+package_maturin() {
+  depends=(
+    bzip2
+    gcc-libs
+    glibc
+    rust
+  )
+
+  cd $pkgname-$pkgver
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm 644 {Changelog,README}.md -t "$pkgdir/usr/share/doc/$pkgname/"
+
+  (
+    cd "$pkgdir"
+    _pick python-$pkgbase usr/lib
+  )
+}
+
+package_python-maturin() {
+  pkgdesc+=" - Python bindings"
+  depends=(
+    maturin=$pkgver
+    python
+  )
+
+  mv -v $pkgname/* "$pkgdir"
+}
