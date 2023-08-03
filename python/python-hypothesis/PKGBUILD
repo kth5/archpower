@@ -1,57 +1,88 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer:
+# Contributor: Felix Yan <felixonmars@archlinux.org>
 
+_name=hypothesis
+_alt_name="${_name}-python"
 pkgname=python-hypothesis
-pkgver=6.75.3
+pkgver=6.82.0
+_version="${_alt_name}-${pkgver}"
 pkgrel=1
 pkgdesc="Advanced Quickcheck style testing library for Python"
 arch=(any)
-license=('MPL')
+license=(MPL)
 url="https://hypothesis.readthedocs.org"
-depends=('python-attrs' 'python-sortedcontainers' 'python-exceptiongroup')
-optdepends=('python-pytz: for datetime and django module'
-            'python-faker: for fakefactory and django module'
-            'python-django: for django module'
-            'python-numpy: for numpy module'
-            'python-pytest: for pytest module'
-            'python-lark-parser: for lark module'
-            'python-libcst: for codemods module')
-makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
-checkdepends=('python-pytest' 'flake8' 'python-pytz' 'python-numpy' 'python-faker'
-              'python-flaky' 'python-django' 'python-pandas' 'python-dpcontracts'
-              'python-pytest-xdist' 'python-lark-parser' 'python-pexpect' 'python-coverage'
-              'python-typing_extensions' 'python-black' 'python-fakeredis' 'python-libcst')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/HypothesisWorks/hypothesis/archive/hypothesis-python-$pkgver.tar.gz")
-sha512sums=('2e31f2f5483abf4c749dc3ef2758e51b62072e36f257777cecd71ea8f67a08987f5547bc9476dd2dbf8e9a6488fbe76d3d8ae83666bc2e80a2f26ea807cb15aa')
-
-prepare() {
-  mv hypothesis-hypothesis-python-$pkgver hypothesis-$pkgver
-}
+_url="https://github.com/HypothesisWorks/hypothesis"
+depends=(
+  python
+  python-attrs
+  python-sortedcontainers
+)
+makedepends=(
+  python-build
+  python-installer
+  python-setuptools
+  python-wheel
+)
+checkdepends=(
+  python-black
+  python-dpcontracts
+  python-django
+  python-faker
+  python-fakeredis
+  python-flaky
+  python-lark-parser
+  python-libcst
+  python-numpy
+  python-pandas
+  python-pexpect
+  python-pytest
+  python-pytest-xdist
+  python-pytz
+)
+optdepends=(
+  'python-black: for CLI and ghostwriter'
+  'python-click: for CLI'
+  'python-dateutil: for date support'
+  'python-django: for django module'
+  'python-dpcontracts: for contracts support'
+  'python-faker: for fakefactory and django module'
+  'python-lark-parser: for lark module'
+  'python-libcst: for codemods module'
+  'python-numpy: for numpy module'
+  'python-pandas: for pandas support'
+  'python-pytest: for pytest module'
+  'python-pytz: for datetime and django module'
+  'python-redis: for redis support'
+  'python-rich: for CLI'
+)
+source=("$_name-$_version.tar.gz::$_url/archive/$_version.tar.gz")
+sha512sums=('2f8b16c1a32340a3aa742627cbbc958cb06e8966b704bd389c8677d58fc3e76e6988705315d570daeb46975839b1c725f5f6a937ff1c326cbed144659ec44d05')
+b2sums=('fb99a499c7b850c4d81f01b99969d611ee8a39a1b1d1a5306b72999b1ca20d605fb42adbc090eedbe06359056d05860e2166be9f8f8001460ea61b398a432de6')
 
 build() {
-  cd hypothesis-$pkgver/hypothesis-python
-
+  cd $_name-$_version/$_alt_name
   python -m build -nw
 }
 
 check() {
-  cd hypothesis-$pkgver/hypothesis-python
-
-  python setup.py install --root="$PWD/tmp_install" --optimize=1
-  python examples/example_hypothesis_entrypoint/setup.py install --root="$PWD/tmp_install" --optimize=1
-
+  local pytest_options=(
+    -vv
+    # disable failing tests: https://github.com/HypothesisWorks/hypothesis/issues/3704
+    # for some reason --deselect does not work, so ignoring whole file
+    --ignore tests/patching/test_patching.py
+  )
   local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-  PYTHONPATH="$PWD/tmp_install/$site_packages:$PWD/examples/example_hypothesis_entrypoint" \
-  PATH="$PWD/tmp_install/usr/bin:$PATH" \
-    pytest --ignore tmp_install || echo "Tests failed"
+
+  cd $_name-$_version/$_alt_name
+  # install to temporary location, as importlib is used
+  python -m installer --destdir=test_dir dist/*.whl
+  export PYTHONPATH="$PWD/test_dir/$site_packages:$PYTHONPATH"
+  export PATH="$PWD/test_dir/usr/bin:$PATH"
+  pytest "${pytest_options[@]}" tests/
 }
 
 package() {
-  cd hypothesis-$pkgver/hypothesis-python
-
+  cd $_name-$_version/$_alt_name
   python -m installer -d "$pkgdir" dist/*.whl
-
-  # It's only present when tests are enabled, so adding -f
-  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-  rm -rf "$pkgdir"/$site_packages/tests
 }
