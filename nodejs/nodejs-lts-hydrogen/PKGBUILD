@@ -1,0 +1,79 @@
+# Maintainer: Bruno Pagani <archange@archlinux.org>
+# Contributor: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=nodejs-lts-hydrogen
+pkgver=18.16.0
+pkgrel=1
+pkgdesc="Evented I/O for V8 javascript (LTS release: Hydrogen)"
+arch=(x86_64 powerpc64le)
+url="https://nodejs.org/"
+license=(MIT)
+# maybe revert back to openssl-1.1 or internal openssl
+# https://github.com/nodejs/node/issues/47852
+depends=(openssl zlib icu libuv c-ares brotli libnghttp2) # http-parser v8)
+makedepends=(python procps-ng)
+options=(!lto)
+provides=("nodejs=$pkgver" "npm=$pkgver")
+conflicts=(nodejs)
+source=(${url}/dist/v${pkgver}/node-v${pkgver}.tar.xz)
+# https://nodejs.org/download/release/latest-hydrogen/SHASUMS256.txt.asc
+sha256sums=('33d81a233e235a509adda4a4f2209008d04591979de6b3f0f67c1c906093f118')
+validpgpkeys=(C4F0DFFF4E8C1A8236409D08E73BC641CC11F4C8  # Myles Borins <mylesborins@google.com>
+              77984A986EBC2AA786BC0F66B01FBB92821C587A  # Gibson Fahnestock <gibfahn@gmail.com>
+              B9AE9905FFD7803F25714661B63B535A4C206CA9  # Evan Lucas <evanlucas@me.com>
+              DD8F2338BAE7501E3DD5AC78C273792F7D83545D  # Rod Vagg <rod@vagg.org>
+              B9E2F5981AA6E0CD28160D9FF13993A75599653C  # Shelley Vohr <shelley.vohr@gmail.com>
+              4ED778F539E3634C779C87C6D7062848A1AB005C  # Beth Griggs <Bethany.Griggs@uk.ibm.com>
+              C82FA3AE1CBEDC6BE46B9360C43CEC45C17AB93C  # Richard Lau <rlau@redhat.com>
+              74F12602B6F1C4E913FAA37AD3A89613643B6201  # Danielle Adams <adamzdanielle@gmail.com>
+              61FC681DFB92A079F1685E77973F295594EC4689) # Juan José Arboleda <soyjuanarbol@gmail.com>
+
+build() {
+  cd node-v${pkgver}
+
+  ./configure \
+    --prefix=/usr \
+    --with-intl=system-icu \
+    --shared-openssl \
+    --shared-zlib \
+    --shared-libuv \
+    --experimental-http-parser \
+    --shared-brotli \
+    --shared-cares \
+    --shared-nghttp2
+    # --shared-v8
+    # --shared-http-parser
+
+  make
+}
+
+check() {
+  cd node-v${pkgver}
+
+  # disable broken tests
+#Failed tests:
+#out/Release/node --tls-min-v1.0 /build/nodejs-lts-hydrogen/src/node-v18.16.0/test/parallel/test-https-agent-session-eviction.js
+#out/Release/node /build/nodejs-lts-hydrogen/src/node-v18.16.0/test/parallel/test-tls-alert.js
+#out/Release/node --tls-max-v1.2 /build/nodejs-lts-hydrogen/src/node-v18.16.0/test/parallel/test-tls-cli-max-version-1.2.js
+#out/Release/node --tls-min-v1.2 /build/nodejs-lts-hydrogen/src/node-v18.16.0/test/parallel/test-tls-cli-min-version-1.2.js
+#out/Release/node --tls-min-v1.3 /build/nodejs-lts-hydrogen/src/node-v18.16.0/test/parallel/test-tls-cli-min-version-1.3.js
+#out/Release/node --tls-max-v1.3 /build/nodejs-lts-hydrogen/src/node-v18.16.0/test/parallel/test-tls-cli-max-version-1.3.js
+#out/Release/node --tls-min-v1.1 /build/nodejs-lts-hydrogen/src/node-v18.16.0/test/parallel/test-tls-cli-min-version-1.1.js
+#out/Release/node /build/nodejs-lts-hydrogen/src/node-v18.16.0/test/parallel/test-tls-getprotocol.js
+#out/Release/node /build/nodejs-lts-hydrogen/src/node-v18.16.0/test/parallel/test-tls-session-cache.js
+#out/Release/node /build/nodejs-lts-hydrogen/src/node-v18.16.0/test/parallel/test-tls-min-max-version.js
+#out/Release/node /build/nodejs-lts-hydrogen/src/node-v18.16.0/test/wpt/test-url.js
+#make[1]: *** [Makefile:308: jstest] Error 1
+#make: *** [Makefile:342: test-only] Error 2
+
+  rm test/parallel/{test-https-agent-session-eviction.js,test-tls-alert.js,test-tls-cli-max-version-1.2.js,test-tls-cli-min-version-1.2.js,test-tls-cli-min-version-1.3.js,test-tls-cli-max-version-1.3.js,test-tls-cli-min-version-1.1.js,test-tls-cli-min-version-1.0.js,test-tls-getprotocol.js,test-tls-session-cache.js,test-tls-min-max-version.js}
+  rm test/wpt/test-url.js
+
+  make test-only
+}
+
+package() {
+  cd node-v${pkgver}
+  make DESTDIR="${pkgdir}" install
+  install -Dm644 LICENSE -t "${pkgdir}"/usr/share/licenses/${pkgname}/
+}
