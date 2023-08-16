@@ -4,7 +4,7 @@
 # Contributor: Jakub Schmidtke <sjakub@gmail.com>
 
 pkgname=firefox
-pkgver=115.0.2
+pkgver=116.0.2
 pkgrel=1
 pkgdesc="Standalone web browser from mozilla.org"
 arch=(x86_64 powerpc64le powerpc64 riscv64)
@@ -29,11 +29,9 @@ makedepends=(
   cbindgen
   clang
   diffutils
-  dump_syms
   imake
   inetutils
   jack
-  lld
   llvm
   mesa
   nasm
@@ -70,13 +68,15 @@ source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-
         $pkgname.desktop
         identity-icons-brand.svg
         big-endian-image-decoders.patch
-        firefox-pgo.patch)
-b2sums=('ca602d102f2b7b7fc7bebb6ca4b21e548d4542727da94410497ad6774b6dc7a9eba778c9b6e269beabdbf647e3447f621103cb68fbcac77c4beca1829cbfc535'
+        firefox-pgo.patch
+        firefox-webrtc-p9.patch)
+b2sums=('59256b68ada144362adb6cd0423ea965d2ec0390d78e0a32b56f83eda8ce212d0f388ffb0ab2d9e902ad0434c8bbed63d54adc3589eafa4f7ad6d3a032801cf8'
         'SKIP'
         '51d7eb22cb568f0437ece2433091d8b54012324edd2fe52ec52cc00f1ad0d4bd84a4d549d78b4d77bbd6ae1c1e7d029d9d4dbff61c60f714362ef791f09fba8b'
         '63a8dd9d8910f9efb353bed452d8b4b2a2da435857ccee083fc0c557f8c4c1339ca593b463db320f70387a1b63f1a79e709e9d12c69520993e26d85a3d742e34'
         'da4b0953f705a82a228c2bb05d9aa82c2263d5176c40012895fd3e6ff9c1110fb595158521f3ddaa0ead6c6dfa098e2384e810aa90af8a7270163d232ad38cb6'
-        '1fd30afba7b8fedec4399ee2d617cf13844cff60512f045c5352146501e13086d7af7c0a419d6b74a113519b6fa923be1e4a43a0f461b99de204ad3011d46d92')
+        '757b70ab9a9000b7fb11306e9b786cdbd44866cee1bfe6a23abfd826847e3d77b219b5d070b97adc2d5938ca3fdaac0e1524dea9b518d0c6f200247219a783a5'
+        '84d2a1c014ee9c4ad02d8d855ac906b5e3747044de831a14637c47f741f0000d620adb23c151f6c457a66ddf2ebef349a8c9268d1abd55cb48f4efa80a8378db')
 validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
@@ -97,6 +97,7 @@ prepare() {
 
   patch -Np0 -i ${srcdir}/big-endian-image-decoders.patch 
   patch -Np1 -i ${srcdir}/firefox-pgo.patch
+  patch -Np1 -i ${srcdir}/firefox-webrtc-p9.patch
 
   sed -i 's/\("files":{\)[^}]*/\1/' third_party/rust/num-traits/.cargo-checksum.json
 
@@ -138,7 +139,6 @@ ac_add_options --enable-jack
 ac_add_options --disable-crashreporter
 ac_add_options --disable-updater
 ac_add_options --disable-tests
-ac_add_options --disable-webrtc
 END
 
   case "${CARCH}" in
@@ -148,6 +148,9 @@ END
       # patch the rust debug level, this is hardcoded
       sed -i "s/debug_info = '2'/debug_info = '1'/" \
         build/moz.configure/toolchain.configure
+    ;;
+    powerpc64)
+      echo "ac_add_options --disable-webrtc" >> ${srcdir}/mozconfig
     ;;
     riscv64)
       echo "export LDFLAGS='${LDFLAGS} -Wl,-z,stack-size=1048576 -Wl,--no-keep-memory'" >> ${srcdir}/mozconfig 
