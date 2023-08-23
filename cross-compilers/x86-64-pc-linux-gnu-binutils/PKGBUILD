@@ -1,71 +1,77 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Anatol Pomozov <anatol.pomozov@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Alexander F. Rødseth <xyproto@archlinux.org>
+# Contributor: Emil Renner Berthing <aur@esmil.dk>
 
-_target=x86_64-pc-linux-gnu
+_target=x86_64-unknown-linux-gnu
 pkgname=$_target-binutils
-pkgver=2.39
-pkgrel=2
-pkgdesc="A set of programs to assemble and manipulate binary and object files for the ${_target} target"
+pkgver=2.41
+_commit=31b78cc991781265d9404bd55151691bedd6d556
+pkgrel=3
+pkgdesc='Assemble and manipulate binary and object files for 32-bit and 64-bit RISC-V'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url='https://www.gnu.org/software/binutils/'
+url='https://gnu.org/software/binutils/'
 license=(GPL)
-depends=(zlib libelf)
-source=(https://ftp.gnu.org/gnu/binutils/binutils-$pkgver.tar.bz2{,.sig})
-sha1sums=('d9028547385694d61d98fb4e2882a2b9c40ce7e9'
-          'SKIP')
-sha256sums=('da24a84fef220102dd24042df06fdea851c2614a5377f86effa28f33b7b16148'
-            'SKIP')
-validpgpkeys=('3A24BC1E8FB409FA9F14371813FCEF89DD9E3C4F') # Nick Clifton (Chief Binutils Maintainer) <nickc@redhat.com>
+depends=(glibc zlib libelf jansson)
+makedepends=(git setconf)
+source=(git+https://sourceware.org/git/binutils-gdb.git#commit=${_commit}
+	gold-warn-unsupported.patch)
+sha512sums=('SKIP'
+            '5d827b349b4456f8314776f1545396945c751b822a77604157b3fe436e5ff82bb313af3a215c99fd9d1f1f8ebb9f92033cc1a4968e35734619ad28b9bb3839a7')
 
 prepare() {
-  cd binutils-$pkgver
-  sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" libiberty/configure
+  cd ${srcdir}
+  [[ ! -d binutils-gdb ]] && ln -s binutils-$pkgver binutils-gdb                                                                                                                                                                         
+
+  cd "binutils-gdb"
+  # Creds @Fedora
+  # Change the gold configuration script to only warn about
+  # unsupported targets.  This allows the binutils to be built with
+  # BPF support enabled.
+  patch -Np1 -i "${srcdir}"/gold-warn-unsupported.patch
+
+  setconf libiberty/configure ac_cpp "'\$CPP \$CPPFLAGS -O2'"
 }
 
 build() {
-  cd binutils-$pkgver
+  cd "binutils-gdb"
 
-  if [ "${CARCH}" != "i686" ];
-  then
-    # enabling gold linker at i686 makes the install fail
-    enable_gold='--enable-gold'
-  fi
-
-  ./configure --target=$_target \
-              --with-sysroot=/usr/$_target \
-              --prefix=/usr \
-              --disable-multilib \
-              --with-gnu-as \
-              --with-gnu-ld \
-              --disable-nls \
-              --enable-ld=default \
-              $enable_gold \
-              --enable-plugins \
-              --enable-deterministic-archives
-
+  unset CPPFLAGS
+  ./configure \
+    --enable-targets=no \
+    --disable-nls \
+    --enable-deterministic-archives \
+    --enable-gold \
+    --enable-ld=default \
+    --enable-multilib \
+    --enable-plugins \
+    --prefix=/usr \
+    --target=$_target \
+    --with-gnu-as \
+    --with-gnu-ld \
+    --with-sysroot=/usr/$_target \
+    --with-system-zlib \
+    --disable-werror \
+    --disable-sim \
+    --enable-colored-disassembly
   make
 }
 
 check() {
-  cd binutils-$pkgver
-
-  # unset LDFLAGS as testsuite makes assumptions about which ones are active
-  # do not abort on errors - manually check log files
-  make -k LDFLAGS="" check || true
+  # * Unset LDFLAGS as testsuite makes assumptions about which ones are active.
+  # * Do not abort on errors - manually check log files.
+  make -C "binutils-gdb" LDFLAGS="" -k check
 }
 
 package() {
-  cd binutils-$pkgver
-
-  make DESTDIR="$pkgdir" install
-
-  # Remove file conflicting with host binutils and manpages for MS Windows tools
-  rm "$pkgdir"/usr/share/man/man1/$_target-{dlltool,windres,windmc}*
-  rm "$pkgdir"/usr/lib/bfd-plugins/libdep.so
-  rm -f "$pkgdir"/usr/etc/gprofng.rc
-  rm -rf "$pkgdir"/usr/include
-  rm -rf "$pkgdir"/usr/lib/gprofng/
+  make -C "binutils-gdb" DESTDIR="$pkgdir" install
 
   # Remove info documents that conflict with host version
-  rm -r "$pkgdir"/usr/share/info
+  rm -r "$pkgdir/usr/share/info"
+  rm -r "$pkgdir/usr/share/gdb"
+  rm "$pkgdir//usr/include/gdb/jit-reader.h"
+
+  rm "$pkgdir"/usr/lib/bfd-plugins/libdep.so
 }
+
+# getver: gnu.org/software/binutils
