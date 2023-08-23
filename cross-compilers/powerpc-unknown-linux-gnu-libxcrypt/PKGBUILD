@@ -1,0 +1,66 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Contributor: Alexander 'hatred' Drozdov <adrozdoff@gmail.com>
+# Contributor: toha257 <toha257@gmail.com>
+# Contributor: Allan McRae <allan@archlinux.org>
+# Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Kevin Mihelich <kevin@archlinuxarm.org>
+# Contributor: Tavian Barnes <tavianator@tavianator.com>
+# Maintainer: Stefan Schmidt <thrimbor.github@gmail.com>
+
+_target=powerpc-unknown-linux-gnu
+pkgname=${_target}-libxcrypt
+pkgver=4.4.36
+pkgrel=1
+pkgdesc='Modern library for one-way hashing of passwords'
+arch=(any)
+url='https://github.com/besser82/libxcrypt'
+license=('LGPL')
+depends=("${_target}-glibc>=2.38")
+makedepends=("${_target}-gcc-stage2")
+validpgpkeys=('678CE3FEE430311596DB8C16F52E98007594C21D') # Björn 'besser82' Esser
+source=("${url}/releases/download/v${pkgver}/libxcrypt-${pkgver}.tar.xz"{,.asc})
+sha256sums=('e5e1f4caee0a01de2aee26e3138807d6d3ca2b8e67287966d1fefd65e1fd8943'
+            'SKIP')
+
+build() {
+  mkdir build-libxcrypt build-libxcrypt-compat
+
+  # don't polute cross cflags
+  unset CFLAGS CXXFLAGS
+  export CFLAGS="-O2 -pipe"
+  export CXXFLAGS="-O2 -pipe"
+
+  export CC=${_target}-gcc
+
+  cd "${srcdir}/build-libxcrypt/"
+  "${srcdir}/libxcrypt-${pkgver}"/configure \
+    --prefix=/usr/${_target} \
+    --with-sysroot=/usr/${_target} \
+    --disable-static \
+    --enable-hashes=strong,glibc \
+    --enable-obsolete-api=no \
+    --disable-failure-tokens \
+    --target=${_target} \
+    --host=${_target}
+  make
+  
+  cd "${srcdir}/build-libxcrypt-compat/"
+  "${srcdir}/libxcrypt-${pkgver}"/configure \
+    --prefix=/usr/${_target} \
+    --with-sysroot=/usr/${_target} \
+    --disable-static \
+    --enable-hashes=strong,glibc \
+    --enable-obsolete-api=glibc \
+    --disable-failure-tokens \
+    --target=${_target} \
+    --host=${_target}
+  make
+}
+
+package() {
+  cd ${srcdir}/build-libxcrypt/
+  make DESTDIR="${pkgdir}" install
+  cd ${srcdir}/build-libxcrypt-compat/
+  make DESTDIR="${pkgdir}" install
+
+}
