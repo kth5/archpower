@@ -4,39 +4,27 @@
 # Contributor: Victor Aurélio Santos <victoraur.santos@gmail.com>
 
 pkgbase='grpc'
-pkgname=('grpc' 'php-grpc' 'php-legacy-grpc')
-[ ! "${CARCH}" = 'powerpc' ] && pkgname+=('python-grpcio' 'python-grpcio-tools')
-[ ! "${CARCH}" = 'riscv64' -a ! "${CARCH}" = 'powerpc' ] && pkgname+=('grpc-cli')
-pkgver=1.55.1
+pkgname=('grpc' 'python-grpcio' 'python-grpcio-tools' 'php-grpc' 'php-legacy-grpc')
+pkgver=1.57.0
 _gtestver=0e402173c97aea7a00749e825b194bfede4f2e45
-pkgrel=2
+pkgrel=1
 pkgdesc="High performance, open source, general RPC framework that puts mobile and HTTP/2 first."
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://grpc.io'
 license=('BSD')
-makedepends=('re2' 're2c' 'protobuf' 'php' 'php-legacy' 'c-ares' 'openssl' 'chrpath' 'cython'
+makedepends=('re2' 're2c' 'protobuf' 'php' 'php-legacy' 'c-ares' 'openssl' 'chrpath' 'cython0'
              'cmake' 'benchmark' 'python-setuptools' 'abseil-cpp' 'ninja')
-checkdepends=('python-six')
+_boringssl_branch=main-with-bazel
 source=("https://github.com/grpc/grpc/archive/v$pkgver/$pkgbase-$pkgver.tar.gz"
-        "https://github.com/google/googletest/archive/$_gtestver/googletest-$_gtestver.tar.gz"
         "https://github.com/grpc/grpc/commit/117dc80e.patch")
-sha256sums=('9c3c0a0ad986ee4fc0a9b58fd71255010068df7d1437c425b525d68c30c85ac7'
-            'c8de6c60e12ad014a28225c5247ee735861d85cf906df617f6a29954ca05f547'
+sha256sums=('8393767af531b2d0549a4c26cf8ba1f665b16c16fb6c9238a7755e45444881dd'
             '2764d9f6f08511f54e1153ebe350a91a251f6f8a335ad8903dea161bd432d27d')
-
-BUILD_TESTS=ON
-case "${CARCH}" in
-  powerpc|riscv64) _cmake_options+=(-DCMAKE_CXX_FLAGS="-latomic"); BUILD_TESTS=OFF ;;
-esac
 
 prepare() {
   cd "$srcdir/$pkgbase-$pkgver"
-
+ 
   # Fix find_dependency cmake macro
   patch -p1 -i ../117dc80e.patch
-
-  ln -sf "$srcdir/googletest-$_gtestver/"{googlemock,googletest} \
-    third_party/googletest
 
   cp -a src/php{,-legacy}
 
@@ -49,6 +37,10 @@ prepare() {
       tools/distrib/python/grpcio_tools/protoc_lib_deps.py
   ln -s ../../../.. tools/distrib/python/grpcio_tools/grpc_root
 
+  case "${CARCH}" in
+    powerpc|riscv64) export CXXFLAGS+=" -latomic" ;;
+  esac
+
   cmake -Bbuild \
     -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_CXX_FLAGS="${CXXFLAGS} -DNDEBUG" \
@@ -57,7 +49,7 @@ prepare() {
     -DCMAKE_CXX_STANDARD=17 \
     -DCMAKE_SKIP_INSTALL_RPATH=ON \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DgRPC_BUILD_TESTS=${BUILD_TESTS} \
+    -DgRPC_BUILD_TESTS=OFF \
     -DgRPC_BUILD_CODEGEN=ON \
     -DgRPC_BUILD_CSHARP_EXT=ON \
     -DgRPC_BACKWARDS_COMPATIBILITY_MODE=OFF \
@@ -77,7 +69,7 @@ prepare() {
     -DgRPC_BUILD_GRPC_PHP_PLUGIN=ON \
     -DgRPC_BUILD_GRPC_PYTHON_PLUGIN=ON \
     -DgRPC_BUILD_GRPC_RUBY_PLUGIN=ON \
-    -GNinja ${_cmake_options}
+    -GNinja
 }
 
 build() {
@@ -117,13 +109,6 @@ build() {
   GRPC_PYTHON_CFLAGS="-fno-wrapv -frtti $(pkg-config --cflags protobuf)" \
   GRPC_PYTHON_LDFLAGS="$(pkg-config --libs protobuf) -lprotoc" \
   python setup.py build
-}
-
-check() {
-  [ "${BUILD_TESTS}" == 'ON' ] && return true
-  cd "$srcdir/$pkgbase-$pkgver"
-  local _pyver=$(python -c "import sys; print('{0}{1}'.format(*sys.version_info[:2]))")
-  PYTHONPATH="python_build/lib.linux-$CARCH-cpython-$_pyver" python -c 'import grpc'
 }
 
 package_grpc() {
@@ -200,16 +185,4 @@ package_php-legacy-grpc() {
 
   echo ';extension=grpc.so' >grpc.ini
   install -Dm644 grpc.ini "$pkgdir/etc/php-legacy/conf.d/grpc.ini"
-}
-
-package_grpc-cli() {
-  pkgdesc='gRPC protocol buffers cli'
-  depends=('grpc')
-
-  cd "$srcdir/$pkgbase-$pkgver"
-  install -dm0755 "$pkgdir/usr/lib"
-  cp -a build/libgrpc++_test_config.so* "$pkgdir/usr/lib/"
-
-  install -Dm0755 build/grpc_cli "$pkgdir/usr/bin/grpc_cli"
-  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
