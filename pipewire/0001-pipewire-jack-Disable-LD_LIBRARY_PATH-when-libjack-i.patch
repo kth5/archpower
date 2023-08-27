@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Jan Alexander Steffens (heftig)" <heftig@archlinux.org>
+Date: Thu, 3 Aug 2023 20:53:49 +0200
+Subject: [PATCH] pipewire-jack: Disable LD_LIBRARY_PATH when libjack is in
+ libdir
+
+This avoids prepending /usr/lib to the LD_LIBRARY_PATH, which supersedes
+DT_RUNPATH and can cause library confusion.
+---
+ pipewire-jack/src/meson.build | 7 +++++++
+ pipewire-jack/src/pw-jack.in  | 4 ++--
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/pipewire-jack/src/meson.build b/pipewire-jack/src/meson.build
+index daa4bcdef1ae..def7746afe20 100644
+--- a/pipewire-jack/src/meson.build
++++ b/pipewire-jack/src/meson.build
+@@ -21,12 +21,19 @@ libjack_path = get_option('libjack-path')
+ if libjack_path == ''
+   libjack_path = modules_install_dir / 'jack'
+   libjack_path_dlopen = modules_install_dir_dlopen / 'jack'
++  libjack_path_enable = ''
++elif libjack_path == get_option('libdir') or libjack_path == pipewire_libdir
++  libjack_path = pipewire_libdir
++  libjack_path_dlopen = libjack_path
++  libjack_path_enable = '#'
+ else
+   libjack_path_dlopen = libjack_path
++  libjack_path_enable = ''
+ endif
+ 
+ tools_config = configuration_data()
+ tools_config.set('LIBJACK_PATH', libjack_path_dlopen)
++tools_config.set('LIBJACK_PATH_ENABLE', libjack_path_enable)
+ 
+ configure_file(input : 'pw-jack.in',
+                output : 'pw-jack',
+diff --git a/pipewire-jack/src/pw-jack.in b/pipewire-jack/src/pw-jack.in
+index 2f232f6253b0..e9714284878a 100755
+--- a/pipewire-jack/src/pw-jack.in
++++ b/pipewire-jack/src/pw-jack.in
+@@ -52,7 +52,7 @@ if [ -n "$PERIOD" ]; then
+ 	fi
+ 	export PIPEWIRE_QUANTUM
+ fi
+-LD_LIBRARY_PATH='@LIBJACK_PATH@'"${LD_LIBRARY_PATH+":$LD_LIBRARY_PATH"}"
+-export LD_LIBRARY_PATH
++@LIBJACK_PATH_ENABLE@LD_LIBRARY_PATH='@LIBJACK_PATH@'"${LD_LIBRARY_PATH+":$LD_LIBRARY_PATH"}"
++@LIBJACK_PATH_ENABLE@export LD_LIBRARY_PATH
+ 
+ exec "$@"
