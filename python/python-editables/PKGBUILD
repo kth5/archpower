@@ -3,33 +3,50 @@
 # Contributor: Mark Wagie <mark dot wagie at tutanota dot com>
 
 pkgname=python-editables
-_name=${pkgname#python-}
-pkgver=0.3
-pkgrel=4
-pkgdesc='A Python library for creating editable wheels'
+pkgver=0.5
+pkgrel=1
+pkgdesc='Python library for creating editable wheels'
 arch=(any)
 url='https://github.com/pfmoore/editables'
-license=(MIT)
-depends=(python)
-makedepends=(python-build python-installer python-setuptools python-wheel)
-checkdepends=(python-pytest)
-source=(https://github.com/pfmoore/editables/archive/$pkgver/$pkgname-$pkgver.tar.gz)
-sha256sums=('42f7240164af1e028ccb7b60e72f54bbd8b639e9409595fbeffac5d3fb610643')
+license=('MIT')
+depends=('python')
+makedepends=(
+  'git'
+  'python-build'
+  'python-installer'
+  'python-flit-core'
+)
+checkdepends=('python-pytest')
+_commit='2331418af764ef203959327354335c431978e70d'
+source=("$pkgname::git+$url#commit=$_commit")
+b2sums=('SKIP')
+
+pkgver() {
+  cd "$pkgname"
+
+  git describe --tags | sed 's/^v//'
+}
 
 build() {
-  cd $_name-$pkgver
+  cd "$pkgname"
+
   python -m build --wheel --no-isolation
 }
 
 check() {
-  cd $_name-$pkgver 
-  PYTHONPATH="$PWD"/src \
-  pytest -v
+  cd "$pkgname"
+
+  PYTHONPATH="$(pwd)/src" pytest -v
 }
 
 package() {
-  cd $_name-$pkgver
+  cd "$pkgname"
+
   python -m installer --destdir="$pkgdir" dist/*.whl
 
-  install -Dm644 LICENSE.txt -t "$pkgdir"/usr/share/licenses/$pkgname
+  # symlink license file
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "$pkgdir/usr/share/licenses/$pkgname"
+  ln -s "$site_packages/${pkgname#python-}-$pkgver.dist-info/LICENSE.txt" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE.txt"
 }
