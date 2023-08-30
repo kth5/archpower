@@ -2,28 +2,29 @@
 # Maintainer:
 # Contributor: Felix Yan <felixonmars@archlinux.org>
 
-_name=lark
 pkgname=python-lark-parser
-_commit=7d9cfa6ed09a2b125e97e3a1810d9c6443f1718e  # refs/tags/1.1.5
-pkgver=1.1.5
-pkgrel=4
-pkgdesc="A modern parsing library"
-url="https://github.com/lark-parser/lark"
-license=(MIT)
+pkgver=1.1.7
+pkgrel=2
+pkgdesc='A modern parsing library'
 arch=(any)
+url='https://github.com/lark-parser/lark'
+license=('MIT')
 depends=(
-  python
-  python-typing_extensions
+  'python'
+  'python-typing_extensions'
 )
 makedepends=(
-  git
-  python-build
-  python-installer
-  python-setuptools
-  python-wheel
+  'git'
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
 )
 checkdepends=(
-  python-js2py
+  'python-js2py'
+  'python-tzlocal'
+  'python-atomicwrites'
+  'python-regex'
 )
 optdepends=(
   'python-atomicwrites: for atomic_cache'
@@ -31,38 +32,52 @@ optdepends=(
   'python-regex: for regex support'
   'python-js2py: for nearley support'
 )
-provides=(python-lark)
+provides=('python-lark')
+_commit='e795810d9849a5ee517effadc7693f7a4ea2f076'
 source=(
-  git+$url#commit=$_commit
-  $_name-nearly::git+https://github.com/Hardmath123/nearley
+  "$pkgname::git+$url#commit=$_commit"
+  'github.com-Hardmath123-nearley::git+https://github.com/Hardmath123/nearley'
 )
-sha512sums=('SKIP'
-            'SKIP')
-
-prepare() {
-  cd $_name
-  git submodule init
-  git config submodule.tests/test_nearley/nearley.url "$srcdir/$_name-nearly"
-  git -c protocol.file.allow=always submodule update
-}
+b2sums=('SKIP' 'SKIP')
 
 pkgver() {
-  cd $_name
-  git describe --tags --abbrev=7 | sed 's/\([^-]*-g\)/r\1/;s/-/./g'
+  cd "$pkgname"
+
+  git describe --tags | sed 's/^v//'
+}
+
+prepare() {
+  cd "$pkgname"
+
+  # setup git submodules
+  git submodule init
+  git config submodule.tests/test_nearley/nearley.url "$srcdir/github.com-Hardmath123-nearley"
+  git -c protocol.file.allow=always submodule update
+
+  # include *.lark files
+  git cherry-pick --no-commit 656334cb8793fd4e08a12843eaced5a7bb518be3
 }
 
 build() {
-  cd $_name
+  cd "$pkgname"
+
   python -m build --wheel --no-isolation
 }
 
 check() {
-  cd $_name
+  cd "$pkgname"
+
   python -m tests
 }
 
 package() {
-  cd $_name
+  cd "$pkgname"
+
   python -m installer --destdir="$pkgdir" dist/*.whl
-  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
+
+  # symlink license file
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "$pkgdir/usr/share/licenses/$pkgname"
+  ln -s "$site_packages/lark-$pkgver.dist-info/LICENSE" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
