@@ -1,33 +1,7 @@
-From 77f70aae4c97cad1dea5fba9c04c8d2ffd3826ec Mon Sep 17 00:00:00 2001
-From: Antonio Rojas <arojas@archlinux.org>
-Date: Sun, 20 Feb 2022 11:12:00 +0000
-Subject: [PATCH 3/3] Port to pipewire 0.3
-
----
- .../webrtc/modules/desktop_capture/BUILD.gn   |  42 +-
- .../linux/base_capturer_pipewire.cc           | 770 ++++++++++++++----
- .../linux/base_capturer_pipewire.h            |  58 +-
- .../linux/{pipewire.sigs => pipewire02.sigs}  |   3 +
- .../desktop_capture/linux/pipewire03.sigs     |  46 ++
- .../linux/screen_capturer_pipewire.cc         |  29 -
- .../linux/screen_capturer_pipewire.h          |  33 -
- .../linux/window_capturer_pipewire.cc         |  29 -
- .../linux/window_capturer_pipewire.h          |  33 -
- .../desktop_capture/screen_capturer_linux.cc  |   4 +-
- .../desktop_capture/window_capturer_linux.cc  |   4 +-
- chromium/third_party/webrtc/webrtc.gni        |   4 +
- 12 files changed, 750 insertions(+), 305 deletions(-)
- rename chromium/third_party/webrtc/modules/desktop_capture/linux/{pipewire.sigs => pipewire02.sigs} (91%)
- create mode 100644 chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire03.sigs
- delete mode 100644 chromium/third_party/webrtc/modules/desktop_capture/linux/screen_capturer_pipewire.cc
- delete mode 100644 chromium/third_party/webrtc/modules/desktop_capture/linux/screen_capturer_pipewire.h
- delete mode 100644 chromium/third_party/webrtc/modules/desktop_capture/linux/window_capturer_pipewire.cc
- delete mode 100644 chromium/third_party/webrtc/modules/desktop_capture/linux/window_capturer_pipewire.h
-
 diff --git a/chromium/third_party/webrtc/modules/desktop_capture/BUILD.gn b/chromium/third_party/webrtc/modules/desktop_capture/BUILD.gn
 index 5235512735d..8259442f811 100644
---- a/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/BUILD.gn
-+++ b/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/BUILD.gn
+--- a/chromium/third_party/webrtc/modules/desktop_capture/BUILD.gn
++++ b/chromium/third_party/webrtc/modules/desktop_capture/BUILD.gn
 @@ -11,6 +11,11 @@ import("//build/config/ui.gni")
  import("//tools/generate_stubs/rules.gni")
  import("../../webrtc.gni")
@@ -119,8 +93,8 @@ index 5235512735d..8259442f811 100644
    }
 diff --git a/chromium/third_party/webrtc/modules/desktop_capture/linux/base_capturer_pipewire.cc b/chromium/third_party/webrtc/modules/desktop_capture/linux/base_capturer_pipewire.cc
 index 2640e93aa98..c302a086ead 100644
---- a/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/linux/base_capturer_pipewire.cc
-+++ b/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/linux/base_capturer_pipewire.cc
+--- a/chromium/third_party/webrtc/modules/desktop_capture/linux/base_capturer_pipewire.cc
++++ b/chromium/third_party/webrtc/modules/desktop_capture/linux/base_capturer_pipewire.cc
 @@ -14,8 +14,14 @@
  #include <glib-object.h>
  #include <spa/param/format-utils.h>
@@ -1341,8 +1315,8 @@ index 2640e93aa98..c302a086ead 100644
  }  // namespace webrtc
 diff --git a/chromium/third_party/webrtc/modules/desktop_capture/linux/base_capturer_pipewire.h b/chromium/third_party/webrtc/modules/desktop_capture/linux/base_capturer_pipewire.h
 index f28d7a558bc..75d20dbf1db 100644
---- a/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/linux/base_capturer_pipewire.h
-+++ b/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/linux/base_capturer_pipewire.h
+--- a/chromium/third_party/webrtc/modules/desktop_capture/linux/base_capturer_pipewire.h
++++ b/chromium/third_party/webrtc/modules/desktop_capture/linux/base_capturer_pipewire.h
 @@ -10,18 +10,23 @@
  
  #ifndef MODULES_DESKTOP_CAPTURE_LINUX_BASE_CAPTURER_PIPEWIRE_H_
@@ -1481,32 +1455,321 @@ index f28d7a558bc..75d20dbf1db 100644
    static void OnStreamProcess(void* data);
    static void OnNewBuffer(void* data, uint32_t id);
  
-diff --git a/chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire.sigs b/chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire02.sigs
-similarity index 91%
-rename from chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire.sigs
-rename to chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire02.sigs
-index 3e21e9dc07c..5ac3d1d22b8 100644
---- a/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire.sigs
-+++ b/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire02.sigs
-@@ -26,6 +26,7 @@ void pw_remote_add_listener(pw_remote *remote, spa_hook *listener, const pw_remo
- int pw_remote_connect_fd(pw_remote *remote, int fd);
- void pw_remote_destroy(pw_remote *remote);
- pw_remote * pw_remote_new(pw_core *core, pw_properties *properties, size_t user_data_size);
-+enum pw_remote_state pw_remote_get_state(pw_remote *remote, const char **error);
+diff --git a/chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire.sigs b/chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire.sigs
+deleted file mode 100644
+index 3e21e9dc07c..00000000000
+--- a/chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire.sigs
++++ /dev/null
+@@ -1,44 +0,0 @@
+-// Copyright 2018 The WebRTC project authors. All rights reserved.
+-// Use of this source code is governed by a BSD-style license that can be
+-// found in the LICENSE file.
+-
+-//------------------------------------------------
+-// Functions from PipeWire used in capturer code.
+-//------------------------------------------------
+-
+-// core.h
+-void pw_core_destroy(pw_core *core);
+-pw_type *pw_core_get_type(pw_core *core);
+-pw_core * pw_core_new(pw_loop *main_loop, pw_properties *props);
+-
+-// loop.h
+-void pw_loop_destroy(pw_loop *loop);
+-pw_loop * pw_loop_new(pw_properties *properties);
+-
+-// pipewire.h
+-void pw_init(int *argc, char **argv[]);
+-
+-// properties.h
+-pw_properties * pw_properties_new_string(const char *args);
+-
+-// remote.h
+-void pw_remote_add_listener(pw_remote *remote, spa_hook *listener, const pw_remote_events *events, void *data);
+-int pw_remote_connect_fd(pw_remote *remote, int fd);
+-void pw_remote_destroy(pw_remote *remote);
+-pw_remote * pw_remote_new(pw_core *core, pw_properties *properties, size_t user_data_size);
+-
+-// stream.h
+-void pw_stream_add_listener(pw_stream *stream, spa_hook *listener, const pw_stream_events *events, void *data);
+-int pw_stream_connect(pw_stream *stream, enum pw_direction direction, const char *port_path, enum pw_stream_flags flags, const spa_pod **params, uint32_t n_params);
+-pw_buffer *pw_stream_dequeue_buffer(pw_stream *stream);
+-void pw_stream_destroy(pw_stream *stream);
+-void pw_stream_finish_format(pw_stream *stream, int res, const spa_pod **params, uint32_t n_params);
+-pw_stream * pw_stream_new(pw_remote *remote, const char *name, pw_properties *props);
+-int pw_stream_queue_buffer(pw_stream *stream, pw_buffer *buffer);
+-int pw_stream_set_active(pw_stream *stream, bool active);
+-
+-// thread-loop.h
+-void pw_thread_loop_destroy(pw_thread_loop *loop);
+-pw_thread_loop * pw_thread_loop_new(pw_loop *loop, const char *name);
+-int pw_thread_loop_start(pw_thread_loop *loop);
+-void pw_thread_loop_stop(pw_thread_loop *loop);
+diff --git a/chromium/third_party/webrtc/modules/desktop_capture/linux/screen_capturer_pipewire.cc b/chromium/third_party/webrtc/modules/desktop_capture/linux/screen_capturer_pipewire.cc
+deleted file mode 100644
+index fe672140cca..00000000000
+--- a/chromium/third_party/webrtc/modules/desktop_capture/linux/screen_capturer_pipewire.cc
++++ /dev/null
+@@ -1,29 +0,0 @@
+-/*
+- *  Copyright 2018 The WebRTC project authors. All Rights Reserved.
+- *
+- *  Use of this source code is governed by a BSD-style license
+- *  that can be found in the LICENSE file in the root of the source
+- *  tree. An additional intellectual property rights grant can be found
+- *  in the file PATENTS.  All contributing project authors may
+- *  be found in the AUTHORS file in the root of the source tree.
+- */
+-
+-#include "modules/desktop_capture/linux/screen_capturer_pipewire.h"
+-
+-#include <memory>
+-
+-
+-namespace webrtc {
+-
+-ScreenCapturerPipeWire::ScreenCapturerPipeWire()
+-    : BaseCapturerPipeWire(BaseCapturerPipeWire::CaptureSourceType::Screen) {}
+-ScreenCapturerPipeWire::~ScreenCapturerPipeWire() {}
+-
+-// static
+-std::unique_ptr<DesktopCapturer>
+-ScreenCapturerPipeWire::CreateRawScreenCapturer(
+-    const DesktopCaptureOptions& options) {
+-  return std::make_unique<ScreenCapturerPipeWire>();
+-}
+-
+-}  // namespace webrtc
+diff --git a/chromium/third_party/webrtc/modules/desktop_capture/linux/screen_capturer_pipewire.h b/chromium/third_party/webrtc/modules/desktop_capture/linux/screen_capturer_pipewire.h
+deleted file mode 100644
+index 66dcd680e06..00000000000
+--- a/chromium/third_party/webrtc/modules/desktop_capture/linux/screen_capturer_pipewire.h
++++ /dev/null
+@@ -1,33 +0,0 @@
+-/*
+- *  Copyright 2018 The WebRTC project authors. All Rights Reserved.
+- *
+- *  Use of this source code is governed by a BSD-style license
+- *  that can be found in the LICENSE file in the root of the source
+- *  tree. An additional intellectual property rights grant can be found
+- *  in the file PATENTS.  All contributing project authors may
+- *  be found in the AUTHORS file in the root of the source tree.
+- */
+-
+-#ifndef MODULES_DESKTOP_CAPTURE_LINUX_SCREEN_CAPTURER_PIPEWIRE_H_
+-#define MODULES_DESKTOP_CAPTURE_LINUX_SCREEN_CAPTURER_PIPEWIRE_H_
+-
+-#include <memory>
+-
+-#include "modules/desktop_capture/linux/base_capturer_pipewire.h"
+-
+-namespace webrtc {
+-
+-class ScreenCapturerPipeWire : public BaseCapturerPipeWire {
+- public:
+-  ScreenCapturerPipeWire();
+-  ~ScreenCapturerPipeWire() override;
+-
+-  static std::unique_ptr<DesktopCapturer> CreateRawScreenCapturer(
+-      const DesktopCaptureOptions& options);
+-
+-  RTC_DISALLOW_COPY_AND_ASSIGN(ScreenCapturerPipeWire);
+-};
+-
+-}  // namespace webrtc
+-
+-#endif  // MODULES_DESKTOP_CAPTURE_LINUX_SCREEN_CAPTURER_PIPEWIRE_H_
+diff --git a/chromium/third_party/webrtc/modules/desktop_capture/linux/window_capturer_pipewire.cc b/chromium/third_party/webrtc/modules/desktop_capture/linux/window_capturer_pipewire.cc
+deleted file mode 100644
+index b4559156dce..00000000000
+--- a/chromium/third_party/webrtc/modules/desktop_capture/linux/window_capturer_pipewire.cc
++++ /dev/null
+@@ -1,29 +0,0 @@
+-/*
+- *  Copyright 2018 The WebRTC project authors. All Rights Reserved.
+- *
+- *  Use of this source code is governed by a BSD-style license
+- *  that can be found in the LICENSE file in the root of the source
+- *  tree. An additional intellectual property rights grant can be found
+- *  in the file PATENTS.  All contributing project authors may
+- *  be found in the AUTHORS file in the root of the source tree.
+- */
+-
+-#include "modules/desktop_capture/linux/window_capturer_pipewire.h"
+-
+-#include <memory>
+-
+-
+-namespace webrtc {
+-
+-WindowCapturerPipeWire::WindowCapturerPipeWire()
+-    : BaseCapturerPipeWire(BaseCapturerPipeWire::CaptureSourceType::Window) {}
+-WindowCapturerPipeWire::~WindowCapturerPipeWire() {}
+-
+-// static
+-std::unique_ptr<DesktopCapturer>
+-WindowCapturerPipeWire::CreateRawWindowCapturer(
+-    const DesktopCaptureOptions& options) {
+-  return std::make_unique<WindowCapturerPipeWire>();
+-}
+-
+-}  // namespace webrtc
+diff --git a/chromium/third_party/webrtc/modules/desktop_capture/linux/window_capturer_pipewire.h b/chromium/third_party/webrtc/modules/desktop_capture/linux/window_capturer_pipewire.h
+deleted file mode 100644
+index 7f184ef2999..00000000000
+--- a/chromium/third_party/webrtc/modules/desktop_capture/linux/window_capturer_pipewire.h
++++ /dev/null
+@@ -1,33 +0,0 @@
+-/*
+- *  Copyright 2018 The WebRTC project authors. All Rights Reserved.
+- *
+- *  Use of this source code is governed by a BSD-style license
+- *  that can be found in the LICENSE file in the root of the source
+- *  tree. An additional intellectual property rights grant can be found
+- *  in the file PATENTS.  All contributing project authors may
+- *  be found in the AUTHORS file in the root of the source tree.
+- */
+-
+-#ifndef MODULES_DESKTOP_CAPTURE_LINUX_WINDOW_CAPTURER_PIPEWIRE_H_
+-#define MODULES_DESKTOP_CAPTURE_LINUX_WINDOW_CAPTURER_PIPEWIRE_H_
+-
+-#include <memory>
+-
+-#include "modules/desktop_capture/linux/base_capturer_pipewire.h"
+-
+-namespace webrtc {
+-
+-class WindowCapturerPipeWire : public BaseCapturerPipeWire {
+- public:
+-  WindowCapturerPipeWire();
+-  ~WindowCapturerPipeWire() override;
+-
+-  static std::unique_ptr<DesktopCapturer> CreateRawWindowCapturer(
+-      const DesktopCaptureOptions& options);
+-
+-  RTC_DISALLOW_COPY_AND_ASSIGN(WindowCapturerPipeWire);
+-};
+-
+-}  // namespace webrtc
+-
+-#endif  // MODULES_DESKTOP_CAPTURE_LINUX_WINDOW_CAPTURER_PIPEWIRE_H_
+diff --git a/chromium/third_party/webrtc/modules/desktop_capture/screen_capturer_linux.cc b/chromium/third_party/webrtc/modules/desktop_capture/screen_capturer_linux.cc
+index 82dbae48137..ed48b7d6d59 100644
+--- a/chromium/third_party/webrtc/modules/desktop_capture/screen_capturer_linux.cc
++++ b/chromium/third_party/webrtc/modules/desktop_capture/screen_capturer_linux.cc
+@@ -14,7 +14,7 @@
+ #include "modules/desktop_capture/desktop_capturer.h"
  
- // stream.h
- void pw_stream_add_listener(pw_stream *stream, spa_hook *listener, const pw_stream_events *events, void *data);
-@@ -42,3 +43,5 @@ void pw_thread_loop_destroy(pw_thread_loop *loop);
- pw_thread_loop * pw_thread_loop_new(pw_loop *loop, const char *name);
- int pw_thread_loop_start(pw_thread_loop *loop);
- void pw_thread_loop_stop(pw_thread_loop *loop);
+ #if defined(WEBRTC_USE_PIPEWIRE)
+-#include "modules/desktop_capture/linux/screen_capturer_pipewire.h"
++#include "modules/desktop_capture/linux/base_capturer_pipewire.h"
+ #endif  // defined(WEBRTC_USE_PIPEWIRE)
+ 
+ #if defined(WEBRTC_USE_X11)
+@@ -28,7 +28,7 @@ std::unique_ptr<DesktopCapturer> DesktopCapturer::CreateRawScreenCapturer(
+     const DesktopCaptureOptions& options) {
+ #if defined(WEBRTC_USE_PIPEWIRE)
+   if (options.allow_pipewire() && DesktopCapturer::IsRunningUnderWayland()) {
+-    return ScreenCapturerPipeWire::CreateRawScreenCapturer(options);
++    return BaseCapturerPipeWire::CreateRawCapturer(options);
+   }
+ #endif  // defined(WEBRTC_USE_PIPEWIRE)
+ 
+diff --git a/chromium/third_party/webrtc/modules/desktop_capture/window_capturer_linux.cc b/chromium/third_party/webrtc/modules/desktop_capture/window_capturer_linux.cc
+index 41dbf836b03..2b142ae3b92 100644
+--- a/chromium/third_party/webrtc/modules/desktop_capture/window_capturer_linux.cc
++++ b/chromium/third_party/webrtc/modules/desktop_capture/window_capturer_linux.cc
+@@ -14,7 +14,7 @@
+ #include "modules/desktop_capture/desktop_capturer.h"
+ 
+ #if defined(WEBRTC_USE_PIPEWIRE)
+-#include "modules/desktop_capture/linux/window_capturer_pipewire.h"
++#include "modules/desktop_capture/linux/base_capturer_pipewire.h"
+ #endif  // defined(WEBRTC_USE_PIPEWIRE)
+ 
+ #if defined(WEBRTC_USE_X11)
+@@ -28,7 +28,7 @@ std::unique_ptr<DesktopCapturer> DesktopCapturer::CreateRawWindowCapturer(
+     const DesktopCaptureOptions& options) {
+ #if defined(WEBRTC_USE_PIPEWIRE)
+   if (options.allow_pipewire() && DesktopCapturer::IsRunningUnderWayland()) {
+-    return WindowCapturerPipeWire::CreateRawWindowCapturer(options);
++    return BaseCapturerPipeWire::CreateRawCapturer(options);
+   }
+ #endif  // defined(WEBRTC_USE_PIPEWIRE)
+ 
+diff --git a/chromium/third_party/webrtc/webrtc.gni b/chromium/third_party/webrtc/webrtc.gni
+index ca8acdbf259..505c975cece 100644
+--- a/chromium/third_party/webrtc/webrtc.gni
++++ b/chromium/third_party/webrtc/webrtc.gni
+@@ -117,6 +117,10 @@ declare_args() {
+   # Set this to link PipeWire directly instead of using the dlopen.
+   rtc_link_pipewire = false
+ 
++  # Set this to use certain PipeWire version
++  # Currently we support PipeWire 0.2 (default) and PipeWire 0.3
++  rtc_pipewire_version = "0.3"
++
+   # Enable to use the Mozilla internal settings.
+   build_with_mozilla = false
+ 
+diff --git a/chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire02.sigs b/chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire02.sigs
+new file mode 100644
+index 00000000000..5ac3d1d22b8
+--- /dev/null
++++ b/chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire02.sigs
+@@ -0,0 +1,47 @@
++// Copyright 2018 The WebRTC project authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++//------------------------------------------------
++// Functions from PipeWire used in capturer code.
++//------------------------------------------------
++
++// core.h
++void pw_core_destroy(pw_core *core);
++pw_type *pw_core_get_type(pw_core *core);
++pw_core * pw_core_new(pw_loop *main_loop, pw_properties *props);
++
++// loop.h
++void pw_loop_destroy(pw_loop *loop);
++pw_loop * pw_loop_new(pw_properties *properties);
++
++// pipewire.h
++void pw_init(int *argc, char **argv[]);
++
++// properties.h
++pw_properties * pw_properties_new_string(const char *args);
++
++// remote.h
++void pw_remote_add_listener(pw_remote *remote, spa_hook *listener, const pw_remote_events *events, void *data);
++int pw_remote_connect_fd(pw_remote *remote, int fd);
++void pw_remote_destroy(pw_remote *remote);
++pw_remote * pw_remote_new(pw_core *core, pw_properties *properties, size_t user_data_size);
++enum pw_remote_state pw_remote_get_state(pw_remote *remote, const char **error);
++
++// stream.h
++void pw_stream_add_listener(pw_stream *stream, spa_hook *listener, const pw_stream_events *events, void *data);
++int pw_stream_connect(pw_stream *stream, enum pw_direction direction, const char *port_path, enum pw_stream_flags flags, const spa_pod **params, uint32_t n_params);
++pw_buffer *pw_stream_dequeue_buffer(pw_stream *stream);
++void pw_stream_destroy(pw_stream *stream);
++void pw_stream_finish_format(pw_stream *stream, int res, const spa_pod **params, uint32_t n_params);
++pw_stream * pw_stream_new(pw_remote *remote, const char *name, pw_properties *props);
++int pw_stream_queue_buffer(pw_stream *stream, pw_buffer *buffer);
++int pw_stream_set_active(pw_stream *stream, bool active);
++
++// thread-loop.h
++void pw_thread_loop_destroy(pw_thread_loop *loop);
++pw_thread_loop * pw_thread_loop_new(pw_loop *loop, const char *name);
++int pw_thread_loop_start(pw_thread_loop *loop);
++void pw_thread_loop_stop(pw_thread_loop *loop);
 +void pw_thread_loop_lock(struct pw_thread_loop *loop);
 +void pw_thread_loop_unlock(struct pw_thread_loop *loop);
 diff --git a/chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire03.sigs b/chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire03.sigs
 new file mode 100644
 index 00000000000..78d241f40c6
 --- /dev/null
-+++ b/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire03.sigs
++++ b/chromium/third_party/webrtc/modules/desktop_capture/linux/pipewire03.sigs
 @@ -0,0 +1,46 @@
 +// Copyright 2018 The WebRTC project authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
@@ -1554,213 +1817,3 @@ index 00000000000..78d241f40c6
 +void pw_context_destroy(pw_context *context);
 +pw_context *pw_context_new(pw_loop *main_loop, pw_properties *props, size_t user_data_size);
 +pw_core * pw_context_connect(pw_context *context, pw_properties *properties, size_t user_data_size);
-diff --git a/chromium/third_party/webrtc/modules/desktop_capture/linux/screen_capturer_pipewire.cc b/chromium/third_party/webrtc/modules/desktop_capture/linux/screen_capturer_pipewire.cc
-deleted file mode 100644
-index fe672140cca..00000000000
---- a/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/linux/screen_capturer_pipewire.cc
-+++ /dev/null
-@@ -1,29 +0,0 @@
--/*
-- *  Copyright 2018 The WebRTC project authors. All Rights Reserved.
-- *
-- *  Use of this source code is governed by a BSD-style license
-- *  that can be found in the LICENSE file in the root of the source
-- *  tree. An additional intellectual property rights grant can be found
-- *  in the file PATENTS.  All contributing project authors may
-- *  be found in the AUTHORS file in the root of the source tree.
-- */
--
--#include "modules/desktop_capture/linux/screen_capturer_pipewire.h"
--
--#include <memory>
--
--
--namespace webrtc {
--
--ScreenCapturerPipeWire::ScreenCapturerPipeWire()
--    : BaseCapturerPipeWire(BaseCapturerPipeWire::CaptureSourceType::Screen) {}
--ScreenCapturerPipeWire::~ScreenCapturerPipeWire() {}
--
--// static
--std::unique_ptr<DesktopCapturer>
--ScreenCapturerPipeWire::CreateRawScreenCapturer(
--    const DesktopCaptureOptions& options) {
--  return std::make_unique<ScreenCapturerPipeWire>();
--}
--
--}  // namespace webrtc
-diff --git a/chromium/third_party/webrtc/modules/desktop_capture/linux/screen_capturer_pipewire.h b/chromium/third_party/webrtc/modules/desktop_capture/linux/screen_capturer_pipewire.h
-deleted file mode 100644
-index 66dcd680e06..00000000000
---- a/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/linux/screen_capturer_pipewire.h
-+++ /dev/null
-@@ -1,33 +0,0 @@
--/*
-- *  Copyright 2018 The WebRTC project authors. All Rights Reserved.
-- *
-- *  Use of this source code is governed by a BSD-style license
-- *  that can be found in the LICENSE file in the root of the source
-- *  tree. An additional intellectual property rights grant can be found
-- *  in the file PATENTS.  All contributing project authors may
-- *  be found in the AUTHORS file in the root of the source tree.
-- */
--
--#ifndef MODULES_DESKTOP_CAPTURE_LINUX_SCREEN_CAPTURER_PIPEWIRE_H_
--#define MODULES_DESKTOP_CAPTURE_LINUX_SCREEN_CAPTURER_PIPEWIRE_H_
--
--#include <memory>
--
--#include "modules/desktop_capture/linux/base_capturer_pipewire.h"
--
--namespace webrtc {
--
--class ScreenCapturerPipeWire : public BaseCapturerPipeWire {
-- public:
--  ScreenCapturerPipeWire();
--  ~ScreenCapturerPipeWire() override;
--
--  static std::unique_ptr<DesktopCapturer> CreateRawScreenCapturer(
--      const DesktopCaptureOptions& options);
--
--  RTC_DISALLOW_COPY_AND_ASSIGN(ScreenCapturerPipeWire);
--};
--
--}  // namespace webrtc
--
--#endif  // MODULES_DESKTOP_CAPTURE_LINUX_SCREEN_CAPTURER_PIPEWIRE_H_
-diff --git a/chromium/third_party/webrtc/modules/desktop_capture/linux/window_capturer_pipewire.cc b/chromium/third_party/webrtc/modules/desktop_capture/linux/window_capturer_pipewire.cc
-deleted file mode 100644
-index b4559156dce..00000000000
---- a/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/linux/window_capturer_pipewire.cc
-+++ /dev/null
-@@ -1,29 +0,0 @@
--/*
-- *  Copyright 2018 The WebRTC project authors. All Rights Reserved.
-- *
-- *  Use of this source code is governed by a BSD-style license
-- *  that can be found in the LICENSE file in the root of the source
-- *  tree. An additional intellectual property rights grant can be found
-- *  in the file PATENTS.  All contributing project authors may
-- *  be found in the AUTHORS file in the root of the source tree.
-- */
--
--#include "modules/desktop_capture/linux/window_capturer_pipewire.h"
--
--#include <memory>
--
--
--namespace webrtc {
--
--WindowCapturerPipeWire::WindowCapturerPipeWire()
--    : BaseCapturerPipeWire(BaseCapturerPipeWire::CaptureSourceType::Window) {}
--WindowCapturerPipeWire::~WindowCapturerPipeWire() {}
--
--// static
--std::unique_ptr<DesktopCapturer>
--WindowCapturerPipeWire::CreateRawWindowCapturer(
--    const DesktopCaptureOptions& options) {
--  return std::make_unique<WindowCapturerPipeWire>();
--}
--
--}  // namespace webrtc
-diff --git a/chromium/third_party/webrtc/modules/desktop_capture/linux/window_capturer_pipewire.h b/chromium/third_party/webrtc/modules/desktop_capture/linux/window_capturer_pipewire.h
-deleted file mode 100644
-index 7f184ef2999..00000000000
---- a/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/linux/window_capturer_pipewire.h
-+++ /dev/null
-@@ -1,33 +0,0 @@
--/*
-- *  Copyright 2018 The WebRTC project authors. All Rights Reserved.
-- *
-- *  Use of this source code is governed by a BSD-style license
-- *  that can be found in the LICENSE file in the root of the source
-- *  tree. An additional intellectual property rights grant can be found
-- *  in the file PATENTS.  All contributing project authors may
-- *  be found in the AUTHORS file in the root of the source tree.
-- */
--
--#ifndef MODULES_DESKTOP_CAPTURE_LINUX_WINDOW_CAPTURER_PIPEWIRE_H_
--#define MODULES_DESKTOP_CAPTURE_LINUX_WINDOW_CAPTURER_PIPEWIRE_H_
--
--#include <memory>
--
--#include "modules/desktop_capture/linux/base_capturer_pipewire.h"
--
--namespace webrtc {
--
--class WindowCapturerPipeWire : public BaseCapturerPipeWire {
-- public:
--  WindowCapturerPipeWire();
--  ~WindowCapturerPipeWire() override;
--
--  static std::unique_ptr<DesktopCapturer> CreateRawWindowCapturer(
--      const DesktopCaptureOptions& options);
--
--  RTC_DISALLOW_COPY_AND_ASSIGN(WindowCapturerPipeWire);
--};
--
--}  // namespace webrtc
--
--#endif  // MODULES_DESKTOP_CAPTURE_LINUX_WINDOW_CAPTURER_PIPEWIRE_H_
-diff --git a/chromium/third_party/webrtc/modules/desktop_capture/screen_capturer_linux.cc b/chromium/third_party/webrtc/modules/desktop_capture/screen_capturer_linux.cc
-index 82dbae48137..ed48b7d6d59 100644
---- a/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/screen_capturer_linux.cc
-+++ b/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/screen_capturer_linux.cc
-@@ -14,7 +14,7 @@
- #include "modules/desktop_capture/desktop_capturer.h"
- 
- #if defined(WEBRTC_USE_PIPEWIRE)
--#include "modules/desktop_capture/linux/screen_capturer_pipewire.h"
-+#include "modules/desktop_capture/linux/base_capturer_pipewire.h"
- #endif  // defined(WEBRTC_USE_PIPEWIRE)
- 
- #if defined(WEBRTC_USE_X11)
-@@ -28,7 +28,7 @@ std::unique_ptr<DesktopCapturer> DesktopCapturer::CreateRawScreenCapturer(
-     const DesktopCaptureOptions& options) {
- #if defined(WEBRTC_USE_PIPEWIRE)
-   if (options.allow_pipewire() && DesktopCapturer::IsRunningUnderWayland()) {
--    return ScreenCapturerPipeWire::CreateRawScreenCapturer(options);
-+    return BaseCapturerPipeWire::CreateRawCapturer(options);
-   }
- #endif  // defined(WEBRTC_USE_PIPEWIRE)
- 
-diff --git a/chromium/third_party/webrtc/modules/desktop_capture/window_capturer_linux.cc b/chromium/third_party/webrtc/modules/desktop_capture/window_capturer_linux.cc
-index 41dbf836b03..2b142ae3b92 100644
---- a/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/window_capturer_linux.cc
-+++ b/src/3rdparty/chromium/third_party/webrtc/modules/desktop_capture/window_capturer_linux.cc
-@@ -14,7 +14,7 @@
- #include "modules/desktop_capture/desktop_capturer.h"
- 
- #if defined(WEBRTC_USE_PIPEWIRE)
--#include "modules/desktop_capture/linux/window_capturer_pipewire.h"
-+#include "modules/desktop_capture/linux/base_capturer_pipewire.h"
- #endif  // defined(WEBRTC_USE_PIPEWIRE)
- 
- #if defined(WEBRTC_USE_X11)
-@@ -28,7 +28,7 @@ std::unique_ptr<DesktopCapturer> DesktopCapturer::CreateRawWindowCapturer(
-     const DesktopCaptureOptions& options) {
- #if defined(WEBRTC_USE_PIPEWIRE)
-   if (options.allow_pipewire() && DesktopCapturer::IsRunningUnderWayland()) {
--    return WindowCapturerPipeWire::CreateRawWindowCapturer(options);
-+    return BaseCapturerPipeWire::CreateRawCapturer(options);
-   }
- #endif  // defined(WEBRTC_USE_PIPEWIRE)
- 
-diff --git a/chromium/third_party/webrtc/webrtc.gni b/chromium/third_party/webrtc/webrtc.gni
-index ca8acdbf259..505c975cece 100644
---- a/src/3rdparty/chromium/third_party/webrtc/webrtc.gni
-+++ b/src/3rdparty/chromium/third_party/webrtc/webrtc.gni
-@@ -117,6 +117,10 @@ declare_args() {
-   # Set this to link PipeWire directly instead of using the dlopen.
-   rtc_link_pipewire = false
- 
-+  # Set this to use certain PipeWire version
-+  # Currently we support PipeWire 0.2 (default) and PipeWire 0.3
-+  rtc_pipewire_version = "0.3"
-+
-   # Enable to use the Mozilla internal settings.
-   build_with_mozilla = false
- 
--- 
-2.35.1
-
