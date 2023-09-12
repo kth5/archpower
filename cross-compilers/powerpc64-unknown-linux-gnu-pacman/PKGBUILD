@@ -1,0 +1,58 @@
+# Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+
+_arch=powerpc64
+_target=${_arch}-unknown-linux-gnu
+pkgname=${_target}-pacman
+pkgver=2023.09
+pkgrel=1
+pkgdesc="Pacman configurations for ${_target} to install dependencies for cross-compilation"
+arch=(any)
+url="https://archlinuxpower.org"
+depends=(
+  ${_target}-gcc
+  ${_target}-glibc
+)
+source=(pacman-arch.sh
+        pacman.conf
+        fakebase.desc)
+backup=(etc/pacman-${_arch}.conf)
+sha256sums=('5fd18c74198312560579d900af2b0e52b757b47fb70e4f78e995b29cf0b5ee7a'
+            '6be22d041e30ca7475d7700ff35b4ca34ad62f3ad415b8f429edbbc03c295d0e'
+            'c7d16160e0d91becce572abee7954e61411c729eec7a367a96335fba6bc470f1')
+
+prepare() {
+  if [ -d /usr/${_target}/var/lib/pacman ]; then
+    echo "Remove existing synced dbs etc from /usr/${_target}/var/lib/pacman/ and try again"
+    exit 1
+  fi
+}
+
+build() {
+  sed "s/@@CARCH@@/${_arch}/g" -i pacman-arch.sh
+  sed "s/@@CHOST_PREFIX@@/\/usr\/${_target}\//g" -i pacman.conf
+  sed "s/@@TIMESTAMP@@/$(date "+%s")/g" -i fakebase.desc
+  sed "s/@@FAKEBASE_VERSION@@/${pkgver}-${pkgrel}/g" -i fakebase.desc
+}
+
+package() {
+  install -d -m755 ${pkgdir}/usr/bin
+  install -m755 ${srcdir}/pacman-arch.sh ${pkgdir}/usr/bin/pacman-${_arch}
+
+  install -d -m 755 ${pkgdir}/etc
+  install -m644 ${srcdir}/pacman.conf ${pkgdir}/etc/pacman-${_arch}.conf
+
+  # fake that we install a few basic packages via pacman
+  install -d -m 755 ${pkgdir}/usr/${_target}/var/lib/pacman/local/fakebase-${pkgver}-${pkgrel}
+
+  pushd /usr/${_target}/
+  shopt -s dotglob globstar
+  printf '%s\0' **/* | LANG=C bsdtar -cnf - --format=mtree --options='!all,use-set,type,uid,gid,mode,time,size,md5,sha256,link' --null --files-from - --exclude .MTREE | gzip -c -f -n > ${pkgdir}/usr/${_target}/var/lib/pacman/local/fakebase-${pkgver}-${pkgrel}/mtree
+  shopt -u dotglob globstar
+ 
+  echo '%FILES%' > ${pkgdir}/usr/${_target}/var/lib/pacman/local/fakebase-${pkgver}-${pkgrel}/files
+  find | sed 's@^./@@g' | grep -v '^\.$' | grep -v '.*mtree$' >> ${pkgdir}/usr/${_target}/var/lib/pacman/local/fakebase-${pkgver}-${pkgrel}/files
+  echo 9 > ${pkgdir}/usr/${_target}/var/lib/pacman/local/ALPM_DB_VERSION
+  install -m644 ${srcdir}/fakebase.desc ${pkgdir}/usr/${_target}/var/lib/pacman/local/fakebase-${pkgver}-${pkgrel}/desc
+
+  popd
+}
