@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=milou
-pkgver=5.27.6
+pkgver=5.27.7
 _dirver=$(echo $pkgver | cut -d. -f1-3)
 pkgrel=1
 pkgdesc='A dedicated search application built on top of Baloo'
@@ -15,7 +15,7 @@ depends=(krunner kitemmodels)
 makedepends=(extra-cmake-modules kdoctools)
 groups=(plasma)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('feaea739bc100f313d098a13614b16c01bdafc7dbe0e9ebed5e7a6d8cfd381c6'
+sha256sums=('81690bffc9d58445c09af64670d80cd53735db2f0da36a4847d3466ec5a90853'
             'SKIP')
 validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell <jr@jriddell.org>
               '0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D'  # Bhushan Shah <bshah@kde.org>
