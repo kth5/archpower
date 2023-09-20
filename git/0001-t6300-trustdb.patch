@@ -1,0 +1,53 @@
+commit 031fff289a52d7a0f8ead7390b67468122f49bec
+Author: Christian Hesse <mail@eworm.de>
+Date:   Tue Aug 22 15:03:14 2023 +0200
+
+    t/lib-gpg: forcibly run a trustdb update
+    
+    We want to compare output later, so randomly popping up 'gpg: checking
+    the trustdb' breaks the tests. Run the trustdb update forcibly.
+    
+    Signed-off-by: Christian Hesse <mail@eworm.de>
+    Signed-off-by: Junio C Hamano <gitster@pobox.com>
+
+diff --git a/t/lib-gpg.sh b/t/lib-gpg.sh
+index 4eebd9c2b5..83b83c9abb 100644
+--- a/t/lib-gpg.sh
++++ b/t/lib-gpg.sh
+@@ -45,6 +45,7 @@ test_lazy_prereq GPG '
+ 			"$TEST_DIRECTORY"/lib-gpg/keyring.gpg &&
+ 		gpg --homedir "${GNUPGHOME}" --import-ownertrust \
+ 			"$TEST_DIRECTORY"/lib-gpg/ownertrust &&
++		gpg --homedir "${GNUPGHOME}" --update-trustdb &&
+ 		gpg --homedir "${GNUPGHOME}" </dev/null >/dev/null \
+ 			--sign -u committer@example.com
+ 		;;
+
+commit 23146f1d4597b0328a98aa58baf78ca7c8c9b4c3
+Author: Christian Hesse <mail@eworm.de>
+Date:   Tue Aug 22 15:03:15 2023 +0200
+
+    t/t6300: drop magic filtering
+    
+    Now that we ran a trustdb check forcibly it does no longer pollute the
+    output.  Filtering is no longer required.
+    
+    Signed-off-by: Christian Hesse <mail@eworm.de>
+    Signed-off-by: Junio C Hamano <gitster@pobox.com>
+
+diff --git a/t/t6300-for-each-ref.sh b/t/t6300-for-each-ref.sh
+index 5b434ab451..aa3c7c03c4 100755
+--- a/t/t6300-for-each-ref.sh
++++ b/t/t6300-for-each-ref.sh
+@@ -1763,10 +1763,7 @@ test_expect_success GPGSSH 'setup for signature atom using ssh' '
+ '
+ 
+ test_expect_success GPG2 'bare signature atom' '
+-	git verify-commit first-signed 2>out.raw &&
+-	grep -Ev "checking the trustdb|PGP trust model" out.raw >out &&
+-	head -3 out >expect &&
+-	tail -1 out >>expect &&
++	git verify-commit first-signed 2>expect &&
+ 	echo  >>expect &&
+ 	git for-each-ref refs/tags/first-signed \
+ 		--format="%(signature)" >actual &&
