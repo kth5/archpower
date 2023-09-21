@@ -1,59 +1,36 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Chih-Hsuan Yen <yan12125@archlinux.org>
 
 pkgname=httpbin
-pkgver=0.7.0
-pkgrel=13
+pkgver=0.10.1
+pkgrel=1
 pkgdesc="HTTP Request and Response Service"
 arch=(any)
-url="https://github.com/requests/httpbin"
-license=('MIT')
+url="https://github.com/psf/httpbin"
+license=('MIT' 'custom:ISC')
 depends=('python' 'python-flask' 'python-decorator' 'python-six'
-         'python-brotli' 'python-werkzeug'
-         # Not directly used. Most likely added to setup.py as they are indirect dependencies
-         # https://github.com/postmanlabs/httpbin/commit/2131d8e2676a03a1077a5ef90747accb299f51fa
-         'python-markupsafe' 'python-itsdangerous')
-makedepends=('python-setuptools')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/requests/httpbin/archive/v$pkgver.tar.gz"
-        httpbin-werkzeug-0.15.1.patch
-        httpbin-werkzeug-2.1.0.patch
-        httpbin-werkzeug-2.3.0.patch
-        remove-raven.patch)
-sha512sums=('faec48a0a2ac8800293b10281966a28195884ad2f69f0f28f1b8c8e1a7bfd8933ebbc9b541c80cdc19e1031a8ba9383afe8e372b9044436cb307dd1e8eddaae7'
-            '3c058ca5f685e281f7d60216de844e58727e7677766660df410ec57d8c985485cf611ec64eb71a234bdd49b4fdf66be6138d4bb7258d9e6d0346d6c6ee9f3cdf'
-            '297902e60a529ad9b7c3ad1cc36a2c958505a0a15bc1e0210cb365a6a4d9dffcde793dad0b426ab14b0f312cd3d9fa34a6662040d665dd5177376a8583945789'
-            'a4ea7d047108e028bb1eed16b51e9c937fdc7f622a7f49495769b63fb4913fcccbfb6e0f94da82e14d1571cfefeee1b4635002ba7c9cb44ce99cf57c690b5907'
-            '757db19d3ded4806423f3361b5d30c962d8a72a9b3bf6afb26770f3fc56c14554c8fc6aa1a6ce72328fd8c77c330c5d0d05478d345c287f07e22302ccf1ec8d3')
-
-prepare() {
-  cd httpbin-$pkgver
-  patch -p1 -i ../httpbin-werkzeug-0.15.1.patch
-  # patch taken from https://github.com/maximino-dev/httpbin/commit/651c03a73072b9f399bbb80741ab473fc8b0adbb,
-  # which is the latest version of https://github.com/postmanlabs/httpbin/pull/674 as of 2022/11/13
-  patch -p1 -i ../httpbin-werkzeug-2.1.0.patch
-  # * For WWWAuthenticate, passing a bool to stale.setter is deprecated since [1]. Actually, stale.setter is not used as __setattr__ takes precedence.
-  # * Support for bytes is deprecated since [2]. Actually, using bytes results in an exception in some cases.
-  # [1] https://github.com/pallets/werkzeug/pull/2619
-  # [2] https://github.com/pallets/werkzeug/pull/2641
-  patch -p1 -i ../httpbin-werkzeug-2.3.0.patch
-  # raven is unmaintained and httpbin removed it already, but no release was made
-  patch -p1 -i ../remove-raven.patch
-  sed -i 's/brotlipy/Brotli/g' setup.py
-}
+         'python-brotlicffi' 'python-werkzeug' 'python-flasgger'
+         # Not directly used. TODO: ask upstream if it's really needed
+         'python-greenlet')
+makedepends=('python-setuptools' 'python-build' 'python-installer' 'python-wheel')
+checkdepends=('python-pytest')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/psf/httpbin/archive/release-v$pkgver.tar.gz")
+sha512sums=('4fc9551a44de6d2dc9d9d1a430bf6f1be6a5d850397fa69cc02e6ffbd537d1b21f2b47310c770af1070c24b27179b6ccd52b62490003c43de680906e072120c8')
 
 build() {
-  cd httpbin-$pkgver
-  LC_CTYPE=en_US.UTF-8 python setup.py build
+  cd httpbin-release-v$pkgver
+  python -m build --wheel --no-isolation
 }
 
 check() {
-  cd httpbin-$pkgver
-  python test_httpbin.py
+  cd httpbin-release-v$pkgver
+  pytest tests
 }
 
 package() {
-  cd httpbin-$pkgver
-  LC_CTYPE=en_US.UTF-8 python setup.py install -O1 --root="$pkgdir"
+  cd httpbin-release-v$pkgver
+  python -m installer --destdir="$pkgdir" dist/*.whl
 
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
