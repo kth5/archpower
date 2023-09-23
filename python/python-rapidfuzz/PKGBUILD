@@ -1,40 +1,84 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer:
+# Maintainer: George Rawlinson
 # Contributor: Pekka Ristola <pekkarr [at] protonmail [dot] com>
 # Contributor: Caltlgin Stsodaat <contact@fossdaily.xyz>
 
-_pkgname=rapidfuzz
-pkgname=python-$_pkgname
-pkgver=3.1.1
+pkgname=python-rapidfuzz
+pkgver=3.2.0
 pkgrel=1
 pkgdesc='Rapid fuzzy string matching in Python using various string metrics'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://github.com/maxbachmann/rapidfuzz'
-license=(MIT)
-depends=(python)
-makedepends=(python-build python-installer python-scikit-build rapidfuzz-cpp)
-checkdepends=(python-hypothesis python-pandas python-pytest)
-optdepends=(python-numpy)
-source=(https://files.pythonhosted.org/packages/source/${_pkgname::1}/$_pkgname/$_pkgname-$pkgver.tar.gz)
-sha256sums=('a06a08be3cb7d7df7993dd16e84aaf59bd5a7ff98a9f1b3e893d18b273a71c64')
+license=('MIT')
+depends=(
+  'glibc'
+  'gcc-libs'
+  'python'
+)
+makedepends=(
+  'git'
+  'python-build'
+  'python-installer'
+  'cython'
+  'python-scikit-build'
+  'rapidfuzz-cpp'
+)
+checkdepends=('python-hypothesis' 'python-pandas' 'python-pytest')
+optdepends=('python-numpy')
+_commit='ece13872864f63173171601ae39f80a527c5059c'
+source=(
+  "$pkgname::git+$url#commit=$_commit"
+  'github.com-taskflow-taskflow::git+https://github.com/taskflow/taskflow'
+  'remove-version-constraints.patch'
+)
+b2sums=('SKIP'
+        'SKIP'
+        '00acfe61b719f592a97bf01376f783737c71eb886b78cd08d4aac11d30524abfc8677a17eef511c0593f7f01e52b261ae1556abd03e54ba10701ec1c5e68948c')
+
+pkgver() {
+  cd "$pkgname"
+
+  git describe --tags | sed 's/^v//'
+}
+
+prepare() {
+  cd "$pkgname"
+
+  # remove version constraints
+  patch -p1 -i "$srcdir/remove-version-constraints.patch"
+
+  # prepare git submodules
+  git submodule init extern/taskflow
+  git config submodule.extern/taskflow.url "$srcdir/github.com-taskflow-taskflow"
+  git -c protocol.file.allow=always submodule update
+}
 
 build() {
-  cd $_pkgname-$pkgver
+  cd "$pkgname"
+
   RAPIDFUZZ_BUILD_EXTENSION=1 \
-  python -m build --wheel --no-isolation
+    python -m build --wheel --no-isolation
 }
 
 check() {
-  cd $_pkgname-$pkgver
+  cd "$pkgname"
+
   python -m venv --system-site-packages test-env
   test-env/bin/python -m installer dist/*.whl
   test-env/bin/python -m pytest
 }
 
 package() {
-  cd $_pkgname-$pkgver
+  cd "$pkgname"
+
   python -m installer --destdir="$pkgdir" dist/*.whl
 
-  install -Dm644 README.md -t "$pkgdir"/usr/share/doc/$pkgname
-  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
+  # documentation
+  install -vDm644 -t "$pkgdir/usr/share/doc/$pkgname" README.md
+
+  # symlink license file
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "$pkgdir/usr/share/licenses/$pkgname"
+  ln -s "$site_packages/${pkgname#python-}-$pkgver.dist-info/LICENSE" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
