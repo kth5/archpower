@@ -2,12 +2,12 @@
 # Maintainer: David Runge <dvzrv@archlinux.org>
 
 pkgname=libsndfile
-pkgver=1.2.0
+pkgver=1.2.2
 pkgrel=1
 pkgdesc="A C library for reading and writing files containing sampled audio data"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://libsndfile.github.io/libsndfile/"
-license=(LGPL2.1)
+license=(LGPL-2.1-or-later)
 depends=(glibc)
 makedepends=(
   alsa-lib
@@ -24,9 +24,9 @@ makedepends=(
 optdepends=('alsa-lib: for sndfile-play')
 provides=(libsndfile.so)
 source=(https://github.com/$pkgname/$pkgname/releases/download/$pkgver/$pkgname-$pkgver.tar.xz{,.asc})
-sha512sums=('c0dee6b33cd3c619aa13ec2854a5480e826640ca98a438758346194e83752af576a39f9de118824f0d0c61288632d87b489dc5793c025296e0f15564d87ca12a'
+sha512sums=('a6e3ea3ac5d91befaa99f6a31a3fac44e7b7c11f1de4698167317a461d5a19a2651d47486a920b34400f18367b4f6173bf0c1c9ba80eb682cece1b5beee352a0'
             'SKIP')
-b2sums=('cb13fde9b9f44c6279a9ee7741457824eb41fc17261bf9c669d757e9e506eba2c3d4ad259e4625b8a11c82308188cc19f7399e9d1fc0299a3a11794e4b653e47'
+b2sums=('bc8e49983d9ad9dfd98984e2ffef501c6f576480e556e9f9ef91c7d597524cc1bb8baed15dfef8e239f72c42136c524117029eb8271f3a2c9d607fee490279b5'
         'SKIP')
 validpgpkeys=(
   '6A91A5CF22C24C99A35E013FCFDCF91FB242ACED'  # Erik de Castro Lopo <erikd@mega-nerd.com>
@@ -35,27 +35,32 @@ validpgpkeys=(
 )
 
 build() {
-  # tests can only be built with static libs
-  cmake -DCMAKE_INSTALL_PREFIX=/usr \
-        -DCMAKE_BUILD_TYPE=None \
-        -Wno-dev \
-        -B build-test \
-        -S $pkgname-$pkgver
-  make VERBOSE=1 -C build-test
+  local cmake_options=(
+    -B build
+    -D BUILD_SHARED_LIBS=ON
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_BUILD_TYPE=None
+    -D ENABLE_EXTERNAL_LIBS=ON
+    -D ENABLE_MPEG=ON
+    -S $pkgname-$pkgver
+    -W no-dev
+  )
+  local cmake_test_options=(
+    -B build-test
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -S $pkgname-$pkgver
+    -W no-dev
+  )
 
-  cmake -DCMAKE_INSTALL_PREFIX=/usr \
-        -DCMAKE_BUILD_TYPE=None \
-        -DBUILD_SHARED_LIBS=ON \
-        -DENABLE_EXTERNAL_LIBS=ON \
-        -DENABLE_MPEG=ON \
-        -Wno-dev \
-        -B build \
-        -S $pkgname-$pkgver
-  make VERBOSE=1 -C build
+  cmake "${cmake_test_options[@]}"
+  cmake --build build-test --verbose
+  cmake "${cmake_options[@]}"
+  cmake --build build --verbose
 }
 
 check() {
-  make test -C build-test
+  ctest --test-dir build-test --output-on-failure
 }
 
 package() {
@@ -68,6 +73,6 @@ package() {
     opus libopus.so
   )
 
-  make DESTDIR="$pkgdir" install -C build
+  DESTDIR="$pkgdir" cmake --install build
   install -vDm 644 $pkgname-$pkgver/{AUTHORS,ChangeLog,README} -t "$pkgdir/usr/share/doc/$pkgname"
 }
