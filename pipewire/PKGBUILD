@@ -12,6 +12,7 @@ pkgname=(
   pipewire-audio
   pipewire-alsa
   pipewire-ffado
+  pipewire-jack-client
   pipewire-jack
   pipewire-pulse
   pipewire-roc
@@ -20,9 +21,9 @@ pkgname=(
   pipewire-v4l2
   pipewire-x11-bell
 )
-_commit=31cd694602cc37ada3a6d02a5a381f4e3933ecef  # tags/0.3.77
-pkgver=0.3.77
-pkgrel=2
+_commit=35cca08d2bef14248ac25ff2a1efb0bf274d0a6f  # tags/0.3.80
+pkgver=0.3.80
+pkgrel=1
 epoch=1
 pkgdesc="Low-latency audio/video router and processor"
 url="https://pipewire.org"
@@ -38,6 +39,7 @@ makedepends=(
   glib2
   graphviz
   gst-plugins-base
+  jack2
   libcamera
   libcanberra
   libfdk-aac
@@ -62,18 +64,23 @@ makedepends=(
   sdl2
   systemd
   valgrind
-  webrtc-audio-processing
+  webrtc-audio-processing-1
 )
 makedepends_powerpc64le=(libldac)
 makedepends_riscv64=(libldac)
 makedepends_x86_64=(libldac)
-checkdepends=(desktop-file-utils)
+checkdepends=(
+  desktop-file-utils
+  openal
+)
 source=(
   "git+https://gitlab.freedesktop.org/pipewire/pipewire.git#commit=$_commit"
-  0001-pipewire-jack-Disable-LD_LIBRARY_PATH-when-libjack-i.patch
+  0001-ci-ShellCheck-preprocessed-scripts-separately.patch
+  0002-pipewire-jack-Disable-LD_LIBRARY_PATH-when-libjack-i.patch
 )
 b2sums=('SKIP'
-        '17de92c7209e4b927f1de7cf11aa5b7b92fbdd41cea26850ecd2159c393ee8a30a93b178681ab05b408fb2fffac111c29b5eebf41119d7ad8f5bbed7122fc3f3')
+        'a3e0b77e7388444872c1a44ee130695ac42a71a07f49903b646a32c291940db9378e8b937f0439e5c21cdfebfe854df6a606479ccab0b3491ec091cb7f6d6da4'
+        '81b86b8a80c110ac944e608eed68ce7bbf77f68b388701eebce24c807131b30958aef16e43865dd227e1aa184e2c770c2603064edc64985aa46bda7de72861b3')
 
 pkgver() {
   cd pipewire
@@ -83,21 +90,17 @@ pkgver() {
 prepare() {
   cd pipewire
 
-  # https://bugs.archlinux.org/task/79355
-  # https://gitlab.freedesktop.org/pipewire/pipewire/-/issues/3414
-  git cherry-pick -n 820ca90705ae78124958f1b96de3bdc7889c2d1e
-
   # remove export of LD_LIBRARY_PATH for pw-jack as it would add /usr/lib
-  git apply -3 ../0001-pipewire-jack-Disable-LD_LIBRARY_PATH-when-libjack-i.patch
+  # https://gitlab.freedesktop.org/pipewire/pipewire/-/merge_requests/1674
+  git apply -3 ../0001-ci-ShellCheck-preprocessed-scripts-separately.patch
+  git apply -3 ../0002-pipewire-jack-Disable-LD_LIBRARY_PATH-when-libjack-i.patch
 }
 
 build() {
   local meson_options=(
-    -D bluez5-codec-lc3=enabled
     -D bluez5-codec-lc3plus=disabled
     -D docs=enabled
     -D jack-devel=true
-    -D jack=disabled
     -D libjack-path=/usr/lib
     -D rlimits-install=false
     -D session-managers=[]
@@ -150,7 +153,8 @@ package_pipewire() {
     'pipewire-audio: Audio support'
     'pipewire-docs: Documentation'
     'pipewire-ffado: FireWire support'
-    'pipewire-jack: JACK support'
+    'pipewire-jack-client: PipeWire as JACK client'
+    'pipewire-jack: JACK replacement'
     'pipewire-pulse: PulseAudio replacement'
     'pipewire-roc: ROC streaming'
     'pipewire-session-manager: Session manager'
@@ -206,6 +210,9 @@ package_pipewire() {
     _pick audio usr/share/spa-0.2/bluez5
 
     _pick ffado usr/lib/pipewire-$_ver/libpipewire-module-ffado*.so
+
+    _pick jack-client usr/lib/pipewire-$_ver/libpipewire-module-jack{-tunnel,dbus-detect}.so
+    _pick jack-client usr/lib/spa-0.2/jack
 
     _pick jack usr/bin/pw-jack
     _pick jack usr/include/jack
@@ -287,7 +294,7 @@ package_pipewire-audio() {
     libsbc.so
     libsndfile.so
     libusb-1.0.so
-    libwebrtc_audio_processing.so
+    libwebrtc-audio-processing-1.so
     pipewire
     systemd-libs
   )
@@ -339,8 +346,25 @@ package_pipewire-ffado() {
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 pipewire/COPYING
 }
 
+package_pipewire-jack-client() {
+  pkgdesc+=" - PipeWire as JACK client"
+  depends=(
+    glibc
+    libdbus-1.so
+    libjack.so
+    libpipewire-$_ver.so
+    pipewire
+    pipewire-audio
+  )
+  conflicts=(pipewire-jack)
+
+  mv jack-client/* "$pkgdir"
+
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 pipewire/COPYING
+}
+
 package_pipewire-jack() {
-  pkgdesc+=" - JACK support"
+  pkgdesc+=" - JACK replacement"
   license+=(GPL2)  # libjackserver
   depends=(
     glibc
@@ -351,7 +375,7 @@ package_pipewire-jack() {
     sh
   )
   optdepends=('jack-example-tools: for official JACK example-clients and tools')
-  conflicts=(jack jack2)
+  conflicts=(jack jack2 pipewire-jack-client)
   provides=(jack libjack.so libjackserver.so libjacknet.so)
 
   mv jack/* "$pkgdir"

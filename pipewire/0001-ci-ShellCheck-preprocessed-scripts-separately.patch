@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Jan Alexander Steffens (heftig)" <heftig@archlinux.org>
+Date: Tue, 29 Aug 2023 16:49:01 +0200
+Subject: [PATCH] ci: ShellCheck preprocessed scripts separately
+
+Change the shellcheck job so that we configure the build and check the
+preprocessed versions of the scripts, not the bare ones, which might not
+be syntactically valid yet.
+---
+ .gitlab-ci.yml               | 9 ++++++++-
+ doc/input-filter-h.sh        | 1 +
+ pipewire-jack/src/pw-jack.in | 2 ++
+ pipewire-v4l2/src/pw-v4l2.in | 1 +
+ 4 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+index 3a21cdd3841a..4311cef8d7aa 100644
+--- a/.gitlab-ci.yml
++++ b/.gitlab-ci.yml
+@@ -458,8 +458,15 @@ shellcheck:
+   extends:
+     - .build_on_fedora
+   stage: analysis
++  variables:
++    MESON_OPTIONS: >-
++        -Dpipewire-v4l2=enabled
++        -Dpipewire-jack=enabled
+   script:
+-    - shellcheck $(git grep -l "#\!/.*bin/.*sh")
++    - echo "Configuring with meson options $MESON_OPTIONS"
++    - meson setup "$BUILD_DIR" --prefix="$PREFIX" $MESON_OPTIONS
++    - shellcheck $(git ls-files '*.sh')
++    - shellcheck $(grep -rl "#\!/.*bin/.*sh" "$BUILD_DIR")
+ 
+ spellcheck:
+   extends:
+diff --git a/doc/input-filter-h.sh b/doc/input-filter-h.sh
+index dc4604a79709..554837c8c0be 100755
+--- a/doc/input-filter-h.sh
++++ b/doc/input-filter-h.sh
+@@ -11,6 +11,7 @@ FILENAME="$1"
+ # Add \ingroup commands for the file, for each \addgroup in it
+ BASEFILE=$(echo "$FILENAME" | sed -e 's@.*src/pipewire/@pipewire/@; s@.*spa/include/spa/@spa/@; s@.*src/test/@test/@;')
+ 
++# shellcheck disable=SC2028 # \file is not an escape sequence
+ echo "/** \file"
+ echo "\`$BASEFILE\`"
+ sed -n -e '/.*\\addtogroup [a-zA-Z0-9_].*/ { s/.*addtogroup /\\ingroup /; p; }' < "$FILENAME" | sort | uniq
+diff --git a/pipewire-jack/src/pw-jack.in b/pipewire-jack/src/pw-jack.in
+index 2f232f6253b0..0399f31fa0f3 100755
+--- a/pipewire-jack/src/pw-jack.in
++++ b/pipewire-jack/src/pw-jack.in
+@@ -52,6 +52,8 @@ if [ -n "$PERIOD" ]; then
+ 	fi
+ 	export PIPEWIRE_QUANTUM
+ fi
++
++# shellcheck disable=SC2016 # ${LIB} is interpreted by ld.so, not the shell
+ LD_LIBRARY_PATH='@LIBJACK_PATH@'"${LD_LIBRARY_PATH+":$LD_LIBRARY_PATH"}"
+ export LD_LIBRARY_PATH
+ 
+diff --git a/pipewire-v4l2/src/pw-v4l2.in b/pipewire-v4l2/src/pw-v4l2.in
+index 9591bf32f018..c02f17dbdfd3 100755
+--- a/pipewire-v4l2/src/pw-v4l2.in
++++ b/pipewire-v4l2/src/pw-v4l2.in
+@@ -37,6 +37,7 @@ shift $(( OPTIND - 1 ))
+ if [ "$PW_UNINSTALLED" = 1 ] ; then
+    PW_V4L2_LD_PRELOAD="$PW_BUILDDIR"'/pipewire-v4l2/src/libpw-v4l2.so'
+ else
++   # shellcheck disable=SC2016 # ${LIB} is interpreted by ld.so, not the shell
+    PW_V4L2_LD_PRELOAD='@LIBV4L2_PATH@/libpw-v4l2.so'
+ fi
+ 
