@@ -1,0 +1,58 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+
+pkgname=webrtc-audio-processing-1
+pkgver=1.3
+pkgrel=2
+pkgdesc="AudioProcessing library based on Google's implementation of WebRTC"
+url="https://freedesktop.org/software/pulseaudio/webrtc-audio-processing/"
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+license=(custom)
+depends=(
+  abseil-cpp
+  gcc-libs
+)
+makedepends=(
+  git
+  meson
+)
+provides=(libwebrtc-audio-{coding,processing}-${pkgver%%.*}.so)
+_commit=8e258a1933d405073c9e6465628a69ac7d2a1f13  # tags/v1.3^0
+source=("git+https://gitlab.freedesktop.org/pulseaudio/webrtc-audio-processing.git#commit=$_commit"
+        Add-generic-byte-order-and-pointer-size-detection.patch
+        big-endian-support.patch)
+b2sums=('SKIP'
+        '0f39c24fd9e7e0a6283142e0a83aeeaf90c6af08241f9068007588a82d4a06964bbcadd9b920871fe1b08c8969f5eabdf48eb2b71180dd4faec65a98c34a637a'
+        'c6879fd0533416e8cecb258846c95700a61693c992b63b15fb777b6eaba118522a6a656cd2c10422e3373e29e61d59e6baa570f0f564e712abdeacf4ad5b75f6')
+
+pkgver() {
+  cd webrtc-audio-processing
+  git describe --tags | sed 's/^v//;s/[^-]*-g/r&/;s/-/+/g'
+}
+
+prepare() {
+  cd webrtc-audio-processing
+  patch -Np1 -i ${srcdir}/Add-generic-byte-order-and-pointer-size-detection.patch
+  patch -Np1 -i ${srcdir}/big-endian-support.patch
+}
+
+build() {
+  local meson_options=(
+    # must match abseil
+    -D cpp_std=c++17
+  )
+
+  arch-meson webrtc-audio-processing build "${meson_options[@]}"
+  meson compile -C build
+}
+
+check() {
+  meson test -C build --print-errorlogs
+}
+
+package() {
+  meson install -C build --destdir "$pkgdir"
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 webrtc-audio-processing/COPYING
+}
+
+# vim:set sw=2 sts=-1 et:
