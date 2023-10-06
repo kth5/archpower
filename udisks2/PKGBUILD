@@ -3,35 +3,51 @@
 # Contributor: Ionut Biru <ibiru@archlinux.org>
 
 pkgname=udisks2
-pkgver=2.9.4
-pkgrel=4
-pkgdesc="Disk Management Service, version 2"
+pkgver=2.10.1
+pkgrel=1
+pkgdesc="Daemon, tools and libraries to access and manipulate disks, storage devices and technologies"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://www.freedesktop.org/wiki/Software/udisks/"
-license=('GPL2')
-depends=('acl' 'polkit' 'glib2' 'gcc-libs' 'glibc' 'libatasmart' 'libgudev' 'libblockdev'
-         'systemd-libs' 'util-linux-libs')
-makedepends=('gobject-introspection' 'gtk-doc')
+license=(
+  GPL-2.0-or-later
+  LGPL-2.0-or-later
+)
+depends=(
+  'acl'
+  'gcc-libs'
+  'glib2'
+  'glibc'
+  'libatasmart'
+  'libblockdev'
+  'libgudev'
+  'polkit'
+  'systemd-libs'
+  'util-linux-libs'
+)
+makedepends=(
+  'gobject-introspection'
+  'gtk-doc'
+)
 backup=('etc/udisks2/udisks2.conf')
-source=("https://github.com/storaged-project/udisks/releases/download/udisks-$pkgver/udisks-$pkgver.tar.bz2"
-        'udisk2-2.9.4-do-not-free-static-daemon-resources.patch::https://patch-diff.githubusercontent.com/raw/storaged-project/udisks/pull/926.patch')
-sha512sums=('35f5429bc2a7092aa659cba9296837d127e2b17c23ab23111d0d9b230d15ef5a6965e112b1f3829748a69a52fb5b09722153f86f1ef70977b3ad7b7a4ec40ec5'
-            'a14cd7c6c52d585b145e96a8b111bd173a06c3bb58dc55db5e099677f24464f23caede27c260ddebcad07a6a9b0872878054a749346c2142e6dd3bdb240c9202')
-
-prepare() {
-  cd udisks-$pkgver
-  # https://bugs.archlinux.org/task/76345
-  # https://github.com/storaged-project/udisks/pull/926
-  patch -Np1 -i ../udisk2-2.9.4-do-not-free-static-daemon-resources.patch
-}
+source=("https://github.com/storaged-project/udisks/releases/download/udisks-$pkgver/udisks-$pkgver.tar.bz2")
+sha512sums=('9cdaeca4306a970c85f88d406dbe5d2dad23d72f47d9ab1c021b8c2888d4c790f680eb94388d86f9255024283b4a36e98b8aee4408d193a7d4aad1e74463356a')
+b2sums=('41282e4dbbd93e6bda2a10a6ff2f2fb82bfc83b3ccbed9450cca7888c634cde9300fcd0b7d055e0d8e4c8fc0b431a75d5612a24132ea9b2677d194529732178d')
 
 build() {
+  local configure_options=(
+    --disable-static
+    --enable-gtk-doc
+    --libexecdir=/usr/lib
+    --localstatedir=/var
+    --prefix=/usr
+    --sbindir=/usr/bin
+    --sysconfdir=/etc
+    --with-systemdsystemunitdir=/usr/lib/systemd/system
+  )
+
   cd udisks-$pkgver
-  ./configure --prefix=/usr --sysconfdir=/etc \
-      --sbindir=/usr/bin --libexecdir=/usr/lib \
-      --with-systemdsystemunitdir=/usr/lib/systemd/system \
-      --localstatedir=/var --disable-static \
-      --enable-gtk-doc enable_available_modules=yes
+  ./configure "${configure_options[@]}"
+  # prevent libtool from overlinking everything
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
 }
@@ -44,4 +60,7 @@ check() {
 package() {
   cd udisks-$pkgver
   make DESTDIR="$pkgdir" install
+
+  # interface declaration
+  install -vDm 644 data/org.freedesktop.UDisks2.xml -t "$pkgdir/usr/share/dbus-1/interfaces/"
 }
