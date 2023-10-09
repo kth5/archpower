@@ -1,4 +1,4 @@
-From 86379195b835eae2dee93bcbcad47028ba440560 Mon Sep 17 00:00:00 2001
+From 9f8d6203e7ccb152c63b23983328022d3c682115 Mon Sep 17 00:00:00 2001
 From: "Carsten Haitzler (Rasterman)" <raster@rasterman.com>
 Date: Sat, 22 May 2021 16:30:33 +0100
 Subject: [PATCH 1/1] build - fix overall sysconfdir handling so it can work
@@ -22,12 +22,11 @@ custom sysconfidr on the cmdline.
  contrib/command-not-found/meson.build            |  7 ++++---
  contrib/command-not-found/pk-command-not-found.c |  2 +-
  contrib/cron/meson.build                         |  4 ++--
- data/meson.build                                 |  2 +-
  etc/meson.build                                  |  2 +-
  meson.build                                      | 10 +++++++++-
  src/meson.build                                  |  3 ++-
  src/pk-shared.c                                  |  2 +-
- 13 files changed, 32 insertions(+), 20 deletions(-)
+ 12 files changed, 31 insertions(+), 19 deletions(-)
 
 diff --git a/backends/alpm/meson.build b/backends/alpm/meson.build
 index eb4d5b373..fc7972128 100644
@@ -54,10 +53,10 @@ index eb4d5b373..fc7972128 100644
 +  install_dir: join_paths(pk_sysconfdir, 'PackageKit', 'alpm.d')
  )
 diff --git a/backends/apt/meson.build b/backends/apt/meson.build
-index 5df8f29e2..b29af882b 100644
+index 9d13225f2..c45ce652f 100644
 --- a/backends/apt/meson.build
 +++ b/backends/apt/meson.build
-@@ -75,7 +75,7 @@ shared_module(
+@@ -78,7 +78,7 @@ shared_module(
  
  install_data(
    '20packagekit',
@@ -67,11 +66,11 @@ index 5df8f29e2..b29af882b 100644
  
  install_data(
 diff --git a/backends/slack/meson.build b/backends/slack/meson.build
-index f44eea193..c6fdee49f 100644
+index 8e4d30f71..b2270a138 100644
 --- a/backends/slack/meson.build
 +++ b/backends/slack/meson.build
-@@ -24,7 +24,8 @@ packagekit_backend_slack_module = shared_module(
-     '-DPK_COMPILATION=1',
+@@ -23,7 +23,8 @@ packagekit_backend_slack_module = shared_module(
+     '-DG_LOG_DOMAIN="PackageKit-Slackware"',
      '-DLOCALSTATEDIR="@0@"'.format(join_paths(get_option('prefix'), get_option('localstatedir'))),
      '-DLIBDIR="@0@"'.format(join_paths(get_option('prefix'), get_option('libdir'))),
 -    '-DSYSCONFDIR="@0@"'.format(get_option('sysconfdir')),
@@ -80,7 +79,7 @@ index f44eea193..c6fdee49f 100644
    ],
    override_options: ['c_std=c14', 'cpp_std=c++14'],
    install: true,
-@@ -45,7 +46,7 @@ configure_file(
+@@ -44,7 +45,7 @@ configure_file(
    output: 'Slackware.conf',
    configuration: slackware_config_data,
    install: true,
@@ -103,11 +102,11 @@ index 46e233d9a..4dbce8a50 100644
  	if (err)
  	{
 diff --git a/backends/slack/tests/meson.build b/backends/slack/tests/meson.build
-index c5235227c..49e6161e1 100644
+index 5ade48a02..a08864d6c 100644
 --- a/backends/slack/tests/meson.build
 +++ b/backends/slack/tests/meson.build
-@@ -13,7 +13,8 @@ pk_slack_test_cpp_args = [
-   '-DPK_COMPILATION=1',
+@@ -12,7 +12,8 @@ pk_slack_test_cpp_args = [
+   '-DG_LOG_DOMAIN="PackageKit-Slackware"',
    '-DLOCALSTATEDIR="@0@"'.format(join_paths(get_option('prefix'), get_option('localstatedir'))),
    '-DLIBDIR="@0@"'.format(join_paths(get_option('prefix'), get_option('libdir'))),
 -  '-DSYSCONFDIR="@0@"'.format(get_option('sysconfdir')),
@@ -172,19 +171,6 @@ index bff5eec27..5c1926e4b 100644
 -  install_dir: join_paths(get_option('sysconfdir'), 'sysconfig')
 +  install_dir: join_paths(sysconfdir, 'sysconfig')
  )
-diff --git a/data/meson.build b/data/meson.build
-index a953f6280..11d115204 100644
---- a/data/meson.build
-+++ b/data/meson.build
-@@ -9,7 +9,7 @@ dbus_config_data.set('libexecdir', join_paths(get_option('prefix'), get_option('
- 
- dbus_sys_dir = get_option('dbus_sys')
- if dbus_sys_dir == ''
--  dbus_sys_dir = join_paths(get_option('sysconfdir'), 'dbus-1', 'system.d')
-+  dbus_sys_dir = join_paths(sysconfdir, 'dbus-1', 'system.d')
- endif
- 
- configure_file(
 diff --git a/etc/meson.build b/etc/meson.build
 index d3687f820..5094d93b3 100644
 --- a/etc/meson.build
@@ -197,10 +183,10 @@ index d3687f820..5094d93b3 100644
 +  install_dir: join_paths(pk_sysconfdir, 'PackageKit')
  )
 diff --git a/meson.build b/meson.build
-index 98587c6ec..8eba1544f 100644
+index 61669551a..0a2512ade 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -73,7 +73,15 @@ add_project_arguments ('-DPK_COMPILATION', language: 'c')
+@@ -73,7 +73,15 @@ add_project_arguments ('-DPK_COMPILATION', language: ['c', 'cpp'])
  conf = configuration_data()
  conf.set_quoted('DATADIR', join_paths(get_option('prefix'), get_option('datadir')))
  conf.set_quoted('LIBDIR', join_paths(get_option('prefix'), get_option('libdir')))
@@ -218,7 +204,7 @@ index 98587c6ec..8eba1544f 100644
  conf.set_quoted('PROJECT_NAME', meson.project_name())
  conf.set_quoted('PROJECT_VERSION', meson.project_version())
 diff --git a/src/meson.build b/src/meson.build
-index cae73380e..505e9491d 100644
+index a47169c2b..e5db40fc9 100644
 --- a/src/meson.build
 +++ b/src/meson.build
 @@ -54,7 +54,8 @@ packagekit_direct_exec = executable(
@@ -232,7 +218,7 @@ index cae73380e..505e9491d 100644
      '-DGETTEXT_PACKAGE="@0@"'.format(meson.project_name()),
      '-DPACKAGE_LOCALE_DIR="@0@"'.format(package_locale_dir),
 diff --git a/src/pk-shared.c b/src/pk-shared.c
-index ca825dee9..a9fc623f4 100644
+index 61bf8bb21..8291dd251 100644
 --- a/src/pk-shared.c
 +++ b/src/pk-shared.c
 @@ -326,7 +326,7 @@ pk_util_get_config_filename (void)
@@ -245,5 +231,5 @@ index ca825dee9..a9fc623f4 100644
  		goto out;
  
 -- 
-2.35.1
+2.42.0
 
