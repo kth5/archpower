@@ -2,56 +2,70 @@
 # Maintainer: Torsten Keßler <tpkessler at archlinux dot org>
 # Contributor: acxz <akashpatel2008 at yahoo dot com>
 pkgname=hip-runtime-amd
-pkgver=5.4.3
+pkgver=5.6.1
 pkgrel=1
 pkgdesc="Heterogeneous Interface for Portability ROCm"
 arch=(x86_64 powerpc64le powerpc64)
-url='https://docs.amd.com/bundle/HIP-Programming-Guide-v5.4/page/Introduction_to_HIP_Programming_Guide.html'
+url='https://rocm.docs.amd.com/projects/HIP/en/latest/'
 license=('MIT')
 depends=('mesa' 'comgr' 'rocminfo' 'rocm-llvm' 'libelf')
 makedepends=('cmake' 'python' 'python-cppheaderparser')
 provides=('hip')
 conflicts=('hip')
+# Common HIP dir (AMD or nVidia)
 _hip='https://github.com/ROCm-Developer-Tools/HIP'
-_opencl='https://github.com/RadeonOpenCompute/ROCm-OpenCL-Runtime'
-_rocclr='https://github.com/ROCm-Developer-Tools/ROCclr'
-_hipamd='https://github.com/ROCm-Developer-Tools/hipamd'
+# ROCclr, HIPAMD and OpenCl repositories
+_clr='https://github.com/ROCm-Developer-Tools/clr'
+# Binary hipcc compiler (previously a perl script)
+_hipcc='https://github.com/ROCm-Developer-Tools/HIPCC'
 source=("$pkgname-$pkgver.tar.gz::$_hip/archive/rocm-$pkgver.tar.gz"
-        "$pkgname-opencl-$pkgver.tar.gz::$_opencl/archive/rocm-$pkgver.tar.gz"
-        "$pkgname-rocclr-$pkgver.tar.gz::$_rocclr/archive/rocm-$pkgver.tar.gz"
-        "$pkgname-hipamd-$pkgver.tar.gz::$_hipamd/archive/rocm-$pkgver.tar.gz")
-sha256sums=('23e51d3af517cd63019f8d199e46b84d5a18251d148e727f3985e8d99ccb0e58'
-            'b0f8339c844a2e62773bd85cd1e7c5ecddfe71d7c8e8d604e1a1d60900c30873'
-            '71d9668619ab57ec8a4564d11860438c5aad5bd161a3e58fbc49555fbd59182d'
-            '475edce0f29c4ccd82e5ee21d4cce4836f2b1e3b13cbc891475e423d38a0ebb9')
+        "$pkgname-clr-$pkgver.tar.gz::$_clr/archive/rocm-$pkgver.tar.gz"
+        "$pkgname-hipcc-$pkgver.tar.gz::$_hipcc/archive/rocm-$pkgver.tar.gz")
+sha256sums=('4b3c4dfcf8595da0e1b8c3e8067b1ccebeaac337762ff098db14375fa8dd4487'
+            '0b88af1e99643899d11b1c8cf8a3c46601051b328a5e0ffbd44ee88b7eb0db33'
+            '5800fac92b841ef6f52acda78d9bf86f83970bec0fb848a6265d239bdb7eb51a')
 _dirhip="$(basename "$_hip")-$(basename "${source[0]}" ".tar.gz")"
-_diropencl="$(basename "$_opencl")-$(basename "${source[1]}" ".tar.gz")"
-_dirrocclr="$(basename "$_rocclr")-$(basename "${source[2]}" ".tar.gz")"
-_dirhipamd="$(basename "$_hipamd")-$(basename "${source[3]}" ".tar.gz")"
+_dirclr="$(basename "$_clr")-$(basename "${source[1]}" ".tar.gz")"
+_dirhipcc="$(basename "$_hipcc")-$(basename "${source[2]}" ".tar.gz")"
 
 build() {
-  # build fails if cmake and make are called from outside the build directory
-  mkdir build && cd build
+  local hipcc_args=(
+    -Wno-dev
+    -S "$srcdir/$_dirhipcc"
+    -B build-hipcc
+    -DCMAKE_BUILD_TYPE=None
+  )
+  cmake "${hipcc_args[@]}"
+  cmake --build build-hipcc
 
-  # Disable assertations as a temporary workaround for hipRTC
-  # https://github.com/ROCmSoftwarePlatform/rocFFT/issues/389#issuecomment-1341370581
-  CXXFLAGS="$CXXFLAGS -DNDEBUG" \
-  cmake \
-    -Wno-dev \
-    -S "$srcdir/$_dirhipamd" \
-    -DHIP_COMMON_DIR="$srcdir/$_dirhip" \
-    -DAMD_OPENCL_PATH="$srcdir/$_diropencl" \
-    -DROCCLR_PATH="$srcdir/$_dirrocclr" \
-    -DHIP_PLATFORM=amd \
-    -DCMAKE_BUILD_TYPE=None \
-    -DROCM_DIR=/opt/rocm \
-    -DCMAKE_INSTALL_PREFIX=/opt/rocm
-
-  cmake --build .
+  local hip_args=(
+    -Wno-dev
+    -S "$srcdir/$_dirclr"
+    -B build
+    -DCMAKE_BUILD_TYPE=None
+    -DCMAKE_INSTALL_PREFIX=/opt/rocm/
+    -DHIP_COMMON_DIR="$srcdir/$_dirhip"
+    -DHIPCC_BIN_DIR="$srcdir/build-hipcc"
+    -DHIP_CATCH_TEST=0
+    -DCLR_BUILD_HIP=ON
+    -DCLR_BUILD_OCL=OFF
+  )
+  cmake "${hip_args[@]}"
+  cmake --build build
 }
 
 package() {
   DESTDIR="$pkgdir" cmake --install build
+  # Binary hipcc and hipconfig currently don't work, so we don't install them:
+  # https://github.com/ROCm-Developer-Tools/HIPCC/issues/103
+  #
+  # There's no install target for hipcc and hipconfig, so copy them manually
+  # install "$srcdir/build-hipcc/hipcc.bin" "$pkgdir/opt/rocm/bin/hipcc.bin"
+  # install "$srcdir/build-hipcc/hipconfig.bin" "$pkgdir/opt/rocm/bin/hipconfig.bin"
+
+  # Remove Windows scripts
+  rm "$pkgdir/opt/rocm/bin/hipcc.bat"
+  rm "$pkgdir/opt/rocm/bin/hipconfig.bat"
 
   install -Dm644 "$srcdir/$_dirhip/LICENSE.txt" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   echo '/opt/rocm/hip/lib' > "$pkgname.conf"
