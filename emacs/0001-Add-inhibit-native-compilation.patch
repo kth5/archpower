@@ -1,0 +1,160 @@
+From fc921c4b1cc74d40c09c2a6653c57a34bdc5da84 Mon Sep 17 00:00:00 2001
+From: Lars Ingebrigtsen <larsi@gnus.org>
+Date: Mon, 3 Oct 2022 15:26:04 +0200
+Subject: Add 'inhibit-native-compilation'
+
+The following upstream patch has been backported:
+
+  Add new variable 'inhibit-native-compilation'
+
+  * lisp/startup.el (normal-top-level): Set
+  inhibit-native-compilation from environment variable.
+
+  * lisp/emacs-lisp/comp.el (comp-trampoline-compile): Don't write
+  trampolines to disk.
+
+  * lisp/progmodes/elisp-mode.el
+  (emacs-lisp-native-compile-and-load): Adjust.
+
+  * src/comp.c (syms_of_comp): New variable
+  inhibit-native-compilation.
+  (maybe_defer_native_compilation): Use it.
+
+Origin: upstream, commit: 5fec9182dbeffa88cef6651d8c798ef9665d6681
+Forwarded: not-needed
+---
+ lisp/emacs-lisp/comp.el      | 47 +++++++++++++++++++-----------------
+ lisp/progmodes/elisp-mode.el |  2 +-
+ lisp/startup.el              |  7 ++++--
+ src/comp.c                   |  8 ++++++
+ 4 files changed, 39 insertions(+), 25 deletions(-)
+
+diff --git a/lisp/emacs-lisp/comp.el b/lisp/emacs-lisp/comp.el
+index 322df0e86a1..52702cab5c9 100644
+--- a/lisp/emacs-lisp/comp.el
++++ b/lisp/emacs-lisp/comp.el
+@@ -3812,28 +3812,31 @@ comp-trampoline-search
+ 
+ (defun comp--trampoline-abs-filename (subr-name)
+   "Return the absolute filename for a trampoline for SUBR-NAME."
+-  (cl-loop
+-   with dirs = (if (stringp native-comp-enable-subr-trampolines)
+-                   (list (expand-file-name native-comp-enable-subr-trampolines
+-                                           invocation-directory))
+-                 (if native-compile-target-directory
+-                     (list (expand-file-name comp-native-version-dir
+-                                             native-compile-target-directory))
+-                   (comp-eln-load-path-eff)))
+-   with rel-filename = (comp-trampoline-filename subr-name)
+-   for dir in dirs
+-   for abs-filename = (expand-file-name rel-filename dir)
+-   unless (file-exists-p dir)
+-     do (ignore-errors
+-          (make-directory dir t)
+-          (cl-return abs-filename))
+-   when (file-writable-p abs-filename)
+-     do (cl-return abs-filename)
+-   ;; Default to some temporary directory if no better option was
+-   ;; found.
+-   finally (cl-return
+-            (make-temp-file (file-name-sans-extension rel-filename) nil ".eln"
+-                            nil))))
++  ;; If we've disabled nativecomp, don't write the trampolines to
++  ;; the eln cache (but create them).
++  (and (not inhibit-native-compilation)
++       (cl-loop
++	with dirs = (if (stringp native-comp-enable-subr-trampolines)
++			(list (expand-file-name native-comp-enable-subr-trampolines
++						invocation-directory))
++                      (if native-compile-target-directory
++			  (list (expand-file-name comp-native-version-dir
++						  native-compile-target-directory))
++			(comp-eln-load-path-eff)))
++	with rel-filename = (comp-trampoline-filename subr-name)
++	for dir in dirs
++	for abs-filename = (expand-file-name rel-filename dir)
++	unless (file-exists-p dir)
++	do (ignore-errors
++             (make-directory dir t)
++             (cl-return abs-filename))
++	when (file-writable-p abs-filename)
++	do (cl-return abs-filename)
++	;; Default to some temporary directory if no better option was
++	;; found.
++	finally (cl-return
++		 (make-temp-file (file-name-sans-extension rel-filename) nil ".eln"
++				 nil)))))
+ 
+ (defun comp-trampoline-compile (subr-name)
+   "Synthesize compile and return a trampoline for SUBR-NAME."
+diff --git a/lisp/progmodes/elisp-mode.el b/lisp/progmodes/elisp-mode.el
+index 956e3d30bce..4f735f2e5a8 100644
+--- a/lisp/progmodes/elisp-mode.el
++++ b/lisp/progmodes/elisp-mode.el
+@@ -222,7 +222,7 @@ emacs-lisp-native-compile-and-load
+ Load the compiled code when finished.
+ 
+ Use `emacs-lisp-byte-compile-and-load' in combination with
+-`native-comp-jit-compilation' set to t to achieve asynchronous
++`inhibit-native-compilation' set to nil to achieve asynchronous
+ native compilation."
+   (interactive nil emacs-lisp-mode)
+   (emacs-lisp--before-compile-buffer)
+diff --git a/lisp/startup.el b/lisp/startup.el
+index d6e1c23fa28..ac17b645f15 100644
+--- a/lisp/startup.el
++++ b/lisp/startup.el
+@@ -546,7 +546,7 @@ startup--honor-delayed-native-compilations
+   (setq comp--compilable t))
+ 
+ (defvar native-comp-eln-load-path)
+-(defvar native-comp-jit-compilation)
++(defvar inhibit-native-compilation)
+ (defvar native-comp-enable-subr-trampolines)
+ 
+ (defvar startup--original-eln-load-path nil
+@@ -583,6 +583,9 @@ normal-top-level
+ It sets `command-line-processed', processes the command-line,
+ reads the initialization files, etc.
+ It is the default value of the variable `top-level'."
++  ;; Allow disabling automatic .elc->.eln processing.
++  (setq inhibit-native-compilation (getenv "EMACS_INHIBIT_NATIVE_COMPILATION"))
++
+   (if command-line-processed
+       (message internal--top-level-message)
+     (setq command-line-processed t)
+@@ -601,7 +604,7 @@ normal-top-level
+         ;; in this session.  This is necessary if libgccjit is not
+         ;; available on MS-Windows, but Emacs was built with
+         ;; native-compilation support.
+-        (setq native-comp-jit-compilation nil
++        (setq inhibit-native-compilation t
+               native-comp-enable-subr-trampolines nil))
+ 
+       ;; Form `native-comp-eln-load-path'.
+diff --git a/src/comp.c b/src/comp.c
+index 59c9e9619a3..06ddb956bb5 100644
+--- a/src/comp.c
++++ b/src/comp.c
+@@ -5179,6 +5179,7 @@ maybe_defer_native_compilation (Lisp_Object function_name,
+     return;
+ 
+   if (!native_comp_jit_compilation
++      || !NILP (Vinhibit_native_compilation)
+       || noninteractive
+       || !NILP (Vpurify_flag)
+       || !COMPILEDP (definition)
+@@ -5681,6 +5682,13 @@ syms_of_comp (void)
+     doc: /* Non-nil when comp.el can be native compiled.
+ For internal use. */);
+   /* Compiler control customizes.  */
++  DEFVAR_LISP ("inhibit-native-compilation", Vinhibit_native_compilation,
++	       doc: /* If non-nil, inhibit automatic native compilation of loaded .elc files.
++
++After compilation, each function definition is updated to the native
++compiled one.  */);
++  Vinhibit_native_compilation = Qnil;
++
+   DEFVAR_BOOL ("native-comp-jit-compilation", native_comp_jit_compilation,
+     doc: /* If non-nil, compile loaded .elc files asynchronously.
+ 
