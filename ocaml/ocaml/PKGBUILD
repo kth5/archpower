@@ -3,8 +3,8 @@
 
 pkgbase='ocaml'
 pkgname=('ocaml' 'ocaml-compiler-libs')
-pkgver=5.1.0
-pkgrel=1
+pkgver=4.14.1
+pkgrel=2
 pkgdesc="A functional language with OO extensions"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=('LGPL2.1' 'custom: QPL-1.0')
@@ -12,14 +12,14 @@ url="https://caml.inria.fr/"
 makedepends=('ncurses>=5.6-7')
 optdepends=('ncurses: advanced ncurses features' 'tk: advanced tk features')
 source=(https://caml.inria.fr/distrib/ocaml-${pkgver%.*}/${pkgname}-${pkgver}.tar.xz
-        ocaml-5.0.0-elfv2-ppc64.patch)
-sha512sums=('23579b76592e225f2ddec58d78084dfd11befede18b61be71d3896fd72a90cc0fe4fb1f64a7dcbc83239ed69ec4254e13ab86fd810671851044c2a353da3adc5'
-            'a7063fd3ce8f0622fafa9619b986abb11e2811c7e8e79973317c9c64f357a6d293b4057a258cf2de5446ed2014c41593cdbb65b874b2bbf17a9d4fe181c505d8')
+        ocaml-4.08.0-elfv2-ppc64.patch)
+sha512sums=('326a063e7e18ec55a21fbb129e4b2915733e67166ec1d94412875853aa10fbfb27fdfc9f6440ce65b188924b93f3cb8d01b0c4640179a5a12bc4e561f48b3e5b'
+            'a6dd3a2cfef21c1df7286ec2f4ad6ca48deac1f450232e7533a46e00867b0b1521d228345b5ee7212dc86c8e39295d152aed27c3e7f374b4c6a5595c425422a6')
 options=('!makeflags' '!emptydirs' 'staticlibs')
 
 prepare() {
   cd "${srcdir}/${pkgname}-${pkgver}"
-  patch -Np1 -i ${srcdir}/ocaml-5.0.0-elfv2-ppc64.patch
+  patch -Np1 -i ${srcdir}/ocaml-4.08.0-elfv2-ppc64.patch
 }
 
 build() {
@@ -28,17 +28,11 @@ build() {
   CXXFLAGS+=' -ffat-lto-objects'
 
   case "${CARCH}" in
-    powerpc*)
-      _configure_flags=(--disable-native-compiler)
-      _make_target="world"
-    ;;
-    *)
-      _make_target="world-opt"
-    ;;
+    x86_64) _configure_flags=(--enable-frame-pointers)
   esac
 
-  ./configure --prefix /usr --mandir /usr/share/man ${_configure_flags[@]}
-  make --debug=v ${_make_target}
+  ./configure --prefix /usr --mandir /usr/share/man --disable-force-safe-string ${_configure_flags[@]}
+  make --debug=v world.opt
 }
 
 package_ocaml() {
@@ -65,8 +59,11 @@ optdepends=()
   cd "${srcdir}/${pkgbase}-${pkgver}"
   make DESTDIR="${pkgdir}" install
   # Remove non-compiler-libs
-  find "${pkgdir}/usr/lib/ocaml/" -mindepth 1 -maxdepth 1 -not -name "compiler-libs" -execdir rm -rf "{}" "+"
-  rm -rf   "${pkgdir}/usr/bin" "${pkgdir}/usr/share"
+  rm -rf   "${pkgdir}/usr/bin"  "${pkgdir}/usr/lib/ocaml/caml" \
+     "${pkgdir}/usr/lib/ocaml/ocamldoc" "${pkgdir}/usr/lib/ocaml/stublibs" \
+     "${pkgdir}/usr/lib/ocaml/threads" "${pkgdir}/usr/share"
+  find "${pkgdir}/usr/lib/ocaml/" -maxdepth 1 -type f -delete
+
   install -m755 -d "${pkgdir}/usr/share/licenses/${pkgname}"
   install -m644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/"
 }
