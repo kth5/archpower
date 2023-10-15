@@ -2,7 +2,7 @@
 # Maintainer: Antonio Rojas <arojas@archlinux.org>
 
 pkgname=ksystemstats
-pkgver=5.27.7
+pkgver=5.27.8
 _dirver=$(echo $pkgver | cut -d. -f1-3)
 pkgrel=1
 pkgdesc='A plugin based system monitoring daemon'
@@ -15,7 +15,7 @@ optdepends=('networkmanager-qt: network usage monitor')
 conflicts=('ksysguard<5.21.90')
 groups=(plasma)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('7c3f8998e6f5abd1adfd22fe6272b9f178bb4db716a3d8dfc162f46e4c59a5bb'
+sha256sums=('2e1655434afabb9a2b46b7ad4b8811d2d81941fa3ba90589a4a3fe5ade08915a'
             'SKIP')
 validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell <jr@jriddell.org>
               '0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D'  # Bhushan Shah <bshah@kde.org>
