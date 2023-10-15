@@ -3,7 +3,7 @@
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=plasma-integration
-pkgver=5.27.7
+pkgver=5.27.8
 _dirver=$(echo $pkgver | cut -d. -f1-3)
 pkgrel=1
 pkgdesc='Qt Platform Theme integration plugins for the Plasma workspaces'
@@ -14,7 +14,7 @@ depends=(libxcursor noto-fonts ttf-hack qqc2-desktop-style kio perl)
 makedepends=(extra-cmake-modules breeze plasma-wayland-protocols)
 groups=(plasma)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('e3f266c60efb3d96f3a22782ba81b7c7071b010484ea717a169327c3f6641faa'
+sha256sums=('fb1cfbe75b4536fb57cc91ed7dcad49e0e00414fc29576b5c3905562b418c791'
             'SKIP')
 validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell <jr@jriddell.org>
               '0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D'  # Bhushan Shah <bshah@kde.org>
