@@ -6,37 +6,60 @@
 # Contributor: keystone <phillip.marvin@gmail.com>
 
 pkgname=libunwind
-pkgver=1.6.2
-pkgrel=2
-pkgdesc='Portable and efficient C programming interface (API) to determine the call-chain of a program'
+pkgver=1.7.2
+pkgrel=1
+pkgdesc="Determine and manipulate the call-chain of a program"
+url="https://www.nongnu.org/libunwind/"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url='https://www.nongnu.org/libunwind/'
-license=('GPL')
-depends=('xz' 'zlib')
-makedepends=('texlive-core')
-options=('debug')
-source=("https://download.savannah.gnu.org/releases/$pkgname/$pkgname-$pkgver.tar.gz"{,.sig})
-sha512sums=('1d17dfb14f99a894a6cda256caf9ec481c14068aaf8f3a85fa3befa7c7cca7fca0f544a91a3a7c2f2fc55bab19b06a67ca79f55ac9081151d94478c7f611f8f7'
-            'SKIP')
-validpgpkeys=('5C96BDEAF5F47FB02BD4F6B965D98560914F3F48'  # Arun Sharma
-              '1675C8DA2EF907FB116EB709EC52B396E6874AF2'  # Dave Watson
-              '75D2CFC56CC2E935A4143297015A268A17D55FA4') # Dave Watson
+license=(GPL)
+depends=(
+  glibc
+  xz
+  zlib
+)
+makedepends=(texlive-binextra)
+provides=(
+  libunwind-{coredump,ptrace,setjmp,x86_64}.so
+  libunwind.so
+)
+options=(debug)
+source=(
+  https://github.com/libunwind/libunwind/releases/download/v$pkgver/libunwind-$pkgver.tar.gz{,.asc}
+  "${pkgname}-ppc32-ucontext.patch::https://patch-diff.githubusercontent.com/raw/libunwind/libunwind/pull/521.patch"
+)
+b2sums=('519570a02d06ce4a174ca226941e493499054112de1c92938434e9fb56fabc8446f699a886ea8beee672ac5e28acd03d16169257a43e2ee1bab084fb331ef4cf'
+        'SKIP'
+        '85d25c52b151de07f5cd8f5e18aec0929fba24c51b2a0b2fa97aec2eb23590b4da6c687e14edac088d8e02c734afea8127ea92c9dc993556889d77461762bdb8')
+validpgpkeys=(
+  F86EB09F72717426F20D36470A0FF845B7DB3427  # Stephen M. Webb <stephen.webb@bregmasoft.ca>
+)
+
+prepare() {
+  cd libunwind-$pkgver
+  patch -Np1 -i ${srcdir}/${pkgname}-ppc32-ucontext.patch
+}
 
 build() {
-  cd $pkgname-$pkgver
-  ./configure --prefix=/usr
+  local configure_options=(
+    --prefix=/usr
+    --sysconfdir=/etc
+    --localstatedir=/var
+    --build=${CHOST}
+  )
+
+  cd libunwind-$pkgver
+  ./configure "${configure_options[@]}"
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
 }
 
 check() {
-  cd $pkgname-$pkgver
-  # This function is ``supposed'' to fail. Upstream know, but haven't fixed it.
-  make check || :
+  cd libunwind-$pkgver
+  make check
 }
 
 package() {
-  cd $pkgname-$pkgver
+  cd libunwind-$pkgver
   make DESTDIR="$pkgdir" install
 }
 
