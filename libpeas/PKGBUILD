@@ -1,11 +1,16 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Fabian Bornschein <fabiscafe-at-mailbox-dot-org>
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
 pkgbase=libpeas
-pkgname=(libpeas libpeas-docs)
+pkgname=(
+  libpeas
+  libpeas-demos
+  libpeas-docs
+)
 pkgver=1.36.0
-pkgrel=2
-pkgdesc="A GObject plugins library"
+pkgrel=4
+pkgdesc="GObject Plugin System"
 url="https://wiki.gnome.org/Projects/Libpeas"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=(LGPL)
@@ -18,12 +23,13 @@ makedepends=(
   git
   glade
   gobject-introspection
+  lua51-lgi
+  lua51
   meson
   python-gobject
   vala
 )
 checkdepends=(xorg-server-xvfb)
-optdepends=('python-gobject: Python loader')
 _commit=7f245fa5158204621c3469756a951b68a651c4fe  # tags/libpeas-1.36.0^0
 source=("git+https://gitlab.gnome.org/GNOME/libpeas.git#commit=$_commit")
 b2sums=('SKIP')
@@ -52,20 +58,46 @@ check() {
     meson test -C build --print-errorlogs
 }
 
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
 package_libpeas() {
+  optdepends=(
+    'lua51-lgi: Lua loader'
+    'python-gobject: Python loader'
+  )
   provides=(libpeas{,-gtk}-1.0.so)
 
   meson install -C build --destdir "$pkgdir"
 
-  mkdir -p doc/usr/share
-  mv {"$pkgdir",doc}/usr/share/doc
+  cd "$pkgdir"
+
+  _pick demo usr/bin/peas-demo
+  _pick demo usr/lib/peas-demo
+
+  _pick docs usr/share/doc
+}
+
+package_libpeas-demos() {
+  pkgdesc+=" (demo applications)"
+  depends=(
+    libpeas
+    python-gobject
+  )
+  mv demo/* "$pkgdir"
 }
 
 package_libpeas-docs() {
   pkgdesc+=" (documentation)"
   depends=()
-
-  mv doc/* "$pkgdir"
+  mv docs/* "$pkgdir"
 }
 
 # vim:set sw=2 sts=-1 et:
