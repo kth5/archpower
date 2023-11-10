@@ -6,14 +6,14 @@ pkgname=(
   wpewebkit
   wpewebkit-docs
 )
-pkgver=2.40.5
-pkgrel=2
+pkgver=2.42.1
+pkgrel=1
 pkgdesc="Embeddable web content engine"
 url="https://wpewebkit.org"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=(custom)
 depends=(
-  at-spi2-atk
+  at-spi2-core
   atk
   bubblewrap
   cairo
@@ -31,6 +31,7 @@ depends=(
   libepoxy
   libgcrypt
   libjpeg
+  libjxl
   libpng
   libseccomp
   libsoup3
@@ -51,11 +52,13 @@ depends=(
   zlib
 )
 makedepends=(
+  clang
   cmake
   gi-docgen
   gobject-introspection
   gperf
   gst-plugins-bad
+  lld
   ninja
   python
   ruby
@@ -65,13 +68,11 @@ makedepends=(
 )
 source=(
   $url/releases/wpewebkit-$pkgver.tar.xz{,.asc}
-  reduce-memory-overheads.patch
-  prefer-pthread.patch
 )
-sha256sums=('4c658d3049c50e98b12fd6623ec42772f25a99cc1c05b5347a10a8633c266733'
-            'SKIP'
-            '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864'
-            'dc1a43f9514dc7ade2d5a2987f6e25f0f6fdaeda246614c916d1974050224475')
+sha256sums=('18a2cf547a503420f4cb8f523a2f4c24b4dc2773abbe74c7d585e6d23cb27bac'
+            'SKIP')
+b2sums=('12e8d0fb662e36c68f4e029d948de0b4bed4d9087d622d0b940726f3bb958572699cbe3d943408e9526d254a0b355b474281a432a38a7a19efbced4031dc7e6e'
+        'SKIP')
 validpgpkeys=(
   'D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
   '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B'  # Adrián Pérez de Castro <aperez@igalia.com>
@@ -79,9 +80,6 @@ validpgpkeys=(
 
 prepare() {
   cd wpewebkit-$pkgver
-
-  patch -Np1 -i ${srcdir}/reduce-memory-overheads.patch
-  patch -Np1 -i ${srcdir}/prefer-pthread.patch
 }
 
 build() {
@@ -98,15 +96,37 @@ build() {
     -DENABLE_MINIBROWSER=ON
   )
 
+  # GCC with LTO fails to link jsc
+  #     /usr/bin/ld: /tmp/ccXxyWZV.ltrans0.ltrans.o: in function `ipint_table_size_validate':
+  #     <artificial>:(.text+0x49f0f): undefined reference to `ipint_extern_table_size'
+  #     /usr/bin/ld: /tmp/ccXxyWZV.ltrans0.ltrans.o: in function `ipint_table_fill_validate':
+  #     <artificial>:(.text+0x4a019): undefined reference to `ipint_extern_table_fill'
+  #     collect2: error: ld returned 1 exit status
+  export CC=clang CXX=clang++
+
   case "${CARCH}" in
     powerpc) 
       cmake_options+=(
         -DENABLE_WEBGL=OFF
         -DFORCE_32BIT=ON
       )
+      export CC=${CHOST}-gcc
+      export CXX=${CHOST}-g++
       export LDFLAGS+=" -Wl,--no-keep-memory"
     ;;
+    powerpc)
+      export CC=${CHOST}-gcc
+      export CXX=${CHOST}-g++
+      export CFLAGS+=' -mminimal-toc'
+      export CXXFLAGS+=' -mminimal-toc'
+    ;;
   esac
+
+  if [ "${CC}" == 'clang' -a "${CXX}" == 'clang++' ]; then
+    export CFLAGS+=" -target ${CHOST}"
+    export CXXFLAGS+=" -target ${CHOST}"
+    export LDFLAGS+=" -fuse-ld=lld"
+  fi
 
   # Produce minimal debug info: 4.3 GB of debug data makes the
   # build too slow and is too much to package for debuginfod
