@@ -8,11 +8,11 @@
 # NOTE: valgrind requires rebuilt with each major glibc version
 
 pkgbase=glibc
-pkgname=(glibc)
-[ "${CARCH}" = 'x86_64' ] && pkgname+=(lib32-glibc)
+pkgname=(glibc glibc-locales)
+[ "${CARCH}" == 'x86_64' ] && pkgname+=(lib32-glibc)
 pkgver=2.38
-_commit=0e1ef6779a90bc0f8a05bc367796df2793deecaa
-pkgrel=4
+_commit=750a45a783906a19591fb8ff6b7841470f1f5701
+pkgrel=7.1
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://www.gnu.org/software/libc'
 license=(GPL LGPL)
@@ -37,8 +37,7 @@ b2sums=('SKIP'
         '35e03ed912e1b0cd23783ab83ce919412885c141344905b8b67bbad4a86c48cf3e893806060e48d5737514ff80cea0b58b0e1f15707c32224579c416dcd810c0')
 
 prepare() {
-  mkdir -p glibc-build
-  [ "${CARCH}" = 'x86_64' ] && mkdir -p lib32-glibc-build
+  mkdir -p glibc-build lib32-glibc-build
 
   [[ -d glibc-$pkgver ]] && ln -s glibc-$pkgver glibc
   cd glibc
@@ -60,9 +59,10 @@ build() {
       --enable-bind-now
       --enable-fortify-source
       --enable-kernel=4.4
-      --enable-stack-protector=strong
       --enable-multi-arch
+      --enable-stack-protector=strong
       --enable-systemtap
+      --disable-nscd
       --disable-profile
       --disable-werror
   )
@@ -73,30 +73,33 @@ build() {
     *)      _configure_flags+=(--disable-multi-arch); CFLAGS='-O2 -pipe' ;;
   esac
 
-  cd "${srcdir}"/glibc-build
+  (
+    cd glibc-build
 
-  echo "slibdir=/usr/lib" >> configparms
-  echo "rtlddir=/usr/lib" >> configparms
-  echo "sbindir=/usr/bin" >> configparms
-  echo "rootsbindir=/usr/bin" >> configparms
+    echo "slibdir=/usr/lib" >> configparms
+    echo "rtlddir=/usr/lib" >> configparms
+    echo "sbindir=/usr/bin" >> configparms
+    echo "rootsbindir=/usr/bin" >> configparms
 
-  # Credits @allanmcrae
-  # https://github.com/allanmcrae/toolchain/blob/f18604d70c5933c31b51a320978711e4e6791cf1/glibc/PKGBUILD
-  # remove fortify for building libraries
-  # CFLAGS=${CFLAGS/-Wp,-D_FORTIFY_SOURCE=2/}
+    # Credits @allanmcrae
+    # https://github.com/allanmcrae/toolchain/blob/f18604d70c5933c31b51a320978711e4e6791cf1/glibc/PKGBUILD
+    # remove fortify for building libraries
+    # CFLAGS=${CFLAGS/-Wp,-D_FORTIFY_SOURCE=2/}
 
-  "${srcdir}"/glibc/configure \
-      --libdir=/usr/lib \
-      --libexecdir=/usr/lib \
-      "${_configure_flags[@]}"
+    "${srcdir}"/glibc/configure \
+        --libdir=/usr/lib \
+        --libexecdir=/usr/lib \
+        "${_configure_flags[@]}"
 
-  make -O
+    make -O
 
-  # build info pages manually for reproducibility
-  make info
+    # build info pages manually for reproducibility
+    make info
+  )
 
   if [ "${CARCH}" = 'x86_64' ]; then
-    cd "${srcdir}"/lib32-glibc-build
+  (
+    cd lib32-glibc-build
     export CC="gcc -m32 -mstackrealign"
     export CXX="g++ -m32 -mstackrealign"
 
@@ -112,22 +115,24 @@ build() {
         "${_configure_flags[@]}"
 
     make -O
+  )
   fi
 
-  # pregenerate C.UTF-8 locale until it is built into glibc
-  # (https://sourceware.org/glibc/wiki/Proposals/C.UTF-8, FS#74864)-
-  elf/ld.so --library-path "$PWD" locale/localedef -c -f ../glibc/localedata/charmaps/UTF-8 -i ../glibc/localedata/locales/C ../C.UTF-8/
+  # pregenerate locales here instead of in package
+  # functions because localedef does not like fakeroot
+  make -C "${srcdir}"/glibc/localedata objdir="${srcdir}"/glibc-build \
+    DESTDIR="${srcdir}"/locales install-locale-files
 }
 
-# Credits for skip_test() and check() @allanmcrae
+# Credits for _skip_test() and check() @allanmcrae
 # https://github.com/allanmcrae/toolchain/blob/f18604d70c5933c31b51a320978711e4e6791cf1/glibc/PKGBUILD
-skip_test() {
+_skip_test() {
   test=${1}
   file=${2}
   sed -i "/\b${test} /d" "${srcdir}"/glibc/${file}
 }
 
-check() {
+check() (
   cd glibc-build
 
   # adjust/remove buildflags that cause false-positive testsuite failures
@@ -140,16 +145,16 @@ check() {
   # The following tests fail due to restrictions in the Arch build system
   # The correct fix is to add the following to the systemd-nspawn call:
   # --system-call-filter="@clock @memlock @pkey"
-  skip_test test-errno-linux        sysdeps/unix/sysv/linux/Makefile
-  skip_test tst-mlock2              sysdeps/unix/sysv/linux/Makefile
-  skip_test tst-ntp_gettime         sysdeps/unix/sysv/linux/Makefile
-  skip_test tst-ntp_gettimex        sysdeps/unix/sysv/linux/Makefile
-  skip_test tst-pkey                sysdeps/unix/sysv/linux/Makefile
-  skip_test tst-process_mrelease    sysdeps/unix/sysv/linux/Makefile
-  skip_test tst-adjtime             time/Makefile
+  _skip_test test-errno-linux        sysdeps/unix/sysv/linux/Makefile
+  _skip_test tst-mlock2              sysdeps/unix/sysv/linux/Makefile
+  _skip_test tst-ntp_gettime         sysdeps/unix/sysv/linux/Makefile
+  _skip_test tst-ntp_gettimex        sysdeps/unix/sysv/linux/Makefile
+  _skip_test tst-pkey                sysdeps/unix/sysv/linux/Makefile
+  _skip_test tst-process_mrelease    sysdeps/unix/sysv/linux/Makefile
+  _skip_test tst-adjtime             time/Makefile
 
   make -O check
-}
+)
 
 package_glibc() {
   pkgdesc='GNU C Library'
@@ -160,7 +165,7 @@ package_glibc() {
   backup=(etc/gai.conf
           etc/locale.gen)
 
-  make -C glibc-build install_root="${pkgdir}" install
+  make -C glibc-build DESTDIR="${pkgdir}" install
   rm -f "${pkgdir}"/etc/ld.so.cache
 
   # Shipped in tzdata
@@ -177,15 +182,18 @@ package_glibc() {
   # Create /etc/locale.gen
   install -m644 "${srcdir}"/locale.gen.txt "${pkgdir}"/etc/locale.gen
   sed -e '1,3d' -e 's|/| |g' -e 's|\\| |g' -e 's|^|#|g' \
-    "${srcdir}"/glibc/localedata/SUPPORTED >> "${pkgdir}"/etc/locale.gen
+    localedata/SUPPORTED >> "${pkgdir}"/etc/locale.gen
 
   # Add SUPPORTED file to pkg
   sed -e '1,3d' -e 's|/| |g' -e 's| \\||g' \
-    "${srcdir}"/glibc/localedata/SUPPORTED > "${pkgdir}"/usr/share/i18n/SUPPORTED
+    localedata/SUPPORTED > "${pkgdir}"/usr/share/i18n/SUPPORTED
 
   # install C.UTF-8 so that it is always available
+  # should be built into glibc eventually
+  # https://sourceware.org/glibc/wiki/Proposals/C.UTF-8
+  # https://bugs.archlinux.org/task/74864
   install -dm755 "${pkgdir}"/usr/lib/locale
-  cp -r "${srcdir}"/C.UTF-8 -t "${pkgdir}"/usr/lib/locale
+  cp -r "${srcdir}"/locales/usr/lib/locale/C.utf8 -t "${pkgdir}"/usr/lib/locale
   sed -i '/#C\.UTF-8 /d' "${pkgdir}"/etc/locale.gen
 
   # Provide tracing probes to libstdc++ for exceptions, possibly for other
@@ -201,7 +209,7 @@ package_lib32-glibc() {
 
   cd lib32-glibc-build
 
-  make install_root="${pkgdir}" install
+  make DESTDIR="${pkgdir}" install
   rm -rf "${pkgdir}"/{etc,sbin,usr/{bin,sbin,share},var}
 
   # We need to keep 32 bit specific header files
@@ -216,4 +224,15 @@ package_lib32-glibc() {
 
   # Symlink /usr/lib32/locale to /usr/lib/locale
   ln -s ../lib/locale "${pkgdir}"/usr/lib32/locale
+}
+
+package_glibc-locales() {
+  pkgdesc='Pregenerated locales for GNU C Library'
+  depends=("glibc=$pkgver")
+
+  cp -r locales/* -t "${pkgdir}"
+  rm -r "${pkgdir}"/usr/lib/locale/C.utf8
+
+  # deduplicate locale data
+  hardlink -c "${pkgdir}"/usr/lib/locale
 }
