@@ -12,8 +12,8 @@ pkgname=(
   libnm
   nm-cloud-setup
 )
-pkgver=1.44.0
-pkgrel=1
+pkgver=1.44.2
+pkgrel=3
 pkgdesc="Network connection manager and user applications"
 url="https://networkmanager.dev/"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
@@ -57,9 +57,13 @@ checkdepends=(
   libx11
   python-dbus
 )
-_commit=d56e49a4ecc2b03b46f3387b837afc87e99c4bfa  # tags/1.44.0^0
-source=("git+https://gitlab.freedesktop.org/NetworkManager/NetworkManager.git#commit=$_commit")
-b2sums=('SKIP')
+_commit=8bee6ef894a27ffc8a464df3b32b03e811e1a15d  # tags/1.44.2^0
+source=(
+  "git+https://gitlab.freedesktop.org/NetworkManager/NetworkManager.git#commit=$_commit"
+  0001-connectivity-Make-curl-timeout-callback-non-repeatin.patch
+)
+b2sums=('SKIP'
+        '51674577e4a2786b6491fdf90cc90734da3792e0a7e224f0eecc9c485a5f81b68a71bb559b23d294d52dc9065ee82c997c31f9272504c3d753e0ffe1321367e9')
 
 pkgver() {
   cd NetworkManager
@@ -68,6 +72,9 @@ pkgver() {
 
 prepare() {
   cd NetworkManager
+
+  # https://gitlab.freedesktop.org/NetworkManager/NetworkManager/-/merge_requests/1756
+  git apply -3 ../0001-connectivity-Make-curl-timeout-callback-non-repeatin.patch
 }
 
 build() {
@@ -103,6 +110,10 @@ build() {
     -D more_logging=false
     -D qt=false
   )
+
+  # NM uses malloc_usable_size in code copied from systemd
+  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
 
   arch-meson NetworkManager build "${meson_options[@]}"
   meson compile -C build
