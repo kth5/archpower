@@ -3,8 +3,8 @@
 # Contributor: Eric Bélanger <eric@archlinux.org>
 
 pkgname=syslog-ng
-pkgver=4.1.1
-pkgrel=1
+pkgver=4.4.0
+pkgrel=2
 pkgdesc="Next-generation syslogd with advanced networking and filtering capabilities"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://www.syslog-ng.com/products/open-source-log-management/"
@@ -15,11 +15,14 @@ depends=(
   'curl'
   'glib2'
   'glibc'
+  'grpc'
   'json-c'
   'libcap'
   'libnet'
   'libnsl'
   'openssl'
+  'pcre2'
+  'protobuf'
   'systemd-libs'
 )
 makedepends=('libxslt' 'mongo-c-driver' 'librabbitmq-c' 'python' 'libesmtp' 'hiredis'
@@ -38,14 +41,15 @@ optdepends=('logrotate: for rotating log files'
             'python-ply: for debugger CLI')
 conflicts=('eventlog')
 replaces=('eventlog')
+# The default scl.conf moved in 4.3.0, but it is still supported here for overrides so we keep this entry. See https://github.com/syslog-ng/syslog-ng/pull/4534 for details.
 backup=('etc/syslog-ng/scl.conf'
         'etc/syslog-ng/syslog-ng.conf'
         'etc/logrotate.d/syslog-ng'
         'etc/default/syslog-ng@default')
 source=(https://github.com/balabit/syslog-ng/releases/download/syslog-ng-$pkgver/$pkgname-$pkgver.tar.gz
         syslog-ng.conf syslog-ng.logrotate)
-sha512sums=('89abb7a53570b6f7c0dc76905c97d207447117f1db1aa0c0da97c17366ea833b6404f9c7fc318436fd01be2bab032eccca9712063a7c683780026e7e52493dc8'
-            '36629a566a8343574dc07430e744e20ce90574be0cc856bc43340f834cd6642a8f08889b9ba15996d088aeebeee4bc3ca64411265046c17c8e125fbed8948ded'
+sha512sums=('1cf18c43321e523d0f49b25a4839fd10ec301b207da1b2c407df5167dba557ac0a7781b07f1c1e5d18241376966b8099d9e41dffa55030f6a8052388139c4107'
+            'cbcc5f6e6d0ed75add8a38bf35a5bee9f0cce487e0eda76d34bf807e1fe1f49bd86db707c7457205e502f0c7de78f44c5b9cb8a8e993880095089e75248906c2'
             'cd39f545a6a855c866a466bf846e33940b2c2dd1fc2eaf50cce29c68e1a5753c7c4b56411e4f01c152f32e155104a98dd755a96319767f47c73a8853f720b2cc')
 
 prepare() {
@@ -61,6 +65,18 @@ build() {
   export CFLAGS+=" -ffat-lto-objects"
   export CXXFLAGS+=" -ffat-lto-objects"
 
+
+  _source_version=$(sed -rn 's#.*define VERSION_STR_CURRENT.* "(.*)"#\1#p' lib/versioning.h)
+  _config_version=$(head -1 "$srcdir/syslog-ng.conf" | cut -d\  -f2)
+
+  if [[ "$_source_version" != "$_config_version" ]]; then
+	  echo "Version in example config at '$srcdir/syslog-ng.conf' is: $_config_version"
+	  echo "Expected version from code is: $_source_version"
+	  echo "Check if config format has incompatible changes and adjust the"
+	  echo "example config file and bump the version to continue the build."
+	  echo "Usually simply bumping is fine since our config is simple enough"
+	  return 1
+  fi
 
   ./autogen.sh
   ./configure --prefix=/usr --sysconfdir=/etc/syslog-ng --libexecdir=/usr/lib \
