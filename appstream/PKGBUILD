@@ -4,47 +4,104 @@
 # Contributor: Tim Jester-Pfadt <t.jp<at>gmx.de>
 
 pkgbase=appstream
-pkgname=(appstream appstream-qt)
-pkgver=0.16.3
-pkgrel=1
+pkgname=(appstream
+         appstream-qt5
+         appstream-qt)
+pkgver=1.0.0
+pkgrel=4
 pkgdesc='Provides a standard for creating app stores across distributions'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://distributions.freedesktop.org/wiki/AppStream'
 license=(GPL)
-depends=(curl librsvg libyaml libxmlb)
-makedepends=(meson xmlto gobject-introspection gtk-doc qt5-tools itstool vala gperf)
+depends=(cairo
+         curl
+         fontconfig
+         freetype2
+         gcc-libs
+         gdk-pixbuf2
+         glib2
+         glibc
+         librsvg
+         libstemmer
+         libxml2
+         libxmlb
+         libyaml
+         pango
+         systemd-libs
+         zstd)
+makedepends=(gi-docgen
+             gobject-introspection
+             gperf
+             itstool
+             meson
+             qt5-tools
+             qt6-tools
+             vala
+             xmlto)
 source=(https://www.freedesktop.org/software/appstream/releases/AppStream-$pkgver.tar.xz{,.asc}
-        update-appstream-cache.hook)
-sha256sums=('081c917646e94d7221c9e4aae54dacda95a27c607fa93cd8e6344a2b318b98b1'
+        update-appstream-cache.hook
+        fix-qt5-link-target.patch)
+sha256sums=('ef23477a380e8b525e92cfa87687f1146b9cef74c641349a1ae11250be5401d0'
             'SKIP'
-            '3a96a1479cfd18dad36c2ca3181aabe46af9bf772c00b965d86ec5f55cd0e0eb')
+            '3a96a1479cfd18dad36c2ca3181aabe46af9bf772c00b965d86ec5f55cd0e0eb'
+            'eac31f15d1e33968ab5ca678fc32fc0cd4c09c30ecbc457cbd490a00959d4c04')
 validpgpkeys=(D33A3F0CA16B0ACC51A60738494C8A5FBF4DECEB) # Matthias Klumpp <matthias@tenstral.net>
+
+prepare() {
+  patch -d AppStream-$pkgver -p1 < fix-qt5-link-target.patch
+}
 
 build() {
   meson build AppStream-$pkgver \
     --prefix=/usr \
     --libexecdir=lib \
-    -Dqt=true \
+    -Dqt5=true \
     -Dvapi=true \
     -Dcompose=true
   meson compile -C build
+
+  meson build6 AppStream-$pkgver \
+    --prefix=/usr \
+    --libexecdir=lib \
+    -Dqt=true
+  meson compile -C build6
 }
 
 package_appstream() {
   meson install --destdir "$pkgdir" -C build
 
 # provided by -qt subpackage
-  rm -r "$pkgdir"/usr/{include/AppStreamQt,lib/cmake,lib/libAppStreamQt.*}
+  rm -r "$pkgdir"/usr/{include/AppStreamQt5,lib/cmake,lib/libAppStreamQt5.*}
 
   install -Dm644 update-appstream-cache.hook "$pkgdir"/usr/share/libalpm/hooks/90-update-appstream-cache.hook
 }
 
-package_appstream-qt() {
+package_appstream-qt5() {
   pkgdesc='Qt5 interface for AppStream'
-  depends=(appstream qt5-base)
+  depends=(appstream
+           gcc-libs
+           glib2
+           glibc
+           qt5-base)
+  conflicts=('appstream-qt<1')
+  replaces=('appstream-qt<1')
 
   meson install --destdir "$pkgdir" -C build
 
 # provided by appstream
-  rm -r "$pkgdir"{/etc,/usr/{bin,include/appstream{,-compose},lib/{appstreamcli-compose,girepository-1.0,libappstream*,pkgconfig},share}}
+  rm -r "$pkgdir"/usr/{bin,include/appstream{,-compose},lib/{appstreamcli-compose,girepository-1.0,libappstream*,pkgconfig},share}
+}
+
+package_appstream-qt() {
+  pkgdesc='Qt6 interface for AppStream'
+  depends=(appstream
+           gcc-libs
+           glib2
+           glibc
+           qt6-base)
+
+  meson install --destdir "$pkgdir" -C build6
+
+# provided by appstream
+  rm -r "$pkgdir"/usr/{bin,include/appstream,lib/{girepository-1.0,libappstream*,pkgconfig},share}
 }
