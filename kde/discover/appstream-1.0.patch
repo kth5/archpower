@@ -1,0 +1,599 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 31460a6d5..89cee3182 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -31,7 +31,7 @@ find_package(KF5 ${KF5_MIN_VERSION} REQUIRED CoreAddons Config Crash DBusAddons
+ find_package(KF5Kirigami2 2.7.0)
+ 
+ find_package(packagekitqt5 1.0.1 CONFIG)
+-find_package(AppStreamQt 0.15.3 CONFIG REQUIRED)
++find_package(AppStreamQt5 1.0 CONFIG REQUIRED)
+ find_package(KF5Attica 5.23 CONFIG)
+ find_package(KF5NewStuff 5.53 CONFIG)
+ 
+@@ -85,7 +85,7 @@ set_package_properties(packagekitqt5 PROPERTIES
+     URL "https://www.freedesktop.org/software/PackageKit/"
+     PURPOSE "Required to build the PackageKit backend"
+     TYPE OPTIONAL)
+-set_package_properties(AppStreamQt PROPERTIES
++set_package_properties(AppStreamQt5 PROPERTIES
+     DESCRIPTION "Library that lists Appstream resources"
+     URL "https://www.freedesktop.org"
+     PURPOSE "Required to build the PackageKit, Flatpak and Snap backends"
+diff --git a/libdiscover/appstream/AppStreamUtils.cpp b/libdiscover/appstream/AppStreamUtils.cpp
+index 94f030c9d..c2080c17a 100644
+--- a/libdiscover/appstream/AppStreamUtils.cpp
++++ b/libdiscover/appstream/AppStreamUtils.cpp
+@@ -7,11 +7,11 @@
+ #include "AppStreamUtils.h"
+ 
+ #include "utils.h"
+-#include <AppStreamQt/pool.h>
+-#include <AppStreamQt/release.h>
+-#include <AppStreamQt/screenshot.h>
+-#include <AppStreamQt/spdx.h>
+-#include <AppStreamQt/version.h>
++#include <AppStreamQt5/pool.h>
++#include <AppStreamQt5/release.h>
++#include <AppStreamQt5/screenshot.h>
++#include <AppStreamQt5/spdx.h>
++#include <AppStreamQt5/version.h>
+ #include <Category/Category.h>
+ #include <KLocalizedString>
+ #include <QDebug>
+@@ -35,10 +35,20 @@ QUrl AppStreamUtils::imageOfKind(const QList<AppStream::Image> &images, AppStrea
+ 
+ QString AppStreamUtils::changelogToHtml(const AppStream::Component &appdata)
+ {
+-    if (appdata.releases().isEmpty())
++#if ASQ_CHECK_VERSION(1, 0, 0)
++    const auto releases = appdata.releasesPlain();
++#else
++    const auto releases = appdata.releases();
++#endif
++    if (releases.isEmpty()) {
+         return {};
++    }
+ 
+-    const auto release = appdata.releases().constFirst();
++#if ASQ_CHECK_VERSION(1, 0, 0)
++    const auto release = releases.indexSafe(0).value();
++#else
++    const auto release = releases.constFirst();
++#endif
+     if (release.description().isEmpty())
+         return {};
+ 
+@@ -49,7 +59,7 @@ QString AppStreamUtils::changelogToHtml(const AppStream::Component &appdata)
+ 
+ Screenshots AppStreamUtils::fetchScreenshots(const AppStream::Component &appdata)
+ {
+-    const auto appdataScreenshots = appdata.screenshots();
++    const auto appdataScreenshots = appdata.screenshotsAll();
+     Screenshots ret;
+     ret.reserve(appdataScreenshots.size());
+     for (const AppStream::Screenshot &s : appdataScreenshots) {
+@@ -131,10 +141,10 @@ QString AppStreamUtils::versionString(const QString &version, const AppStream::C
+     if (version.isEmpty()) {
+         return {};
+     } else {
+-        if (appdata.releases().isEmpty())
++        if (appdata.releasesPlain().isEmpty())
+             return version;
+ 
+-        auto release = appdata.releases().constFirst();
++        auto release = appdata.releasesPlain().indexSafe(0).value();
+         if (release.timestamp().isValid() && version.startsWith(release.version())) {
+             QLocale l;
+             return i18n("%1, released on %2", version, l.toString(release.timestamp().date(), QLocale::ShortFormat));
+@@ -256,7 +266,7 @@ QList<AppStream::Component> AppStreamUtils::componentsByCategories(AppStream::Po
+ {
+     QList<AppStream::Component> ret;
+     for (const auto &categoryName : cat->involvedCategories()) {
+-        ret += pool->componentsByCategories({categoryName});
++        ret += pool->componentsByCategories({categoryName}).toList();
+     }
+     kRemoveDuplicates(ret, kind);
+     return ret;
+diff --git a/libdiscover/appstream/AppStreamUtils.h b/libdiscover/appstream/AppStreamUtils.h
+index 383e55aa8..906bd327a 100644
+--- a/libdiscover/appstream/AppStreamUtils.h
++++ b/libdiscover/appstream/AppStreamUtils.h
+@@ -6,9 +6,9 @@
+ 
+ #pragma once
+ 
+-#include <AppStreamQt/component.h>
+-#include <AppStreamQt/image.h>
+-#include <AppStreamQt/pool.h>
++#include <AppStreamQt5/component.h>
++#include <AppStreamQt5/image.h>
++#include <AppStreamQt5/pool.h>
+ #include <QColor>
+ #include <QList>
+ #include <QUrl>
+diff --git a/libdiscover/backends/CMakeLists.txt b/libdiscover/backends/CMakeLists.txt
+index bd3a03256..c2e0ec12d 100644
+--- a/libdiscover/backends/CMakeLists.txt
++++ b/libdiscover/backends/CMakeLists.txt
+@@ -8,11 +8,11 @@ function(add_unit_test name)
+         Qt::Test Qt::Core ${EXTRA_LIBS})
+ endfunction()
+ 
+-if(KF5Attica_FOUND AND KF5NewStuff_FOUND AND AppStreamQt_FOUND)
++if(KF5Attica_FOUND AND KF5NewStuff_FOUND AND AppStreamQt5_FOUND)
+    add_subdirectory(KNSBackend)
+ endif()
+ 
+-if(packagekitqt5_FOUND AND AppStreamQt_FOUND)
++if(packagekitqt5_FOUND AND AppStreamQt5_FOUND)
+     add_subdirectory(PackageKitBackend)
+ endif()
+ 
+@@ -22,10 +22,10 @@ if(BUILD_DummyBackend)
+ endif()
+ 
+ option(BUILD_FlatpakBackend "Build Flatpak support" "ON")
+-if(Flatpak_FOUND AND AppStreamQt_FOUND AND BUILD_FlatpakBackend)
++if(Flatpak_FOUND AND AppStreamQt5_FOUND AND BUILD_FlatpakBackend)
+     add_subdirectory(FlatpakBackend)
+ elseif(BUILD_FlatpakBackend)
+-    message(WARNING "BUILD_FlatpakBackend enabled but Flatpak=${Flatpak_FOUND} or AppStreamQt=${AppStreamQt_FOUND} not found")
++    message(WARNING "BUILD_FlatpakBackend enabled but Flatpak=${Flatpak_FOUND} or AppStreamQt=${AppStreamQt5_FOUND} not found")
+ endif()
+ 
+ find_package(Snapd)
+@@ -41,7 +41,7 @@ if(BUILD_SteamOSBackend)
+ endif()
+ 
+ option(BUILD_SnapBackend "Build Snap support." "ON")
+-if(BUILD_SnapBackend AND AppStreamQt_FOUND AND Snapd_FOUND)
++if(BUILD_SnapBackend AND AppStreamQt5_FOUND AND Snapd_FOUND)
+     add_subdirectory(SnapBackend)
+ endif()
+ 
+diff --git a/libdiscover/backends/FlatpakBackend/CMakeLists.txt b/libdiscover/backends/FlatpakBackend/CMakeLists.txt
+index eac5a3241..905f2ee7f 100644
+--- a/libdiscover/backends/FlatpakBackend/CMakeLists.txt
++++ b/libdiscover/backends/FlatpakBackend/CMakeLists.txt
+@@ -15,7 +15,7 @@ set(flatpak-backend_SRCS
+ add_library(flatpak-backend MODULE ${flatpak-backend_SRCS})
+ target_link_libraries(flatpak-backend Qt::Core Qt::Widgets Qt::Concurrent KF5::CoreAddons KF5::ConfigCore KF5::KIOGui Discover::Common AppStreamQt PkgConfig::Flatpak)
+ 
+-if (AppStreamQt_VERSION VERSION_GREATER 0.14.6)
++if (AppStreamQt5_VERSION VERSION_GREATER 0.14.6)
+     target_compile_definitions(flatpak-backend PRIVATE -DAPPSTREAM_NEW_POOL_API)
+ endif()
+ 
+diff --git a/libdiscover/backends/FlatpakBackend/FlatpakBackend.cpp b/libdiscover/backends/FlatpakBackend/FlatpakBackend.cpp
+index 99488469b..2471bb8f0 100644
+--- a/libdiscover/backends/FlatpakBackend/FlatpakBackend.cpp
++++ b/libdiscover/backends/FlatpakBackend/FlatpakBackend.cpp
+@@ -20,12 +20,12 @@
+ #include <resources/StandardBackendUpdater.h>
+ #include <utils.h>
+ 
+-#include <AppStreamQt/bundle.h>
+-#include <AppStreamQt/icon.h>
+-#include <AppStreamQt/metadata.h>
+-#include <AppStreamQt/pool.h>
+-#include <AppStreamQt/release.h>
+-#include <AppStreamQt/version.h>
++#include <AppStreamQt5/bundle.h>
++#include <AppStreamQt5/icon.h>
++#include <AppStreamQt5/metadata.h>
++#include <AppStreamQt5/pool.h>
++#include <AppStreamQt5/release.h>
++#include <AppStreamQt5/version.h>
+ 
+ #include <KAboutData>
+ #include <KConfigGroup>
+@@ -159,18 +159,19 @@ public:
+ 
+     QList<AppStream::Component> componentsByName(const QString &name)
+     {
+-        QList<AppStream::Component> comps = m_pool->componentsById(name);
+-        if (!comps.isEmpty())
+-            return comps;
++        auto comps = m_pool->componentsById(name);
++        if (!comps.isEmpty()) {
++            return comps.toList();
++        }
+ 
+         comps = m_pool->componentsByProvided(AppStream::Provided::KindId, name);
+-        return comps;
++        return comps.toList();
+     }
+ 
+     QList<AppStream::Component> componentsByFlatpakId(const QString &ref)
+     {
+ #if ASQ_CHECK_VERSION(0, 16, 0)
+-        QList<AppStream::Component> comps = m_pool->componentsByBundleId(AppStream::Bundle::KindFlatpak, ref, false);
++        QList<AppStream::Component> comps = m_pool->componentsByBundleId(AppStream::Bundle::KindFlatpak, ref, false).toList();
+ #else
+         QList<AppStream::Component> comps = m_pool->components();
+         comps = kFilter<QList<AppStream::Component>>(comps, [&ref](const AppStream::Component &component) {
+@@ -181,7 +182,7 @@ public:
+         if (!comps.isEmpty())
+             return comps;
+ 
+-        comps = m_pool->componentsByProvided(AppStream::Provided::KindId, ref.section('/', 1, 1));
++        comps = m_pool->componentsByProvided(AppStream::Provided::KindId, ref.section('/', 1, 1)).toList();
+         return comps;
+     }
+ 
+@@ -274,7 +275,11 @@ static std::optional<AppStream::Metadata> metadataFromBytes(GBytes *appstreamGz,
+     gconstpointer data = g_bytes_get_data(appstream, &len);
+ 
+     AppStream::Metadata metadata;
++#if ASQ_CHECK_VERSION(0, 16, 0)
++    metadata.setFormatStyle(AppStream::Metadata::FormatStyleCatalog);
++#else
+     metadata.setFormatStyle(AppStream::Metadata::FormatStyleCollection);
++#endif
+     AppStream::Metadata::MetadataError error = metadata.parse(QString::fromUtf8((char *)data, len), AppStream::Metadata::FormatKindXml);
+     if (error != AppStream::Metadata::MetadataErrorNoError) {
+         qWarning() << "Failed to parse appstream metadata: " << error;
+@@ -479,7 +484,7 @@ FlatpakResource *FlatpakBackend::getAppForInstalledRef(FlatpakInstallation *inst
+             g_autoptr(GBytes) metadata = flatpak_installed_ref_load_appdata(ref, 0, 0);
+             if (metadata) {
+                 auto meta = metadataFromBytes(metadata, m_cancellable);
+-                comps = meta->components();
++                comps = meta->components().toList();
+             }
+         }
+ 
+@@ -626,7 +631,7 @@ void FlatpakBackend::addAppFromFlatpakBundle(const QUrl &url, ResultsStream *str
+             return;
+         }
+ 
+-        const QList<AppStream::Component> components = metadata->components();
++        const QList<AppStream::Component> components = metadata->components().toList();
+         if (components.size()) {
+             asComponent = components.first();
+         } else {
+@@ -777,7 +782,11 @@ AppStream::Component fetchComponentFromRemote(const QSettings &settings, GCancel
+     AppStream::Pool pool;
+ #ifdef APPSTREAM_NEW_POOL_API
+     pool.setLoadStdDataLocations(false);
++#if ASQ_CHECK_VERSION(0, 16, 0)
++    pool.addExtraDataLocation(appstreamLocation, AppStream::Metadata::FormatStyleCatalog);
++#else
+     pool.addExtraDataLocation(appstreamLocation, AppStream::Metadata::FormatStyleCollection);
++#endif
+ #else
+     pool.clearMetadataLocations();
+     pool.addMetadataLocation(appstreamLocation);
+@@ -795,7 +804,7 @@ AppStream::Component fetchComponentFromRemote(const QSettings &settings, GCancel
+     }
+ 
+     // TODO optimise, this lookup should happen in libappstream
+-    auto comps = pool.components();
++    auto comps = pool.components().toList();
+     comps = kFilter<QList<AppStream::Component>>(comps, [name, branch](const AppStream::Component &component) {
+         const QString id = component.bundle(AppStream::Bundle::KindFlatpak).id();
+         // app/app.getspace.Space/x86_64/stable
+@@ -1079,7 +1088,11 @@ void FlatpakBackend::createPool(QSharedPointer<FlatpakSource> source)
+ 
+ #ifdef APPSTREAM_NEW_POOL_API
+     pool->setLoadStdDataLocations(false);
++#if ASQ_CHECK_VERSION(0, 16, 0)
++    pool->addExtraDataLocation(appstreamDirPath, AppStream::Metadata::FormatStyleCatalog);
++#else
+     pool->addExtraDataLocation(appstreamDirPath, AppStream::Metadata::FormatStyleCollection);
++#endif
+ #else
+     pool->clearMetadataLocations();
+     pool->addMetadataLocation(appstreamDirPath);
+@@ -1558,11 +1571,11 @@ ResultsStream *FlatpakBackend::search(const AbstractResourcesBackend::Filters &f
+         for (const auto &source : qAsConst(m_flatpakSources)) {
+             QList<FlatpakResource *> resources;
+             if (source->m_pool) {
+-                const auto a = !filter.search.isEmpty() ? source->m_pool->search(filter.search)
++                const auto a = !filter.search.isEmpty() ? source->m_pool->search(filter.search).toList()
+ #if ASQ_CHECK_VERSION(0, 15, 6)
+                     : filter.category ? AppStreamUtils::componentsByCategories(source->m_pool, filter.category, AppStream::Bundle::KindFlatpak)
+ #endif
+-                                      : source->m_pool->components();
++                                      : source->m_pool->components().toList();
+                 resources = kTransform<QList<FlatpakResource *>>(a, [this, &source](const auto &comp) {
+                     return resourceForComponent(comp, source);
+                 });
+diff --git a/libdiscover/backends/FlatpakBackend/FlatpakBackend.h b/libdiscover/backends/FlatpakBackend/FlatpakBackend.h
+index 66188095a..878965bfc 100644
+--- a/libdiscover/backends/FlatpakBackend/FlatpakBackend.h
++++ b/libdiscover/backends/FlatpakBackend/FlatpakBackend.h
+@@ -14,7 +14,7 @@
+ #include <QVariantList>
+ #include <resources/AbstractResourcesBackend.h>
+ 
+-#include <AppStreamQt/component.h>
++#include <AppStreamQt5/component.h>
+ 
+ #include "flatpak-helper.h"
+ 
+diff --git a/libdiscover/backends/FlatpakBackend/FlatpakResource.cpp b/libdiscover/backends/FlatpakBackend/FlatpakResource.cpp
+index 7ed905ead..1af8c9e3f 100644
+--- a/libdiscover/backends/FlatpakBackend/FlatpakResource.cpp
++++ b/libdiscover/backends/FlatpakBackend/FlatpakResource.cpp
+@@ -13,9 +13,11 @@
+ 
+ #include <Transaction/AddonList.h>
+ 
+-#include <AppStreamQt/icon.h>
+-#include <AppStreamQt/screenshot.h>
+-#include <AppStreamQt/utils.h>
++#include <AppStreamQt5/developer.h>
++#include <AppStreamQt5/icon.h>
++#include <AppStreamQt5/screenshot.h>
++#include <AppStreamQt5/utils.h>
++#include <AppStreamQt5/version.h>
+ #include <appstream/AppStreamUtils.h>
+ 
+ #include <KConfigGroup>
+@@ -24,7 +26,7 @@
+ #include <KIO/ApplicationLauncherJob>
+ #include <KLocalizedString>
+ 
+-#include <AppStreamQt/release.h>
++#include <AppStreamQt5/release.h>
+ #include <QDebug>
+ #include <QDesktopServices>
+ #include <QDir>
+@@ -113,7 +115,11 @@ QList<PackageState> FlatpakResource::addonsInformation()
+ QString FlatpakResource::availableVersion() const
+ {
+     if (m_availableVersion.isEmpty()) {
++#if ASQ_CHECK_VERSION(1, 0, 0)
++        const auto releases = m_appdata.releasesPlain().entries();
++#else
+         const auto releases = m_appdata.releases();
++#endif
+         if (!releases.isEmpty()) {
+             auto latestVersion = releases.constFirst().version();
+             for (const auto &release : releases) {
+@@ -649,8 +655,13 @@ QUrl FlatpakResource::url() const
+ 
+ QDate FlatpakResource::releaseDate() const
+ {
+-    if (!m_appdata.releases().isEmpty()) {
+-        auto release = m_appdata.releases().constFirst();
++#if ASQ_CHECK_VERSION(1, 0, 0)
++    if (!m_appdata.releasesPlain().isEmpty()) {
++        auto release = m_appdata.releasesPlain().indexSafe(0).value();
++#else
++    if (const auto releases = m_appdata.releases(); !releases.isEmpty()) {
++        auto release = releases.constFirst();
++#endif
+         return release.timestamp().date();
+     }
+ 
+@@ -673,7 +684,7 @@ QString FlatpakResource::sourceIcon() const
+ 
+ QString FlatpakResource::author() const
+ {
+-    QString name = m_appdata.developerName();
++    QString name = m_appdata.developer().name();
+ 
+     if (name.isEmpty()) {
+         name = m_appdata.projectGroup();
+@@ -711,8 +722,13 @@ QString FlatpakResource::versionString()
+         if (ref) {
+             version = flatpak_installed_ref_get_appdata_version(ref);
+         }
++#if ASQ_CHECK_VERSION(1, 0, 0)
++    } else if (!m_appdata.releasesPlain().isEmpty()) {
++        const auto release = m_appdata.releasesPlain().indexSafe(0).value();
++#else
+     } else if (!m_appdata.releases().isEmpty()) {
+-        auto release = m_appdata.releases().constFirst();
++        const auto release = m_appdata.releases().constFirst();
++#endif
+         version = release.version();
+     } else {
+         version = m_id.branch;
+diff --git a/libdiscover/backends/FlatpakBackend/FlatpakResource.h b/libdiscover/backends/FlatpakBackend/FlatpakResource.h
+index 06e1b030a..648b6a5a7 100644
+--- a/libdiscover/backends/FlatpakBackend/FlatpakResource.h
++++ b/libdiscover/backends/FlatpakBackend/FlatpakResource.h
+@@ -12,7 +12,7 @@
+ #include "FlatpakPermission.h"
+ #include "flatpak-helper.h"
+ 
+-#include <AppStreamQt/component.h>
++#include <AppStreamQt5/component.h>
+ 
+ #include <QAbstractItemModel>
+ #include <QPixmap>
+diff --git a/libdiscover/backends/PackageKitBackend/AppPackageKitResource.cpp b/libdiscover/backends/PackageKitBackend/AppPackageKitResource.cpp
+index 510266dfd..740127879 100644
+--- a/libdiscover/backends/PackageKitBackend/AppPackageKitResource.cpp
++++ b/libdiscover/backends/PackageKitBackend/AppPackageKitResource.cpp
+@@ -6,10 +6,12 @@
+ 
+ #include "AppPackageKitResource.h"
+ #include "utils.h"
+-#include <AppStreamQt/icon.h>
+-#include <AppStreamQt/image.h>
+-#include <AppStreamQt/release.h>
+-#include <AppStreamQt/screenshot.h>
++#include <AppStreamQt5/developer.h>
++#include <AppStreamQt5/icon.h>
++#include <AppStreamQt5/image.h>
++#include <AppStreamQt5/release.h>
++#include <AppStreamQt5/screenshot.h>
++#include <AppStreamQt5/version.h>
+ #include <KLocalizedString>
+ #include <KService>
+ #include <PackageKit/Daemon>
+@@ -236,8 +238,13 @@ QString AppPackageKitResource::versionString()
+ 
+ QDate AppPackageKitResource::releaseDate() const
+ {
++#if ASQ_CHECK_VERSION(1, 0, 0)
++    if (!m_appdata.releasesPlain().isEmpty()) {
++        const auto release = m_appdata.releasesPlain().indexSafe(0).value();
++#else
+     if (!m_appdata.releases().isEmpty()) {
+-        auto release = m_appdata.releases().constFirst();
++        const auto release = m_appdata.releases().constFirst();
++#endif
+         return release.timestamp().date();
+     }
+ 
+@@ -246,7 +253,7 @@ QDate AppPackageKitResource::releaseDate() const
+ 
+ QString AppPackageKitResource::author() const
+ {
+-    QString name = m_appdata.developerName();
++    QString name = m_appdata.developer().name();
+ 
+     if (name.isEmpty()) {
+         name = m_appdata.projectGroup();
+diff --git a/libdiscover/backends/PackageKitBackend/PackageKitBackend.cpp b/libdiscover/backends/PackageKitBackend/PackageKitBackend.cpp
+index 6902318a3..f713b9036 100644
+--- a/libdiscover/backends/PackageKitBackend/PackageKitBackend.cpp
++++ b/libdiscover/backends/PackageKitBackend/PackageKitBackend.cpp
+@@ -13,9 +13,10 @@
+ #include "PKTransaction.h"
+ #include "PackageKitSourcesBackend.h"
+ #include "PackageKitUpdater.h"
+-#include <AppStreamQt/release.h>
+-#include <AppStreamQt/utils.h>
+-#include <AppStreamQt/version.h>
++#include <AppStreamQt5/release.h>
++#include <AppStreamQt5/systeminfo.h>
++#include <AppStreamQt5/utils.h>
++#include <AppStreamQt5/version.h>
+ #include <appstream/AppStreamIntegration.h>
+ #include <appstream/AppStreamUtils.h>
+ #include <appstream/OdrsReviewsBackend.h>
+@@ -309,12 +310,16 @@ void PackageKitBackend::reloadPackageList()
+         }
+         acquireFetching(false);
+ 
+-        const QList<AppStream::Component> distroComponents = m_appdata->componentsById(AppStream::Utils::currentDistroComponentId());
++        const auto distroComponents = m_appdata->componentsById(AppStream::SystemInfo::currentDistroComponentId());
+         if (distroComponents.isEmpty()) {
+-            qWarning() << "no component found for" << AppStream::Utils::currentDistroComponentId();
++            qWarning() << "no component found for" << AppStream::SystemInfo::currentDistroComponentId();
+         }
+-        for (const AppStream::Component &dc : distroComponents) {
++        for (const auto list = distroComponents.toList(); const AppStream::Component &dc : list) {
++#if ASQ_CHECK_VERSION(1, 0, 0)
++            const auto releases = dc.releasesPlain().entries();
++#else
+             const auto releases = dc.releases();
++#endif
+             for (const auto &r : releases) {
+                 int cmp = AppStream::Utils::vercmpSimple(r.version(), AppStreamIntegration::global()->osRelease()->versionId());
+                 if (cmp == 0) {
+@@ -552,7 +557,7 @@ QList<AppStream::Component> PackageKitBackend::componentsById(const QString &id)
+     if (comps.isEmpty()) {
+         comps = m_appdata->componentsByProvided(AppStream::Provided::KindId, id);
+     }
+-    return comps;
++    return comps.toList();
+ }
+ 
+ static const auto needsResolveFilter = [](AbstractResource *res) {
+@@ -698,13 +703,15 @@ ResultsStream *PackageKitBackend::search(const AbstractResourcesBackend::Filters
+             if (!stream) {
+                 return;
+             }
+-            const auto components = !filter.search.isEmpty() ? m_appdata->search(filter.search)
+-#if ASQ_CHECK_VERSION(0, 15, 6)
+-                                  : filter.category          ? AppStreamUtils::componentsByCategories(m_appdata.get(),
+-                                                                                                      filter.category,
+-                                                                                                      AppStream::Bundle::KindUnknown)
+-#endif
+-                                                             : m_appdata->components();
++            QList<AppStream::Component> components;
++            if (!filter.search.isEmpty()) {
++                components = m_appdata->search(filter.search).toList();
++            } else if (filter.category) {
++                components = AppStreamUtils::componentsByCategories(m_appdata.get(), filter.category, AppStream::Bundle::KindUnknown);
++            } else {
++                components = m_appdata->components().toList();
++            }
++
+             const QSet<QString> ids = kTransform<QSet<QString>>(components, [](const AppStream::Component &comp) {
+                 return comp.id();
+             });
+diff --git a/libdiscover/backends/PackageKitBackend/PackageKitBackend.h b/libdiscover/backends/PackageKitBackend/PackageKitBackend.h
+index d9a5fd824..93899450b 100644
+--- a/libdiscover/backends/PackageKitBackend/PackageKitBackend.h
++++ b/libdiscover/backends/PackageKitBackend/PackageKitBackend.h
+@@ -7,7 +7,7 @@
+ #pragma once
+ 
+ #include "PackageKitResource.h"
+-#include <AppStreamQt/pool.h>
++#include <AppStreamQt5/pool.h>
+ #include <PackageKit/Transaction>
+ #include <QFile>
+ #include <QPointer>
+diff --git a/libdiscover/backends/PackageKitBackend/PackageKitResource.cpp b/libdiscover/backends/PackageKitBackend/PackageKitResource.cpp
+index 8bdaec395..c7e2c0077 100644
+--- a/libdiscover/backends/PackageKitBackend/PackageKitResource.cpp
++++ b/libdiscover/backends/PackageKitBackend/PackageKitResource.cpp
+@@ -10,7 +10,7 @@
+ #include "PackageKitMessages.h"
+ #include "appstream/AppStreamUtils.h"
+ #include "config-paths.h"
+-#include <AppStreamQt/spdx.h>
++#include <AppStreamQt5/spdx.h>
+ #include <KIO/ApplicationLauncherJob>
+ #include <KLocalizedString>
+ #include <KService>
+diff --git a/libdiscover/backends/RpmOstreeBackend/RpmOstreeBackend.cpp b/libdiscover/backends/RpmOstreeBackend/RpmOstreeBackend.cpp
+index 6e1528be4..eb06b6510 100644
+--- a/libdiscover/backends/RpmOstreeBackend/RpmOstreeBackend.cpp
++++ b/libdiscover/backends/RpmOstreeBackend/RpmOstreeBackend.cpp
+@@ -10,8 +10,8 @@
+ 
+ #include "Transaction/TransactionModel.h"
+ 
+-#include <AppStreamQt/release.h>
+-#include <AppStreamQt/utils.h>
++#include <AppStreamQt5/release.h>
++#include <AppStreamQt5/utils.h>
+ #include <Category/Category.h>
+ #include <KLocalizedString>
+ #include <appstream/AppStreamIntegration.h>
+@@ -316,7 +316,7 @@ void RpmOstreeBackend::lookForNextMajorVersion()
+     }
+ 
+     // Look at releases to see if we have a new major version available.
+-    const QList<AppStream::Component> distroComponents = m_appdata->componentsById(distroId);
++    const auto distroComponents = m_appdata->componentsById(distroId);
+     if (distroComponents.isEmpty()) {
+         qWarning() << "rpm-ostree-backend: No component found for" << distroId;
+         return;
+@@ -324,8 +324,12 @@ void RpmOstreeBackend::lookForNextMajorVersion()
+ 
+     QString currentVersion = AppStreamIntegration::global()->osRelease()->versionId();
+     QString nextVersion;
+-    for (const AppStream::Component &dc : distroComponents) {
++    for (const auto list = distroComponents.toList(); const AppStream::Component &dc : list) {
++#if ASQ_CHECK_VERSION(1, 0, 0)
++        const auto releases = dc.releasesPlain().entries();
++#else
+         const auto releases = dc.releases();
++#endif
+         for (const auto &r : releases) {
+             // Only look at stable releases unless development mode is enabled
+             if ((r.kind() != AppStream::Release::KindStable) && !m_developmentEnabled) {
+diff --git a/libdiscover/backends/RpmOstreeBackend/RpmOstreeBackend.h b/libdiscover/backends/RpmOstreeBackend/RpmOstreeBackend.h
+index 8ceed1af1..ea0a07c6f 100644
+--- a/libdiscover/backends/RpmOstreeBackend/RpmOstreeBackend.h
++++ b/libdiscover/backends/RpmOstreeBackend/RpmOstreeBackend.h
+@@ -14,7 +14,7 @@
+ #include <resources/AbstractResourcesBackend.h>
+ #include <resources/StandardBackendUpdater.h>
+ 
+-#include <AppStreamQt/pool.h>
++#include <AppStreamQt5/pool.h>
+ #include <QTimer>
+ 
+ class DiscoverAction;
