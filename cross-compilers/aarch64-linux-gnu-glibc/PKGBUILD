@@ -6,17 +6,17 @@
 # Contributor: Tavian Barnes <tavianator@tavianator.com>
 # Maintainer: Stefan Schmidt <thrimbor.github@gmail.com>
 
-_target=aarch64-linux-gnu
+_target=riscv64-unknown-linux-gnu
 pkgname=${_target}-glibc
-pkgver=2.37                                                                                                                                                                                                                                
-_commit=6fe86ecd787a2624cd638131629ba9a824040308
-pkgrel=1
+pkgver=2.38
+_commit=6b99458d197ab779ebb6ff632c168e2cbfa4f543
+pkgrel=3.2
 pkgdesc="GNU C Library (${_target})"
 arch=('any')
 url="http://www.gnu.org/software/libc/"
 license=(GPL LGPL)
-depends=("${_target}-linux-api-headers>=5.18.15")
-makedepends=("${_target}-gcc-stage2>=12.2.0" "python" "git")
+depends=("${_target}-linux-api-headers>=6.4")
+makedepends=("${_target}-gcc-stage2>=13.2.1" python git)
 provides=("${_target}-glibc-headers=${pkgver}" "${_target}-eglibc")
 conflicts=("${_target}-glibc-headers" "${_target}-eglibc")
 replaces=("${_target}-glibc-headers")
@@ -24,15 +24,17 @@ options=(!buildflags !strip staticlibs)
 source=(git+https://sourceware.org/git/glibc.git#commit=${_commit}
         sdt-config.h
         sdt.h
-	disable-clone3.diff
+        fix-malloc-p1.patch
+        fix-malloc-p2.patch
         reenable_DT_HASH.patch)
 validpgpkeys=(7273542B39962DF7B299931416792B4EA25340F8 # Carlos O'Donell
               BC7C7372637EC10C57D7AA6579C43DFBF1CF2187) # Siddhesh Poyarekar
 sha256sums=('SKIP'
             'cdc234959c6fdb43f000d3bb7d1080b0103f4080f5e67bcfe8ae1aaf477812f0'
             '774061aff612a377714a509918a9e0e0aafce708b87d2d7e06b1bd1f6542fe70'
-            'f5df8fc95592cce7825744aeb8c9699a5b4b5b7ccf7bcf554355167c3a7e375e'
-            'bb2fc5a38158d339a51a4aaab3fe2d5cc496221f77cfce6f74768db91cb5ec1e')
+            '1e22a2226fe308154e70981c0036c7c4ebac488b26b9959cb803d7a3d831d0c4'
+            '59f37c6f3a27e08d846c1dcb0ac08c1aebb14c11afb9be10652ca1a80fd54c3e'
+            'cf9fe494f7ec69752a63d1b0a9ad689aa620888ae9b902b6383a6fbc7c1726a7')
 
 prepare() {
   mkdir -p glibc-build
@@ -52,12 +54,16 @@ prepare() {
 
 build() {
   local _configure_flags=(
-      --prefix=/
-      --with-headers=/usr/${_target}/include
+      --prefix=/usr
+      --with-headers=/usr/${_target}/usr/include
       --enable-add-ons
       --enable-bind-now
       --enable-lock-elision
       --disable-multi-arch
+      --enable-kernel=4.4
+      --enable-multi-arch
+      --enable-stack-protector=strong
+      --enable-systemtap
       --enable-stack-protector=strong
       --enable-stackguard-randomization
       --disable-profile
@@ -66,10 +72,10 @@ build() {
 
   cd glibc-build
 
-  echo "slibdir=/lib" >> configparms
-  echo "rtlddir=/lib" >> configparms
-  echo "sbindir=/bin" >> configparms
-  echo "rootsbindir=/bin" >> configparms
+  echo "slibdir=/usr/lib" >> configparms
+  echo "rtlddir=/usr/lib" >> configparms
+  echo "sbindir=/usr/bin" >> configparms
+  echo "rootsbindir=/usr/bin" >> configparms
 
   # remove fortify for building libraries
   CPPFLAGS=${CPPFLAGS/-D_FORTIFY_SOURCE=2/}
@@ -79,16 +85,18 @@ build() {
   export CXX=${_target}-g++
   export AR=${_target}-ar
   export RANLIB=${_target}-ranlib
+  export OBJCOPY=${_target}-objcopy
+  export OBJDUMP=${_target}-objdump
 
   unset LD_LIBRARY_PATH
 
   "$srcdir/glibc/configure" \
-      --libdir=/lib \
-      --libexecdir=/lib \
+      --libdir=/usr/lib \
+      --libexecdir=/usr/lib \
       ${_configure_flags[@]} \
       --target=${_target} \
       --host=${_target} \
-      --build=${CHOST}
+      --build=${_target}
 
   echo "build-programs=no" >> configparms
   make
@@ -100,8 +108,13 @@ package() {
   make install_root="$pkgdir/usr/$_target" install
 
   mkdir -p "$pkgdir/usr/$_target/usr"
-  ln -s ../{include,lib} "$pkgdir/usr/$_target/usr"
+  ln -s usr/lib "$pkgdir/usr/$_target/"
 
   # Remove unneeded for compilation files
   rm -rf "$pkgdir/usr/$_target/"{bin,sbin,etc,share,var}
+
+  # Provide tracing probes to libstdc++ for exceptions, possibly for other
+  # libraries too. Useful for gdb's catch command.
+  install -Dm644 "${srcdir}"/sdt.h "${pkgdir}"/usr/${_target}/usr/include/sys/sdt.h
+  install -Dm644 "${srcdir}"/sdt-config.h "${pkgdir}"/usr/${_target}/usr/include/sys/sdt-config.h
 }
