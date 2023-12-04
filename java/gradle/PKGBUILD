@@ -6,7 +6,8 @@
 
 pkgbase=gradle
 pkgname=('gradle' 'gradle-doc' 'gradle-src')
-pkgver=8.3
+pkgver=8.4
+_commit_hash='e9251e572c9bd1d01e503a0dfdf43aedaeecdc3f' # git rev-parse v${_tag_name}
 pkgrel=1
 pkgdesc='Powerful build system for the JVM'
 url='https://gradle.org/'
@@ -16,13 +17,16 @@ depends=('java-environment' 'bash' 'which' 'coreutils' 'findutils' 'sed')
 makedepends=('git' 'asciidoc' 'xmlto' 'groovy' 'java-environment=11')
 source=(https://services.gradle.org/distributions/${pkgbase}-${pkgver}-src.zip
         https://services.gradle.org/distributions/${pkgbase}-${pkgver}-all.zip
-        ${pkgbase}.sh)
-sha256sums=('283bff7a2e83113216aba791aeca8c102da4ce7141a6a7dd232edac867ab3325'
-            'bb09982fdf52718e4c7b25023d10df6d35a5fff969860bdf5a5bd27a3ab27a9e'
-            '6f3472486278252417af49196847ba465b56819d286658fcdf918687f89ee032')
-sha512sums=('836ece6f40fcbcf632bbc552a91f55b88bc21e18ffffb63ee79146be1bb5a8fb6d14d62ac39a1c25089ba8b53a177ab311e331edd736703d4087fd2c788acdc4'
-            'c328b597ff0c28b8071c050b6f1e57bf3eccca4d0eaeda0974700fc2d380667aca2e1a7b3548314519e99b7a823ede4c83a5786147a6a002d081920afa9c490b'
-            'a50b6cf8281b56b80f55a20ac9316e1eed6887da1d191ad575dec140c9819711644d7077c4dc693b8cb0f1b08ceba0033ba88b5ad138d33ffb73b786c0d4bf81')
+        ${pkgbase}.sh
+        externalize-release-commit-hash.patch)
+sha256sums=('8c6dbc4a3d9118bf16aa120106d4dfb06950a195b15715cf4843415637d2ab5a'
+            'f2b9ed0faf8472cbe469255ae6c86eddb77076c75191741b4a462f33128dd419'
+            '6f3472486278252417af49196847ba465b56819d286658fcdf918687f89ee032'
+            'cd68dcb8bb909202c1a10181980c35bc6f11b8557618e1369464a32b718c17a0')
+sha512sums=('6bee721038f6e581e5d173425e10d94939954d03e1d8eaf3e4888a76aa2216e8f46d36edb49f50d61002d271e45ce6dbcb0fc46c2c2372429d09d589e02c5aa9'
+            '52d5f622b8ad0ab36ff84589733b47423b12f94211086a84eca9810690af29e396877f1155ee31279c4325e98cd1d55b32137d52efcf48eb1e258caeece08f22'
+            'a50b6cf8281b56b80f55a20ac9316e1eed6887da1d191ad575dec140c9819711644d7077c4dc693b8cb0f1b08ceba0033ba88b5ad138d33ffb73b786c0d4bf81'
+            '93df9d173da82b15fce0cfbcbeca0f96cd0648cb77bbaef1da383bd6754d0ffd1409b4b5628560a75cd617f4b407b4c07df3af916835914d852e1fbd36fe01e3')
 
 prepare() {
   cd ${pkgbase}-${pkgver}
@@ -39,17 +43,20 @@ prepare() {
   # inhibit automatic download of binary gradle
   sed -i "s#distributionUrl=.*#distributionUrl=file\:${srcdir}/${pkgbase}-${pkgver}-all.zip#" \
     gradle/wrapper/gradle-wrapper.properties
+  # https://github.com/gradle/gradle/issues/26805
+  patch -Np1 < "${srcdir}/externalize-release-commit-hash.patch"
 }
 
 build() {
   cd ${pkgbase}-${pkgver}
   # requires java language level 6, which >=13 has dropped
   export PATH="/usr/lib/jvm/java-11-openjdk/bin:${PATH}"
+  export COMMIT_HASH="${_commit_hash}"
   ./gradlew installAll \
     -Porg.gradle.java.installations.auto-download=false \
     -PfinalRelease=true \
     -Pgradle_installPath="$(pwd)/dist" \
-    --no-configuration-cache
+    --no-configuration-cache --stacktrace
 }
 
 package_gradle() {
