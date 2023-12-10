@@ -1,0 +1,68 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+
+pkgbase=zix
+pkgname=(zix{,-docs})
+pkgver=0.4.2
+pkgrel=2
+pkgdesc="A lightweight C99 portability and data structure library"
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+url="https://gitlab.com/drobilla/zix"
+license=('0BSD OR ISC')
+makedepends=(
+  doxygen
+  glibc
+  meson
+  python-sphinx
+  python-sphinx-lv2-theme
+  python-sphinxygen
+)
+source=(https://download.drobilla.net/$pkgname-$pkgver.tar.xz{,.sig})
+sha512sums=('b8fb931a3e9ab5a67f6da57a07bf10b91e7f861c8cf39db14c49c083a9983a0971cc6bc6abcb54a83c00471b386e377cb9bb51e2edd945ba07b9ae43a35964cc'
+            'SKIP')
+b2sums=('46d9e3049632abe8fe60928fa4d27ab5a94e86549dbde999c8215f951fe6f70f29124c89de9639c07a3bfb06da6ce902ea2a59f431ea6015d2c7a38df2f6eff6'
+        'SKIP')
+validpgpkeys=('907D226E7E13FA337F014A083672782A9BF368F3') # David Robillard <d@drobilla.net>
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+build() {
+  arch-meson $pkgname-$pkgver build
+  meson compile -C build
+}
+
+check() {
+  # ignore entire test suite, because of failing tests:
+  # https://gitlab.com/drobilla/zix/-/issues/2
+  meson test -C build --no-suite 'zix:unit'
+}
+
+package_zix() {
+  depends=(glibc)
+  optdepends=('zix-docs: for developer documentation')
+  provides=(libzix-0.so)
+
+  meson install -C build --destdir "$pkgdir"
+  (
+    cd "$pkgdir"
+    _pick $pkgname-docs usr/share/doc
+  )
+
+  install -vDm 644 $pkgname-$pkgver/LICENSES/* -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -vDm 644 $pkgname-$pkgver/{NEWS,README.md} -t "$pkgdir/usr/share/doc/$pkgname/"
+}
+
+package_zix-docs() {
+  pkgdesc+=" - documentation"
+
+  mv -v $pkgname/* "$pkgdir"
+  mv -v "$pkgdir/usr/share/doc/$pkgbase"{-0,}
+}
