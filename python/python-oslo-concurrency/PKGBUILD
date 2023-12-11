@@ -3,7 +3,8 @@
 # Contributor: Daniel Wallace <danielwallace at gtmanfred dot com>
 
 pkgname=python-oslo-concurrency
-pkgver=5.0.1
+pkgver=5.2.0
+_commit=1abc8e0c5005175d0cfcd5c7ae3f6852ae148ef4
 pkgrel=1
 pkgdesc="OpenStack library for all concurrency-related code"
 arch=(any)
@@ -11,25 +12,27 @@ url="https://pypi.python.org/pypi/oslo.concurrency/$pkgver"
 license=('Apache')
 depends=('python-pbr' 'python-oslo-config' 'python-oslo-i18n' 'python-oslo-utils'
          'python-fasteners')
-makedepends=('python-setuptools')
-checkdepends=('python-oslotest' 'python-eventlet')
-source=("https://github.com/openstack/oslo.concurrency/archive/$pkgver/$pkgname-$pkgver.tar.gz")
-sha512sums=('e9f072b814c1e961110cb3da0c327ee9b1eb510780dcc0772b97cf8fc633577d7667e96b8f91b0741b47403dfbce50f12f76b97854e28f0d6c95a9c13a2a924d')
-
-export PBR_VERSION=$pkgver
+makedepends=('git' 'python-setuptools')
+checkdepends=('python-oslotest' 'python-stestr' 'python-eventlet')
+source=("git+https://github.com/openstack/oslo.concurrency.git#commit=$_commit")
+sha512sums=('SKIP')
 
 build() {
-  cd oslo.concurrency-$pkgver
+  cd oslo.concurrency
   python setup.py build
 }
 
 check() {
-  cd oslo.concurrency-$pkgver
-  stestr run || : # "1 failure about raising rlimit"
+  cd oslo.concurrency
+  python setup.py install --root="tmp_install" --optimize=1
+  PYTHONPATH="$PWD/tmp_install/usr/lib/python3.11/site-packages" PATH="$PWD/tmp_install/usr/bin:$PATH" \
+    TEST_EVENTLET=0 lockutils-wrapper stestr run --exclude-regex oslo_concurrency.tests.unit.test_processutils.PrlimitTestCase.test_core_size
+  PYTHONPATH="$PWD/tmp_install/usr/lib/python3.11/site-packages" PATH="$PWD/tmp_install/usr/bin:$PATH" \
+    TEST_EVENTLET=1 lockutils-wrapper stestr run --exclude-regex oslo_concurrency.tests.unit.test_processutils.PrlimitTestCase.test_core_size
 }
 
 package() {
-  cd oslo.concurrency-$pkgver
+  cd oslo.concurrency
   python setup.py install --root="$pkgdir" --optimize=1
 }
 
