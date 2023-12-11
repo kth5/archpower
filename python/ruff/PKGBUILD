@@ -1,0 +1,69 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Maintainer: Caleb Maclennan <caleb@alerque.com>
+
+pkgbase=ruff
+pkgname=($pkgbase python-$pkgbase)
+pkgver=0.1.7
+pkgrel=1
+pkgdesc='An extremely fast Python linter, written in Rust'
+arch=(x86_64 powerpc64le powerpc64 riscv64)
+url="https://github.com/astral-sh/$pkgbase"
+license=(MIT)
+depends=(
+  gcc-libs
+  glibc
+)
+makedepends=(
+  cargo
+  maturin
+  python-installer
+)
+options=(!lto)
+_archive="$pkgbase-$pkgver"
+source=($url/archive/refs/tags/v$pkgver/$_archive.tar.gz)
+sha512sums=('bba0f8015d5affc06d3f44c77d1840766d33e19fa901a0dce84358a67d52f9f6a23eeb0500be4e549b73ccebec70b0e41e4869b3372491ea9463d39342e1e91f')
+b2sums=('f3db305e2f01f75d66b71c56a645605da2008dbbbdc185ec41aa6dfdde755b694798426a2ee944af86ac059c9a7317f9c20fac9db49a5cefa0c1429887a4b797')
+
+case "${CARCH}" in
+  riscv64) export MYARCH=riscv64gc ;;
+esac
+
+prepare() {
+  cd "$_archive"
+
+  cargo fetch --locked --target "$MYARCH-unknown-linux-gnu"
+}
+
+build() {
+  cd "$_archive"
+  maturin build --locked --release --all-features --target "$MYARCH-unknown-linux-gnu" --strip
+}
+
+check() {
+  cd "$_archive"
+  cargo test -p ruff_cli --frozen --all-features
+}
+
+_package_common() {
+  install -Dm0644 -t "$pkgdir/usr/share/licenses/$pkgname/" LICENSE
+  install -Dm0644 -t "$pkgdir/usr/share/doc/$pkgname/" README.md
+}
+
+package_ruff() {
+  cd "$_archive"
+  _package_common
+  local _target="target/$MYARCH-unknown-linux-gnu/release/ruff"
+  install -Dm0755 -t "$pkgdir/usr/bin/" "$_target"
+  $_target --generate-shell-completion bash | install -Dm0644 /dev/stdin "$pkgdir/usr/share/bash-completion/completions/$pkgbase.bash"
+  $_target --generate-shell-completion fish | install -Dm0644 /dev/stdin "$pkgdir/usr/share/fish/vendor_completions.d/$pkgbase.fish"
+  $_target --generate-shell-completion zsh  | install -Dm0644 /dev/stdin "$pkgdir/usr/share/zsh/site-functions/_$pkgbase"
+}
+
+package_python-ruff() {
+  cd "$_archive"
+  _package_common
+  depends=(python "$pkgbase")
+  python -m installer -d "$pkgdir" target/wheels/*.whl
+  rm -rf "$pkgdir/usr/bin"
+}
