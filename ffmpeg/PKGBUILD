@@ -5,8 +5,8 @@
 # Contributor: Paul Mattal <paul@archlinux.org>
 
 pkgname=ffmpeg
-pkgver=6.0
-pkgrel=13.1
+pkgver=6.1
+pkgrel=1
 epoch=2
 pkgdesc='Complete solution to record, convert and stream audio and video'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
@@ -75,7 +75,7 @@ depends=(
   zlib
 )
 depends_x86_64=(
-  libmfx
+  onevpl
 )
 makedepends=(
   amf-headers
@@ -91,13 +91,13 @@ makedepends_x86_64=(
   ffnvcodec-headers
   nasm
 )
-
 optdepends=(
   'avisynthplus: AviSynthPlus support'
   'ladspa: LADSPA filters'
 )
 optdepends_x86_64=(
-  'intel-media-sdk: Intel QuickSync support'
+  'intel-media-sdk: Intel QuickSync support (legacy)'
+  'onevpl-intel-gpu: Intel QuickSync support'
   'nvidia-utils: Nvidia NVDEC/NVENC support'
 )
 provides=(
@@ -110,7 +110,11 @@ provides=(
   libswresample.so
   libswscale.so
 )
-_tag=3949db4d261748a9f34358a388ee255ad1a7f0c0
+options=(
+  debug
+  !distcc
+)
+_tag=3cdfac27d3ea06f8719faed48b4ae2e75e94a463
 source=(
   git+https://git.ffmpeg.org/ffmpeg.git?signed#tag=${_tag}
   add-av_stream_get_first_dts-for-chromium.patch
@@ -120,7 +124,6 @@ b2sums=('SKIP'
         '555274228e09a233d92beb365d413ff5c718a782008075552cafb2130a3783cf976b51dfe4513c15777fb6e8397a34122d475080f2c4483e8feea5c0d878e6de'
         'd7a5d2180e523d8c593686d9f3effa73c3d5a8d450a8ec0b64018a3f9f944fe77bb1690ad9a33625704c0eda3d9bccf5e7aa95b3db12552bfbeb7f22a748fdf0')
 validpgpkeys=(DD1EC9E8DE085C629B3E1846B18E8928B3948D64) # Michael Niedermayer <michael@niedermayer.cc>
-options=(!distcc)
 
 prepare() {
   cd ffmpeg
@@ -129,8 +132,11 @@ prepare() {
   # FS#77813: fix playing ogg files with mplayer
   git cherry-pick -n cbcc817353a019da4332ad43deb7bbc4e695d02a
   patch -Np1 -i ../add-av_stream_get_first_dts-for-chromium.patch # https://crbug.com/1251779
+  # use non-deprecated nvenc GUID for conftest
+  git cherry-pick -n 03823ac0c6a38bd6ba972539e3203a592579792f
+  git cherry-pick -n d2b46c1ef768bc31ba9180f6d469d5b8be677500
+
   patch -Np1 -i ../powerpc-altivec.patch
-  sudo pacman -S base/texinfo --noconfirm
 }
 
 pkgver() {
@@ -147,6 +153,7 @@ build() {
                --enable-libmfx
                --enable-nvdec
                --enable-nvenc
+               --enable-libvpl
             )
     ;;
   esac
@@ -207,9 +214,8 @@ build() {
     --enable-opencl \
     --enable-opengl \
     --enable-shared \
-    --enable-vulkan \
-    --enable-version3 ${_configure_flags[@]}
-
+    --enable-version3 \
+    --enable-vulkan ${_configure_flags[@]}
   make
   make tools/qt-faststart
   make doc/ff{mpeg,play}.1
