@@ -4,7 +4,7 @@
 # Contributor: Caltlgin Stsodaat <contact@fossdaily.xyz>
 
 pkgname=python-rapidfuzz
-pkgver=3.2.0
+pkgver=3.5.2
 pkgrel=1
 pkgdesc='Rapid fuzzy string matching in Python using various string metrics'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
@@ -19,21 +19,23 @@ makedepends=(
   'git'
   'python-build'
   'python-installer'
-  'cython'
   'python-scikit-build'
+  'cython'
   'rapidfuzz-cpp'
 )
 checkdepends=('python-hypothesis' 'python-pandas' 'python-pytest')
 optdepends=('python-numpy')
-_commit='ece13872864f63173171601ae39f80a527c5059c'
+_commit='0a9a8f81c9afd67e0a88179e391fbcef07f77e7b'
 source=(
   "$pkgname::git+$url#commit=$_commit"
   'github.com-taskflow-taskflow::git+https://github.com/taskflow/taskflow'
   'remove-version-constraints.patch'
+  'rapidfuzz-atomics.patch'
 )
 b2sums=('SKIP'
         'SKIP'
-        '00acfe61b719f592a97bf01376f783737c71eb886b78cd08d4aac11d30524abfc8677a17eef511c0593f7f01e52b261ae1556abd03e54ba10701ec1c5e68948c')
+        'db458ca7daab8c2004fe84384fe3aa1f1403f58e59ffb7108617ee5b9bfb4905726c23237a8e4303220a29d8b4edaa992fabafab8ae72f5067adce06bf0afed2'
+        '3dcc412eaebca188fd00269edadea0f63de171df2c861bfc2c1990a2bd5b8e442083bf893ace097caf46c0a33adf1598c5a4cf24c9d337525ea06934fc6e448f')
 
 pkgver() {
   cd "$pkgname"
@@ -47,6 +49,9 @@ prepare() {
   # remove version constraints
   patch -p1 -i "$srcdir/remove-version-constraints.patch"
 
+  # fix 32bit atomics detection / https://github.com/maxbachmann/RapidFuzz/issues/354
+  patch -Np1 -i "$srcdir/rapidfuzz-atomics.patch"
+
   # prepare git submodules
   git submodule init extern/taskflow
   git config submodule.extern/taskflow.url "$srcdir/github.com-taskflow-taskflow"
@@ -56,8 +61,12 @@ prepare() {
 build() {
   cd "$pkgname"
 
-  RAPIDFUZZ_BUILD_EXTENSION=1 \
-    python -m build --wheel --no-isolation
+  case "${CARCH}" in
+    powerpc) ;;
+    *) RAPIDFUZZ_BUILD_EXTENSION=1 ;;
+  esac
+
+  python -m build --wheel --no-isolation
 }
 
 check() {
