@@ -1,36 +1,60 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
 # Maintainer: Jonas Witschel <diabonas@archlinux.org>
+# Maintainer: Daniel M. Capella <polyzen@archlinux.org>
 # Contributor: Philipp A. <flying-sheep@web.de>
+
+# Check if new updates break python-engineio
 
 _pkgname=aiohttp
 pkgname=python-aiohttp
-_gitcommit=996de2629ef6b4c2934a7c04dfd49d0950d4c43b
-pkgver=3.8.6
+_gitcommit=6333c026422c6b0fe57ff63cde4104e2d00f47f4
+pkgver=3.9.1
 pkgrel=1
 pkgdesc='HTTP client/server for asyncio'
-url='https://aiohttp.readthedocs.io'
 arch=(x86_64 powerpc64le powerpc64 riscv64)
+url='https://aiohttp.readthedocs.io'
 license=('Apache')
-depends=('python' 'python-multidict' 'python-async-timeout'
-         'python-yarl' 'python-attrs' 'python-charset-normalizer'
-         'python-aiosignal' 'python-frozenlist')
-makedepends=('git' 'cython' 'nodejs' 'python-build' 'python-installer'
-             'python-setuptools' 'python-wheel')
-checkdepends=('python-pytest' 'python-pytest-mock'
-              'python-async_generator' 'python-brotli'
-              'python-pytest-xdist' 'python-pytest-cov'
-              'python-trustme' 'python-freezegun' 'gunicorn' 'python-re-assert'
-              'python-proxy.py' 'python-aiodns')
-optdepends=('gunicorn: to deploy using Gunicorn'
-            'python-aiodns: for fast DNS resolving'
-            'python-brotli: for Brotli transfer-encodings support')
-source=(${pkgname}::"git+https://github.com/aio-libs/aiohttp#commit=${_gitcommit}"
-        git+https://github.com/nodejs/llhttp.git
-        yarl-1.9.patch)
+depends=(
+  'python'
+  'python-aiosignal'
+  'python-attrs'
+  'python-frozenlist'
+  'python-multidict'
+  'python-yarl'
+)
+makedepends=(
+  'cython'
+  'git'
+  'npm'
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+)
+checkdepends=(
+  'gunicorn'
+  'python-aiodns'
+  'python-brotli'
+  'python-proxy.py'
+  'python-pytest'
+  'python-pytest-mock'
+  'python-pytest-xdist'
+  'python-re-assert'
+  'python-time-machine'
+  'python-trustme'
+  'python-uvloop'
+)
+optdepends=(
+  'gunicorn: to deploy using Gunicorn'
+  'python-aiodns: for fast DNS resolving'
+  'python-brotli: for Brotli transfer-encodings support'
+)
+source=(
+  "${pkgname}::git+https://github.com/aio-libs/aiohttp#commit=${_gitcommit}"
+  git+https://github.com/nodejs/llhttp.git
+)
 sha512sums=('SKIP'
-            'SKIP'
-            'd82603b24d2525e801878e807cef7bc3f69c3bb263581e1f0078e6794e39f07ad714254fc7257a6ca5f1e165977ada3b1116e00478b7206b329d9e277b3c1829')
+            'SKIP')
 
 pkgver() {
   cd ${pkgname}
@@ -49,8 +73,8 @@ prepare() {
   sed -i "s/import {import_path!s}/import sys; sys.path.insert(0, '{os.environ['PYTHONPATH']}'); &/" \
       tests/test_circular_imports.py
 
-  # yarl 1.9 compatibility
-  patch -p1 -i ../yarl-1.9.patch
+  # Remove coverage testing
+  sed -i '/--cov=/d' setup.cfg
 }
 
 build() {
@@ -62,7 +86,9 @@ build() {
 check() {
   cd ${pkgname}
   local _python_version=$(python -c 'import sys; print("".join(map(str, sys.version_info[:2])))')
-  PYTHONPATH="$PWD/build/lib.linux-$CARCH-cpython-${_python_version}" pytest -k 'not test_default_loop[pyloop] and not test_ctor_global_loop and not test_set_loop_default_loop'
+  mv tests/autobahn/test_autobahn.py{,.bak} # Docker tests
+  PYTHONPATH="$PWD/build/lib.linux-$CARCH-cpython-${_python_version}" pytest
+  mv tests/autobahn/test_autobahn.py{.bak,}
 }
 
 package() {
