@@ -4,13 +4,13 @@
 
 pkgname=clang
 pkgver=16.0.6
-pkgrel=1
+pkgrel=1.1
 pkgdesc="C language family frontend for LLVM"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://clang.llvm.org/"
 license=('custom:Apache 2.0 with LLVM Exception')
 depends=('llvm-libs' 'gcc' 'compiler-rt')
-makedepends=('llvm' 'cmake' 'ninja' 'python-sphinx' 'python-recommonmark' 'gtest')
+makedepends=('llvm' 'cmake' 'ninja' 'python-sphinx' 'python-recommonmark')
 optdepends=('openmp: OpenMP support in clang with -fopenmp'
             'python: for scan-view and git-clang-format'
             'llvm: referenced by some clang headers')
@@ -22,6 +22,8 @@ source=($_source_base/clang-$pkgver.src.tar.xz{,.sig}
         $_source_base/clang-tools-extra-$pkgver.src.tar.xz{,.sig}
         $_source_base/llvm-$pkgver.src.tar.xz{,.sig}
         $_source_base/cmake-$pkgver.src.tar.xz{,.sig}
+        $_source_base/third-party-$pkgver.src.tar.xz{,.sig}
+        enable-fstack-protector-strong-by-default.patch
         clang-ppc64-elfv2.patch
         llvm-ppc64-elfv2.patch
         clang-ppc64-dynamic-linker-path.patch)
@@ -33,6 +35,9 @@ sha256sums=('1186b6e6eefeadd09912ed73b3729e85b59f043724bb2818a95a2ec024571840'
             'SKIP'
             '39d342a4161095d2f28fb1253e4585978ac50521117da666e2b1f6f28b62f514'
             'SKIP'
+            '15f5b9aeeba938530af977d5f9205612737a091a7f0f6c8075df8723b7713f70'
+            'SKIP'
+            '45da5783f4e89e4507a351ed0ffbbe6ec240e21ff7070797a89c5ccf434ac612'
             'f80157e9ef2bfea9dcb8560e17b76b7e4e9de72bab0c83b1802734ff83293411'
             '8c4e8db0b80b1a86f8cff9aa678b70458503bc8926ecc41e0df953ea14ab3559'
             '654b9eafcd20125319b3c319ab6674a940ddef400821c80813c16011ef8b6086')
@@ -62,15 +67,11 @@ _get_distribution_components() {
 }
 
 prepare() {
-  mv cmake{-$pkgver.src,}
+  rename -v -- "-$pkgver.src" '' {cmake,third-party}-$pkgver.src
   cd clang-$pkgver.src
-
   mkdir build
   mv "$srcdir/clang-tools-extra-$pkgver.src" tools/extra
-
-  # https://reviews.llvm.org/D122768 (needed for Chromium 113)
-  sed 's|clang-tools-extra|clang/tools/extra|g' \
-    ../$pkgname-structured-bindings-r1.patch | patch -Np2
+  patch -Np2 -i ../enable-fstack-protector-strong-by-default.patch
 
   # powerpc64 uses ELFv2
   patch -Np1 -i ../clang-ppc64-elfv2.patch
@@ -99,7 +100,7 @@ build() {
     -DCLANG_LINK_CLANG_DYLIB=ON
     -DENABLE_LINKER_BUILD_ID=ON
     -DLLVM_BUILD_DOCS=ON
-    -DLLVM_BUILD_TESTS=OFF
+    -DLLVM_BUILD_TESTS=ON
     -DLLVM_ENABLE_RTTI=ON
     -DLLVM_ENABLE_SPHINX=ON
     -DLLVM_EXTERNAL_LIT=/usr/bin/lit
