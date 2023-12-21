@@ -6,7 +6,7 @@
 
 pkgbase=oxygen-icons
 pkgname=(oxygen-icons oxygen-icons-svg)
-pkgver=5.112.0
+pkgver=5.113.0
 epoch=1
 pkgrel=1
 pkgdesc='The Oxygen Icon Theme'
@@ -14,13 +14,13 @@ arch=(any)
 url='https://community.kde.org/Frameworks'
 license=(LGPL)
 makedepends=(extra-cmake-modules qt5-base)
-source=(https://download.kde.org/stable/frameworks/${pkgver%.*}/${pkgbase}5-$pkgver.tar.xz{,.sig})
-sha256sums=('8a14b0e9980decadc94806823695fd346e281907d9656350e217dde27bac827b'
+source=(https://download.kde.org/stable/frameworks/${pkgver%.*}/$pkgbase-$pkgver.tar.xz{,.sig})
+sha256sums=('bd03eac086c7360114ad6842db0eaa8fc7d1c3b18ad65a2cb98ea6f21fb02d3f'
             'SKIP')
 validpgpkeys=(53E6B47B45CEA3E0D5B7457758D0EE648A48B3BB) # David Faure <faure@kde.org>
 
 build() {
-  cmake -B build -S ${pkgbase}5-$pkgver
+  cmake -B build -S $pkgbase-$pkgver
   cmake --build build
 }
 
@@ -33,7 +33,7 @@ package_oxygen-icons() {
 package_oxygen-icons-svg() {
   pkgdesc='The Oxygen Icon Theme (Scalable Vector Graphics)'
 
-  cd ${pkgbase}5-$pkgver
+  cd $pkgbase-$pkgver
   find scalable -type f ! -name '*.sh' -exec \
     install -D -m644 "{}" "$pkgdir"/usr/share/icons/oxygen/{} \;
 }
