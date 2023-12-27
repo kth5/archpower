@@ -5,20 +5,28 @@
 
 pkgname=nspr
 pkgver=4.35
-pkgrel=1.2
+pkgrel=2
 pkgdesc="Netscape Portable Runtime"
 url="https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSPR"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=(MPL GPL)
-depends=(glibc sh)
-makedepends=(zip mercurial)
+license=(MPL-2.0)
+depends=(
+  glibc
+  sh
+)
+makedepends=(
+  mercurial
+  zip
+)
 _revision=b563bfc16c887c48b038b7b441fcc4e40a126d3b
-source=("hg+https://hg.mozilla.org/projects/nspr#revision=$_revision"
-        nspr-4.35-b1815947.patch
-        nspr-4.35-parenthesis.patch)
-sha256sums=('SKIP'
-            '32c1180a2fbe2e7dad6d09f381a60d5408ba7e01a652c57a6cf235952a135442'
-            '11956ba078030661c6201965a202be0ddc6065e9793d075394579d67d4630a92')
+source=(
+  "hg+https://hg.mozilla.org/projects/nspr#revision=$_revision"
+  0001-linux-prefer-GCC-provided-atomics-to-asssembly-imple.patch
+  0002-configure.in-Remove-assembly-files-from-build.patch
+)
+b2sums=('SKIP'
+        'fe81bbb23478958438e385ec5563842cdaf7400021def0d2f2184c0c38389e75f28ed7a4f3b52cada4d76c6318c104dda661f1d4efaa224bc832a989729ef852'
+        '1fd6e9b1f3111a29a052b6034f796e4e9577a3dbb2d0e96798ce1f47b74f515c882c9f595198fa1646648611525b48857b33ed62e713991e2f28850690e99060')
 
 pkgver() {
   cd nspr
@@ -27,26 +35,27 @@ pkgver() {
 
 prepare() {
   cd nspr
-  patch -Np1 -i ${srcdir}/nspr-4.35-b1815947.patch
-  patch -Np1 -i ${srcdir}/nspr-4.35-parenthesis.patch
+
+  # https://bugzilla.mozilla.org/show_bug.cgi?id=1496426
+  # https://gitlab.archlinux.org/archlinux/packaging/packages/nspr/-/merge_requests/1
+  patch -Np1 -i ../0001-linux-prefer-GCC-provided-atomics-to-asssembly-imple.patch
+  patch -Np1 -i ../0002-configure.in-Remove-assembly-files-from-build.patch
+
+  autoreconf -fvi
 }
 
 build() {
+  local configure_options=(
+      --prefix=/usr
+      --libdir=/usr/lib
+      --includedir=/usr/include/nspr
+      --enable-optimize
+      --disable-debug
+      --enable-64bit
+  )
+
   cd nspr
-
-  case "${CARCH}" in
-    powerpc) ;;
-    *) _options=(--enable-64bit) ;;
-  esac
-
-  unset CFLAGS CXXFLAGS
-
-  ./configure \
-      --prefix=/usr \
-      --libdir=/usr/lib \
-      --includedir=/usr/include/nspr \
-      --enable-optimize="-O2" \
-      --disable-debug ${_options[@]}
+  ./configure "${configure_options[@]}"
   make ${SOURCE_DATE_EPOCH:+
     SH_NOW="${SOURCE_DATE_EPOCH}000000"
     SH_DATE="$(date --utc --date="@$SOURCE_DATE_EPOCH" '+%Y-%m-%d %T')"
@@ -62,4 +71,4 @@ package() {
   rm "$pkgdir"/usr/bin/{compile-et.pl,prerr.properties}
 }
 
-# vim:set sw=2 et:
+# vim:set sw=2 sts=-1 et:
