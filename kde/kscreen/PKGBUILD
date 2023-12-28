@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kscreen
-pkgver=5.27.9
+pkgver=5.27.10
 _dirver=$(echo $pkgver | cut -d. -f1-3)
 pkgrel=1
 pkgdesc='KDE screen management software'
@@ -15,7 +15,7 @@ depends=(libkscreen plasma-framework5 qt5-sensors layer-shell-qt)
 makedepends=(extra-cmake-modules kcmutils5)
 groups=(plasma)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('32e693581202ebfe2b99d98bcf291a5d8710238e4df0764d4d5c401245a5e15b'
+sha256sums=('8987bfcdb4e8617a229090ff42c4e4142ac0b5228e9bed7c3d2f03ed4e981c3c'
             'SKIP')
 validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell <jr@jriddell.org>
               '0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D'  # Bhushan Shah <bshah@kde.org>
