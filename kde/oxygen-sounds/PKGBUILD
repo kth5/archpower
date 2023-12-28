@@ -5,7 +5,7 @@
 
 pkgname=oxygen-sounds
 pkgdesc='The Oxygen Sound Theme'
-pkgver=5.27.9
+pkgver=5.27.10
 _dirver=$(echo $pkgver | cut -d. -f1-3)
 pkgrel=1
 arch=(any)
@@ -15,7 +15,7 @@ depends=()
 makedepends=(extra-cmake-modules)
 groups=(plasma)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('e1fdcbcbdd4f965dcb966b885258f94c08faf6ea359c8ac926941bdd49a63759'
+sha256sums=('23a1f090aaeee966476ff03aecad1f60b1e067d7948edd1b61c3a5d2b33bc35f'
             'SKIP')
 validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell <jr@jriddell.org>
               '0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D'  # Bhushan Shah <bshah@kde.org>
