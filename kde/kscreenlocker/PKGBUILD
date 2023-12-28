@@ -2,7 +2,7 @@
 # Maintainer: Antonio Rojas <arojas@archlinux.org>
 
 pkgname=kscreenlocker
-pkgver=5.27.9
+pkgver=5.27.10
 _dirver=$(echo $pkgver | cut -d. -f1-3)
 pkgrel=1
 pkgdesc='Library and components for secure lock screen architecture'
@@ -14,7 +14,7 @@ depends=(layer-shell-qt kidletime5 kdeclarative5 libkscreen perl)
 makedepends=(extra-cmake-modules kdoctools5 kcmutils5 libxcursor)
 optdepends=('kcmutils5: configuration module')
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('e780a48c0a3686fcf34e250ff29fbb9b05ac88fa1114a15194c6b8959391874d'
+sha256sums=('d74d80b87fc5b4915d615c288819f9006c0103ee864cadc565141bf468cb3d89'
             'SKIP')
 validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell <jr@jriddell.org>
               '0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D'  # Bhushan Shah <bshah@kde.org>
