@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=sddm-kcm
-pkgver=5.27.9
+pkgver=5.27.10
 _dirver=$(echo $pkgver | cut -d. -f1-3)
 pkgrel=1
 pkgdesc='KDE Config Module for SDDM'
@@ -15,7 +15,7 @@ depends=(sddm knewstuff5 systemsettings)
 makedepends=(extra-cmake-modules kdoctools5)
 groups=(plasma)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('61ee7fc52d8eab1ab673741736424afd0905c1c9296563acee70ac5d3fe6ba68'
+sha256sums=('83e43177bf83d7b2c5d617349bb913dbdb80b0354aecbcc47febd4e50d95f4ad'
             'SKIP')
 validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell <jr@jriddell.org>
               '0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D'  # Bhushan Shah <bshah@kde.org>
