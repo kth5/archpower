@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=bluedevil
-pkgver=5.27.9
+pkgver=5.27.10
 _dirver=$(echo $pkgver | cut -d. -f1-3)
 pkgrel=1
 epoch=1
@@ -17,7 +17,7 @@ makedepends=(extra-cmake-modules plasma-framework5 kdoctools5 kcmutils5)
 optdepends=('pulseaudio-bluetooth: to connect to A2DP profile')
 groups=(plasma)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('668168641d287d01c15d1e6324aa670ff1daaedc973ac656e86b564d95624b6e'
+sha256sums=('771fd58c2e1945e9f375598a5d1120671d9142d95580f08ec22494dd4d7fa180'
             'SKIP')
 validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell <jr@jriddell.org>
               '0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D'  # Bhushan Shah <bshah@kde.org>
