@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kmenuedit
-pkgver=5.27.9
+pkgver=5.27.10
 _dirver=$(echo $pkgver | cut -d. -f1-3)
 pkgrel=1
 pkgdesc='KDE menu editor'
@@ -15,7 +15,7 @@ depends=(kio5)
 makedepends=(extra-cmake-modules kdoctools5)
 groups=(plasma)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('c8366bca69a41ce2a5b18596f82314f9d203ea16827f34a6c5e5ea97e571ebd9'
+sha256sums=('1c090b7e96c65043d2d75c359e536cb05a44ed6655e4e12c437ef233fa4f20d7'
             'SKIP')
 validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell <jr@jriddell.org>
               '0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D'  # Bhushan Shah <bshah@kde.org>
