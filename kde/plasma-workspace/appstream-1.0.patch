@@ -1,0 +1,115 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7b8102a86..bb5bed60c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -183,12 +183,12 @@ if(FONTCONFIG_FOUND)
+   find_package(Qt${QT_MAJOR_VERSION} ${QT_MIN_VERSION} CONFIG REQUIRED COMPONENTS PrintSupport)
+ endif()
+ 
+-find_package(AppStreamQt 0.10.6)
+-set_package_properties(AppStreamQt PROPERTIES DESCRIPTION "Access metadata for listing available software"
++find_package(AppStreamQt5 1.0)
++set_package_properties(AppStreamQt5 PROPERTIES DESCRIPTION "Access metadata for listing available software"
+                        URL "https://www.freedesktop.org/wiki/Distributions/AppStream/"
+                        TYPE OPTIONAL)
+ 
+-if(${AppStreamQt_FOUND})
++if(${AppStreamQt5_FOUND})
+     set(HAVE_APPSTREAMQT true)
+ endif()
+ 
+diff --git a/applets/kicker/plugin/actionlist.cpp b/applets/kicker/plugin/actionlist.cpp
+index 61fc23487..787afdc06 100644
+--- a/applets/kicker/plugin/actionlist.cpp
++++ b/applets/kicker/plugin/actionlist.cpp
+@@ -32,7 +32,7 @@
+ #include "containmentinterface.h"
+ 
+ #ifdef HAVE_APPSTREAMQT
+-#include <AppStreamQt/pool.h>
++#include <AppStreamQt5/pool.h>
+ #endif
+ 
+ namespace KAStats = KActivities::Stats;
+@@ -447,7 +447,7 @@ bool handleAppstreamActions(const QString &actionId, const KService::Ptr &servic
+     }
+ 
+     const auto components =
+-        appstreamPool->componentsByLaunchable(AppStream::Launchable::KindDesktopId, service->desktopEntryName() + QLatin1String(".desktop"));
++        appstreamPool->componentsByLaunchable(AppStream::Launchable::KindDesktopId, service->desktopEntryName() + QLatin1String(".desktop")).toList();
+     if (components.empty()) {
+         return false;
+     }
+diff --git a/runners/CMakeLists.txt b/runners/CMakeLists.txt
+index ec22f27d7..4216518e9 100644
+--- a/runners/CMakeLists.txt
++++ b/runners/CMakeLists.txt
+@@ -14,7 +14,7 @@ add_subdirectory(shell)
+ add_subdirectory(webshortcuts)
+ add_subdirectory(windowedwidgets)
+ 
+-if(AppStreamQt_FOUND)
++if(AppStreamQt5_FOUND)
+     add_subdirectory(appstream)
+ endif()
+ 
+diff --git a/runners/appstream/CMakeLists.txt b/runners/appstream/CMakeLists.txt
+index 7dc43cdad..15c486a3e 100644
+--- a/runners/appstream/CMakeLists.txt
++++ b/runners/appstream/CMakeLists.txt
+@@ -11,4 +11,4 @@ ecm_qt_declare_logging_category(krunner_appstream_SRCS
+     DEFAULT_SEVERITY Warning)
+ 
+ kcoreaddons_add_plugin(krunner_appstream SOURCES ${krunner_appstream_SRCS} INSTALL_NAMESPACE "kf5/krunner")
+-target_link_libraries(krunner_appstream PUBLIC Qt::Gui KF5::Runner KF5::I18n KF5::Service AppStreamQt)
++target_link_libraries(krunner_appstream PUBLIC Qt::Gui KF5::Runner KF5::I18n KF5::Service AppStreamQt5)
+diff --git a/runners/appstream/appstreamrunner.cpp b/runners/appstream/appstreamrunner.cpp
+index b0dcb381e..be37a9459 100644
+--- a/runners/appstream/appstreamrunner.cpp
++++ b/runners/appstream/appstreamrunner.cpp
+@@ -6,7 +6,7 @@
+ 
+ #include "appstreamrunner.h"
+ 
+-#include <AppStreamQt/icon.h>
++#include <AppStreamQt5/icon.h>
+ 
+ #include <QDebug>
+ #include <QDesktopServices>
+@@ -148,19 +148,18 @@ void InstallerRunner::run(const Plasma::RunnerContext & /*context*/, const Plasm
+ QList<AppStream::Component> InstallerRunner::findComponentsByString(const QString &query)
+ {
+     QMutexLocker locker(&m_appstreamMutex);
+-    QString error;
+     static bool warnedOnce = false;
+-    static bool opened = m_db.load(&error);
++    static bool opened = m_db.load();
+     if (!opened) {
+         if (warnedOnce) {
+-            qCDebug(RUNNER_APPSTREAM) << "Had errors when loading AppStream metadata pool" << error;
++            qCDebug(RUNNER_APPSTREAM) << "Had errors when loading AppStream metadata pool" << m_db.lastError();
+         } else {
+-            qCWarning(RUNNER_APPSTREAM) << "Had errors when loading AppStream metadata pool" << error;
++            qCWarning(RUNNER_APPSTREAM) << "Had errors when loading AppStream metadata pool" << m_db.lastError();
+             warnedOnce = true;
+         }
+     }
+ 
+-    return m_db.search(query);
++    return m_db.search(query).toList();
+ }
+ 
+ #include "appstreamrunner.moc"
+diff --git a/runners/appstream/appstreamrunner.h b/runners/appstream/appstreamrunner.h
+index 18197ab08..b585f55c3 100644
+--- a/runners/appstream/appstreamrunner.h
++++ b/runners/appstream/appstreamrunner.h
+@@ -6,7 +6,7 @@
+ 
+ #pragma once
+ 
+-#include <AppStreamQt/pool.h>
++#include <AppStreamQt5/pool.h>
+ #include <KRunner/AbstractRunner>
+ #include <QMutex>
+ 
