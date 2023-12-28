@@ -1,0 +1,60 @@
+Description: widgets: setTransientParent() when a QMenu is a window
+ On some platforms, such as X11 and Wayland with some compositors,
+ QMenu could be a popup window, which should be set a transient parent
+ to get relative position, which is requested by Wayland.
+ .
+ Added transientParentWindow() for QMenuPrivate like QDialogPrivate.
+Origin: upstream, https://code.qt.io/cgit/qt/qtbase.git/commit/?id=493a85a9e4688744
+Last-Update: 2022-10-16
+
+--- a/src/widgets/widgets/qmenu.cpp
++++ b/src/widgets/widgets/qmenu.cpp
+@@ -624,6 +624,29 @@ void QMenuPrivate::hideMenu(QMenu *menu)
+     menu->d_func()->causedPopup.widget = nullptr;
+ }
+ 
++QWindow *QMenuPrivate::transientParentWindow() const
++{
++    Q_Q(const QMenu);
++    if (const QWidget *parent = q->nativeParentWidget()) {
++        if (parent->windowHandle())
++            return parent->windowHandle();
++    }
++
++    if (const QWindow *w = q->windowHandle()) {
++        if (w->transientParent())
++            return w->transientParent();
++    }
++
++    if (causedPopup.widget) {
++        if (const QWidget *w = causedPopup.widget.data()) {
++            if (const QWidget *ww = w->window())
++                return ww->windowHandle();
++        }
++    }
++
++    return nullptr;
++}
++
+ void QMenuPrivate::popupAction(QAction *action, int delay, bool activateFirst)
+ {
+     Q_Q(QMenu);
+@@ -3060,6 +3083,8 @@ QMenu::event(QEvent *e)
+         d->sloppyState.reset();
+         if (d->currentAction)
+             d->popupAction(d->currentAction, 0, false);
++        if (isWindow() && window() && window()->windowHandle() && !window()->windowHandle()->transientParent())
++            window()->windowHandle()->setTransientParent(d->transientParentWindow());
+         break;
+ #ifndef QT_NO_TOOLTIP
+     case QEvent::ToolTip:
+--- a/src/widgets/widgets/qmenu_p.h
++++ b/src/widgets/widgets/qmenu_p.h
+@@ -440,6 +440,7 @@ public:
+     QMenuCaused causedPopup;
+     void hideUpToMenuBar();
+     void hideMenu(QMenu *menu);
++    QWindow *transientParentWindow() const;
+ 
+     //index mappings
+     inline QAction *actionAt(int i) const { return q_func()->actions().at(i); }

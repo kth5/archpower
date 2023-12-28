@@ -1,0 +1,31 @@
+Description: fix accessibility on XCB when running as root
+ Accessibility actually works when running applications as root, but we
+ would never properly connect, since the enabledChanged signal would be
+ emitted from the constructor in this case. So after connecting the
+ signal, check the value by hand to make sure not to miss the
+ notification.
+ .
+ Only applications running as root would be affected, because all other
+ applications would go through the asynchronous pattern of getting the
+ bus address from dbus instead.
+Origin: upstream, https://code.qt.io/cgit/qt/qtbase.git/commit/?id=db346e711c9af505
+Bug: https://bugs.debian.org/1033995
+Last-Update: 2023-04-15
+
+--- a/src/platformsupport/linuxaccessibility/bridge.cpp
++++ b/src/platformsupport/linuxaccessibility/bridge.cpp
+@@ -65,6 +65,14 @@ QSpiAccessibleBridge::QSpiAccessibleBrid
+ {
+     dbusConnection = new DBusConnection();
+     connect(dbusConnection, SIGNAL(enabledChanged(bool)), this, SLOT(enabledChanged(bool)));
++    // Now that we have connected the signal, make sure we didn't miss a change,
++    // e.g. when running as root or when AT_SPI_BUS_ADDRESS is set by hand.
++    // But do that only on next loop, once dbus is really settled.
++    QTimer::singleShot(
++        0, this, [this]{
++            if (dbusConnection->isEnabled())
++                enabledChanged(true);
++        });
+ }
+ 
+ void QSpiAccessibleBridge::enabledChanged(bool enabled)

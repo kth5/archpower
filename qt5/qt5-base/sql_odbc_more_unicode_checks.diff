@@ -1,0 +1,35 @@
+Description: SQL/ODBC: add another check to detect unicode availability in driver
+ Since ODBC does not have a direct way finding out if unicode is
+ supported by the underlying driver the ODBC plugin does some checks. As
+ a last resort a sql statement is executed which returns a string. But
+ even this may fail because the select statement has no FROM part which
+ is rejected by at least Oracle does not allow. Therefore add another
+ query which is correct for Oracle & DB2 as a workaround. The question
+ why the first three statements to check for unicode availability fail
+ is still open but can't be checked since I've no access to an oracle
+ database.
+Origin: upstream, https://code.qt.io/cgit/qt/qtbase.git/commit/?id=f19320748d282b1e
+Last-Update: 2023-06-30
+
+--- a/src/plugins/sqldrivers/odbc/qsql_odbc.cpp
++++ b/src/plugins/sqldrivers/odbc/qsql_odbc.cpp
+@@ -2111,7 +2111,18 @@ void QODBCDriverPrivate::checkUnicode()
+                                   hDbc,
+                                   &hStmt);
+ 
+-    r = SQLExecDirect(hStmt, toSQLTCHAR(QLatin1String("select 'test'")).data(), SQL_NTS);
++    // for databases which do not return something useful in SQLGetInfo and are picky about a
++    // 'SELECT' statement without 'FROM' but support VALUE(foo) statement like e.g. DB2 or Oracle
++    const auto statements = {
++        QLatin1String("select 'test'"),
++        QLatin1String("values('test')"),
++        QLatin1String("select 'test' from dual"),
++    };
++    for (const auto &statement : statements) {
++        r = SQLExecDirect(hStmt, toSQLTCHAR(statement).data(), SQL_NTS);
++        if (r == SQL_SUCCESS)
++            break;
++    }
+     if(r == SQL_SUCCESS) {
+         r = SQLFetch(hStmt);
+         if(r == SQL_SUCCESS) {
