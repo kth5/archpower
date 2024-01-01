@@ -12,7 +12,7 @@ case "${CARCH}" in
   x86_64) pkgname+=(opencv-cuda)
 esac
 pkgver=4.8.1
-pkgrel=1
+pkgrel=4
 pkgdesc='Open Source Computer Vision Library'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=(BSD)
@@ -37,16 +37,16 @@ depends=(abseil-cpp
          libwebp
          openexr
          openjpeg2
+         verdict
          protobuf
          onetbb
          zlib)
-makedepends=(ant
+makedepends=(
              cmake
              eigen
              fmt
              glew
              hdf5
-             java-environment
              lapacke
              mesa
              nlohmann-json
@@ -62,8 +62,7 @@ optdepends=('opencv-samples: samples'
             'glew: for the viz module'
             'qt6-base: for the HighGUI module'
             'hdf5: for the HDF5 module'
-            'opencl-icd-loader: For coding with OpenCL'
-            'java-runtime: Java interface')
+            'opencl-icd-loader: For coding with OpenCL')
 source=(https://github.com/opencv/opencv/archive/$pkgver/$pkgname-$pkgver.tar.gz
         https://github.com/opencv/opencv_contrib/archive/$pkgver/opencv_contrib-$pkgver.tar.gz
         vtk9.patch
@@ -79,6 +78,7 @@ prepare() {
 }
 
 build() {
+  export LDFLAGS+=' -lverdict'
   case "${CARCH}" in
     powerpc) export CXXFLAGS+=' -latomic' ;;
     powerpc64)
@@ -113,12 +113,12 @@ build() {
          -DLAPACK_LAPACKE_H=/usr/include/lapacke.h \
          -DOPENCV_GENERATE_PKGCONFIG=ON \
          -DOPENCV_ENABLE_NONFREE=ON \
-         -DOPENCV_JNI_INSTALL_PATH=lib \
          -DOPENCV_GENERATE_SETUPVARS=OFF \
          -DEIGEN_INCLUDE_PATH=/usr/include/eigen3 \
          -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
-         -Dprotobuf_MODULE_COMPATIBLE=ON"
- 
+         -Dprotobuf_MODULE_COMPATIBLE=ON \
+         -DBUILD_JAVA=OFF"
+
   cmake -B build -S $pkgname-$pkgver $_opts \
     -DBUILD_WITH_DEBUG_INFO=ON
   cmake --build build
@@ -147,16 +147,6 @@ package_opencv() {
 
   # separate samples package
   mv "$pkgdir"/usr/share/opencv4/samples "$srcdir"
-
-  case "${CARCH}" in
-    powerpc)   ;;
-    powerpc64) ;;
-    *)
-      # Add java symlinks expected by some binary blobs
-      ln -sr "$pkgdir"/usr/share/java/{opencv4/opencv-${pkgver//./},opencv}.jar
-      ln -sr "$pkgdir"/usr/lib/{libopencv_java${pkgver//./},libopencv_java}.so
-    ;;
-  esac
 
   # Split Python bindings
   rm -r "$pkgdir"/usr/lib/python3*
@@ -208,10 +198,6 @@ package_opencv-cuda() {
 
   # Split samples
   rm -r "$pkgdir"/usr/share/opencv4/samples
-
-  # Add java symlinks expected by some binary blobs
-  ln -sr "$pkgdir"/usr/share/java/{opencv4/opencv-${pkgver//./},opencv}.jar
-  ln -sr "$pkgdir"/usr/lib/{libopencv_java${pkgver//./},libopencv_java}.so
 
   # Split Python bindings
   rm -r "$pkgdir"/usr/lib/python3*
