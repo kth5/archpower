@@ -4,47 +4,65 @@
 # Contributor: Martin Striz <ms@poruba.net>
 
 pkgname=irqbalance
-pkgver=1.9.2
+pkgver=1.9.3
 pkgrel=1
 pkgdesc="IRQ balancing daemon for SMP systems"
-arch=(x86_64 powerpc64le powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://github.com/irqbalance/irqbalance"
-license=(GPL2)
+license=(GPL-2.0-only)
 backup=(etc/$pkgname.env)
-depends=(glibc libnl)
-makedepends=(glib2 libcap-ng ncurses numactl systemd systemd-libs)
-options=(debug)
-source=($pkgname-$pkgver.tar.gz::https://github.com/$pkgname/$pkgname/archive/v$pkgver.tar.gz)
-sha512sums=('d0fb157fbfc096fa9cfb4562e51fd4c3f4fa8788f72377c58b27df67c70073b787bba05e39809dcbe17532bb5b8e74b6d27c5e5b3d9af09bc9ce1a9b6aab9378')
-b2sums=('bc640323c3a594090f77983e63d9b7df177a05b859e4d29edb5b654f886c9e9f0d748ce22b1323bee443ea8369e014b9e0ce383bfe6f396692346649199d10a2')
+depends=(
+  glibc
+  libnl
+)
+makedepends=(
+  glib2
+  libcap-ng
+  meson
+  ncurses
+  numactl
+  systemd
+  systemd-libs
+)
+source=(
+  $pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz
+  $pkgname-1.9.3-meson.patch
+)
+sha512sums=('5638fb59f5a59901333b90289ee70c960df0e2b9e55731805397797b8e630bb3703e36a4dfd05bf01de49334dab9d6fc95bde4967eeab131534950d281103fa1'
+            '6de10e9c4b9fc56dce6991e173ff3fee6c9d5fe2e60e0f03606db03bf723bb9f26fc0b27200fd7998517ab8791895a9a526e456f615ee347c61ce798e382e5ea')
+b2sums=('0f7b3b62c3784c009c6829078cdf5496910ec3f3c8c13de5f0dfbaed510fb5e3dab4953810c646ece962ef130af3aaa0bb9fa8c2e013485751cc661c9458e87a'
+        '1152d273ec3a435dcdfec28bc5f0eeed7b7e57914fea0d7298e0a611b1df2c3b3df33bc4e6697d5f50b59e584a73b8e53d3a59372b430a27d058ba273454501e')
 
 prepare() {
   # fix location of configuration and binary in service
   sed -e 's|/path/to/|/etc/|g;s|/usr/sbin|/usr/bin|g' -i $pkgname-$pkgver/misc/$pkgname.service
 
-  cd $pkgname-$pkgver
-  autoreconf -fiv
+  # add required patches to be able to use meson as build system:
+  # https://github.com/Irqbalance/irqbalance/pull/279
+  # https://github.com/Irqbalance/irqbalance/pull/280
+  patch -Np1 -d $pkgname-$pkgver -i ../$pkgname-1.9.3-meson.patch
 }
 
 build() {
-  cd $pkgname-$pkgver
-  ./configure \
-    --prefix=/usr \
-    --sbindir=/usr/bin \
-    --with-systemd
-  make
+  arch-meson $pkgname-$pkgver/contrib build
+  meson compile -C build
 }
 
 check() {
-  make -k check -C $pkgname-$pkgver
+  meson test -C build --print-errorlogs
 }
 
 package() {
-  depends+=(libglib-2.0.so libcap-ng.so libncursesw.so libnuma.so libsystemd.so)
+  depends+=(
+    glib2 libglib-2.0.so
+    libcap-ng libcap-ng.so
+    ncurses libncursesw.so
+    numactl libnuma.so
+    systemd-libs libsystemd.so
+  )
 
-  cd $pkgname-$pkgver
-  make install DESTDIR="$pkgdir"
-  install -vDm 644 misc/irqbalance.service -t "$pkgdir/usr/lib/systemd/system/"
-  install -vDm 644 misc/irqbalance.env -t "$pkgdir/etc/"
-  install -vDm 644 {AUTHORS,README.md} -t "$pkgdir/usr/share/doc/$pkgname/"
+  meson install -C build --destdir "$pkgdir"
+  install -vDm 644 $pkgname-$pkgver/misc/irqbalance.service -t "$pkgdir/usr/lib/systemd/system/"
+  install -vDm 644 $pkgname-$pkgver/misc/irqbalance.env -t "$pkgdir/etc/"
+  install -vDm 644 $pkgname-$pkgver/{AUTHORS,README.md} -t "$pkgdir/usr/share/doc/$pkgname/"
 }
