@@ -5,11 +5,11 @@
 # Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
 
 pkgname=chromium
-pkgver=118.0.5993.117
+pkgver=120.0.6099.109
 pkgrel=2
 _launcher_ver=8
 _manual_clone=0
-_archpower_patchset=118.0
+_archpower_patchset=120.0
 pkgdesc="A web browser built for speed, simplicity, and security"
 arch=(x86_64 powerpc64le)
 url="https://www.chromium.org/Home"
@@ -19,30 +19,31 @@ depends=('gtk3' 'nss' 'alsa-lib' 'xdg-utils' 'libxss' 'libcups' 'libgcrypt'
          'libffi' 'desktop-file-utils' 'hicolor-icon-theme')
 makedepends=('python' 'gn' 'ninja' 'clang' 'lld' 'gperf' 'nodejs' 'pipewire'
              'java-runtime-headless' 'git')
-makedepends_x86_64=('qt5-base')
 optdepends=('pipewire: WebRTC desktop sharing under Wayland'
             'kdialog: support for native dialogs in Plasma'
+            'gtk4: for --gtk-version=4 (GTK4 IME might work better on Wayland)'
             'org.freedesktop.secrets: password storage backend on GNOME / Xfce'
             'kwallet: support for storing passwords in KWallet on Plasma')
-optdepends_x86_64=(
-            'qt5-base: enable Qt5 with --enable-features=AllowQt'
-)
 options=('!lto') # Chromium adds its own flags for ThinLTO
 source=(https://commondatastorage.googleapis.com/chromium-browser-official/chromium-$pkgver.tar.xz
         https://github.com/foutrelis/chromium-launcher/archive/v$_launcher_ver/chromium-launcher-$_launcher_ver.tar.gz
         https://gitlab.com/Matt.Jolly/chromium-patches/-/archive/${pkgver%%.*}/chromium-patches-${pkgver%%.*}.tar.bz2
-        free-the-X11-pixmap-in-the-NativePixmapEGLX11Bind.patch
+        libxml2-2.12.patch
+        icu-74.patch
+        drop-flags-unsupported-by-clang16.patch
         use-oauth2-client-switches-as-default.patch
-        https://repo.archlinuxpower.org/distfiles/chromium/patchsets/archpower-chromium-patchset-${_archpower_patchset}.tar.zst{,.asc})
+      https://repo.archlinuxpower.org/distfiles/chromium/patchsets/archpower-chromium-patchset-${_archpower_patchset}.tar.zst{,.asc})
 validpgpkeys=(
   8D3D6CE8D4F0625F4D7109022205B7A06C2656A3 # Alexander Baleck <alex.bldck@gmail.com>
 )
-sha256sums=('7029d851e4a2e8d5a145a6f6ba76f18f5c3043f57b2c750b35d96e92f3453786'
+sha256sums=('87c00c525ee07c2233b78dbece1496b697f686244a67fac2c71e4a30bd96849b'
             '213e50f48b67feb4441078d50b0fd431df34323be15be97c55302d3fdac4483a'
-            '0d1eb054965711a2d4ed6b4cb7f06cbda5b374a48e1b99c8c38ebf6375a781a9'
-            'ab1eb107ec1c915065dc59cf4832da27e17d60eb29038e2aec633daeb946cc6a'
+            'ffee1082fbe3d0c9e79dacb8405d5a0e1aa94d6745089a30b093f647354894d2'
+            '1808df5ba4d1e2f9efa07ac6b510bec866fa6d60e44505d82aea3f6072105a71'
+            'ff9ebd86b0010e1c604d47303ab209b1d76c3e888c423166779cefbc22de297f'
+            '8d1cdf3ddd8ff98f302c90c13953f39cd804b3479b13b69b8ef138ac57c83556'
             'e393174d7695d0bafed69e868c5fbfecf07aa6969f3b64596d0bae8b067e1711'
-            'c4a58f46b4158bb4adde0e7328b461c65a247f34e9607cccce97bfb7f0e5fb9c'
+            'bbfcd36f5bacaee83941e89b18a631559b4e3397483e6d820ebc98d4f45fa22b'
             'SKIP')
 
 if (( _manual_clone )); then
@@ -55,17 +56,17 @@ fi
 declare -gA _system_libs=(
   #[brotli]=brotli
   [dav1d]=dav1d
-  [ffmpeg]=ffmpeg
+  [libevent]=libevent
+  #[ffmpeg]=ffmpeg    # YouTube playback stopped working in Chromium 120
   [flac]=flac
   [fontconfig]=fontconfig
   [freetype]=freetype2
   [harfbuzz-ng]=harfbuzz
   [icu]=icu
-  [jsoncpp]=jsoncpp
+  #[jsoncpp]=jsoncpp  # needs libstdc++
   #[libaom]=aom
-  [libavif]=libavif
+  #[libavif]=libavif  # needs https://github.com/AOMediaCodec/libavif/commit/5410b23f76
   [libdrm]=
-  [libevent]=libevent
   [libjpeg]=libjpeg
   [libpng]=libpng
   #[libvpx]=libvpx
@@ -73,9 +74,9 @@ declare -gA _system_libs=(
   [libxml]=libxml2
   [libxslt]=libxslt
   [opus]=opus
-  [re2]=re2
-  [snappy]=snappy
-  [woff2]=woff2
+  #[re2]=re2          # needs libstdc++
+  #[snappy]=snappy    # needs libstdc++
+  #[woff2]=woff2      # needs libstdc++
   [zlib]=minizip
 )
 _unwanted_bundled_libs=(
@@ -114,14 +115,20 @@ prepare() {
   patch -Np1 -i ../use-oauth2-client-switches-as-default.patch
 
   # Upstream fixes
-  patch -Np1 -i ../free-the-X11-pixmap-in-the-NativePixmapEGLX11Bind.patch
+  patch -Np1 -i ../libxml2-2.12.patch
+
+  # Fix build with ICU 74
+  patch -Np1 -i ../icu-74.patch
+
+  # Drop compiler flags that need newer clang
+  patch -Np1 -i ../drop-flags-unsupported-by-clang16.patch
 
   # Fixes for building with libstdc++ instead of libc++
-  patch -Np1 -i ../chromium-patches-*/chromium-114-maldoca-include.patch
-  patch -Np1 -i ../chromium-patches-*/chromium-114-ruy-include.patch
-  patch -Np1 -i ../chromium-patches-*/chromium-114-vk_mem_alloc-include.patch
-  patch -Np1 -i ../chromium-patches-*/chromium-117-material-color-include.patch
-  patch -Np1 -i ../chromium-patches-*/chromium-118-SensorReadingField-include.patch
+  #patch -Np1 -i ../chromium-patches-*/chromium-114-ruy-include.patch
+  #patch -Np1 -i ../chromium-patches-*/chromium-117-material-color-include.patch
+  patch -Np1 -i ../chromium-patches-*/chromium-119-at-spi-variable-consumption.patch
+  patch -Np1 -i ../chromium-patches-*/chromium-119-clang16.patch
+  #patch -Np1 -i ../chromium-patches-*/chromium-120-std-nullptr_t.patch
 
   # ArchPOWER patchset
   sh ${srcdir}/archpower-chromium-patchset-${_archpower_patchset}/apply.sh
@@ -164,7 +171,6 @@ build() {
 
   cd chromium-$pkgver
 
-  #export PATH=/usr/lib/ccache/bin:/usr/lib/llvm14/bin:$PATH
   export CC=clang
   export CXX=clang++
   export AR=ar
@@ -185,7 +191,7 @@ build() {
     'proprietary_codecs=true'
     'rtc_use_pipewire=true'
     'link_pulseaudio=true'
-    'use_custom_libcxx=false'
+    'use_custom_libcxx=true' # https://github.com/llvm/llvm-project/issues/61705
     'use_sysroot=false'
     'use_system_libffi=true'
     'enable_hangout_services_extension=true'
@@ -193,6 +199,7 @@ build() {
     'enable_nacl=false'
     'enable_rust=false'
     "google_api_key=\"$_google_api_key\""
+    'use_qt=false'
   )
 
   case "${CARCH}" in
@@ -201,7 +208,6 @@ build() {
         'enable_swiftshader=false'
         'dawn_use_swiftshader=false'
         'use_system_libdrm=true'
-        'use_qt=false'
       )
     ;;
   esac
@@ -291,7 +297,6 @@ package() {
   case "${CARCH}" in
     x86_64)
       toplevel_files+=(
-        libqt5_shim.so
         libvk_swiftshader.so
         vk_swiftshader_icd.json
       )
