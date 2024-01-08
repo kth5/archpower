@@ -4,14 +4,17 @@
 # Contributor: Dan McGee <dan@archlinux.org>
 
 _upstream_name=license-list-data
-_upstream_version=3.21
+_upstream_version=3.22
 pkgname=licenses
-pkgver=20231011
+pkgver=20231215
 pkgrel=1
 pkgdesc="A set of common license files"
 arch=(any)
 license=(custom:none)
 url="https://www.archlinux.org/"
+makedepends=(
+  jq
+)
 source=(
   $_upstream_name-$_upstream_version.tar.gz::https://github.com/spdx/$_upstream_name/archive/refs/tags/v$_upstream_version.tar.gz
   https://www.gnu.org/licenses/agpl-3.0.txt
@@ -22,7 +25,7 @@ source=(
   https://www.gnu.org/licenses/lgpl-2.1.txt
   https://www.gnu.org/licenses/lgpl-3.0.txt
 )
-sha512sums=('f271cf86b061262c8e4be8ff6ebaa98cf039f50489008880549fc6a07a0abd58626e7d388b8962b818ccaa05502fedb03fad83f2b8b0ae3dd8d6bc413067f60a'
+sha512sums=('b213fe66699770d75a4c994a01a5c08325751423516c2fb871088a47e7e7ce605736064f5ce3a63dc1d3c462271832db7bc464ac968df1888f9823787964c786'
             '3568a76677f3d55dbbc7fc33c4073b4714cc6f68d92cd842a9ca2b230e8bd2140e59c3fc3cce34be34ffed78d75ab6e9d991ba59bf7c4addde7fb96648d3375d'
             '22d2414762188840be68198978b9ece122813d1cac522632b8fa8315749335b43b1b58a6475fec0ef593a7bc568368526a90e199999808a118a7c6bb55906ac1'
             '22d46818d3998ad841f537af4de7c50440dd918099fb6c5d4ab324cd71dc03066bfe1b67210a5efde77abd1d97b88da3c3dbfc39a24ae7248ee2d64e7f0fe6bb'
@@ -30,7 +33,7 @@ sha512sums=('f271cf86b061262c8e4be8ff6ebaa98cf039f50489008880549fc6a07a0abd58626
             'd361e5e8201481c6346ee6a886592c51265112be550d5224f1a7a6e116255c2f1ab8788df579d9b8372ed7bfd19bac4b6e70e00b472642966ab5b319b99a2686'
             '1bca76c9f2f559a7851c278650125cd4f44a7ae4a96ceee6a6ba81d34d28fe7d6125c5ee459fef729b6a2a0eba3075c0841c8a156b3a26f66194f77f7d49151c'
             '6a21e9f6706dacb99162dd4c70ec704e3fdf283b93ca2cc1521e08e55e0727db4c7384d027d54739f100cd26c8d3d5be717715c6b21086a9bb22efb893c34fcf')
-b2sums=('f4f762da3c7c286596e1e047c6e083017e2662334ab039faeb57e0947ab700e0c8540727375c2170a35bac5b983fd80e8824ebbe5b051a5e23be0f7bdcb173ed'
+b2sums=('751d4a31a74b1f0c6831b2e2ad7b361fddca6f9e71f58f57b2dc4fdf13f3ad2a63c652d0333e97d25c1748b7ced62db0b799cc5421c7ed4e117b46fa0869bf3c'
         'b6829320f725e3e45c4807ef5deb4738a691fb3ab146d8531b81fdbccd8376a826c8ec76165985cdf37d534f68e395652c96841ba7636c4bd34c49b7c7b3a9ec'
         'a580eceb4f7514964ef00e8c5130b9568fb2cf99d9bef0222662fa994af7b1634c1034c846eac9d63c21b67c4f94f91b79d144b1d3b4a856ca10243548407b84'
         '85947e91ba1da3f15c1d2c55f592aaaa1ede964ca8f48c9a68799c7a405a8f43b927ce9bac65c893e3b4c7925e879bdfcc852e46f03ae04e48b036fdff6c29f7'
@@ -41,13 +44,17 @@ b2sums=('f4f762da3c7c286596e1e047c6e083017e2662334ab039faeb57e0947ab700e0c854072
 
 prepare() {
   local license
+  touch known_spdx_license_exceptions.txt known_spdx_license_identifiers.txt
 
-  # create list of known SPDX license identifiers
-  {
-    for license in "$_upstream_name-$_upstream_version/text/"*.txt; do
-      printf "%s\n" "$(basename "${license//.txt/}")"
-    done
-  } > known_spdx_license_identifiers.txt
+  # create list of known, non-deprecated SPDX license identifiers
+  for license in $(jq -r '.licenses[] | select(.isDeprecatedLicenseId == false) | .licenseId' $_upstream_name-$_upstream_version/json/licenses.json); do
+    printf "%s\n" "$license" >> known_spdx_license_identifiers.txt
+  done
+
+  # create list of known SPDX exception identifiers
+  for license in $(jq -r '.exceptions[] | .licenseExceptionId' $_upstream_name-$_upstream_version/json/exceptions.json); do
+    printf "%s\n" "$license" >> known_spdx_license_exceptions.txt
+  done
 }
 
 package() {
@@ -122,8 +129,6 @@ package() {
     GFDL-1.3-or-later
     GPL-2.0-only
     GPL-2.0-or-later
-    GPL-3.0-linking-exception
-    GPL-3.0-linking-source-exception
     GPL-3.0-only
     GPL-3.0-or-later
     GPL-CC-1.0
@@ -131,7 +136,6 @@ package() {
     LGPL-2.0-or-later
     LGPL-2.1-only
     LGPL-2.1-or-later
-    LGPL-3.0-linking-exception
     LGPL-3.0-only
     LGPL-3.0-or-later
     LGPLLR
@@ -142,7 +146,6 @@ package() {
     LPPL-1.3c
     MPL-1.0
     MPL-1.1
-    MPL-2.0-no-copyleft-exception
     MPL-2.0
     PHP-3.01
     PHP-3.0
@@ -154,16 +157,27 @@ package() {
     ZPL-2.0
     ZPL-2.1
   )
-  local legacy_license_dir="$pkgdir/usr/share/licenses/common"
+  local standard_exceptions=(
+    GPL-3.0-linking-exception
+    GPL-3.0-linking-source-exception
+    LGPL-3.0-linking-exception
+    MPL-2.0-no-copyleft-exception
+  )
 
   for license in "${standard_licenses[@]}"; do
     install -vDm 644 "$_upstream_name-$_upstream_version/text/$license.txt" -t "$pkgdir/usr/share/licenses/spdx/"
   done
+  for license in "${standard_exceptions[@]}"; do
+    install -vDm 644 "$_upstream_name-$_upstream_version/text/$license.txt" -t "$pkgdir/usr/share/licenses/spdx/"
+  done
+
   install -vDm 644 known_spdx_license_identifiers.txt -t "$pkgdir/usr/share/licenses/"
+  install -vDm 644 known_spdx_license_exceptions.txt -t "$pkgdir/usr/share/licenses/"
 
   # NOTE: all below license files and directories are provided for **legacy** compatibility only!
   #       Once all use in relevant downstreams have been removed, they will be deleted.
 
+  local legacy_license_dir="$pkgdir/usr/share/licenses/common"
   install -vDm 644 agpl-3.0.txt "$legacy_license_dir/"AGPL3/license.txt
   ln -s AGPL3 "$legacy_license_dir/"AGPL
 
