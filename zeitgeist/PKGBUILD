@@ -5,46 +5,96 @@
 
 pkgname=zeitgeist
 pkgver=1.0.4
-pkgrel=2
+pkgrel=3
 pkgdesc="Service logging user activities and events"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://launchpad.net/zeitgeist/"
-license=(GPL2 LGPL2.1)
-depends=(json-glib telepathy-glib gtk3 xapian-core sqlite)
-makedepends=(gobject-introspection vala raptor python-rdflib git)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+license=(
+  "BSD-3-Clause OR CC-BY-3.0"
+  GPL-3.0-or-later
+  LGPL-2.1-or-later
+  LGPL-3.0-or-later
+)
+depends=(
+  gtk3
+  json-glib
+  sqlite
+  telepathy-glib
+  xapian-core
+)
+makedepends=(
+  git
+  gobject-introspection
+  python-rdflib
+  raptor
+  vala
+)
+checkdepends=(xorg-server-xvfb)
+optdepends=('python: Python bindings')
 provides=(zeitgeist-datahub)
 conflicts=(zeitgeist-datahub)
 replaces=(zeitgeist-datahub)
-_commit=8b89364c077b46734d193c5b8a80f83b0fc917dd
-source=("git+https://gitlab.freedesktop.org/zeitgeist/zeitgeist#commit=$_commit")
-sha256sums=('SKIP')
-validpgpkeys=('E4884AEEDE4CC02043C3D8045DECDBA89270E723') #Rico Tzschichholz <ricotz@ubuntu.com>
+_commit=8b89364c077b46734d193c5b8a80f83b0fc917dd  # tags/v1.0.4^0
+source=(
+  "git+https://gitlab.freedesktop.org/zeitgeist/zeitgeist.git#commit=$_commit"
+)
+b2sums=('SKIP')
+validpgpkeys=(
+  E4884AEEDE4CC02043C3D8045DECDBA89270E723  # Rico Tzschichholz <ricotz@ubuntu.com>
+)
 
 pkgver() {
   cd $pkgname
-  git describe --tags | sed 's/^v//;s/-/+/g'
+  git describe --tags | sed 's/^v//;s/[^-]*-g/r&/;s/-/+/g'
 }
 
 prepare() {
   cd $pkgname
+
+  # Fix some crashes
+  # https://gitlab.freedesktop.org/zeitgeist/zeitgeist/issues/19
+  # https://gitlab.freedesktop.org/zeitgeist/zeitgeist/issues/26
+  git cherry-pick -n 1be2a5fff77cdf61c843edc8356dfdef3fd2dbfc \
+                     33ab4cce74857f928382ba6cfada111a64dafe88
+
   autoreconf -fi
 }
 
 build() {
+  local configure_options=(
+    --prefix=/usr
+    --sysconfdir=/etc
+    --localstatedir=/var
+    --libexecdir=/usr/lib
+    --enable-fts
+  )
+
   cd $pkgname
-  ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
-    --libexecdir=/usr/lib --enable-fts
+  ./configure "${configure_options[@]}"
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
 }
 
+_check() {
+  export ZEITGEIST_DATA_PATH="$PWD"
+
+  ./src/zeitgeist-daemon --no-datahub --log-level=debug &
+  _z=$!
+
+  trap "kill $_z; wait" EXIT
+
+  make -k check VERBOSE=1
+}
+
 check() {
   cd $pkgname
-  # Log test fails in chroot, as we have no X and no proper dbus
-  make -k check || :
+  dbus-run-session xvfb-run -s '-nolisten local' \
+    bash -c "$(declare -f _check); _check"
 }
 
 package() {
   cd $pkgname
   make DESTDIR="$pkgdir" install
 }
+
+# vim:set sw=2 sts=-1 et:
