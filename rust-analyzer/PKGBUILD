@@ -4,11 +4,11 @@
 # Contributor: Sergey A. <murlakatamenka@disroot.org>
 
 pkgname=rust-analyzer
-_pkgver=2023-10-23
+_pkgver=2023-12-11
 pkgver=${_pkgver//-}
 pkgrel=1
 pkgdesc='Rust compiler front-end for IDEs'
-arch=(x86_64 powerpc64le powerpc64 riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url=https://rust-analyzer.github.io/
 license=('Apache' 'MIT')
 depends=('gcc-libs' 'rust-src')
@@ -22,13 +22,20 @@ export CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
 # Use debug
 export CARGO_PROFILE_RELEASE_DEBUG=2
 
+MYARCH=${CARCH}
+case "${CARCH}" in
+  riscv64) MYARCH=riscv64gc ;;
+  powerpc)
+    # fails to link otherwise due to 32bit limitations
+    export RUSTFLAGS="-C opt-level=2"
+    export CARGO_PROFILE_RELEASE_LTO=false
+    export CARGO_PROFILE_RELEASE_DEBUG=0
+  ;;
+esac
+
 prepare() {
   cd $pkgname
 
-  case "${CARCH}" in
-    riscv64) MYARCH=riscv64gc ;;
-    *)       MYARCH=${CARCH} ;;
-  esac
   cargo fetch --locked --target "$MYARCH-unknown-linux-gnu"
 }
 
