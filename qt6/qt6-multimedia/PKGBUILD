@@ -1,0 +1,89 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgbase=qt6-multimedia
+pkgname=(qt6-multimedia
+         qt6-multimedia-ffmpeg
+         qt6-multimedia-gstreamer)
+_qtver=6.6.1
+pkgver=${_qtver/-/}
+pkgrel=1
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+url='https://www.qt.io'
+license=(GPL3 LGPL3 FDL custom)
+pkgdesc='Classes for audio, video, radio and camera functionality'
+depends=(gcc-libs
+         glibc
+         libpulse
+         qt6-base)
+makedepends=(cmake
+             ffmpeg
+             gst-plugins-base
+             libxrandr
+             ninja
+             qt6-declarative
+             qt6-quick3d
+             qt6-shadertools)
+groups=(qt6)
+_pkgfn=${pkgname/6-/}-everywhere-src-$_qtver
+source=(https://download.qt.io/official_releases/qt/${pkgver%.*}/$_qtver/submodules/$_pkgfn.tar.xz)
+sha256sums=('7ee4e2296f5714961692f6ded568d3e3fde3687cee48e9d717194b5d1360db4a')
+
+build() {
+  cmake -B build -S $_pkgfn -G Ninja \
+    -DCMAKE_MESSAGE_LOG_LEVEL=STATUS \
+    -DCMAKE_CXX_FLAGS="$CXXFLAGS -ffat-lto-objects"
+  cmake --build build
+}
+
+package_qt6-multimedia() {
+  depends+=(qt6-multimedia-backend)
+  optdepends=('qt6-declarative: QML bindings'
+              'qt6-quick3d: for QtQuick3DAudio')
+
+  DESTDIR="$pkgdir" cmake --install build
+# Split plugins
+  rm -r "$pkgdir"/usr/lib/qt6/plugins/
+  rm "$pkgdir"/usr/lib/cmake/Qt6Multimedia/Qt6Q{FFmpeg,Gstreamer}*
+
+  install -d "$pkgdir"/usr/share/licenses
+  ln -s /usr/share/licenses/qt6-base "$pkgdir"/usr/share/licenses/$pkgname
+}
+
+package_qt6-multimedia-gstreamer() {
+  pkgdesc='Gstreamer backend for qt6-multimedia'
+  depends=(gcc-libs
+           glib2
+           glibc
+           gst-plugins-base
+           gstreamer
+           libglvnd
+           qt6-base
+           qt6-multimedia)
+  provides=(qt6-multimedia-backend)
+  groups=()
+  optdepends=('gst-plugins-good: camera support, additional plugins'
+              'gst-plugins-bad: camera support, additional plugins'
+              'gst-plugins-ugly: additional plugins'
+              'gst-libav: additional plugins')
+  
+  DESTDIR="$pkgdir" cmake --install build/src/plugins/multimedia/gstreamer    
+}
+
+package_qt6-multimedia-ffmpeg() {
+  pkgdesc='FFMpeg backend for qt6-multimedia'
+  depends=(ffmpeg
+           gcc-libs
+           glibc
+           libglvnd
+           libx11
+           libxext
+           libxrandr
+           qt6-base
+           qt6-multimedia)
+  provides=(qt6-multimedia-backend)
+  groups=()
+
+  DESTDIR="$pkgdir" cmake --install build/src/plugins/multimedia/ffmpeg
+}
