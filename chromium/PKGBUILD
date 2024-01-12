@@ -5,20 +5,23 @@
 # Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
 
 pkgname=chromium
-pkgver=120.0.6099.109
-pkgrel=2
+pkgver=120.0.6099.216
+pkgrel=1
 _launcher_ver=8
 _manual_clone=0
-_archpower_patchset=120.0
+_archpower_patchset=120.0.1
 pkgdesc="A web browser built for speed, simplicity, and security"
-arch=(x86_64 powerpc64le)
+arch=(x86_64 powerpc64le) #FIXME: riscv64)
 url="https://www.chromium.org/Home"
 license=('BSD')
 depends=('gtk3' 'nss' 'alsa-lib' 'xdg-utils' 'libxss' 'libcups' 'libgcrypt'
          'ttf-liberation' 'systemd' 'dbus' 'libpulse' 'pciutils' 'libva'
          'libffi' 'desktop-file-utils' 'hicolor-icon-theme')
-makedepends=('python' 'gn' 'ninja' 'clang' 'lld' 'gperf' 'nodejs' 'pipewire'
+makedepends=('python' 'gn' 'ninja' 'clang' 'lld' 'gperf' 'pipewire'
              'java-runtime-headless' 'git')
+makedepends_powerpc64le=('nodejs')
+makedepends_riscv64=('nodejs-lts-iron')
+makedepends_x86_64=('nodejs')
 optdepends=('pipewire: WebRTC desktop sharing under Wayland'
             'kdialog: support for native dialogs in Plasma'
             'gtk4: for --gtk-version=4 (GTK4 IME might work better on Wayland)'
@@ -36,14 +39,14 @@ source=(https://commondatastorage.googleapis.com/chromium-browser-official/chrom
 validpgpkeys=(
   8D3D6CE8D4F0625F4D7109022205B7A06C2656A3 # Alexander Baleck <alex.bldck@gmail.com>
 )
-sha256sums=('87c00c525ee07c2233b78dbece1496b697f686244a67fac2c71e4a30bd96849b'
+sha256sums=('7e7bea15bf56f3cc920bb015fed1a1b1368267299e132e795935c5cc604adfc0'
             '213e50f48b67feb4441078d50b0fd431df34323be15be97c55302d3fdac4483a'
             'ffee1082fbe3d0c9e79dacb8405d5a0e1aa94d6745089a30b093f647354894d2'
             '1808df5ba4d1e2f9efa07ac6b510bec866fa6d60e44505d82aea3f6072105a71'
             'ff9ebd86b0010e1c604d47303ab209b1d76c3e888c423166779cefbc22de297f'
             '8d1cdf3ddd8ff98f302c90c13953f39cd804b3479b13b69b8ef138ac57c83556'
             'e393174d7695d0bafed69e868c5fbfecf07aa6969f3b64596d0bae8b067e1711'
-            'bbfcd36f5bacaee83941e89b18a631559b4e3397483e6d820ebc98d4f45fa22b'
+            'e1282ee435f626600fa5a00dcbbf8b8ceb87db012f6dd945a62fdf2f7cefcae3'
             'SKIP')
 
 if (( _manual_clone )); then
@@ -124,18 +127,18 @@ prepare() {
   patch -Np1 -i ../drop-flags-unsupported-by-clang16.patch
 
   # Fixes for building with libstdc++ instead of libc++
-  #patch -Np1 -i ../chromium-patches-*/chromium-114-ruy-include.patch
-  #patch -Np1 -i ../chromium-patches-*/chromium-117-material-color-include.patch
   patch -Np1 -i ../chromium-patches-*/chromium-119-at-spi-variable-consumption.patch
   patch -Np1 -i ../chromium-patches-*/chromium-119-clang16.patch
-  #patch -Np1 -i ../chromium-patches-*/chromium-120-std-nullptr_t.patch
 
-  # ArchPOWER patchset
-  sh ${srcdir}/archpower-chromium-patchset-${_archpower_patchset}/apply.sh
+  case "${CARCH}" in
+    powerpc64le|riscv64)
+      sh ${srcdir}/archpower-chromium-patchset-${_archpower_patchset}/apply-${CARCH}.sh
+    ;;
+  esac
 
   # upstream does not ship vpx properly, regenerate
   case "${CARCH}" in
-    powerpc64*)
+    powerpc64le|riscv64)
       pushd third_party/libvpx
       mkdir -p source/config/linux/ppc64
       sed -i -e "s|^update_readme||g; s|clang-format|${EPREFIX}/bin/true|g" generate_gni.sh
@@ -244,7 +247,7 @@ build() {
   CXXFLAGS=${CXXFLAGS/-Wp,-D_GLIBCXX_ASSERTIONS}
 
   gn gen out/Release --args="${_flags[*]}"
-  ninja -C out/Release chrome chrome_sandbox chromedriver.unstripped
+  ninja ${MAKEFLAGS} -C out/Release chrome chrome_sandbox chromedriver.unstripped
 }
 
 package() {
