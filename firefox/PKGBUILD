@@ -35,7 +35,7 @@ makedepends=(
   llvm
   mesa
   nasm
-  nodejs
+  nodejs-lts-iron
   python
   rust
   unzip
@@ -72,7 +72,8 @@ source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-
         0001-LTO-Only-enable-LTO-for-Rust-when-complete-build-use.patch
         0002-bmo-1196777-Set-GDK_FOCUS_CHANGE_MASK.patch
         0003-enable-vaapi-on-all-amd-cards.patch
-        0004-big-endian-image-decoders.patch)
+        0004-big-endian-image-decoders.patch
+        0005-build-Disable-Werror.patch)
 b2sums=('66ac2f1071ad8276b61946465db6d71cbe0a43c154fb57db67670e8f88183893fe7c7c8284388242964fd2883e50f40f29c879ebec3a2d759d20c356f27ca151'
         'SKIP'
         '51d7eb22cb568f0437ece2433091d8b54012324edd2fe52ec52cc00f1ad0d4bd84a4d549d78b4d77bbd6ae1c1e7d029d9d4dbff61c60f714362ef791f09fba8b'
@@ -82,7 +83,8 @@ b2sums=('66ac2f1071ad8276b61946465db6d71cbe0a43c154fb57db67670e8f88183893fe7c7c8
         '6dc2566cb910a35ecc943d56aac5b0a863681513e4e3f6b95e5c718fe13e6b4e6d6b8e3efa786e9647e71aee71190c284b2911f0753c01680090642562fbc86d'
         'ebfaf3caa444cf21c6cc49e53682a686916addf11e5e12ebf3c4efff8236cce8f135e05321eff1a45d6d1f03cd548b5d75dfa6fe00a09e7a0a00e2294ffa001f'
         'f565ea3fb687f19a0660429cd9b9f9280a9a0c28407c4c70544a3d0e74dcf05b158facd1e7b9e16635f623bf08876e495e4ce398b26f7ffc5c20c1f6c18a4702'
-        'da4b0953f705a82a228c2bb05d9aa82c2263d5176c40012895fd3e6ff9c1110fb595158521f3ddaa0ead6c6dfa098e2384e810aa90af8a7270163d232ad38cb6')
+        'da4b0953f705a82a228c2bb05d9aa82c2263d5176c40012895fd3e6ff9c1110fb595158521f3ddaa0ead6c6dfa098e2384e810aa90af8a7270163d232ad38cb6'
+        'e4b6afe78e298b76cf5c8d618cb15a1de43cfc790d2f4c7be0a597019f2a182bd70843b2e23d99d5e382a2bc2cc38fcf7cd0735b16dd32146eaf73d680560eab')
 validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
@@ -105,8 +107,14 @@ prepare() {
   patch -Np1 -i ${srcdir}/0002-bmo-1196777-Set-GDK_FOCUS_CHANGE_MASK.patch
   patch -Np1 -i ${srcdir}/0003-enable-vaapi-on-all-amd-cards.patch
   patch -Np0 -i ${srcdir}/0004-big-endian-image-decoders.patch
-  patch -Np1 -i ${srcdir}/firefox-pgo.patch
-  patch -Np1 -i ${srcdir}/firefox-webrtc-p9.patch
+  patch -Np1 -i ${srcdir}/0005-build-Disable-Werror.patch
+
+  case "${CARCH}" in
+    powerpc64le)
+      patch -Np1 -i ${srcdir}/firefox-pgo.patch
+      patch -Np1 -i ${srcdir}/firefox-webrtc-p9.patch
+    ;;
+  esac
 
   sed -i 's/\("files":{\)[^}]*/\1/' third_party/rust/num-traits/.cargo-checksum.json
 
@@ -174,9 +182,9 @@ END
 
   case "${CARCH}" in
     riscv64)
-      echo "ac_add_options --disable-release" >> ${srcdir}/mozconfig
+      echo "ac_add_options --enable-release" >> ${srcdir}/mozconfig
       echo "ac_add_options --disable-debug" >> ${srcdir}/mozconfig
-      echo "ac_add_options --disable-jit" >> ${srcdir}/mozconfig
+      echo "ac_add_options --enable-jit" >> ${srcdir}/mozconfig
       echo "ac_add_options --without-wasm-sandboxed-libraries" >> ${srcdir}/mozconfig
       rm -fv ${srcdir}/firefox-${pkgver}/.cargo/config
     ;;
@@ -226,8 +234,13 @@ build() {
   ulimit -n 4096
 
   rm -f old-configure
-  xvfb-run -s "-screen 0 1920x1080x24 -nolisten local" \
-  ./mach build
+  case "${CARCH}" in
+    riscv64) ./mach build ;;
+    *)
+      xvfb-run -s "-screen 0 1920x1080x24 -nolisten local" \
+      ./mach build
+    ;;
+  esac
 
   #echo "Building symbol archive..."
   #xvfb-run -s "-screen 0 1920x1080x24 -nolisten local" \
