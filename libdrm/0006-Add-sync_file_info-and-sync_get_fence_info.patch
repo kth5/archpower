@@ -1,0 +1,148 @@
+From a12e3b4490c182ed506f59eda01f1bd0919720f1 Mon Sep 17 00:00:00 2001
+From: Brendan King <Brendan.King@imgtec.com>
+Date: Mon, 9 Mar 2020 14:52:17 +0000
+Subject: [PATCH 6/6] Add sync_file_info and sync_get_fence_info
+
+For pre-4.7 kernels, sync_file_info calls the SYNC_IOC_FENCE_INFO ioctl,
+and converts the data to SYNC_IOC_FILE_INFO form. For newer kernels,
+sync_file_info returns data from the SYNC_IOC_FILE_INFO ioctl.
+
+This patch depends on patch "Add sync_fence_info and sync_pt_info",
+which added legacy sync info support, using the structure and ioctl
+definitions at the top of the patch, as well as the sync_pt_info
+function.
+---
+ libsync.h | 117 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 117 insertions(+)
+
+diff --git a/libsync.h b/libsync.h
+index 44f7330..54acb6f 100644
+--- a/libsync.h
++++ b/libsync.h
+@@ -351,6 +351,123 @@ static inline void sync_fence_info_free(struct sync_fence_info_data *info)
+ {
+ 	free(info);
+ }
++
++static inline struct sync_fence_info *sync_get_fence_info(
++					struct sync_file_info *file_info)
++{
++	return (struct sync_fence_info *)(uintptr_t)file_info->sync_fence_info;
++}
++
++static inline struct sync_file_info *file_info_from_info_data(
++					struct sync_fence_info_data *info)
++{
++	struct sync_pt_info *pt_info = NULL;
++	uint32_t num_fences = 0;
++	struct sync_file_info *file_info;
++	struct sync_fence_info *fence_info;
++	uint32_t i;
++
++	while ((pt_info = sync_pt_info(info, pt_info)) != NULL)
++		num_fences++;
++
++	file_info = calloc(1, sizeof(*file_info) + num_fences *
++				sizeof(*fence_info));
++	if (!file_info)
++		return NULL;
++
++	strncpy(file_info->name, info->name, sizeof(file_info->name));
++	file_info->status = info->status;
++	file_info->num_fences = num_fences;
++	file_info->sync_fence_info = (uint64_t)(uintptr_t)(file_info + 1);
++
++	fence_info = sync_get_fence_info(file_info);
++	for (i = 0; i < num_fences; i++) {
++		pt_info = sync_pt_info(info, pt_info);
++		assert(pt_info);
++
++		strncpy(fence_info->obj_name, pt_info->obj_name,
++			sizeof(fence_info->obj_name));
++		strncpy(fence_info->driver_name, pt_info->driver_name,
++			sizeof(fence_info->driver_name));
++		fence_info->status = pt_info->status;
++		fence_info->timestamp_ns = pt_info->timestamp_ns;
++
++		fence_info++;
++	}
++
++	return file_info;
++}
++
++static inline struct sync_file_info *sync_legacy_file_info(int fd)
++{
++	const uint32_t len = 4096;
++	struct sync_fence_info_data *info = malloc(len);
++	struct sync_file_info *file_info;
++	int ret;
++
++	if (!info)
++		return NULL;
++
++	info->len = len;
++
++	do {
++		ret = ioctl(fd, SYNC_IOC_LEGACY_FENCE_INFO, info);
++	} while (ret == -1 && (errno == EINTR || errno == EAGAIN));
++
++	if (ret < 0) {
++		free(info);
++		return NULL;
++	}
++
++	file_info = file_info_from_info_data(info);
++
++	free(info);
++
++	return file_info;
++}
++
++static inline void sync_file_info_free(struct sync_file_info *file_info)
++{
++	free(file_info);
++}
++
++static inline struct sync_file_info *sync_file_info(int fd)
++{
++	struct sync_file_info initial_info = {""};
++	struct sync_file_info *file_info;
++	int ret;
++
++	do {
++		ret = ioctl(fd, SYNC_IOC_FILE_INFO, &initial_info);
++	} while (ret == -1 && (errno == EINTR || errno == EAGAIN));
++
++	if (ret < 0) {
++		if (errno == ENOTTY)
++			return sync_legacy_file_info(fd);
++		else
++			return NULL;
++	}
++
++	file_info = calloc(1, sizeof(*file_info) + initial_info.num_fences *
++				sizeof(struct sync_fence_info));
++	if (!file_info)
++		return NULL;
++
++	file_info->num_fences = initial_info.num_fences;
++	file_info->sync_fence_info = (uint64_t)(uintptr_t)(file_info + 1);
++
++	do {
++		ret = ioctl(fd, SYNC_IOC_FILE_INFO, file_info);
++	} while (ret == -1 && (errno == EINTR || errno == EAGAIN));
++
++	if (ret < 0) {
++		sync_file_info_free(file_info);
++		return NULL;
++	}
++
++	return file_info;
++}
++
+ #if defined(__cplusplus)
+ }
+ #endif
+-- 
+2.7.4
+

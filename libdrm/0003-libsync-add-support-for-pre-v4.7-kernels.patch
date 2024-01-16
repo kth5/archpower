@@ -1,0 +1,92 @@
+From fbe2100a295bafe2567e976fce5e0664b854e8b4 Mon Sep 17 00:00:00 2001
+From: Brendan King <Brendan.King@imgtec.com>
+Date: Tue, 13 Jun 2017 15:52:44 +0100
+Subject: [PATCH 3/6] libsync: add support for pre-v4.7 kernels
+
+Add support for the the sync merge ioctl supported by older kernels.
+---
+ libsync.h | 44 +++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 41 insertions(+), 3 deletions(-)
+
+diff --git a/libsync.h b/libsync.h
+index f1a2f96..c3b8a38 100644
+--- a/libsync.h
++++ b/libsync.h
+@@ -40,6 +40,10 @@
+ extern "C" {
+ #endif
+ 
++#ifndef SYNC_IOC_MAGIC
++#define SYNC_IOC_MAGIC		'>'
++#endif
++
+ #ifndef SYNC_IOC_MERGE
+ /* duplicated from linux/sync_file.h to avoid build-time dependency
+  * on new (v4.7) kernel headers.  Once distro's are mostly using
+@@ -53,10 +57,22 @@ struct sync_merge_data {
+ 	uint32_t	flags;
+ 	uint32_t	pad;
+ };
+-#define SYNC_IOC_MAGIC		'>'
+ #define SYNC_IOC_MERGE		_IOWR(SYNC_IOC_MAGIC, 3, struct sync_merge_data)
+ #endif
+ 
++#ifndef SYNC_IOC_LEGACY_MERGE
++/* the legacy definitions are based on the contents of
++ * drivers/staging/android/uapi/sync.h in the v4.4 kernel.
++ */
++struct sync_legacy_merge_data {
++	int32_t	fd2;
++	char	name[32];
++	int32_t	fence;
++};
++
++#define SYNC_IOC_LEGACY_MERGE	_IOWR(SYNC_IOC_MAGIC, 1, \
++	struct sync_legacy_merge_data)
++#endif
+ 
+ static inline int sync_wait(int fd, int timeout)
+ {
+@@ -83,6 +99,24 @@ static inline int sync_wait(int fd, int timeout)
+ 	return ret;
+ }
+ 
++static inline int sync_legacy_merge(const char *name, int fd1, int fd2)
++{
++	struct sync_legacy_merge_data data;
++	int ret;
++
++	data.fd2 = fd2;
++	strncpy(data.name, name, sizeof(data.name));
++
++	do {
++		ret = ioctl(fd1, SYNC_IOC_LEGACY_MERGE, &data);
++	} while (ret == -1 && (errno == EINTR || errno == EAGAIN));
++
++	if (ret < 0)
++		return ret;
++
++	return data.fence;
++}
++
+ static inline int sync_merge(const char *name, int fd1, int fd2)
+ {
+ 	struct sync_merge_data data = {0};
+@@ -95,8 +129,12 @@ static inline int sync_merge(const char *name, int fd1, int fd2)
+ 		ret = ioctl(fd1, SYNC_IOC_MERGE, &data);
+ 	} while (ret == -1 && (errno == EINTR || errno == EAGAIN));
+ 
+-	if (ret < 0)
+-		return ret;
++	if (ret < 0) {
++		if (errno == ENOTTY)
++			return sync_legacy_merge(name, fd1, fd2);
++		else
++			return ret;
++	}
+ 
+ 	return data.fence;
+ }
+-- 
+2.7.4
+

@@ -1,0 +1,168 @@
+From 001ef51239541dd91f854ea5a5f569f2b338ad82 Mon Sep 17 00:00:00 2001
+From: Luigi Santivetti <luigi.santivetti@imgtec.com>
+Date: Tue, 24 Sep 2019 13:09:31 +0100
+Subject: [PATCH 5/6] xf86drm: add support for populating drm formats
+
+This change lets libdrm take care of allocation and deallocation of
+the drmModePlane formats on behalf of clients. Weston, xserver and
+others can use this functionaly instead of querying and parsing the
+drm blob.
+
+NOTE: this change is based on weston/kms.c
+
+Change-Id: Id318322ee6b8f02442a37797669edd0363a58d88
+Signed-off-by: Luigi Santivetti <luigi.santivetti@imgtec.com>
+---
+ xf86drmMode.c | 108 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ xf86drmMode.h |  12 +++++++
+ 2 files changed, 120 insertions(+)
+
+Index: libdrm-2.4.114/xf86drmMode.c
+===================================================================
+--- libdrm-2.4.114.orig/xf86drmMode.c
++++ libdrm-2.4.114/xf86drmMode.c
+@@ -858,6 +858,114 @@ drm_public bool drmModeFormatModifierBlo
+ 	return has_fmt;
+ }
+ 
++static inline uint32_t *
++formats_ptr(struct drm_format_modifier_blob *blob)
++{
++	return (uint32_t *)(((uint8_t *)blob) + blob->formats_offset);
++}
++
++static inline struct drm_format_modifier *
++modifiers_ptr(struct drm_format_modifier_blob *blob)
++{
++	return (struct drm_format_modifier *)(((uint8_t *)blob) +
++					      blob->modifiers_offset);
++}
++
++drm_public void
++drmModeFreeFormats(drmModeFormatsPtr drm_mode_fmt)
++{
++	uint32_t i;
++
++	if (!drm_mode_fmt)
++		return;
++
++	for (i = 0; i < drm_mode_fmt->count; i++)
++		drmFree(drm_mode_fmt->formats[i].modifiers);
++
++	drmFree(drm_mode_fmt);
++}
++
++drm_public int
++drmModePopulateFormats(drmModePropertyBlobPtr blob, drmModeFormatsPtr *out_formats)
++{
++	struct drm_format_modifier_blob *fmt_mod_blob;
++	struct drm_format_modifier *blob_modifiers;
++	drmModeFormatsPtr drm_mode_fmt;
++	uint32_t *blob_formats;
++	uint32_t count_formats;
++	uint32_t i;
++
++	if (!blob || !out_formats)
++		return -EINVAL;
++
++	fmt_mod_blob = blob->data;
++	blob_formats = formats_ptr(fmt_mod_blob);
++	blob_modifiers = modifiers_ptr(fmt_mod_blob);
++
++	if (!fmt_mod_blob->count_formats)
++		return -EINVAL;
++
++	/* The drmModeFormats type supports C versions earlier than C99
++	 * by explicitly defining an array of length 1. Thus, 1 must be
++	 * deducted from the runtime value of fmt_mod_blob->count_formats.
++	 */
++	count_formats = fmt_mod_blob->count_formats - 1;
++	drm_mode_fmt = drmMalloc(sizeof(*drm_mode_fmt) +
++				 sizeof(drm_mode_fmt->formats[0]) * count_formats);
++	if (!drm_mode_fmt)
++		return -errno;
++
++	drm_mode_fmt->count = 0;
++
++	for (i = 0; i < fmt_mod_blob->count_formats; i++) {
++		uint32_t count_valid_modifiers = 0;
++		uint64_t *modifiers = NULL;
++		unsigned j;
++
++		for (j = 0; j < fmt_mod_blob->count_modifiers; j++) {
++			struct drm_format_modifier *mod = &blob_modifiers[j];
++
++			if ((i < mod->offset) || (i > mod->offset + 63))
++				continue;
++			if (!(mod->formats & (1 << (i - mod->offset))))
++				continue;
++
++			modifiers = realloc(modifiers,
++					    (count_valid_modifiers + 1) *
++					    sizeof(*modifiers));
++			if (!modifiers)
++				goto err_allocs;
++
++			modifiers[count_valid_modifiers++] = mod->modifier;
++		}
++
++		/* Couldn't find valid modifiers, fallback to use linear */
++		if (count_valid_modifiers == 0) {
++			modifiers = drmMalloc(sizeof(*modifiers));
++			if (!modifiers)
++				goto err_allocs;
++
++			*modifiers = 0; /* as DRM_FORMAT_MOD_LINEAR */
++			count_valid_modifiers = 1;
++		}
++
++		/* If realloc fails, in order to free all previoulsy allocated
++		 * modifiers, always update drm_mode_fmt->count.
++		 */
++		drm_mode_fmt->count++;
++		drm_mode_fmt->formats[i].format = blob_formats[i];
++		drm_mode_fmt->formats[i].modifiers = modifiers;
++		drm_mode_fmt->formats[i].count_modifiers = count_valid_modifiers;
++	}
++
++	*out_formats = drm_mode_fmt;
++	return 0;
++
++err_allocs:
++	drmModeFreeFormats(drm_mode_fmt);
++	return -errno;
++}
++
+ drm_public void drmModeFreePropertyBlob(drmModePropertyBlobPtr ptr)
+ {
+ 	if (!ptr)
+Index: libdrm-2.4.114/xf86drmMode.h
+===================================================================
+--- libdrm-2.4.114.orig/xf86drmMode.h
++++ libdrm-2.4.114/xf86drmMode.h
+@@ -238,6 +238,15 @@ typedef struct _drmModeFormatModifierIte
+ 	uint64_t mod;
+ } drmModeFormatModifierIterator;
+ 
++typedef struct _drmModeFormats {
++  uint32_t count;
++  struct {
++    uint32_t format;
++    uint32_t count_modifiers;
++    uint64_t *modifiers;
++  } formats[1];
++} drmModeFormats, *drmModeFormatsPtr;
++
+ typedef struct _drmModePlane {
+ 	uint32_t count_formats;
+ 	uint32_t *formats;
+@@ -410,6 +419,9 @@ extern void drmModeFreeProperty(drmModeP
+ extern drmModePropertyBlobPtr drmModeGetPropertyBlob(int fd, uint32_t blob_id);
+ extern bool drmModeFormatModifierBlobIterNext(const drmModePropertyBlobRes *blob,
+ 					      drmModeFormatModifierIterator *iter);
++extern int drmModePopulateFormats(drmModePropertyBlobPtr ptr,
++                                 drmModeFormatsPtr *out_formats);
++extern void drmModeFreeFormats(drmModeFormatsPtr ptr);
+ extern void drmModeFreePropertyBlob(drmModePropertyBlobPtr ptr);
+ extern int drmModeConnectorSetProperty(int fd, uint32_t connector_id, uint32_t property_id,
+ 				    uint64_t value);
