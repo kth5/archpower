@@ -1,27 +1,41 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Sven-Hendrik Haase <svenstaro@archlinux.org>
+# Maintainer: Daniel M. Capella <polyzen@archlinux.org>
+# Contributor: Sven-Hendrik Haase <svenstaro@archlinux.org>
 # Contributor: Jan Koppe <post@jankoppe.de>
 
 pkgname=yarn
-pkgver=1.22.19
+pkgver=1.22.21
 pkgrel=1
 pkgdesc='Fast, reliable, and secure dependency management'
 arch=(any)
-url='https://classic.yarnpkg.com/'
+url=https://classic.yarnpkg.com/
 license=('BSD')
 depends=('nodejs')
-source=("https://github.com/yarnpkg/yarn/releases/download/v$pkgver/yarn-v$pkgver.tar.gz")
-sha512sums=('ff4579ab459bb25aa7c0ff75b62acebe576f6084b36aa842971cf250a5d8c6cd3bc9420b22ce63c7f93a0857bc6ef29291db39c3e7a23aab5adfd5a4dd6c5d71')
+makedepends=('git' 'jq' 'yarn')
+source=("git+https://github.com/${pkgname}pkg/$pkgname.git#tag=v$pkgver")
+b2sums=('SKIP')
+
+build() {
+  cd $pkgname
+  yarn --frozen-lockfile
+  yarn build
+}
 
 package() {
-  cd yarn-v${pkgver}
-  install -dm755  "$pkgdir"/usr/lib/node_modules/yarn
-  cp -R * "$pkgdir"/usr/lib/node_modules/yarn
+  local mod_dir=/usr/lib/node_modules/$pkgname
+  install -d  "$pkgdir"/{usr/bin,$mod_dir/bin}
+  ln -s $mod_dir/bin/$pkgname.js "$pkgdir"/usr/bin/$pkgname
+  ln -s $mod_dir/bin/$pkgname.js "$pkgdir"/usr/bin/${pkgname}pkg
 
-  install -dm755 "$pkgdir"/usr/bin
-  ln -s /usr/lib/node_modules/yarn/bin/yarn.js "$pkgdir"/usr/bin/yarn
-  ln -s /usr/lib/node_modules/yarn/bin/yarn.js "$pkgdir"/usr/bin/yarnpkg
+  cd $pkgname
+  # Prune unnecessary packages
+  cp package.json{,.bak}
+  read -ra devDependencies < <(jq -r '.devDependencies | keys | join(" ")' package.json)
+  yarn remove --frozen-lockfile "${devDependencies[@]}"
+  mv package.json{.bak,}
 
-  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  cp -r lib node_modules package.json "$pkgdir"/$mod_dir
+  install -t "$pkgdir"/$mod_dir/bin bin/$pkgname.js
+  install -Dm644 -t "$pkgdir"/usr/share/doc/$pkgname README.md
+  install -Dm644 -t "$pkgdir"/usr/share/licenses/$pkgname LICENSE
 }
