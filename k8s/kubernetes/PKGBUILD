@@ -2,6 +2,7 @@
 # Maintainer: David Runge <dvzrv@archlinux.org>
 # Maintainer: Morten Linderud <foxboron@archlinux.org>
 
+# NOTE: when updating major or minor version, make sure to upgrade in tandem with the stability guarantees of cri-tools and cri-o
 pkgbase=kubernetes
 pkgname=(
   kube-apiserver
@@ -13,12 +14,12 @@ pkgname=(
   kubelet
   kubernetes-control-plane-common
 )
-pkgver=1.27.4
+pkgver=1.29.0
 pkgrel=1
 pkgdesc="Production-Grade Container Scheduling and Management"
 arch=(x86_64 powerpc64le)
 url="https://kubernetes.io/"
-license=(Apache)
+license=(Apache-2.0)
 makedepends=(
   cni-plugins
   conntrack-tools
@@ -49,7 +50,7 @@ source=(
   kube-scheduler.env
   kube-scheduler.service
 )
-sha512sums=('0558a8760e538aeb29efff54282a2fab613f5e6c16abf8964ab836065a4f40a568dae3caa5c06e172e2643491a63b1056c093421fded8cb9b7a0c0ed10b9f6ec'
+sha512sums=('14876c54a4179936c348c7c5f2e090deaa40a1efc6f8c942eb2feaa644b3d8e64ea3836d4b030d883ff2cd2533d5b4ec319c3fc2418708769ed8b07507b6d16e'
             'e98921d111fabf2c353df589dea0fab57b0b174079483b4092741cc50553a3b765cea4c784e42ad9ab90827581cac028af4fc7a2db5acde1877446882393ae78'
             '5f7132636b6afe9f00dc450c58073c0829942fa44070e7ec5a2c227c485c83f076bdea081d207f926b44d02700be65bf19a61f5d8d1472edd480f980e6ffbc3a'
             'ed5ba22b37eaa9f4950ff3b57d60dd7866fcd5b8bd5197eab3170470528e8d91379483d3eb724589e695184f9b0ed506ebaee73ecca0dc40afdb5f35e79d178a'
@@ -66,7 +67,7 @@ sha512sums=('0558a8760e538aeb29efff54282a2fab613f5e6c16abf8964ab836065a4f40a568d
             'dd4efa137462905f9e29a99d69b747ae35e58ba8152794bfa417325953dd5059bad96fabfabf73ce1ee2310dc4ab4d1b95c8d931d33b81c67addcb614a51be54'
             'ba277f765959ddb8aa0dee5a86cd9df1f40fb3f6ea1001f24825dbf21bd9342981d13894301170431729f76e710f70c23481e4061c64be29517ff497490f1ef3'
             '2c25c0e11a7b2d6d61e03f9afe7ba21f9497495ab02e85f2623ce8c71019fb8a1af16197ab3968d5da050c2188c3e67372aa43322ac91af84f7da61bf73596bc')
-b2sums=('b4f3afe7e96f74cbbb18866234e4ad591fa055bd158c8dad4b17c66b9ff5dfd9ea28bfd4ed5a89433fe58ecf4c86c821b1fb89bfaa5808310c8b72b875ce3fa2'
+b2sums=('81d216a40cbf0d8b1ddc7bac4a0304be2f988500d2861dde7f549ffe08b2d284317c0a8616949bd6cb39836a377abeb55ed4340896f86fc924e61e0b5f5a89b8'
         '94a21e3923396b5a97a1e713419bab1f897ce8a4eedbbc2c0ed82fd1fd909bb69183c349322d2a774afd26c4beeb9972a57c6d4f67ef527c7e0ca7ea20651d43'
         'dbab30d7e1b566027fec9d6a95dd41ed8f64399c39aac07fb4513ce21050eeeb4a226adfd513f76921c305945dfa4a140602ede574dd5eb4cd287e0f2df21714'
         '27a8dcbbe06fa7aea122fc87ca663710ae2179c995270d94e22c905422e2639f3c9c81eef6723467c76366062381d8bd65e84ef79f47fed7c240973a55f5cb0e'
@@ -90,9 +91,6 @@ prepare() {
 }
 
 build() {
-  mkdir ${srcdir}/.tmp
-  export TMPDIR=${srcdir}/.tmp
-
   export CGO_CPPFLAGS="$CPPFLAGS"
   export CGO_CFLAGS="$CFLAGS"
   export CGO_CXXFLAGS="$CXXFLAGS"
@@ -125,7 +123,10 @@ build() {
 package_kubeadm() {
   pkgdesc='A tool for quickly installing Kubernetes and setting up a secure cluster'
   groups=(kubernetes-tools)
-  depends=(glibc crictl)
+  depends=(
+    glibc
+    crictl
+  )
   install=$pkgname.install
 
   install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/*/$pkgname -t "$pkgdir/usr/bin"
@@ -140,8 +141,8 @@ package_kubeadm() {
 
 package_kubectl() {
   pkgdesc='A command line tool for communicating with a Kubernetes API server'
-  depends=(glibc)
   groups=(kubernetes-tools)
+  depends=(glibc)
 
   install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/*/$pkgname -t "$pkgdir/usr/bin"
   # man pages
@@ -154,8 +155,18 @@ package_kubectl() {
 
 package_kubelet() {
   pkgdesc='An agent that runs on each node in a Kubernetes cluster making sure that containers are running in a Pod'
-  groups=(kubernetes-control-plane kubernetes-node)
-  depends=(cni-plugins conntrack-tools ethtool glibc iptables-nft socat)
+  groups=(
+    kubernetes-control-plane
+    kubernetes-node
+  )
+  depends=(
+    cni-plugins
+    conntrack-tools
+    ethtool
+    glibc
+    iptables-nft
+    socat
+  )
   optdepends=(
     'containerd: for using the containerd container runtime'
     'cri-o: for using the cri-o container runtime'
@@ -180,8 +191,11 @@ package_kubelet() {
 
 package_kube-apiserver() {
   pkgdesc='Kubernetes control plane component exposing the Kubernetes API'
-  depends=(glibc kubernetes-control-plane-common)
   groups=(kubernetes-control-plane)
+  depends=(
+    glibc
+    kubernetes-control-plane-common
+  )
   backup=(etc/$pkgbase/$pkgname.env)
 
   install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/*/$pkgname -t "$pkgdir/usr/bin"
@@ -195,8 +209,11 @@ package_kube-apiserver() {
 
 package_kube-controller-manager() {
   pkgdesc='Kubernetes control plane component that runs controller processes'
-  depends=(glibc kubernetes-control-plane-common)
   groups=(kubernetes-control-plane)
+  depends=(
+    glibc
+    kubernetes-control-plane-common
+  )
   backup=(etc/$pkgbase/$pkgname.env)
 
   install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/*/$pkgname -t "$pkgdir/usr/bin"
@@ -210,8 +227,14 @@ package_kube-controller-manager() {
 
 package_kube-proxy() {
   pkgdesc='Kubernetes network proxy that runs on each node'
-  depends=(glibc kubernetes-control-plane-common)
-  groups=(kubernetes-control-plane kubernetes-node)
+  groups=(
+    kubernetes-control-plane
+    kubernetes-node
+  )
+  depends=(
+    glibc
+    kubernetes-control-plane-common
+  )
   backup=(etc/$pkgbase/$pkgname.env)
 
   install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/*/$pkgname -t "$pkgdir/usr/bin/"
@@ -227,8 +250,11 @@ package_kube-proxy() {
 
 package_kube-scheduler() {
   pkgdesc='Kubernetes control plane component watching over pods on nodes'
-  depends=(glibc kubernetes-control-plane-common)
   groups=(kubernetes-control-plane)
+  depends=(
+    glibc
+    kubernetes-control-plane-common
+  )
   backup=(etc/$pkgbase/$pkgname.env)
 
   install -vDm 755 $pkgbase-$pkgver/_output/local/bin/linux/*/$pkgname -t "$pkgdir/usr/bin"
