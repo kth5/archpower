@@ -5,9 +5,10 @@
 pkgbase=dbus-broker
 pkgname=(
   dbus-broker
+  dbus-broker-units
 )
-pkgver=34
-pkgrel=1
+pkgver=35
+pkgrel=2
 pkgdesc="Linux D-Bus Message Broker"
 url="https://github.com/bus1/dbus-broker/wiki"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
@@ -25,19 +26,23 @@ makedepends=(
 )
 source=(
   https://github.com/bus1/dbus-broker/releases/download/v$pkgver/$pkgbase-$pkgver.tar.xz{,.asc}
+  0001-units-Enable-statically.patch
 )
-b2sums=('9c135db01d3b8d436c39dd4cb07303b8faf2cc2651b1b0c95444fc8c5b42a2ba84e963b7e0df4668ab0584c3ac3572da295a75b718df65b13b4a96a417a35176'
-        'SKIP')
+b2sums=('2c270197d76ec157bf2fd8eb561b49cea2739d656fac8129c4ecdd0bbd5804f8e4e427414cb5f209eef4c22cf9559fc409170476d8df0e1d252c0b5aa2288e01'
+        'SKIP'
+        'c6ad58146a76dbb62548029cf84403ccba355a9ce74b8e081a27a6e3bf4535809741f0621b8a1396cbcb5be55434a90c169829c9b443952477e838c1036b84af')
 validpgpkeys=(
   BE5FBC8C9C1C9F60A4F0AEAE7A4F3A09EBDEFF26  # David Herrmann <dh.herrmann@gmail.com>
 )
 
 # https://github.com/bus1/dbus-broker/releases
-sha256sums=('4f5f55ba74f1f098014c97ec753ab75a2bbe92012a7afcac108783c83f39c307'
-            'SKIP')
+sha256sums=('d50daa31ff33f48693194596ea2aeb1a925183b59cdc82a550774e5c43982252'
+            'SKIP'
+            'a37cedf7fef8f513f4a79c9893c677ff68dd5184b3918a57c3ec0b0383ea6cb5')
 
 prepare() {
   cd $pkgbase-$pkgver
+  patch -Np1 -i ../0001-units-Enable-statically.patch
 }
 
 build() {
@@ -56,6 +61,16 @@ check() {
   meson test -C build --print-errorlogs
 }
 
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
 package_dbus-broker() {
   depends+=(
     libaudit.so
@@ -65,6 +80,20 @@ package_dbus-broker() {
   )
 
   meson install -C build --destdir "$pkgdir"
+
+  _pick unit "$pkgdir"/usr/lib/systemd/{system,user}/dbus.service
+}
+
+package_dbus-broker-units() {
+  pkgdesc+=" - Service units"
+  depends=(
+    dbus
+    dbus-broker
+  )
+  provides=(dbus-units)
+  conflicts=(dbus-daemon-units)
+
+  mv unit/* "$pkgdir"
 }
 
 # vim:set sw=2 sts=-1 et:
