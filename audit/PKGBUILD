@@ -14,7 +14,7 @@ pkgname=(
   audit
   python-audit
 )
-pkgver=3.1.2
+pkgver=4.0
 pkgrel=1
 pkgdesc='Userspace components of the audit framework'
 url='https://people.redhat.com/sgrubb/audit'
@@ -24,6 +24,7 @@ license=(
   LGPL-2.0-or-later
 )
 makedepends=(
+  apparmor
   glibc
   krb5
   libcap-ng
@@ -32,15 +33,18 @@ makedepends=(
   python
   swig
 )
-options=(emptydirs !ccache !distcc)
+options=(emptydirs)
 source=(
   https://github.com/linux-audit/$_name/archive/v$pkgver/$_name-v$pkgver.tar.gz
-  $pkgbase-3.0.8-config_paths.patch
+  $pkgbase.tmpfiles
+  $pkgbase-4.0-executable_paths.patch
 )
-sha512sums=('d5b05686aedd6eaaced000778580bd3e96e38c020534038d6b1ee6de96dd7687c2f3a52a2ae75be8b93c173b286a56dbc92231906c68fda79b113dfcaad6da84'
-            'bc699123f810abcf9300728bf61d7fcfcc83677b75fbeb713fb24cc11b2f9edf687661aab70766acde7c3c41c6a62f8e0a54cdfb49d1c7ce2246b67fbe3feec5')
-b2sums=('85dd8b399f608dcf51ee2fbe6c99b35802f373e033d9d27e464aa4d98c4c0b4d190b932a2f19a047f18904261bb5e9ec7947be31effad80707b458481808ffcd'
-        '50be1b4f76ace20d8d14b4c57a9bb69daa3da35fd654aca8730bc287682fe38f1c1917b37469fb087daf9f309ffc15cca15f54166ece0a055f540c2604778fc6')
+sha512sums=('f001e3f466e012dc9c41e8aefd19ffac0db73c8510cd20467e2eb78dcf7a0fdde64279ec2ff0c370ecba692cda2ae228543b8e7ecdae06863ef37f6fa3a7c7c3'
+            '1750741755f58d0ae19ed2c30e136d05560dc12ec613a502bad12f47c6b70432d30b3a16f3f1574c8433ad2701428d1c1d567a4d3b55be19abac300310c831d9'
+            '5c1b524bf86234eac690cbe073e5b5459d3f74ec58ef57d50250261b0b1ca4656f295f410bf0727242ed852e725e6acd4438a4a02993c21a6fc80c132eb745b1')
+b2sums=('c8ab1b241134dfc16f4a440358203b095b376a5f2042c6434a22d4127b3ae0751759b2f457bab50b81969368daa218bedbcd4cce815aec5fe6d13a62e9363d57'
+        '549ebbbc9e43277d44d0dc5bfd8ca2926628322d898479171b2707dd004968d036ef792b442548af90ad56dea868a72c88b5cf3bb93ea70cb8bbed82747ad9b5'
+        '36e9c74eeccda534a019f780d7aa5337fc24118129c2766203a8bb028a81ba2bdf057cbc78194bcaeeda28c7ae9ef4ef8bb9cd34a37e47655a4ed2b64381935d')
 
 _pick() {
   local p="$1" f d; shift
@@ -53,8 +57,8 @@ _pick() {
 }
 
 prepare() {
-  # replace the use of /sbin with /usr/bin in configs
-  patch -Np1 -d $pkgbase-userspace-$pkgver -i ../$pkgbase-3.0.8-config_paths.patch
+  # use /usr and /bin merge compatible paths in configs and services
+  patch -Np1 -d $pkgbase-userspace-$pkgver -i ../$pkgbase-4.0-executable_paths.patch
 
   cd $_name-$pkgver
   autoreconf -fiv
@@ -62,16 +66,16 @@ prepare() {
 
 build() {
   local configure_options=(
+    --enable-gssapi-krb5=yes
+    --enable-systemd=yes
+    --enable-zos-remote
+    --libexecdir=/usr/lib/audit
     --prefix=/usr
     --sbindir=/usr/bin
     --sysconfdir=/etc
-    --libexecdir=/usr/lib/audit
-    --enable-zos-remote
-    --enable-gssapi-krb5=yes
-    --enable-systemd=yes
+    --with-apparmor=yes
     --with-io_uring=yes
     --with-libcap-ng=yes
-    --with-python=no
     --with-python3=yes
   )
 
@@ -110,10 +114,21 @@ package_audit() {
 
   make DESTDIR="$pkgdir" install -C $_name-$pkgver
 
+  install -vDm 644 $_name-$pkgver/{{README,SECURITY}.md,ChangeLog} -t "$pkgdir/usr/share/doc/$pkgname/"
+
   # add log dir
-  install -vdm 700 "$pkgdir/var/log/$pkgname/"
+  install -vdm 755 "$pkgdir/var/log/$pkgname/"
   # add rules.d dir to satisfy augenrules
   install -vdm 755 "$pkgdir/etc/audit/rules.d/"
+  # add config dir for audisp
+  install -vdm 755 "$pkgdir/etc/audisp"
+
+  # add factory files
+  install -vdm 755 "$pkgdir/usr/share/factory/"
+  cp -av "$pkgdir/etc" "$pkgdir/usr/share/factory/"
+
+  # add tmpfiles.d integration for factory files and file permissions
+  install -vDm 644 $pkgbase.tmpfiles "$pkgdir/usr/lib/tmpfiles.d/$pkgbase.conf"
 
   # remove legacy files
   rm -frv "$pkgdir/usr/lib/audit"
