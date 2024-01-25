@@ -1,0 +1,61 @@
+Description: patch to get the <date> from the sgml file
+ For the moment, docbook2man doesn't use the tag date in <date> </date>
+ to but `date "+%d %B %Y"`, and thus depend on the current locale.
+ 
+ <refentry>
+   <docinfo>
+     <date>06 September 2003</>
+   </docinfo>
+ </refentry>
+ 
+ A patch against /usr/share/perl5/sgmlspl-specs/docbook2man-spec.pl
+ allows to use the date written in the source SGML file (which can be
+ localized) instead of the current date.
+ 
+ However, if no correct date tag is present in the SGML file, the date
+ written in the manpage will depend on the current locale.
+Author: Simon Paillard <simon.paillard@resel.enst-bretagne.fr>
+Forwarded: not-needed
+Bug-Debian: http://bugs.debian.org/214982
+
+Index: docbook-utils-0.6.14/helpers/docbook2man-spec.pl
+===================================================================
+--- docbook-utils-0.6.14.orig/helpers/docbook2man-spec.pl	2012-05-09 18:27:28.000000000 +0200
++++ docbook-utils-0.6.14/helpers/docbook2man-spec.pl	2012-05-09 18:55:53.276783163 +0200
+@@ -278,8 +278,9 @@
+ .\\" etc. to Steve Cheng <steve\@ggi-project.org>.
+ _END_BANNER
+ 
+-	my $manpage_date = `date "+%d %B %Y"`;
+-		
++	my $date = `date "+%d %B %Y"`;
++	my $manpage_date = $manpage_date || $date ;
++
+ 	output '.TH "';
+ 	
+ 	# If the title is not mixed-case, convention says to
+@@ -292,7 +293,7 @@
+ 	}
+ 	
+ 	output  '" "', fold_string($manpage_sect), 
+-		'" "', fold_string(`date "+%d %B %Y"`), 
++		'" "', fold_string($manpage_date), 
+ 		'" "', $manpage_misc, 
+ 		'" "', $manpage_manual, 
+ 		"\"\n";
+@@ -568,6 +569,15 @@
+ sgml('</ATTRIBUTION>', sub { $_[0]->parent->ext->{'attribution'} = pop_output(); });
+ 
+ 
++sgml('<DATE>', sub {
++	save_cdata();
++});
++sgml('</DATE>', sub { 
++	$manpage_date = fold_string(pop_output());
++	$raw_cdata--;
++});
++
++
+ # IGNORE.
+ sgml('<DOCINFO>', sub { push_output('nul'); });
+ sgml('</DOCINFO>', sub { pop_output(); });
