@@ -3,17 +3,18 @@
 
 pkgbase=libjxl
 pkgname=('libjxl' 'libjxl-doc')
-pkgver=0.8.2
-pkgrel=2
+pkgver=0.9.1
+pkgrel=1
 pkgdesc='JPEG XL image format reference implementation'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://jpeg.org/jpegxl/'
 license=('BSD')
-makedepends=('git' 'cmake' 'brotli' 'gdk-pixbuf2' 'giflib'
+makedepends=('git' 'cmake' 'brotli' 'gdk-pixbuf2' 'giflib' 'gimp'
              'gperftools' 'highway' 'libjpeg-turbo' 'libpng' 'openexr'
              'gtest' 'python' 'asciidoc' 'doxygen'
-             'graphviz' 'xdg-utils' 'docbook-xml')
-makedepends_x86_64=('gimp' 'java-runtime')
+             'graphviz' 'xdg-utils')
+makedepends_powerpc64le=('java-environment')
+makedepends_x86_64=('java-environment')
 source=("git+https://github.com/libjxl/libjxl.git#tag=v${pkgver}"
         'git+https://github.com/google/brotli.git'
         'git+https://github.com/mm2/Little-CMS.git'
@@ -24,7 +25,7 @@ source=("git+https://github.com/libjxl/libjxl.git#tag=v${pkgver}"
         'git+https://github.com/glennrp/libpng.git'
         'git+https://github.com/madler/zlib.git'
         'libjxl-testdata'::'git+https://github.com/libjxl/testdata.git'
-        'atomic.patch')
+        'git+https://github.com/libjpeg-turbo/libjpeg-turbo.git')
 sha256sums=('SKIP'
             'SKIP'
             'SKIP'
@@ -35,36 +36,29 @@ sha256sums=('SKIP'
             'SKIP'
             'SKIP'
             'SKIP'
-            '850716cb636440c988b000e3608aef3d6827ede4f25548b80e73034ca82fc1ad')
+            'SKIP')
 
 prepare() {
     git -C libjxl submodule init
     local _submodule
-    for _submodule in brotli googletest sjpeg skcms highway libpng zlib
+    for _submodule in brotli googletest sjpeg skcms highway libpng zlib libjpeg-turbo
     do
         git -C libjxl config --local "submodule.third_party/${_submodule}.url" "${srcdir}/${_submodule}"
     done
     git -C libjxl config --local submodule.third_party/lcms.url "${srcdir}/Little-CMS"
     git -C libjxl config --local submodule.third_party/testdata.url "${srcdir}/libjxl-testdata"
     git -C libjxl -c protocol.file.allow='always' submodule update
-
-    cd libjxl
-    patch -Np1 -i ${srcdir}/atomic.patch
 }
 
 build() {
     case "${CARCH}" in
-      riscv64) _cmake_options=(
-                 -DBUILD_TESTING:BOOL='OFF'
-                 -DCMAKE_CXX_FLAGS="-latomic"
-               )
-      ;;
-      powerpc) export CXXFLAGS+=' -maltivec -mabi=altivec' ;;
+      riscv64) export CXX_FLAGS+=' -latomic' ;;
     esac
 
     export CFLAGS+=' -DNDEBUG -ffat-lto-objects'
     export CXXFLAGS+=' -DNDEBUG -ffat-lto-objects -Wp,-U_GLIBCXX_ASSERTIONS'
     cmake -B build -S libjxl \
+        -G 'Unix Makefiles' \
         -DCMAKE_BUILD_TYPE:STRING='None' \
         -DCMAKE_INSTALL_PREFIX:PATH='/usr' \
         -DJPEGXL_ENABLE_BENCHMARK:BOOL='false' \
@@ -76,26 +70,28 @@ build() {
         -DJPEGXL_FORCE_SYSTEM_GTEST:BOOL='true' \
         -DJPEGXL_FORCE_SYSTEM_HWY:BOOL='true' \
         -DJPEGXL_BUNDLE_LIBPNG:BOOL='NO' \
-        -Wno-dev ${_cmake_options[@]}
-    make -C build all doc
+        -DJPEGXL_INSTALL_JARDIR='/usr/share/java' \
+        -Wno-dev
+    cmake --build build
+    make -C build doc
 }
 
 check() {
-    make -C build test
+    ctest --test-dir build --output-on-failure
 }
 
 package_libjxl() {
     depends=('brotli' 'giflib' 'gperftools' 'highway' 'libjpeg-turbo' 'libpng' 'openexr')
-    optdepends=('gdk-pixbuf2: for gdk-pixbuf loader')
+    optdepends=('gdk-pixbuf2: for gdk-pixbuf loader'
+                'gimp: for gimp plugin')
     optdepends_powerpc64le=('java-runtime: for JNI bindings')
-    optdepends_x86_64=('java-runtime: for JNI bindings'
-                       'gimp: for gimp plugin')
-    provides=('libjxl.so' 'libjxl_threads.so')
+    optdepends_x86_64=('java-runtime: for JNI bindings')
+    provides=('libjxl.so' 'libjxl_cms.so' 'libjxl_threads.so')
     
     DESTDIR="$pkgdir" cmake --install build
     install -D -m644 libjxl/{LICENSE,PATENTS} -t "${pkgdir}/usr/share/licenses/${pkgname}"
     case "${CARCH}" in
-      x86_64) mv "${pkgdir}/usr/share/java"/{org.jpeg.jpegxl,jpegxl}.jar ;;
+      powerpc64le|x86_64) mv "${pkgdir}/usr/share/java"/{org.jpeg.jpegxl,jpegxl}.jar ;;
     esac
 }
 
