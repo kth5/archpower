@@ -4,49 +4,36 @@
 pkgname=lz4
 epoch=1
 pkgver=1.9.4
-pkgrel=1.1
+pkgrel=2
 pkgdesc='Extremely fast compression algorithm'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://lz4.github.io/lz4/'
 license=('GPL2')
-makedepends=('git')
+makedepends=('git' 'cmake' 'ninja')
 checkdepends=('diffutils')
 depends=('glibc')
 source=("git+https://github.com/lz4/lz4.git#tag=v$pkgver")
 sha256sums=('SKIP')
 
-prepare() {
-  cd $pkgname
-  # apply patch from the source array (should be a pacman feature)
-  local src
-  for src in "${source[@]}"; do
-    src="${src%%::*}"
-    src="${src##*/}"
-    [[ $src = *.patch ]] || continue
-    msg2 "Applying patch $src..."
-    patch -Np1 < "../$src"
-  done
-}
-
 build() {
-  # do not use the main makefile, it calls sub make with -e
-  # exported CLFAGS by makepkg break the version. see FS#50071
-  cd $pkgname
-  make -C lib PREFIX=/usr
-  make -C programs PREFIX=/usr lz4 lz4c
+  cmake -B build -S "$pkgname"/build/cmake \
+    -G Ninja \
+    -DCMAKE_BUILD_TYPE='None' \
+    -DCMAKE_INSTALL_PREFIX='/usr' \
+    -Wno-dev
+  cmake --build build
 }
 
 check() {
   rm -f passwd.lz4
-  $pkgname/programs/lz4 /etc/passwd passwd.lz4
-  $pkgname/programs/lz4 -d passwd.lz4 passwd
+  build/lz4 /etc/passwd passwd.lz4
+  build/lz4 -d passwd.lz4 passwd
   diff -q /etc/passwd passwd
   rm passwd
 }
 
 package() {
-  cd $pkgname
-  make install PREFIX=/usr DESTDIR="$pkgdir"
+  DESTDIR="$pkgdir" cmake --install build
 }
 
 # vim:set ts=2 sw=2 et:
