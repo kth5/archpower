@@ -9,8 +9,8 @@ pkgname=('systemd'
 case "${CARCH}" in
   x86_64) pkgname+=('systemd-ukify') ;;
 esac
-_tag='1a43f634534bcafd9cbb39b93ce06783a3d92ae4' # git rev-parse v${_tag_name}
-_tag_name=255-rc4
+_tag='8cf1da1e9172ba04d90a483a63118873343ea656' # git rev-parse v${_tag_name}
+_tag_name=255.3
 pkgver="${_tag_name/-/}"
 pkgrel=1
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
@@ -23,10 +23,11 @@ makedepends=('acl' 'cryptsetup' 'docbook-xsl' 'gperf' 'lz4' 'xz' 'pam' 'libelf'
              'bash-completion' 'p11-kit' 'systemd' 'libfido2' 'tpm2-tss' 'rsync'
              'bpf' 'libbpf' 'clang' 'llvm' 'curl' 'gnutls' 'python-pyelftools'
              'libpwquality' 'qrencode')
-checkdepends=('python-pefile')
-makedepends_powerpc=('kexec-tools')
+makedepends_powerpc64=('kexec-tools')
 makedepends_powerpc64le=('kexec-tools')
+makedepends_riscv64=('kexec-tools')
 makedepends_x86_64=('kexec-tools' 'lib32-gcc-libs')
+checkdepends=('python-pefile')
 options=('strip')
 validpgpkeys=('63CDA1E5D3FC22B998D20DD6327F26951A015CC4'  # Lennart Poettering <lennart@poettering.net>
               'A9EA9081724FFAE0484C35A1A81CEA22BC8C7E2E'  # Luca Boccassi <luca.boccassi@gmail.com>
@@ -61,9 +62,9 @@ sha512sums=('SKIP'
             'SKIP'
             '3ccf783c28f7a1c857120abac4002ca91ae1f92205dcd5a84aff515d57e706a3f9240d75a0a67cff5085716885e06e62597baa86897f298662ec36a940cf410e'
             '4a6cd0cf6764863985dc5ad774d7c93b574645a05b3295f989342951d43c71696d069641592e37eeadb6d6f0531576de96b6392224452f15cd9f056fae038f8e'
-            '442e79012d654e72cde03c8b4b90c7b6e9c9e7803551fdeae79bda945f7aff92f1046f5edc64f75d23614f66b3ef044cc47c862379b3e0695ecff412fec90401'
+            'ada692514d758fa11e2be6b4c5e1dc2d9d47548f24ada35afdce1dcac918e72ae2251c892773e6cf41fa431c3613a1608668e999eb86a565870fecb55c47b4ba'
             'a8c7e4a2cc9c9987e3c957a1fc3afe8281f2281fffd2e890913dcf00cf704024fb80d86cb75f9314b99b0e03bac275b22de93307bfc226d8be9435497e95b7e6'
-            '61032d29241b74a0f28446f8cf1be0e8ec46d0847a61dadb2a4f096e8686d5f57fe5c72bcf386003f6520bc4b5856c32d63bf3efe7eb0bc0deefc9f68159e648'
+            '78c6b0d6dd971bfda7e5948f4048ffce041f2d8e79c865116fe8ab0cb6b588203ec4076f1d3a66bdeffbfa4c44af74bc230dc1adefbe4533a602c3e3719da822'
             'c416e2121df83067376bcaacb58c05b01990f4614ad9de657d74b6da3efa441af251d13bf21e3f0f71ddcb4c9ea658b81da3d915667dc5c309c87ec32a1cb5a5'
             '5a1d78b5170da5abe3d18fdf9f2c3a4d78f15ba7d1ee9ec2708c4c9c2e28973469bc19386f70b3cf32ffafbe4fcc4303e5ebbd6d5187a1df3314ae0965b25e75'
             'b90c99d768dc2a4f020ba854edf45ccf1b86a09d2f66e475de21fe589ff7e32c33ef4aa0876d7f1864491488fd7edb2682fc0d68e83a6d4890a0778dc2d6fe19'
@@ -165,8 +166,10 @@ build() {
   )
 
   case "${CARCH}" in
-    x86_64|riscv64) _meson_options+=(-Dbootloader=true) ;;
-    *) _meson_options+=(-Dbootloader=false) ;;
+    x86_64) _meson_options+=(-Dbootloader=true) ;;
+    riscv64) _meson_options+=(-Dbootloader=true -Dukify=false) ;;
+    powerpc) _meson_options+=(-Dbootloader=false -Dukify=false -Dseccomp=false) ;; #FIXME: seccomp breaks systemd on powerpc
+    *) _meson_options+=(-Dbootloader=false -Dukify=false) ;;
   esac
 
   # this uses malloc_usable_size, which is incompatible with fortification level 3
@@ -186,7 +189,7 @@ package_systemd() {
   pkgdesc='system and service manager'
   license=('GPL2' 'LGPL2.1')
   depends=('acl' 'libacl.so' 'bash' 'cryptsetup' 'libcryptsetup.so' 'dbus'
-           'kbd' 'kmod' 'libkmod.so' 'hwdata' 'libcap' 'libcap.so'
+           'dbus-units' 'kbd' 'kmod' 'libkmod.so' 'hwdata' 'libcap' 'libcap.so'
            'libgcrypt' 'libxcrypt' 'libcrypt.so' 'systemd-libs' 'libidn2' 'lz4' 'pam'
            'libelf' 'libseccomp' 'libseccomp.so' 'util-linux' 'libblkid.so'
            'libmount.so' 'xz' 'pcre2' 'audit' 'libaudit.so'
@@ -207,7 +210,9 @@ package_systemd() {
               'libfido2: unlocking LUKS2 volumes with FIDO2 token'
               'libp11-kit: support PKCS#11'
               'tpm2-tss: unlocking LUKS2 volumes with TPM2')
-  optdepends_x86_64=('systemd-ukify: combine kernel and initrd into a signed Unified Kernel Image')
+  optdepends_x86_64=(
+              'systemd-ukify: combine kernel and initrd into a signed Unified Kernel Image'
+  )
   backup=(etc/pam.d/systemd-user
           etc/systemd/coredump.conf
           etc/systemd/homed.conf
@@ -242,12 +247,13 @@ package_systemd() {
   case "${CARCH}" in
     x86_64)
       # ukify shipped in separate package
-      # we do *NOT* move the kernel-install files there, as other ways of
-      # creating uki exist!
-      install -d -m0755 systemd-ukify/{bin,systemd,man1}
+      install -d -m0755 systemd-ukify/{bin,systemd,man1,install.d}
       mv "$pkgdir"/usr/bin/ukify systemd-ukify/bin/
       mv "$pkgdir"/usr/lib/systemd/ukify systemd-ukify/systemd/
       mv "$pkgdir"/usr/share/man/man1/ukify.1 systemd-ukify/man1/
+      # we move the ukify hook itself, but keep 90-uki-copy.install in place,
+      # because there are other ways to generate UKIs w/o ukify, e.g. w/ mkinitcpio
+      mv "$pkgdir"/usr/lib/kernel/install.d/60-ukify.install systemd-ukify/install.d
     ;;
   esac
 
@@ -277,9 +283,6 @@ package_systemd() {
   # gid on different systems. Let's install with gid 0 (root), systemd-tmpfiles
   # will fix the permissions for us. (see /usr/lib/tmpfiles.d/systemd.conf)
   install -d -o root -g root -m 2755 "$pkgdir"/var/log/journal
-
-  # match directory owner/group and mode from [extra]/polkit
-  install -d -o root -g 102 -m 0750 "$pkgdir"/usr/share/polkit-1/rules.d
 
   # add example bootctl configuration
   install -D -m0644 arch.conf "$pkgdir"/usr/share/systemd/bootctl/arch.conf
@@ -313,7 +316,7 @@ package_systemd-resolvconf() {
   license=('LGPL2.1')
   depends=('systemd')
   provides=('openresolv' 'resolvconf')
-  conflicts=('openresolv')
+  conflicts=('resolvconf')
 
   install -d -m0755 "$pkgdir"/usr/bin
   ln -s resolvectl "$pkgdir"/usr/bin/resolvconf
@@ -350,6 +353,7 @@ package_systemd-ukify() {
   mv systemd-ukify/bin "$pkgdir"/usr/bin
   mv systemd-ukify/systemd "$pkgdir"/usr/lib/systemd
   mv systemd-ukify/man1 "$pkgdir"/usr/share/man/man1
+  mv systemd-ukify/install.d "$pkgdir"/usr/lib/kernel/install.d
 }
 
 # vim:ft=sh syn=sh et sw=2:
