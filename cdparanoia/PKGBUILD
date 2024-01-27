@@ -4,38 +4,42 @@
 
 pkgname=cdparanoia
 pkgver=10.2
-pkgrel=8
+pkgrel=9
 pkgdesc="Compact Disc Digital Audio extraction tool"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url="http://www.xiph.org/paranoia/"
+url="https://www.xiph.org/paranoia/"
 license=('GPL')
 depends=('glibc')
 options=('!makeflags' '!staticlibs')
 source=("https://downloads.xiph.org/releases/cdparanoia/cdparanoia-III-$pkgver.src.tgz"
-        gcc.patch
-        autoconf-init-ac_cv_objext.patch
-        makefile.in-install.patch
-        byteswap-null-check.diff)
+        cdparanoia-r15388.patch # svn diff -c 15338 https://svn.xiph.org/trunk/cdparanoia/
+        cdparanoia-10.2-format-security.patch # Patch from Fedora
+        cdparanoia-10.2-ldflags.patch # Patch from Fedora
+        autoconf-init-ac_cv_objext.patch)
 sha512sums=('4ab0a0f5ef44d56c1af72d1fc1035566a1a89c4eeddb9e8baea675fe51c06138d913342afc8bed167d9fa55672fa25a2763ce21f7e24c1232e4739aff20733a7'
-            '27bf216e8b5b9d6971e3999166544025f166587df06065b89657dac62d0d53c01b76f53146c1e9a400dd71460567fadb8fd4ce00576836f972914d69e8855909'
-            '20c0630447543573d3f5538942291c700fea16b75d1d568d80bdc97c9b816fee4ed5a12cd646e3047e06bb34b9652a8c9523d48c5bd8e2f0e5947c9115489b8f'
-            'fe37e717e9803a895bb4cf7cfffd764253aa0db22891c7b2c2f5e1eb3cfebaedf56a98853fb47e02a24d6ee7e6a5457ccfaa845be75428a68cd1b1fbd68b7924'
-            'b2af6748bd9cebc5ff0ff6035440bf534b0c24449e01638291c3a18588bdf0cb10d665f7053c753154e108ad739e3a9083a2bca9022266eb5f30a9954cbf64e2')
+            'bcae1e3850f1780d3e731d6f662f62c82a5e698612d3ef84cacdd8e7179ef84c1571d45799336f019694b727bf526af9889422e608ea695593d0b9083fb651be'
+            '56532fc71b357e91a767f94a30ebdc528fdd44661bd982e5a2930bb5f48a7b0fa68b03ae89fbf726c0c310d3af40ac294e68dd0e6417d034923e64193ad1bfa1'
+            '1df9724b72efd1be330a8991b7a56e3eef39fea48d648402ad9b613d6456a13e479be455e477bdfd3f4ff3fc6d7f6cbbe83db9af9bbb07fa462e290e2d010b85'
+            '20c0630447543573d3f5538942291c700fea16b75d1d568d80bdc97c9b816fee4ed5a12cd646e3047e06bb34b9652a8c9523d48c5bd8e2f0e5947c9115489b8f')
 
 prepare() {
   cd cdparanoia-III-$pkgver
-  patch -Np1 -i "$srcdir"/gcc.patch
-  patch -Np1 -i "$srcdir"/autoconf-init-ac_cv_objext.patch
-  patch -Np1 -i "$srcdir"/makefile.in-install.patch
-  patch -Np1 -i "$srcdir"/byteswap-null-check.diff
+  # Fix for 'private' becoming a reserved keyword as of GCC 4.3+
+  patch -p0 -i "$srcdir"/cdparanoia-r15388.patch
+  # Add missing printf format strings for `-Wformat -Werror=format-security`
+  patch -p1 -i "$srcdir"/cdparanoia-10.2-format-security.patch
+  # Use LDFLAGS
+  patch -p1 -i "$srcdir"/cdparanoia-10.2-ldflags.patch
 
+  # let us define 16bit types via CFLAGS
+  patch -p1 -i "$srcdir"/autoconf-init-ac_cv_objext.patch
   autoreconf -fiv
 }
 
 build() {
   cd cdparanoia-III-$pkgver
   CFLAGS+=' -Du_int16_t=uint16_t -Du_int32_t=uint32_t' \
-  ./configure --build=$CHOST --prefix=/usr --mandir=/usr/share/man
+  ./configure --prefix=/usr --mandir=/usr/share/man --build=${CHOST}
   make
 }
 
