@@ -8,7 +8,7 @@
 
 pkgbase=thunderbird
 pkgname=(thunderbird)
-pkgver=115.1.1
+pkgver=115.7.0
 pkgrel=1
 pkgdesc='Standalone mail and news reader from mozilla.org'
 url='https://www.thunderbird.net/'
@@ -62,18 +62,18 @@ makedepends=(
 makedepends_x86_64=(nasm)
 options=(!emptydirs !makeflags !lto)
 source=(https://archive.mozilla.org/pub/thunderbird/releases/$pkgver/source/thunderbird-$pkgver.source.tar.xz{,.asc}
-        thunderbird.desktop
         vendor-prefs.js
         distribution.ini
         mozconfig.cfg
-        metainfo.patch)
-sha256sums=('f3255dccc2e9ffd1466f8f3404114f7c6c191f2fdbc7af3117c65fee754810b1'
+        metainfo.patch
+        thunderbird-system-icu-74.patch) # https://bugzilla.mozilla.org/show_bug.cgi?id=1862601
+sha256sums=('19f483d4c26e47daaeabb8fb99605b12f4e842aec2814dfb92d78b1a73459f43'
             'SKIP'
-            'e44c55501f650a4e80b9c353b81f33e07ca65808db831eff6ca616aded233827'
             'fa11b4736bbf53ec015f71cd42b1040b22d1a855c562b76927b3f0eccb925c85'
-            'bc3aae2cc00dc9806f54606f98d967366a2ba7223f6a3ad1c658a653ebff5569'
+            '4a3a61e119637000c563a194283ef741959756b75edf7be84e25b4253c4288c5'
             '59cab9977c3effbba33129c014e87414ea939c02be859f1f0b9d79581c8935eb'
-            '3390d127e5dd70a0ff60895bcb044ec4521dd528cd9d6efc27c4ba58df9cca5c')
+            '3390d127e5dd70a0ff60895bcb044ec4521dd528cd9d6efc27c4ba58df9cca5c'
+            '9a4241af157512580d85e04cc5502248680a178c75038d70ff446055c59e80e6')
 validpgpkeys=(
   14F26682D0916CDD81E37B6D61B7B526D98F0353 # Mozilla Software Releases <release@mozilla.com>
   4360FE2109C49763186F8E21EBE41E90F6F12F6D # Mozilla Software Releases <release@mozilla.com>
@@ -136,6 +136,11 @@ build() {
   fi
   export MACH_BUILD_PYTHON_NATIVE_PACKAGE_SOURCE=none
   export MOZBUILD_STATE_PATH="${srcdir}/mozbuild"
+
+  # malloc_usable_size is used in various parts of the codebase
+  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+
   ./mach configure
   ./mach build
   ./mach buildsymbols
@@ -153,13 +158,12 @@ package_thunderbird() {
 
   install -Dm 644 ../vendor-prefs.js -t "$pkgdir/usr/lib/$pkgname/defaults/pref"
   install -Dm 644 ../distribution.ini -t "$pkgdir/usr/lib/$pkgname/distribution"
-  install -Dm 644 ../thunderbird.desktop -t "$pkgdir/usr/share/applications"
   install -Dm 644 comm/mail/branding/thunderbird/net.thunderbird.Thunderbird.appdata.xml \
     "$pkgdir/usr/share/metainfo/net.thunderbird.Thunderbird.appdata.xml"
 
   for i in 16 22 24 32 48 64 128 256; do
     install -Dm644 comm/mail/branding/thunderbird/default${i}.png \
-      "$pkgdir/usr/share/icons/hicolor/${i}x${i}/apps/$pkgname.png"
+      "$pkgdir/usr/share/icons/hicolor/${i}x${i}/apps/org.mozilla.Thunderbird.png"
   done
   install -Dm644 comm/mail/branding/thunderbird/TB-symbolic.svg \
     "$pkgdir/usr/share/icons/hicolor/symbolic/apps/thunderbird-symbolic.svg"
