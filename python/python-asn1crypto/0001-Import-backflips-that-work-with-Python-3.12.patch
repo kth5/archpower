@@ -1,0 +1,92 @@
+diff -aur asn1crypto-1.5.1/dev/_import.py asn1crypto-1.5.1.new/dev/_import.py
+--- asn1crypto-1.5.1/dev/_import.py	2022-03-15 15:45:23.000000000 +0100
++++ asn1crypto-1.5.1.new/dev/_import.py	2024-01-07 20:16:55.560811396 +0100
+@@ -1,7 +1,9 @@
+ # coding: utf-8
+ from __future__ import unicode_literals, division, absolute_import, print_function
+ 
+-import imp
++import importlib
++import importlib.machinery
++import importlib.util
+ import sys
+ import os
+ 
+@@ -34,6 +36,14 @@
+         None if not loaded, otherwise the module
+     """
+ 
++    if mod in sys.modules:
++        return sys.modules[mod]
++
++    if mod_dir is None:
++        full_mod = mod
++    else:
++        full_mod = mod_dir
++
+     if mod_dir is None:
+         mod_dir = mod.replace('.', os.sep)
+ 
+@@ -49,8 +59,16 @@
+         path = os.path.join(path, append)
+ 
+     try:
+-        mod_info = imp.find_module(mod_dir, [path])
+-        return imp.load_module(mod, *mod_info)
++        loader_details = (
++            importlib.machinery.SourceFileLoader,
++            importlib.machinery.SOURCE_SUFFIXES
++        )
++        finder = importlib.machinery.FileFinder(path, loader_details)
++        spec = finder.find_spec(full_mod)
++        module = importlib.util.module_from_spec(spec)
++        sys.modules[mod] = module
++        spec.loader.exec_module(module)
++        return module
+     except ImportError:
+         if allow_error:
+             raise
+diff -aur asn1crypto-1.5.1/tests/__init__.py asn1crypto-1.5.1.new/tests/__init__.py
+--- asn1crypto-1.5.1/tests/__init__.py	2022-03-15 15:45:23.000000000 +0100
++++ asn1crypto-1.5.1.new/tests/__init__.py	2024-01-07 20:18:32.384639619 +0100
+@@ -1,7 +1,10 @@
+ # coding: utf-8
+ from __future__ import unicode_literals, division, absolute_import, print_function
+ 
+-import imp
++import importlib
++import importlib.machinery
++import importlib.util
++import sys
+ import os
+ import unittest
+ 
+@@ -28,6 +31,9 @@
+         None if not loaded, otherwise the module
+     """
+ 
++    if mod in sys.modules:
++        return sys.modules[mod]
++
+     if mod_dir is None:
+         mod_dir = mod
+ 
+@@ -38,8 +44,16 @@
+         return None
+ 
+     try:
+-        mod_info = imp.find_module(mod_dir, [path])
+-        return imp.load_module(mod, *mod_info)
++        loader_details = (
++            importlib.machinery.SourceFileLoader,
++            importlib.machinery.SOURCE_SUFFIXES
++        )
++        finder = importlib.machinery.FileFinder(path, loader_details)
++        spec = finder.find_spec(mod_dir)
++        module = importlib.util.module_from_spec(spec)
++        sys.modules[mod] = module
++        spec.loader.exec_module(module)
++        return module
+     except ImportError:
+         return None
+ 
