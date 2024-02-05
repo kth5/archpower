@@ -3,12 +3,12 @@
 # Contributor: Jan de Groot <jgc@archlinux.org>
 
 pkgname=polkit
-pkgver=123
+pkgver=124
 pkgrel=1
 pkgdesc="Application development toolkit for controlling system-wide privileges"
 url="https://gitlab.freedesktop.org/polkit/polkit"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=(LGPL)
+license=(LGPL-2.0-or-later)
 depends=(
   duktape
   expat
@@ -25,11 +25,13 @@ makedepends=(
 checkdepends=(python-dbusmock)
 provides=(libpolkit-{agent,gobject}-1.so)
 backup=(etc/pam.d/polkit-1)
-_commit=fc8b07e71d99f88a29258cde99b913b44da1846d  # tags/123^0
+_commit=82f0924dc0eb23b9df68e88dbaf9e07c81940a5a  # tags/124
 source=(
   "git+https://gitlab.freedesktop.org/polkit/polkit.git#commit=$_commit"
+  0001-meson-Pass-polkitd_uid-to-meson_post_install.py.patch
 )
-b2sums=('SKIP')
+b2sums=('SKIP'
+        '0fc028f7c883015c38515883f91e7cd10d15540ae6cb8305d79e8e2d8d70f2228a9935eb477413b37f4b33f6d4faf86f1b6ee33b0c9d6d3d3212e8c1733a83d0')
 
 pkgver() {
   cd polkit
@@ -38,6 +40,7 @@ pkgver() {
 
 prepare() {
   cd polkit
+  git apply -3 ../0001-meson-Pass-polkitd_uid-to-meson_post_install.py.patch
 }
 
 build() {
@@ -46,6 +49,8 @@ build() {
     -D gtk_doc=true
     -D man=true
     -D os_type=redhat
+    -D polkitd_uid=102
+    -D polkitd_user=polkitd
     -D session_tracking=libsystemd-login
     -D tests=true
   )
@@ -60,13 +65,6 @@ check() {
 
 package() {
   meson install -C build --destdir "$pkgdir"
-
-  install -d -o root -g 102 -m 750 "$pkgdir"/{etc,usr/share}/polkit-1/rules.d
-
-  install -Dm644 /dev/stdin "$pkgdir/usr/lib/sysusers.d/$pkgname.conf" <<END
-u polkitd 102 "PolicyKit daemon"
-m polkitd proc
-END
 }
 
 # vim:set sw=2 sts=-1 et:
