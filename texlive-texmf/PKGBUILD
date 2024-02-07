@@ -1,5 +1,6 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Maintainer: Caleb Maclennan <caleb@alerque.com>
 # Contributor: Rémy Oudompheng <remy@archlinux.org>
 
 pkgbase=texlive-texmf
@@ -11,7 +12,7 @@ for _coll in ${_collections[@]}; do
 done
 _rev=66594
 pkgver=2023.$_rev
-pkgrel=19
+pkgrel=20
 pkgdesc='TeX Live - '
 license=(GPL)
 arch=(any)
@@ -49,15 +50,15 @@ sha256sums=('SKIP'
 options=(!strip) # Nothing to strip, save packaging time
 
 prepare() {
-# Customize configuration
+  # Customize configuration
   patch -d texmf-dist/web2c -p0 < texmf.cnf.patch
   patch -d texmf-dist/web2c -p0 < texmfcnf.lua.patch
 
-# Copy files where format and maps will be extracted from
-  cp texmf-dist/web2c/{fmtutil.cnf,updmap.cfg} .
+  # Copy files where format and maps will be extracted from
+  cp texmf-dist/web2c/{fmtutil.cnf,updmap.cfg,texmf.cnf} .
   cp texmf-dist/tex/generic/config/language.{dat,dat.lua,def} .
   
-# Split files per package
+  # Split files per package
   for _coll in ${_collections[@]}; do
     echo -ne "splitting collection ${_coll}"
     # extract description
@@ -137,6 +138,7 @@ _package() {
                                          'python-pygments: for pygmentex')
   [[ $1 == music ]] && optdepends+=('fontforge: for scripts from the lilyglyphs package')
   if [[ $1 == basic ]]; then
+    depends+=(perl) # needed by fmtutil which runs from install hook
     optdepends+=('perl-tk: for the tlmgr GUI'
                  'biber: for bibliography processing')
     conflicts=(texlive-core)
@@ -152,6 +154,7 @@ _package() {
                  'perl-file-homedir: for latexindent'
                  'perl-ipc-system-simple: for latex-git-log'
                  'python: for de-macro, dviasm, pythontex'
+                 'texlive-latexrecommended: for pdfjam'
                  'wdiff: for texdiff')
     conflicts=(git-latexdiff)
     provides=(git-latexdiff)
@@ -231,6 +234,10 @@ _package() {
     backup=(etc/texmf/chktex/chktexrc)
   # copy config files to $TEXMFCONFIG tree
     install -Dm644 "$pkgdir"/usr/share/texmf-dist/chktex/chktexrc -t "$pkgdir"/etc/texmf/chktex/
+  # install zsh completions
+    mkdir -p "$pkgdir"/usr/share/zsh/site-functions
+    TEXMFCNF="$srcdir" \
+    "$pkgdir"/usr/bin/texdoc --print-completion zsh > "$pkgdir"/usr/share/zsh/site-functions/_texdoc 2>/dev/null
   fi
 
   if [[ $1 == fontutils ]]; then
