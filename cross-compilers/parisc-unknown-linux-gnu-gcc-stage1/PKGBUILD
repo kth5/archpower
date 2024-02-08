@@ -1,0 +1,110 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Contributor: Alexander 'hatred' Drozdov <adrozdoff@gmail.com>
+# Contributor: toha257 <toha257@gmail.com>
+# Contributor: Allan McRae <allan@archlinux.org>
+# Contributor: Kevin Mihelich <kevin@archlinuxarm.org>
+# Contributor: Tavian Barnes <tavianator@tavianator.com>
+# Maintainer: Stefan Schmidt <thrimbor.github@gmail.com>
+
+_target=parisc-unknown-linux-gnu
+pkgname=${_target}-gcc-stage1
+pkgver=13.2.1
+_majorver=${pkgver%%.*}
+_commit=860b0f0ef787f756c0e293671b4c4622dff63a79
+pkgrel=3.1
+pkgdesc="The GNU Compiler Collection. Stage 1 for toolchain building (${_target})"
+arch=(x86_64 powerpc64le powerpc64 powerpc)
+license=(GPL LGPL FDL custom)
+url='http://gcc.gnu.org'
+depends=(${_target}-binutils libmpc zlib libisl)
+makedepends=(git)
+options=(!emptydirs !distcc !strip)
+source=(git+https://sourceware.org/git/gcc.git#commit=${_commit}
+	gcc11-Wno-format-security.patch)
+validpgpkeys=(F3691687D867B81B51CE07D9BBE43771487328A9  # bpiotrowski@archlinux.org
+              86CFFCA918CF3AF47147588051E8B148A9999C34  # evangelos@foutrelis.com
+              13975A70E63C361C73AE69EF6EEB81F8981C74C7  # richard.guenther@gmail.com
+              D3A93CAD751C2AF4F8C7AD516C35B99309B5FA62) # Jakub Jelinek <jakub@redhat.com>
+sha256sums=('SKIP'
+            '504e4b5a08eb25b6c35f19fdbe0c743ae4e9015d0af4759e74150006c283585e')
+
+prepare() {
+  [[ ! -d gcc ]] && ln -s gcc-${pkgver/+/-} gcc
+  cd gcc
+
+  # Do not run fixincludes
+  sed -i 's@\./fixinc\.sh@-c true@' gcc/Makefile.in
+
+  # Arch Linux installs x86_64 libraries /lib
+  sed -i '/m64=/s/lib64/lib/' gcc/config/i386/t-linux64
+
+  # hack! - some configure tests for header files using "$CPP $CPPFLAGS"
+  sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" {libiberty,gcc}/configure
+
+  # configure.ac: When adding -Wno-format, also add -Wno-format-security
+  patch -Np0 < "$srcdir/gcc11-Wno-format-security.patch"
+
+  mkdir -p "$srcdir/gcc-build"
+}
+
+build() {
+  cd gcc-build
+
+  # using -pipe causes spurious test-suite failures
+  # http://gcc.gnu.org/bugzilla/show_bug.cgi?id=48565
+  CFLAGS=${CFLAGS/-pipe}
+  CFLAGS=${CFLAGS/-Wformat -Werror=format-security/}
+  CXXFLAGS=${CXXFLAGS/-pipe/}
+  CXXFLAGS=${CXXFLAGS/ -Wformat -Werror=format-security/}
+
+  "$srcdir/gcc/configure" --prefix=/usr \
+      --program-prefix=${_target}- \
+      --with-local-prefix=/usr/${_target} \
+      --with-sysroot=/usr/${_target} \
+      --with-build-sysroot=/usr/${_target} \
+      --with-as=/usr/bin/${_target}-as \
+      --with-ld=/usr/bin/${_target}-ld \
+      --libdir=/usr/lib \
+      --libexecdir=/usr/lib \
+      --disable-nls \
+      --with-newlib \
+      --enable-languages=c,c++ \
+      --disable-shared \
+      --disable-threads \
+      --with-system-zlib \
+      --enable-__cxa_atexit \
+      --disable-libunwind-exceptions \
+      --enable-clocale=gnu \
+      --disable-libstdcxx-pch \
+      --disable-libssp \
+      --enable-gnu-unique-object \
+      --enable-linker-build-id \
+      --disable-lto \
+      --disable-plugin \
+      --enable-install-libiberty \
+      --with-linker-hash-style=gnu \
+      --enable-gnu-indirect-function \
+      --disable-multilib \
+      --disable-werror \
+      --enable-checking=release \
+      --enable-default-pie \
+      --enable-default-ssp \
+      --target=${_target} \
+      --host=${CHOST} \
+      --build=${CHOST}
+
+  make STAGE1_CFLAGS="-O2" all-gcc all-target-libgcc
+}
+
+package() {
+  cd gcc-build
+
+  make DESTDIR="$pkgdir" install-gcc install-target-libgcc
+
+  rm -rf "$pkgdir/usr/share"
+
+  # strip it manually
+  strip "$pkgdir/usr/bin/"* 2>/dev/null || true
+  find "$pkgdir/usr/lib" -type f -exec /usr/bin/${_target}-strip \
+    --strip-unneeded {} \; 2>/dev/null || true
+}

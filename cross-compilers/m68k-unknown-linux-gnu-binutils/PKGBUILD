@@ -1,0 +1,80 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Alexander F. Rødseth <xyproto@archlinux.org>
+# Contributor: Emil Renner Berthing <aur@esmil.dk>
+
+_target=m68k-unknown-linux-gnu
+pkgname=$_target-binutils
+pkgver=2.41
+_commit=31b78cc991781265d9404bd55151691bedd6d556
+pkgrel=3.1
+pkgdesc='Assemble and manipulate binary and object files for m68k'
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+url='https://gnu.org/software/binutils/'
+license=(GPL)
+depends=(glibc zlib libelf jansson)
+makedepends=(git setconf)
+source=(git+https://sourceware.org/git/binutils-gdb.git#commit=${_commit}
+	gold-warn-unsupported.patch)
+sha512sums=('SKIP'
+            '5d827b349b4456f8314776f1545396945c751b822a77604157b3fe436e5ff82bb313af3a215c99fd9d1f1f8ebb9f92033cc1a4968e35734619ad28b9bb3839a7')
+
+prepare() {
+  cd ${srcdir}
+  [[ ! -d binutils-gdb ]] && ln -s binutils-$pkgver binutils-gdb
+
+  cd "binutils-gdb"
+  # Creds @Fedora
+  # Change the gold configuration script to only warn about
+  # unsupported targets.  This allows the binutils to be built with
+  # BPF support enabled.
+  patch -Np1 -i "${srcdir}"/gold-warn-unsupported.patch
+
+  setconf libiberty/configure ac_cpp "'\$CPP \$CPPFLAGS -O2'"
+}
+
+build() {
+  cd "binutils-gdb"
+
+  unset CPPFLAGS
+  ./configure \
+    --disable-nls \
+    --enable-deterministic-archives \
+    --enable-gold \
+    --enable-ld=default \
+    --enable-multilib \
+    --enable-plugins \
+    --prefix=/usr \
+    --target=$_target \
+    --with-gnu-as \
+    --with-gnu-ld \
+    --with-sysroot=/usr/$_target/usr \
+    --with-system-zlib \
+    --disable-werror \
+    --disable-sim \
+    --enable-colored-disassembly \
+    --enable-targets=no
+  make
+}
+
+check() {
+  # * Unset LDFLAGS as testsuite makes assumptions about which ones are active.
+  # * Do not abort on errors - manually check log files.
+  make -C "binutils-gdb" LDFLAGS="" -k check
+}
+
+package() {
+  make -C "binutils-gdb" DESTDIR="$pkgdir" install
+
+  install -d -m755 "$pkgdir/usr/$_target/usr"
+  mv $pkgdir/usr/$_target/{bin,lib} "$pkgdir/usr/$_target/usr/"
+
+  # Remove info documents that conflict with host version
+  rm -r "$pkgdir/usr/share/info"
+  rm -r "$pkgdir/usr/share/gdb"
+  rm "$pkgdir/usr/include/gdb/jit-reader.h"
+
+  rm "$pkgdir"/usr/lib/bfd-plugins/libdep.so
+}
+
+# getver: gnu.org/software/binutils
