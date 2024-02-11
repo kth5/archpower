@@ -7,27 +7,34 @@
 
 pkgbase=curl
 pkgname=(curl libcurl-compat libcurl-gnutls)
-_tag='55b5fafb094ebe07ca8a5d4f79813c8b40670795' # git rev-parse v${_tag_name}
-_tag_name='8_5_0'
+_tag='8cd1397d3c5c9b1526c8d74530266a7a9a22294b' # git rev-parse v${_tag_name}
+_tag_name='8_6_0'
 pkgver="${_tag_name//_/.}"
-pkgrel=1
+pkgrel=3
 pkgdesc='command line tool and library for transferring data with URLs'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://curl.se/'
 license=('MIT')
-depends=('ca-certificates' 'brotli' 'libbrotlidec.so' 'krb5' 'libgssapi_krb5.so'
-         'libidn2' 'libidn2.so' 'libnghttp2' 'libpsl' 'libpsl.so' 'libssh2' 'libssh2.so'
-         'openssl' 'zlib' 'zstd' 'libzstd.so')
+depends=('ca-certificates'
+         'brotli' 'libbrotlidec.so'
+         'krb5' 'libgssapi_krb5.so'
+         'libidn2' 'libidn2.so'
+         'libnghttp2' 'libnghttp2.so'
+         'libnghttp3' 'libnghttp3.so'
+         'libpsl' 'libpsl.so'
+         'libssh2' 'libssh2.so'
+         'zlib' 'libz.so'
+         'zstd' 'libzstd.so')
 makedepends=('git' 'patchelf')
-provides=('libcurl.so')
 validpgpkeys=('27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2') # Daniel Stenberg
-source=("git+https://github.com/bagder/curl.git#tag=${_tag}?signed")
+source=("git+https://github.com/curl/curl.git#tag=${_tag}?signed")
 sha512sums=('SKIP')
 
 _backports=(
 )
 
 _reverts=(
+    '9a90c9dd64d2f03601833a70786d485851bd1b53'
 )
 
 prepare() {
@@ -79,6 +86,7 @@ build() {
   "${srcdir}/${pkgbase}"/configure \
     "${_configure_options[@]}" \
     --with-openssl \
+    --with-openssl-quic \
     --enable-versioned-symbols
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
@@ -89,9 +97,11 @@ build() {
   "${srcdir}/${pkgbase}"/configure \
     "${_configure_options[@]}" \
     --with-openssl \
+    --with-openssl-quic \
     --disable-versioned-symbols
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make -C lib
+  patchelf --set-soname 'libcurl-compat.so.4' ./lib/.libs/libcurl.so
 
   # build libcurl-gnutls
   cd "${srcdir}"/build-curl-gnutls
@@ -107,6 +117,9 @@ build() {
 }
 
 package_curl() {
+  depends+=('openssl' 'libcrypto.so' 'libssl.so')
+  provides=('libcurl.so')
+
   cd build-curl
 
   make DESTDIR="${pkgdir}" install
@@ -120,7 +133,7 @@ package_curl() {
 
 package_libcurl-compat() {
   pkgdesc='command line tool and library for transferring data with URLs (no versioned symbols)'
-  depends=('curl' 'openssl')
+  depends=('curl')
   provides=('libcurl-compat.so')
 
   cd "${srcdir}"/build-curl-compat
@@ -131,6 +144,7 @@ package_libcurl-compat() {
   rm "${pkgdir}"/usr/lib/libcurl.{a,so}*
   for version in 3 4.0.0 4.1.0 4.2.0 4.3.0 4.4.0 4.5.0 4.6.0 4.7.0; do
     ln -s libcurl-compat.so.4.8.0 "${pkgdir}"/usr/lib/libcurl.so.${version}
+    ln -s libcurl-compat.so.4.8.0 "${pkgdir}"/usr/lib/libcurl-compat.so.${version}
   done
 
   install -dm 0755 "${pkgdir}"/usr/share/licenses
