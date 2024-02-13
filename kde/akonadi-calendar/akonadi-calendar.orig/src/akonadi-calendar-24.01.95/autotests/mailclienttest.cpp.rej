@@ -1,0 +1,331 @@
+--- autotests/mailclienttest.cpp	2023-11-22 20:09:08.601106900 +0100
++++ autotests/mailclienttest.cpp	2023-11-22 20:09:11.896759820 +0100
+@@ -8,47 +8,22 @@
+ 
+ #include "mailclient_p.h"
+ 
+-#include <Akonadi/ItemCreateJob>
+ #include <Akonadi/MessageQueueJob>
+ #include <KCalendarCore/FreeBusy>
+ #include <KCalendarCore/Incidence>
+-#include <KContacts/Addressee>
+ #include <KIdentityManagement/Identity>
+-#include <MessageComposer/ContactPreference>
+-
+-#include <gpgme++/context.h>
+-#include <gpgme++/keylistresult.h>
+ 
+ #include <akonadi/qtest_akonadi.h>
+ 
+ #include <QObject>
+ #include <QTestEventLoop>
+ 
+-const QString s_ourEmail = QStringLiteral("unittests@dev.nul"); // change also in kdepimlibs/akonadi/calendar/tests/unittestenv/kdehome/share/config
+-const auto s_ourGpgKey = QByteArray("7E501DEA81F62DB17389393325058D1857FDD0E7");
+-
+-const QString s_testEmail = QStringLiteral("test@example.com");
+-const auto s_testGpgKey = QByteArray("D6003D89B2840A1B1888C39E5AB1CE1311F6B1DB");
+-
+-const QString s_test2Email = QStringLiteral("test2@example.com");
+-const auto s_test2GpgKey = QByteArray("A9794D762BC67B1DEB161CDD8B3613B451672CB8");
+-
+-enum class CryptoState { Plain, Signed, Encrypted };
+-
+-struct ExpectedDialog {
+-    QString text;
+-    Akonadi::ITIPHandlerDialogDelegate::DialogAction action;
+-};
+-
+-using ContactPreferences = QMap<QString, MessageComposer::ContactPreference>;
++static const char *s_ourEmail = "unittests@dev.nul"; // change also in kdepimlibs/akonadi/calendar/tests/unittestenv/kdehome/share/config
+ 
+ using namespace Akonadi;
+ 
+ Q_DECLARE_METATYPE(KIdentityManagement::Identity)
+ Q_DECLARE_METATYPE(KCalendarCore::Incidence::Ptr)
+-Q_DECLARE_METATYPE(CryptoState)
+-Q_DECLARE_METATYPE(QVector<ExpectedDialog>)
+-Q_DECLARE_METATYPE(ContactPreferences)
+ 
+ class FakeMessageQueueJob : public Akonadi::MessageQueueJob
+ {
+@@ -80,43 +55,6 @@
+ 
+ UnitTestResult::List FakeMessageQueueJob::sUnitTestResults;
+ 
+-class FakeITIPHandlerDialogDelegate : public ITIPHandlerDialogDelegate
+-{
+-public:
+-    explicit FakeITIPHandlerDialogDelegate(const KCalendarCore::Incidence::Ptr &incidence, KCalendarCore::iTIPMethod method, QWidget *parent = nullptr)
+-        : ITIPHandlerDialogDelegate(incidence, method, parent)
+-    {
+-    }
+-
+-    static QVector<ExpectedDialog> expectedWarningTwoActionsCancelDialogs;
+-
+-protected:
+-    int warningTwoActionsCancel(const QString &text, const QString &title, const KGuiItem &, const KGuiItem &, const KGuiItem &) override
+-    {
+-        if (expectedWarningTwoActionsCancelDialogs.empty()) {
+-            QTest::qFail("Unexpected dialog - the testcase doesn't expect any dialog", __FILE__, __LINE__);
+-            qDebug() << "Dialog title:" << title;
+-            qDebug() << "Dialog text:" << text;
+-            return ITIPHandlerDialogDelegate::CancelAction;
+-        }
+-
+-        const auto expected = expectedWarningTwoActionsCancelDialogs.front();
+-        expectedWarningTwoActionsCancelDialogs.erase(expectedWarningTwoActionsCancelDialogs.begin());
+-
+-        if (!title.contains(expected.text) && !text.contains(expected.text)) {
+-            QTest::qFail("Mismatching dialog - the dialog text doesn't match the expected string", __FILE__, __LINE__);
+-            qDebug() << "Dialog title:" << title;
+-            qDebug() << "Dialog text:" << text;
+-            qDebug() << "Expected substring:" << expected.text;
+-            return ITIPHandlerDialogDelegate::CancelAction;
+-        }
+-
+-        return expected.action;
+-    }
+-};
+-
+-QVector<ExpectedDialog> FakeITIPHandlerDialogDelegate::expectedWarningTwoActionsCancelDialogs;
+-
+ class FakeITIPHandlerComponentFactory : public ITIPHandlerComponentFactory
+ {
+ public:
+@@ -173,34 +62,23 @@
+         QTest::addColumn<QStringList>("expectedToList");
+         QTest::addColumn<QStringList>("expectedCcList");
+         QTest::addColumn<QStringList>("expectedBccList");
+-        QTest::addColumn<CryptoState>("expectedCrypto");
+-        QTest::addColumn<QVector<ExpectedDialog>>("expectedDialogs");
+-        QTest::addColumn<ContactPreferences>("contactPreferences");
+ 
+         KCalendarCore::Incidence::Ptr incidence(new KCalendarCore::Event());
+         KIdentityManagement::Identity identity;
+-        identity.setPrimaryEmailAddress(s_ourEmail);
+-
+-        KIdentityManagement::Identity cryptoIdentity = identity;
+-        cryptoIdentity.setPGPSigningKey(s_ourGpgKey);
+-        cryptoIdentity.setPGPEncryptionKey(s_ourGpgKey);
+-        cryptoIdentity.setPgpAutoSign(true);
+-        cryptoIdentity.setPgpAutoEncrypt(true);
+-
+-        bool bccMe = false;
++        bool bccMe;
+         QString attachment;
+         QString transport;
+         MailClient::Result expectedResult = MailClient::ResultNoAttendees;
+         const int expectedTransportId = 69372773; // from tests/unittestenv/kdehome/share/config/mailtransports
+-        const QString expectedFrom = s_ourEmail; // from tests/unittestenv/kdehome/share/config/emailidentities
+-        KCalendarCore::Person organizer(QStringLiteral("Organizer"), s_ourEmail);
++        const QString expectedFrom = QStringLiteral("unittests@dev.nul"); // from tests/unittestenv/kdehome/share/config/emailidentities
++        KCalendarCore::Person organizer(QStringLiteral("Organizer"), QStringLiteral("unittests@dev.nul"));
+ 
+         QStringList toList;
+         QStringList toCcList;
+         QStringList toBccList;
+         //----------------------------------------------------------------------------------------------
+         QTest::newRow("No attendees") << incidence << identity << bccMe << attachment << transport << expectedResult << -1 << QString() << toList << toCcList
+-                                      << toBccList << CryptoState::Plain << QVector<ExpectedDialog>{} << ContactPreferences{};
++                                      << toBccList;
+         //----------------------------------------------------------------------------------------------
+         // One attendee, but without e-mail
+         KCalendarCore::Attendee attendee(QStringLiteral("name1"), QString());
+@@ -208,7 +86,7 @@
+         incidence->addAttendee(attendee);
+         expectedResult = MailClient::ResultReallyNoAttendees;
+         QTest::newRow("No attendees with email") << incidence << identity << bccMe << attachment << transport << expectedResult << -1 << QString() << toList
+-                                                 << toCcList << toBccList << CryptoState::Plain << QVector<ExpectedDialog>{} << ContactPreferences{};
++                                                 << toCcList << toBccList;
+         //----------------------------------------------------------------------------------------------
+         // One valid attendee
+         attendee = KCalendarCore::Attendee(QStringLiteral("name1"), QStringLiteral("test@foo.org"));
+@@ -218,7 +96,7 @@
+         expectedResult = MailClient::ResultSuccess;
+         toList << QStringLiteral("test@foo.org");
+         QTest::newRow("One attendee") << incidence << identity << bccMe << attachment << transport << expectedResult << expectedTransportId << expectedFrom
+-                                      << toList << toCcList << toBccList << CryptoState::Plain << QVector<ExpectedDialog>{} << ContactPreferences{};
++                                      << toList << toCcList << toBccList;
+         //----------------------------------------------------------------------------------------------
+         // One valid attendee
+         attendee = KCalendarCore::Attendee(QStringLiteral("name1"), QStringLiteral("test@foo.org"));
+@@ -229,87 +107,7 @@
+         expectedResult = MailClient::ResultSuccess;
+         // Should default to the default transport
+         QTest::newRow("Invalid transport") << incidence << identity << bccMe << attachment << invalidTransport << expectedResult << expectedTransportId
+-                                           << expectedFrom << toList << toCcList << toBccList << CryptoState::Plain << QVector<ExpectedDialog>{}
+-                                           << ContactPreferences{};
+-
+-        //----------------------------------------------------------------------------------------------
+-        // One valid attendee, identity wants to sign
+-        {
+-            auto ident = identity;
+-            ident.setPGPSigningKey(s_ourGpgKey);
+-            ident.setPgpAutoSign(true);
+-
+-            QTest::newRow("One attendee, identity wants to sign")
+-                << incidence << ident << bccMe << attachment << transport << expectedResult << expectedTransportId << expectedFrom << toList << toCcList
+-                << toBccList << CryptoState::Signed << QVector<ExpectedDialog>{} << ContactPreferences{};
+-        }
+-
+-        //----------------------------------------------------------------------------------------------
+-        // One valid attendee, identity wants to encrypt
+-        {
+-            KCalendarCore::Incidence::Ptr inc{incidence->clone()};
+-            inc->clearAttendees();
+-            inc->addAttendee(KCalendarCore::Attendee({}, s_testEmail));
+-            // No crypto preference for the attendee
+-
+-            QTest::newRow("One attendee, identity wants to encrypt")
+-                << inc << cryptoIdentity << bccMe << attachment << transport << expectedResult << expectedTransportId << expectedFrom
+-                << QStringList({s_testEmail}) << toCcList << toBccList << CryptoState::Encrypted << QVector<ExpectedDialog>{} << ContactPreferences{};
+-        }
+-
+-        //----------------------------------------------------------------------------------------------
+-        // One valid attendee, attendee wants to encrypt
+-        {
+-            auto ident = identity;
+-            ident.setPGPSigningKey(s_ourGpgKey);
+-            ident.setPGPEncryptionKey(s_ourGpgKey);
+-
+-            KCalendarCore::Incidence::Ptr inc{incidence->clone()};
+-            inc->clearAttendees();
+-            inc->addAttendee(KCalendarCore::Attendee({}, s_testEmail));
+-
+-            QTest::newRow("One attendee, attendee wants to encrypt")
+-                << inc << ident << bccMe << attachment << transport << expectedResult << expectedTransportId << expectedFrom << QStringList({s_testEmail})
+-                << toCcList << toBccList << CryptoState::Encrypted << QVector<ExpectedDialog>{}
+-                << ContactPreferences{{s_testEmail, createPreference(s_testGpgKey, Kleo::AlwaysEncrypt, Kleo::AlwaysSign)}};
+-        }
+-
+-        //----------------------------------------------------------------------------------------------
+-        // Two attendees, one without key
+-        {
+-            auto ident = identity;
+-            ident.setPGPSigningKey(s_ourGpgKey);
+-            ident.setPGPEncryptionKey(s_ourGpgKey);
+-
+-            KCalendarCore::Incidence::Ptr inc{incidence->clone()};
+-            inc->addAttendee(KCalendarCore::Attendee({}, s_testEmail));
+-
+-            QTest::newRow("Two attendees, one wants encryption, one has no key")
+-                << inc << ident << bccMe << attachment << transport << expectedResult << expectedTransportId << expectedFrom
+-                << QStringList({QStringLiteral("test@foo.org"), s_testEmail}) << toCcList << toBccList << CryptoState::Plain
+-                << QVector<ExpectedDialog>{{QStringLiteral("conflicting encryption preferences"),
+-                                            ITIPHandlerDialogDelegate::SecondaryAction /* do not encrypt */}}
+-                << ContactPreferences{{s_testEmail, createPreference(s_testGpgKey, Kleo::AlwaysEncrypt)}};
+-        }
+-
+-        //----------------------------------------------------------------------------------------------
+-        // Two attendees, both have key but only one explicitly wants encryption - we should encrypt anyway
+-        {
+-            auto ident = identity;
+-            ident.setPGPSigningKey(s_ourGpgKey);
+-            ident.setPGPEncryptionKey(s_ourGpgKey);
+-
+-            KCalendarCore::Incidence::Ptr inc{incidence->clone()};
+-            inc->clearAttendees();
+-            inc->addAttendee(KCalendarCore::Attendee({}, s_testEmail));
+-            inc->addAttendee(KCalendarCore::Attendee({}, s_test2Email));
+-
+-            QTest::newRow("Two attendees, both have keys but only one explicitly wants encryption")
+-                << inc << ident << bccMe << attachment << transport << expectedResult << expectedTransportId << expectedFrom
+-                << QStringList({s_testEmail, s_test2Email}) << toCcList << toBccList << CryptoState::Encrypted << QVector<ExpectedDialog>{}
+-                << ContactPreferences{{s_test2Email, createPreference(s_test2GpgKey, Kleo::AlwaysEncrypt)}};
+-        }
+-
++                                           << expectedFrom << toList << toCcList << toBccList;
+         //----------------------------------------------------------------------------------------------
+         // One valid attendee, and bcc me
+         attendee = KCalendarCore::Attendee(QStringLiteral("name1"), QStringLiteral("test@foo.org"));
+@@ -319,9 +117,9 @@
+         expectedResult = MailClient::ResultSuccess;
+         // Should default to the default transport
+         toBccList.clear();
+-        toBccList << s_ourEmail;
++        toBccList << QStringLiteral("unittests@dev.nul");
+         QTest::newRow("Test bcc") << incidence << identity << /*bccMe*/ true << attachment << transport << expectedResult << expectedTransportId << expectedFrom
+-                                  << toList << toCcList << toBccList << CryptoState::Plain << QVector<ExpectedDialog>{} << ContactPreferences{};
++                                  << toList << toCcList << toBccList;
+         //----------------------------------------------------------------------------------------------
+         // Test CC list
+         attendee = KCalendarCore::Attendee(QStringLiteral("name1"), QStringLiteral("test@foo.org"));
+@@ -337,12 +135,12 @@
+         expectedResult = MailClient::ResultSuccess;
+         // Should default to the default transport
+         toBccList.clear();
+-        toBccList << s_ourEmail;
++        toBccList << QStringLiteral("unittests@dev.nul");
+ 
+         toCcList.clear();
+         toCcList << QStringLiteral("optional@foo.org") << QStringLiteral("non@foo.org");
+         QTest::newRow("Test cc") << incidence << identity << /*bccMe*/ true << attachment << transport << expectedResult << expectedTransportId << expectedFrom
+-                                 << toList << toCcList << toBccList << CryptoState::Plain << QVector<ExpectedDialog>{} << ContactPreferences{};
++                                 << toList << toCcList << toBccList;
+     }
+ 
+     void testMailAttendees()
+@@ -358,15 +156,9 @@
+         QFETCH(QStringList, expectedToList);
+         QFETCH(QStringList, expectedCcList);
+         QFETCH(QStringList, expectedBccList);
+-        QFETCH(CryptoState, expectedCrypto);
+-        QFETCH(QVector<ExpectedDialog>, expectedDialogs);
+-        QFETCH(ContactPreferences, contactPreferences);
+ 
+         FakeMessageQueueJob::sUnitTestResults.clear();
+ 
+-        FakeITIPHandlerDialogDelegate::expectedWarningTwoActionsCancelDialogs = expectedDialogs;
+-        TestableMailClient::preferences = contactPreferences;
+-
+         mPendingSignals = 1;
+         mMailClient->mailAttendees(incidence, identity, bccMe, attachment, transport);
+         waitForSignals();
+@@ -412,19 +189,19 @@
+ 
+         KCalendarCore::IncidenceBase::Ptr incidence(new KCalendarCore::Event());
+         KIdentityManagement::Identity identity;
+-        const QString from = s_ourEmail;
+-        bool bccMe = false;
++        const QString from = QLatin1String(s_ourEmail);
++        bool bccMe;
+         QString attachment;
+         QString subject = QStringLiteral("subject1");
+         QString transport;
+         MailClient::Result expectedResult = MailClient::ResultSuccess;
+         const int expectedTransportId = 69372773; // from tests/unittestenv/kdehome/share/config/mailtransports
+         QString expectedFrom = from; // from tests/unittestenv/kdehome/share/config/emailidentities
+-        KCalendarCore::Person organizer(QStringLiteral("Organizer"), s_ourEmail);
++        KCalendarCore::Person organizer(QStringLiteral("Organizer"), QStringLiteral("unittests@dev.nul"));
+         incidence->setOrganizer(organizer);
+ 
+         QStringList toList;
+-        toList << s_ourEmail;
++        toList << QStringLiteral("unittests@dev.nul");
+         QStringList toBccList;
+         QString expectedSubject;
+         //----------------------------------------------------------------------------------------------
+@@ -489,17 +266,17 @@
+ 
+         KCalendarCore::IncidenceBase::Ptr incidence(new KCalendarCore::Event());
+         KIdentityManagement::Identity identity;
+-        const QString from = s_ourEmail;
+-        bool bccMe = false;
+-        const QString recipients = s_ourEmail;
++        const QString from = QLatin1String(s_ourEmail);
++        bool bccMe;
++        const QString recipients = QStringLiteral("unittests@dev.nul");
+         QString attachment;
+         QString transport;
+         MailClient::Result expectedResult = MailClient::ResultSuccess;
+         const int expectedTransportId = 69372773; // from tests/unittestenv/kdehome/share/config/mailtransports
+         QString expectedFrom = from; // from tests/unittestenv/kdehome/share/config/emailidentities
+-        KCalendarCore::Person organizer(QStringLiteral("Organizer"), s_ourEmail);
++        KCalendarCore::Person organizer(QStringLiteral("Organizer"), QStringLiteral("unittests@dev.nul"));
+         QStringList toList;
+-        toList << s_ourEmail;
++        toList << QLatin1String(s_ourEmail);
+         QStringList toBccList;
+         //----------------------------------------------------------------------------------------------
+         QTest::newRow("test1") << incidence << identity << from << bccMe << recipients << attachment << transport << expectedResult << expectedTransportId
