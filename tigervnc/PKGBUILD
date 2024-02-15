@@ -3,8 +3,8 @@
 
 pkgname=tigervnc
 pkgver=1.13.1
-pkgrel=2
-_xorgver=21.1.6
+pkgrel=3
+_xorgver=21.1.11
 pkgdesc="Suite of VNC servers and clients. Based on the VNC 4 branch of TightVNC."
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="http://www.tigervnc.org"
@@ -29,7 +29,7 @@ source=($pkgname-$pkgver.tar.gz::https://github.com/TigerVNC/tigervnc/archive/v$
 	more-xsessions.patch
 	remove-selinux.patch)
 sha256sums=('b7c5b8ed9e4e2c2f48c7b2c9f21927db345e542243b4be88e066b2daa3d1ae25'
-            '1eb86ed674d042b6c8b1f9135e59395cbbca35ed551b122f73a7d8bb3bb22484'
+            '1d3dadbd57fb86b16a018e9f5f957aeeadf744f56c0553f55737628d06d326ef'
             'c9276f6ea277cf9654fb2cc3bc9dadbb2e596b5cf8ca867ee906c0080cf7f810'
             'cb57dece026b29d7019a3e1e42fd2fb201d37fc60a70c885d2a50acffb808c06'
             'fb8bb5bd3ec990720580a664326a70fd178ce94b97c2130462df9b1e3a3925c3')
@@ -47,11 +47,16 @@ prepare() {
 build() {
   cd "$srcdir"/${pkgname}-${pkgver}
 
+  JAVA=TRUE
+  case "${CARCH}" in
+    riscv64) JAVA=FALSE ;;
+  esac
+
   cmake -G "Unix Makefiles" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_INSTALL_SBINDIR=/usr/bin \
     -DCMAKE_INSTALL_LIBEXECDIR=/usr/bin \
-    -DBUILD_JAVA=TRUE
+    -DBUILD_JAVA=${JAVA}
   make
 
   cd unix/xserver
@@ -69,7 +74,8 @@ build() {
 package() {
   cd "$srcdir"/${pkgname}-${pkgver}
   make DESTDIR="$pkgdir" install
-  install -Dm0644 java/VncViewer.jar "${pkgdir}"/usr/share/vnc/classes/VncViewer.jar
+  [ ! "${CARCH}" == 'riscv64' ] && \
+    install -Dm0644 java/VncViewer.jar "${pkgdir}"/usr/share/vnc/classes/VncViewer.jar
   cd unix/xserver/hw/vnc
   make DESTDIR="$pkgdir" install
   install -Dm0755 "$srcdir"/Xsession "$pkgdir"/etc/X11/tigervnc/Xsession
