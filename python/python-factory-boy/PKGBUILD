@@ -4,37 +4,43 @@
 # Contributor: Kyle Keen <keenerd@gmail.com>
 
 pkgname=python-factory-boy
-pkgver=3.2.1
-pkgrel=4
+pkgver=3.3.0
+pkgrel=1
 pkgdesc="A versatile test fixtures replacement based on thoughtbot's factory_bot for Ruby"
 url="https://github.com/FactoryBoy/factory_boy"
 license=('MIT')
 arch=(any)
 depends=('python-faker')
-makedepends=('python-setuptools')
-checkdepends=('python-pytest-runner' 'python-flask' 'python-django' 'python-sqlalchemy'
-              'python-flask-sqlalchemy' 'python-mongoengine' 'python-mongomock')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/FactoryBoy/factory_boy/archive/$pkgver.tar.gz")
-sha512sums=('45f88970fa2adf15160d489335d7843ebf78178ae619e6b1ad2cc2e3af8e6c14763cf1afe21bc4e66d1d7196458d8045862db4d5878d5cfc1f2aa658ccba1812')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+checkdepends=('python-pytest' 'python-flask' 'python-django' 'python-sqlalchemy'
+              'python-sqlalchemy-utils' 'python-flask-sqlalchemy' 'python-mongoengine'
+              'python-mongomock')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/FactoryBoy/factory_boy/archive/$pkgver.tar.gz"
+        https://github.com/FactoryBoy/factory_boy/commit/f0859075b048b85c8ed44c051f18070cbd20d03d.patch)
+sha512sums=('483e7454dbbafdf6ba2ec8924ccd648585c5ad5676da0af222a942beb3ebdbf4c372bb963c948d8a87a5359c1277b45b226239ff6109e11dbc1851ef5fd7275f'
+            'c9fd3ecc6598547a39ec588d634f8ace46090f02518732420e8dcb14f373983c02ed91c1e7ec28777007ebd66f4179ed4a407a4252c8402e861b75748c3d813f')
 
 prepare() {
   cd factory_boy-$pkgver
+  # Fix test_version
+  patch -p1 -i ../f0859075b048b85c8ed44c051f18070cbd20d03d.patch
   # Use mongomock
-  sed -i '/serverselectiontimeoutms/a is_mock=True' tests/test_mongoengine.py
+  sed -i '/serverselectiontimeoutms/a is_mock=True,' tests/test_mongoengine.py
 }
 
 build() {
   cd factory_boy-$pkgver
-  python setup.py build
+  python -m build -nw
 }
 
 check() {
   cd factory_boy-$pkgver
-  python setup.py pytest
+  python -m installer -d tmp_install dist/*.whl
+  PYTHONPATH=tmp_install/usr/lib/python3.11/site-packages pytest
 }
 
 package() {
   cd factory_boy-$pkgver
-  python setup.py install --root="$pkgdir" --optimize=1
-  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  python -m installer -d "$pkgdir" dist/*.whl
+  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
 }
