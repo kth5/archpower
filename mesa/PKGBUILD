@@ -10,16 +10,16 @@ pkgname=(
   'opencl-clover-mesa'
   'opencl-rusticl-mesa'
   'vulkan-radeon'
-  'vulkan-swrast'
-  'vulkan-virtio'
   'libva-mesa-driver'
   'mesa-vdpau'
 )
 case "${CARCH}" in
-  powerpc64*|riscv64|x86_64) pkgname+=('vulkan-intel' 'vulkan-powervr' 'mesa' ) ;;
-  *) pkgname+=('mesa')
+  powerpc) pkgname+=('vulkan-swrast' 'vulkan-virtio' 'mesa' ) ;;
+  powerpc64*|x86_64) pkgname+=('vulkan-swrast' 'vulkan-virtio' 'vulkan-intel' 'vulkan-powervr' 'mesa' ) ;;
+  riscv64) pkgname+=('vulkan-intel' 'vulkan-powervr' 'mesa' ) ;;
+  *) pkgname+=('vulkan-swrast' 'vulkan-virtio' 'mesa')
 esac
-pkgver=24.0.0
+pkgver=24.0.1
 pkgrel=1
 epoch=1
 pkgdesc="An open-source implementation of the OpenGL specification"
@@ -83,14 +83,14 @@ source=(
   0004-add-orcjit-riscv.patch
   0005-llvmpipe-linkage.patch
 )
-sha256sums=('dc7e8c077bc5884df95478263b34bdebb7e88e600689cb56fb07be2b8c304c36'
+sha256sums=('f387192b08c471c545590dd12230a2a343244804b5fe866fec6aea02eab57613'
             '7052ba73bb07ea78873a2431ee4e828f4e72bda7d176d07f770fa48373dec537'
             'a82392ed26b32a4edd57ec2ca40db0a556787932edd59681eeedf4a21861b9d0'
             '0a8f2792dfd0469bc41540884fe2a1dbf4f0fd92f53bad5b9db831ac1e59dd11'
             '30b781d8d72ec72803926a82867b1c8de14245fb79ddd392de85c4d9c35b540d'
             'c6fc690ed2a4d7391e23db13fdde3b4c92d24cca0c85e7911b1e46377ce7edd3'
             '24e955c349bbadf61fab1e3155234230928ff825ee4c5bcf6d2786ea032b596b')
-b2sums=('e15b14e921a6d1c8d1b183b8f7302d13aa81401d9485742846b8b70e2353825bcf0a0e1ee1849831eb43e5836a108cb3cf68bfe0d9183a78684dbd2fac637ab7'
+b2sums=('05eb98f2fec0d15e63e8da2ca2e563d0b6fb7e29d639e66fc69074b7550939160e6f29121b80f2c64083625f2b13aa728221443b1f5adf2dd0fd92056ed9dc40'
         '1ecf007b82260710a7bf5048f47dd5d600c168824c02c595af654632326536a6527fbe0738670ee7b921dd85a70425108e0f471ba85a8e1ca47d294ad74b4adb'
         '73489865623395ee749742145ea2f75473a85c14c9a129f68f29ae5936ffb3ea6018a5d2f53c19aefdd8a2aff2f2d7c1d0f393b00496f11867b8588c99d26432'
         'c28718783873be25fa2d6c0f43fae900f93e2f20df1c11a40ec86622112b7be7e7f50c3b77e52849fec9288fb8da3744d8bc2027df941ffd0b8c558fe3a927ba'
@@ -128,10 +128,18 @@ prepare() {
 build() {
   case "${CARCH}" in
     x86_64)
-      _platform_vulkan_drivers=',iris,intel_hasvk'
+      _platform_vulkan_drivers=',virtio,swrast,iris,intel_hasvk'
       _platform_gallium_drivers=',crocus,i915,iris,svga'
     ;;
-    powerpc64*|riscv64)
+    powerpc64*)
+      _platform_vulkan_drivers=',virtio,swrast,intel,intel,imagination-experimental'
+      _platform_gallium_drivers=',i915,iris,etnaviv,lima'
+    ;;
+    powerpc*)
+      _platform_vulkan_drivers=',virtio,swrast'
+      _platform_gallium_drivers=''
+    ;;
+    riscv64)
       _platform_vulkan_drivers=',intel,intel,imagination-experimental'
       _platform_gallium_drivers=',i915,iris,etnaviv,lima'
     ;;
@@ -159,7 +167,6 @@ build() {
     -D glx=dri
     -D intel-clc=enabled
     -D libunwind=enabled
-    -D llvm=enabled
     -D lmsensors=enabled
     -D microsoft-clc=disabled
     -D osmesa=true
@@ -168,18 +175,21 @@ build() {
     -D shared-glapi=enabled
     -D valgrind=enabled
     -D video-codecs=vc1dec,h264dec,h264enc,h265dec,h265enc
-    -D vulkan-drivers=amd,swrast,virtio${_platform_vulkan_drivers}
+    -D vulkan-drivers=amd${_platform_vulkan_drivers}
     -D vulkan-layers=device-select,intel-nullhw,overlay
   )
 
   case "${CARCH}" in
-    powerpc) meson_options+=(-D glx-direct=true) ;;
-    powerpc64le) meson_options+=(-D power8=true) ;;
-    powerpc64|powerpc) meson_options+=(-D power8=false) ;;
+    powerpc) meson_options+=(-D glx-direct=true -D llvm=enabled) ;;
+    powerpc64le) meson_options+=(-D power8=true -D llvm=enabled) ;;
+    powerpc64|powerpc) meson_options+=(-D power8=false -D llvm=enabled) ;;
     riscv64) meson_options+=(
                -D imagination-srv=true
+               -D draw-use-llvm=false
+               #-D llvm=disabled
              )
     ;;
+    *) meson_options=(-D llvm=enabled) ;;
   esac
 
   # Build only minimal debug info to reduce size
