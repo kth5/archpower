@@ -5,54 +5,43 @@
 # Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
 
 pkgname=netsurf
-pkgver=3.10
-pkgrel=8
+pkgver=3.11
+pkgrel=4
 pkgdesc='Lightweight and fast web browser'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://www.netsurf-browser.org/'
 license=(GPL2 MIT)
-depends=(curl gtk3 'libcss>=0.9.1' 'libdom>=0.4.1' 'libhubbub=0.3.7'
-         libjpeg-turbo 'libnsbmp>=0.1.6' 'libnsgif>=0.2.1' 'libnsutils=0.1.0'
-         'libutf8proc>=2.9.0' 'libwapcaplet>=0.4.3' libwebp)
+depends=(curl gtk3 'libcss>=0.9.2' 'libdom>=0.4.2' 'libhubbub=0.3.8'
+         libjpeg-turbo libjxl 'libnsbmp>=0.1.7' 'libnsgif>=1.0.0' 'libnsutils=0.1.1'
+         'libsvgtiny>=0.1.8' 'libutf8proc>=2.9.0' 'libwapcaplet>=0.4.3' libwebp)
 # vim is needed only for xxd when building
-makedepends=(check inetutils 'nsgenbind>=0.8' perl-html-parser setconf vim)
-source=("https://download.netsurf-browser.org/netsurf/releases/source-full/netsurf-all-$pkgver.tar.gz"
+makedepends=(check inetutils 'nsgenbind>=0.9' perl-html-parser setconf tinyxxd)
+source=("netsurf-$pkgver.tar.bz2::https://git.netsurf-browser.org/netsurf.git/snapshot/netsurf-release/$pkgver.tar.bz2"
         netsurf.sh)
-b2sums=('7c33db550a99000fabc95a9d0e48b86189485076bbcf740d8ff865564ca243c1a66d65fc21c036790cd0d1426e7f8251a376fc8370e1530b75e3f171ddb22ce4'
-        'f0220a0c2c03d567434deeed20f821dc110947e16889aa78e12e3f468a431d2f721b9cff23bd6ed3545323f3ed975ea0941f0ee61c4b09938b8bfb99764f8bc8')
+b2sums=('9714735389aa752b5e11a13c3e6e4fc456589517e98fe55025725e05e38a52afea377d53703553ec9d94e492c58f7e1b5ed04c7a0c4fb5158c3053eeedfddcdc'
+        '0eed1ab36a9c849794bfef88d8cc47cf568190d3e159ba8c3f490ee8265e75fc6483c064bb7ccd263efa83f2a5e98dab1ce521e74f00959885c17ff9f7bfb15e')
 
 prepare() {
-  cd $pkgname-all-$pkgver/$pkgname
+  cd $pkgname-release/$pkgver
   # Fix compilation issues
   sed -i 's:libutf8proc/::;s:UTF8PROC_CCC_VIRAMA:UTF8PROC_BIDI_CLASS_EN:' utils/idna.c
-  # Use "netsurf" as the name of the executable in /usr/bin
-  setconf frontends/gtk/res/netsurf-gtk.desktop 'Exec=netsurf %u'
+  # Use netsurf wrapper script, to set the language to one that NetSurf supports
+  setconf frontends/gtk/res/netsurf-gtk.desktop 'Exec=/usr/bin/netsurf %u'
+  # The xpm icon is placed in /usr/share/pixmaps
+  setconf frontends/gtk/res/netsurf-gtk.desktop 'Icon=netsurf.xpm'
 }
 
 build() {
-  export CFLAGS+=' -Os -funroll-loops -w'
-  make -C $pkgname-all-$pkgver/$pkgname \
-    INCLUDEDIR=include \
-    LIBDIR=lib \
-    NETSURF_UA_FORMAT_STRING='"NetSurf/%d.%d (%s; Arch Linux)"' \
-    PREFIX=/usr \
-    TARGET=gtk3
+  CFLAGS+=' -w' make -C $pkgname-release/$pkgver INCLUDEDIR=include LIBDIR=lib \
+    NETSURF_UA_FORMAT_STRING='"Mozilla/5.0 (Arch POWER; %s) NetSurf/%d.%d"' \
+    PREFIX=/usr TARGET=gtk3
 }
 
 package() {
-  make -C $pkgname-all-$pkgver/$pkgname \
-    DESTDIR="$pkgdir" \
-    INCLUDEDIR=include \
-    LIBDIR=lib \
-    PREFIX=/usr \
-    TARGET=gtk3 \
-    install
-
+  make -C $pkgname-release/$pkgver DESTDIR="$pkgdir" INCLUDEDIR=include LIBDIR=lib PREFIX=/usr TARGET=gtk3 install
   install -Dm755 $pkgname.sh "$pkgdir/usr/bin/$pkgname"
-  cd $pkgname-all-$pkgver/$pkgname
-  install -Dm644 frontends/gtk/res/$pkgname.xpm \
-    "$pkgdir/usr/share/pixmaps/$pkgname.xpm"
-  install -Dm644 frontends/gtk/res/$pkgname-gtk.desktop \
-    "$pkgdir/usr/share/applications/$pkgname.desktop"
+  cd $pkgname-release/$pkgver
+  install -Dm644 frontends/gtk/res/$pkgname.xpm "$pkgdir/usr/share/pixmaps/$pkgname.xpm"
+  install -Dm644 frontends/gtk/res/$pkgname-gtk.desktop "$pkgdir/usr/share/applications/$pkgname.desktop"
   install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
 }
