@@ -1,4 +1,3 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Levente Polyak <anthraxx@archlinux.org>
 # Contributor: Ionut Biru <ibiru@archlinux.org>
 # Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
@@ -6,37 +5,40 @@
 
 pkgbase=mplayer
 pkgname=('mplayer' 'mencoder')
-pkgver=38412
+pkgver=38448
 pkgrel=1
 pkgdesc='Media player for Linux'
 url='http://www.mplayerhq.hu/'
-arch=(x86_64 powerpc64le powerpc64 powerpc)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=('GPL')
 makedepends=('xorgproto' 'libxxf86vm' 'libmad' 'libxinerama' 'libmng' 'libxss'
              'smbclient' 'aalib' 'jack' 'libcaca' 'faac' 'faad2' 'lirc' 'libxv'
              'libxvmc' 'enca' 'libdca' 'a52dec' 'libvpx' 'unzip' 'mesa'
              'git' 'mpg123' 'ladspa' 'libcdio' 'zlib'
-             'libcdio-paranoia' 'subversion' 'x264' 'libx264.so' 'rtmpdump'
-             'libdvdcss' 'libdvdread' 'libdvdnav' 'ffmpeg' 'giflib' 'libgif.so'
-             'libbs2b' 'fribidi' 'opus' 'libvorbis' 'libvorbis.so' 'gsm'
-             'libpulse' 'alsa-lib' 'glibc' 'libass' 'libass.so' 'libjpeg'
-             'libpng' 'libogg' 'libtheora' 'libbluray' 'libbluray.so'
-             'xvidcore' 'libxvidcore.so' 'ncurses' 'libncursesw.so'
+             'libcdio-paranoia' 'subversion' 'x264' 'rtmpdump'
+             'libdvdcss' 'libdvdread' 'libdvdnav' 'ffmpeg' 'giflib'
+             'libbs2b' 'fribidi' 'opus' 'libvorbis' 'gsm'
+             'libpulse' 'alsa-lib' 'glibc' 'libass' 'libjpeg'
+             'libpng' 'libogg' 'libtheora' 'libbluray'
+             'xvidcore' 'ncurses'
              'fontconfig' 'freetype2' 'libx11' 'libxext' 'libvdpau' 'libgl'
              'lame' 'desktop-file-utils' 'ttf-font' 'openal' 'speex'
              'libmpeg2')
-makedepends_x86_64=('yasm')
+makedepends_x86_64=('nasm' 'yasm')
 options=('!emptydirs' '!lto')
 source=(${pkgbase}-${pkgver}::"svn://svn.mplayerhq.hu/mplayer/trunk#revision=${pkgver}"
         mplayer.desktop
-        include-samba-4.0.patch)
+        include-samba-4.0.patch
+        add_riscv64_support.patch)
 sha512sums=('SKIP'
             'd3c5cbf0035279c6f307e4e225473d7b77f9b56566537a26aa694e68446b9e3240333296da627ad5af83b04cc8f476d1a3f8c05e4cf81cd6e77153feb4ed74bc'
-            '9debb8c58b996f6c716c22c86c720bf9dc49b4ee9b76c57519f791667ae1de2cc6f5add878fbf4ac02c6b6fd1865e1bcfa6105e75de4bf7ec596c338ed0cae99')
+            '9debb8c58b996f6c716c22c86c720bf9dc49b4ee9b76c57519f791667ae1de2cc6f5add878fbf4ac02c6b6fd1865e1bcfa6105e75de4bf7ec596c338ed0cae99'
+            'abca77dfe47e65bc89b3eac3a701c534a05c76b0758db39478593b41f24f7775daafe3414949141d56dca0dda1555d6982519c2aab1090b0d1f4a3ee37bcefe7')
 
 prepare() {
   cd ${pkgbase}-${pkgver}
   patch -p1 < "../include-samba-4.0.patch"
+  patch -p0 < "../add_riscv64_support.patch"
   ./version.sh
 }
 
@@ -46,8 +48,13 @@ build() {
   export CFLAGS="${CFLAGS/-mtune=generic/}"
   export LDFLAGS="${LDFLAGS/,O1/}"
   export LDFLAGS="${LDFLAGS/,--sort-common/}"
+
+  case "${CARCH}" in
+    riscv64) configure_flags=(--disable-runtime-cpudetection) ;;
+    *)       configure_flags=(--enable-runtime-cpudetection) ;;
+  esac
+
   ./configure --prefix=/usr \
-    --enable-runtime-cpudetection \
     --disable-gui \
     --disable-arts \
     --disable-liblzo \
@@ -65,7 +72,7 @@ build() {
     --language=all \
     --confdir=/etc/mplayer \
     --extra-cflags="${CFLAGS} ${CPPFLAGS}" \
-    --extra-ldflags="${LDFLAGS}"
+    --extra-ldflags="${LDFLAGS}" ${configure_flags[@]}
   make
 }
 
