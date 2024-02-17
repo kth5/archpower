@@ -1,0 +1,75 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Christian Hesse <mail@eworm.de>
+# Maintainer: Robin Candau <antiz@archlinux.org>
+# Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Eivind Uggedal <eivind@uggedal.com>
+
+pkgname=mpv
+epoch=1
+_tag='807b9343ef911d138950411cdb83c16a151d2018' # git rev-parse v${pkgver}
+pkgver=0.37.0
+pkgrel=2
+pkgdesc='a free, open source, and cross-platform media player'
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+license=('GPL-2.0-or-later AND LGPL-2.1-or-later')
+url='https://mpv.io/'
+depends=('alsa-lib' 'libasound.so' 'desktop-file-utils' 'ffmpeg' 'libavcodec.so' 'libavdevice.so'
+         'libavfilter.so' 'libavformat.so' 'libavutil.so' 'libswresample.so' 'libswscale.so'
+         'glibc' 'hicolor-icon-theme' 'jack' 'libjack.so' 'lcms2' 'liblcms2.so' 'libarchive'
+         'libarchive.so' 'libass' 'libass.so' 'libbluray' 'libbluray.so' 'libcdio'
+         'libcdio-paranoia' 'libdrm' 'libdvdnav' 'libdvdread' 'libegl' 'libgl' 'libglvnd'
+         'libjpeg' 'libjpeg.so' 'libplacebo' 'libplacebo.so' 'libpulse' 'libpulse.so' 'libsixel'
+         'libva' 'libva.so' 'libva-drm.so' 'libva-wayland.so' 'libva-x11.so' 'libvdpau' 'libx11'
+         'libxext' 'libxkbcommon' 'libxkbcommon.so' 'libxpresent' 'libxrandr' 'libxss'
+         'libxv' 'mesa' 'mujs' 'libpipewire' 'rubberband' 'librubberband.so' 'shaderc'
+         'libshaderc_shared.so' 'openal' 'uchardet' 'vapoursynth' 'vulkan-icd-loader' 'wayland' 'zlib')
+depends_powerpc=('luajit')
+depends_powerpc64=('lua')
+depends_powerpc64le=('luajit')
+depends_riscv64=('luajit')
+depends_x86_64=('luajit')
+makedepends=('git' 'meson' 'python-docutils' 'ladspa' 'wayland-protocols'
+             'ffnvcodec-headers' 'vulkan-headers')
+optdepends=('yt-dlp: for video-sharing websites playback'
+            'youtube-dl: for video-sharing websites playback')
+provides=('libmpv.so')
+options=('!emptydirs')
+validpgpkeys=('145077D82501AA20152CACCE8D769208D5E31419') # sfan5 <sfan5@live.de>
+source=("git+https://github.com/mpv-player/mpv.git#tag=${_tag}?signed")
+sha256sums=('SKIP')
+
+build() {
+  local _meson_options=(
+    --auto-features auto
+
+    -Dlibmpv=true
+
+    -Dcaca=disabled
+    -Dcdda=enabled
+    -Ddvbin=enabled
+    -Ddvdnav=enabled
+    -Dlibarchive=enabled
+    -Dopenal=enabled
+  )
+
+  arch-meson "${pkgname}" build "${_meson_options[@]}"
+
+  meson compile -C build
+}
+
+check() {
+  meson test -C build
+}
+
+package() {
+  meson install -C build --destdir "${pkgdir}"
+
+  # delete private entries only required for static linking 
+  sed -i -e '/Requires.private/d' -e '/Libs.private/d' "${pkgdir}"/usr/lib/pkgconfig/mpv.pc
+
+  install -m0644 "${pkgname}"/DOCS/{encoding.rst,tech-overview.txt} \
+    "${pkgdir}"/usr/share/doc/mpv
+
+  install -m0644 "${pkgname}"/TOOLS/{umpv,mpv_identify.sh,stats-conv.py,idet.sh,lua/*} \
+    -D -t "${pkgdir}"/usr/share/mpv/scripts
+}
