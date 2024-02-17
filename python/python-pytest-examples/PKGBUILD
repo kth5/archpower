@@ -1,0 +1,52 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+
+_name=pytest-examples
+pkgname=python-pytest-examples
+pkgver=0.0.10
+pkgrel=1
+pkgdesc="Pytest plugin for testing examples in docstrings and markdown files"
+arch=(any)
+url="https://github.com/pydantic/pytest-examples"
+license=(MIT)
+depends=(
+  python
+  python-black
+  python-pytest
+  python-ruff
+)
+makedepends=(
+  python-build
+  python-hatchling
+  python-installer
+)
+# tests missing in sdist tarball: https://github.com/pydantic/pytest-examples/issues/16
+# source=(https://files.pythonhosted.org/packages/source/${_name::1}/$_name/$_name-$pkgver.tar.gz)
+source=($_name-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz)
+sha512sums=('af3f8314384f58a8aaa1fa9a4e8746d6a5b0dead8a6cacd582e1008c38276cce62b0bf778f12b399c1e732d9f270c6e5d22de785f035c07ad7c590826f7ef11e')
+b2sums=('4813e3a558a4359b56fd4d21a93b82fa84814ae4adac1b448611ada44685edf0ee3eab70b083cead959fa2f1d44fc45774480325c3c1b84a7ddfd119c1974296')
+
+build() {
+  cd $_name-$pkgver
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  local pytest_options=(
+    -vv
+  )
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+
+  cd $_name-$pkgver
+  # install to temporary location, as importlib is used
+  python -m installer --destdir=test_dir dist/*.whl
+  export PYTHONPATH="$PWD/test_dir/$site_packages:$PYTHONPATH"
+  pytest "${pytest_options[@]}"
+}
+
+package() {
+  cd $_name-$pkgver
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm 644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -vDm 644 README.md -t "$pkgdir/usr/share/doc/$pkgname/"
+}

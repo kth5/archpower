@@ -1,0 +1,59 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+
+_name=dirty_equals
+pkgname=python-dirty-equals
+pkgver=0.6.0
+pkgrel=1
+pkgdesc="Doing dirty (but extremely useful) things with equals"
+arch=(any)
+url="https://github.com/samuelcolvin/dirty-equals"
+license=(MIT)
+depends=(
+  python
+  python-pytz
+)
+makedepends=(
+  python-build
+  python-hatchling
+  python-installer
+)
+checkdepends=(
+  python-packaging
+  python-pydantic
+  python-pytest
+  python-pytest-examples
+  python-pytest-mock
+)
+optdepends=(
+  'python-pydantic: for pydantic support'
+)
+source=(https://files.pythonhosted.org/packages/source/${_name::1}/$_name/$_name-$pkgver.tar.gz)
+sha512sums=('75d47d5604bb2e3f3920b02f400e651b9189f95ed883a92c3624a1347ed2827baa4bdee560b0cd00cc723d5ec90c808110d11e488a294188fc7370b940ae3f36')
+b2sums=('e397d0dc6751384d8f248ea5f5e9f4a86eeb3859435e8544383e5388980e57c9f6b882a2a74edb515311eab2c2dd15dc8e615ac456fefce8b4e9c1ae7b1b688b')
+
+build() {
+  cd $_name-$pkgver
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  local pytest_options=(
+    -vv
+  )
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+
+  cd $_name-$pkgver
+  # install to temporary location, as importlib is used
+  python -m installer --destdir=test_dir dist/*.whl
+  export PYTHONPATH="$PWD/test_dir/$site_packages:$PYTHONPATH"
+  # tests require UTC timezone: https://github.com/samuelcolvin/dirty-equals/issues/33
+  TZ=UTC pytest "${pytest_options[@]}"
+}
+
+package() {
+  cd $_name-$pkgver
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm 644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -vDm 644 README.md -t "$pkgdir/usr/share/doc/$pkgname/"
+}
