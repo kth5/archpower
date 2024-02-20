@@ -1,22 +1,48 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jakub Klinkovský <lahwaacz at archlinux dot org>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
-# Maintainer: Dan McGee <dan@archlinux.org>
+# Contributor: Dan McGee <dan@archlinux.org>
 
 pkgbase=doxygen
-pkgname=('doxygen' 'doxygen-docs')
+pkgname=(doxygen doxygen-docs)
 pkgver=1.10.0
-pkgrel=1
+pkgrel=2
 pkgdesc='Documentation system for C++, C, Java, IDL and PHP'
 url='http://www.doxygen.nl'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=('GPL')
-makedepends=('cmake' 'gcc-libs' 'flex' 'qt6-base' 'ghostscript'
-             'texlive-latexextra' 'texlive-fontutils' 'texlive-fontsrecommended' 'texlive-plaingeneric'
-             'graphviz' 'python')
+license=(GPL-2.0-or-later)
+makedepends=(
+  clang
+  cmake
+  flex
+  fmt
+  gcc-libs
+  ghostscript
+  glibc
+  graphviz
+  llvm
+  python
+  qt6-base
+  spdlog
+  sqlite
+  texlive-fontsrecommended
+  texlive-fontutils
+  texlive-latexextra
+  texlive-plaingeneric
+)
 source=(${pkgbase}-${pkgver}.tar.gz::https://github.com/doxygen/doxygen/archive/Release_${pkgver//./_}.tar.gz)
-sha256sums=('795692a53136ca9bb9a6cd72656968af7858a78be7d6d011e12ab1dce6b9533c')
 sha512sums=('d8731796d5513ff5939c234f32f7f31aabc45f5557947741a330b3d33b368fb5ad770ef1d3d7384a402d98229eafeb1f955ef76e9932310b83c1d35a2eef500f')
 b2sums=('e9eaf70e106aa022bb0edc99082e6bccd5c6879c41be40ce69d2d5e4eb7d1c5ff078fd8f9132206bf546fa78aab7f8bef4584fd1f2d6e1e84b01d2e65933375e')
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
 
 prepare() {
   cd ${pkgbase}-Release_${pkgver//./_}
@@ -26,43 +52,53 @@ prepare() {
 }
 
 build() {
-  cd ${pkgbase}-Release_${pkgver//./_}
-
-  cmake -B build \
+  cmake -B build -S $pkgbase-Release_${pkgver//./_} \
+    -DCMAKE_BUILD_TYPE:STRING=None \
     -DCMAKE_INSTALL_PREFIX:PATH=/usr \
     -DDOC_INSTALL_DIR:PATH=share/doc/doxygen \
     -Dbuild_doc:BOOL=ON \
-    -Dbuild_wizard:BOOL=ON
-  make -C build
-  export CAIRO_DEBUG_PDF=1 # https://github.com/doxygen/doxygen/issues/9319
-  make -C build docs -j1
+    -Dbuild_wizard:BOOL=ON \
+    -Duse_sys_spdlog:BOOL=ON \
+    -Duse_sys_sqlite3:BOOL=ON \
+    -Duse_libclang:BOOL=ON
+  cmake --build build --verbose
+  cmake --build build --target docs
 }
 
 check() {
-  cd ${pkgbase}-Release_${pkgver//./_}
-  make -C build tests
+  ctest --test-dir build --output-on-failure
 }
 
 package_doxygen() {
-  pkgdesc='Documentation system for C++, C, Java, IDL and PHP'
-  depends=('gcc-libs')
-  optdepends=('graphviz: for caller/callee graph generation'
-              'qt6-base: for doxywizard')
+  depends=(
+    clang
+    fmt libfmt.so
+    gcc-libs
+    glibc
+    sqlite libsqlite3.so
+  )
+  optdepends=(
+    'graphviz: for caller/callee graph generation'
+    'qt6-base: for doxywizard'
+    'texlive-fontsrecommended: for generating LaTeX, Postscript and PDF output'
+    'texlive-fontutils: for generating LaTeX, Postscript and PDF output'
+    'texlive-latexextra: for generating LaTeX, Postscript and PDF output'
+    'texlive-plaingeneric: for generating LaTeX, Postscript and PDF output'
+  )
 
-  cd ${pkgbase}-Release_${pkgver//./_}
-  make -C build DESTDIR="${pkgdir}" install
-
-  rm -rf "${pkgdir}/usr/share/doc"
+  DESTDIR="$pkgdir" cmake --install build
+  (
+    cd "$pkgdir"
+    _pick $pkgbase-docs usr/share/doc
+  )
+  install -vDm 644 $pkgbase-Release_${pkgver//./_}/LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
 }
 
 package_doxygen-docs() {
   pkgdesc='Developer documentation for doxygen'
 
-  cd ${pkgbase}-Release_${pkgver//./_}
-  make -C build DESTDIR="${pkgdir}" install
-
-  rm -rf "${pkgdir}/usr/bin"
-  rm -rf "${pkgdir}/usr/share/man"
+  mv -v $pkgname/* "$pkgdir"
+  install -vDm 644 $pkgbase-Release_${pkgver//./_}/LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
 }
 
 # vim: ts=2 sw=2 et:
