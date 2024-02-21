@@ -3,10 +3,11 @@
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
-pkgname=qt6-base
+pkgbase=qt6-base
+pkgname=(qt6-base qt6-xcb-private-headers)
 _qtver=6.6.2
 pkgver=${_qtver/-/}
-pkgrel=1
+pkgrel=4
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://www.qt.io'
 license=(GPL3 LGPL3 FDL custom)
@@ -80,39 +81,25 @@ optdepends_x86_64=(
             'libfbclient: Firebird/iBase driver'
 )
 groups=(qt6)
-options=(debug)
-_pkgfn=${pkgname/6-/}-everywhere-src-$_qtver
+_pkgfn=${pkgbase/6-/}-everywhere-src-$_qtver
 source=(https://download.qt.io/official_releases/qt/${pkgver%.*}/$_qtver/submodules/$_pkgfn.tar.xz
         qt6-base-cflags.patch
-        qt6-base-nostrip.patch
-        qtbase-6.6.1-forkfd-childstack-size.patch
-        qtbase-6.5.2-no-symlink-check.patch
-        qtbase-6.5.2-no-glx.patch
-        qtbase-6.5.2-hppa-forkfd-grow-stack.patch)
+        qt6-base-nostrip.patch)
 sha256sums=('b89b426b9852a17d3e96230ab0871346574d635c7914480a2a27f98ff942677b'
             '5411edbe215c24b30448fac69bd0ba7c882f545e8cf05027b2b6e2227abc5e78'
-            '4b93f6a79039e676a56f9d6990a324a64a36f143916065973ded89adc621e094'
-            '75e15d68296b94ee14fd4057c2515263b2ca586ab2e7294730aa7dedce96447d'
-            'f645694fa0974fcca1a9e70d33c24a6be1dd40242fbcc6bae4fc7444d5cebe1e'
-            '27bf163c4d686f7a7b8d8c04bfed85dd8f537589b6d5e544840243241ffd01cf'
-            'ec3fbbc1d80a80480ccede735dc09fee03c42c3eba6568a7ef6beebee92ca3bc')
+            '4b93f6a79039e676a56f9d6990a324a64a36f143916065973ded89adc621e094')
 
 prepare() {
   patch -d $_pkgfn -p1 < qt6-base-cflags.patch # Use system CFLAGS
   patch -d $_pkgfn -p1 < qt6-base-nostrip.patch # Don't strip binaries with qmake
-
-  patch -d $_pkgfn -p1 < qtbase-6.6.1-forkfd-childstack-size.patch
-  patch -d $_pkgfn -p1 < qtbase-6.5.2-no-symlink-check.patch
-  patch -d $_pkgfn -p1 < qtbase-6.5.2-no-glx.patch
-  patch -d $_pkgfn -p1 < qtbase-6.5.2-hppa-forkfd-grow-stack.patch
 }
 
 build() {
   case "${CARCH}" in
-    powerpc) _cmake_options=(-DCMAKE_CXX_FLAGS="-latomic" -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF) ;;
+    powerpc) _cmake_options=(-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF) ;;
     powerpc64|powerpc64le) _cmake_options=(-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON) ;;
     riscv64) _cmake_options=(-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DFEATURE_reduce_relocations=OFF) ;;
-    x86_64) _cmake_options=(-DFEATURE_no_direct_extern_access=ON -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DFEATURE_no_direct_extern_access=ON) ;;
+    x86_64) _cmake_options=(-DFEATURE_no_direct_extern_access=ON -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON) ;;
   esac
 
   cmake -B build -S $_pkgfn -G Ninja \
@@ -136,7 +123,8 @@ build() {
   cmake --build build
 }
 
-package() {
+package_qt6-base() {
+  pkgdesc='A cross-platform application and UI framework'
   depends+=(qt6-translations)
   DESTDIR="$pkgdir" cmake --install build
 
@@ -148,4 +136,18 @@ package() {
   while read _line; do
     ln -s $_line
   done < "$srcdir"/build/user_facing_tool_links.txt
+}
+
+package_qt6-xcb-private-headers() {
+  pkgdesc='Private headers for Qt6 Xcb'
+
+  depends=("qt6-base=$pkgver")
+  optdepends=()
+  groups=()
+
+  cd $_pkgfn
+  install -d -m755 "$pkgdir"/usr/include/qt6xcb-private/{gl_integrations,nativepainting}
+  cp -r src/plugins/platforms/xcb/*.h "$pkgdir"/usr/include/qt6xcb-private/
+  cp -r src/plugins/platforms/xcb/gl_integrations/*.h "$pkgdir"/usr/include/qt6xcb-private/gl_integrations/
+  cp -r src/plugins/platforms/xcb/nativepainting/*.h "$pkgdir"/usr/include/qt6xcb-private/nativepainting/
 }
