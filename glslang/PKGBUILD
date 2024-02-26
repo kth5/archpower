@@ -12,24 +12,17 @@
 # upstream releases a compatible version of spirv-tools, then updating the
 # spriv-tools system package and only then building glslang against that.
 pkgname=glslang
-pkgver=13.1.1
-pkgrel=3
+pkgver=14.0.0
+pkgrel=1
 pkgdesc='OpenGL and OpenGL ES shader front end and validator'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://github.com/KhronosGroup/glslang'
-license=('BSD')
+license=('BSD-3-Clause')
 depends=('gcc-libs' 'spirv-tools')
 makedepends=('cmake' 'ninja' 'spirv-headers' 'python')
 options=('staticlibs')
-source=(${pkgname}-${pkgver}.tar.gz::https://github.com/KhronosGroup/glslang/archive/${pkgver}.tar.gz
-        ${pkgname}-3420.patch::https://github.com/KhronosGroup/glslang/pull/3420.patch)
-sha256sums=('1c4d0a5a38c8aaf89a2d7e6093be734320599f5a6775b2726beeb05b0c054e66'
-            '8930d3829bae4e0cd911bf63728d4d49d736d261af1e2cef912b769e6fa8373f')
-
-prepare() {
-  cd ${pkgname}-${pkgver}
-  patch -Np1 -i "${srcdir}"/${pkgname}-3420.patch
-}
+source=(${pkgname}-${pkgver}.tar.gz::https://github.com/KhronosGroup/glslang/archive/${pkgver}.tar.gz)
+sha256sums=('80bbb916a23e94ea9cbfb1acb5d1a44a7e0c9613bcf5b5947c03f2273bdc92b0')
 
 build() {
   cd ${pkgname}-${pkgver}
@@ -37,21 +30,22 @@ build() {
   # we need fat LTO objects to not break consumers during linking
   CXXFLAGS+=" -ffat-lto-objects"
   cmake \
-    -Bbuild-shared \
-    -GNinja \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_BUILD_TYPE=None \
-    -DALLOW_EXTERNAL_SPIRV_TOOLS=ON \
-    -DBUILD_SHARED_LIBS=ON
-  ninja -Cbuild-shared
-  cmake \
     -Bbuild-static \
     -GNinja \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=None \
     -DALLOW_EXTERNAL_SPIRV_TOOLS=ON \
     -DBUILD_SHARED_LIBS=OFF
-  ninja -Cbuild-static
+  cmake --build build-static
+  cmake \
+    -Bbuild-shared \
+    -GNinja \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=None \
+    -DALLOW_EXTERNAL_SPIRV_TOOLS=ON \
+    -DBUILD_SHARED_LIBS=ON \
+    -DGLSLANG_TESTS=ON
+  cmake --build build-shared
 }
 
 check() {
@@ -61,8 +55,8 @@ check() {
 
 package() {
   cd ${pkgname}-${pkgver}
-  DESTDIR="${pkgdir}" ninja -C build-shared install
-  DESTDIR="${pkgdir}" ninja -C build-static install
+  DESTDIR="${pkgdir}" cmake --install build-static
+  DESTDIR="${pkgdir}" cmake --install build-shared
 
   install -Dm644 LICENSE.txt "${pkgdir}"/usr/share/licenses/${pkgname}/LICENSE
 
