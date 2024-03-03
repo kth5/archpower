@@ -4,12 +4,12 @@
 # Contributor: judd <jvinet@zeroflux.org>
 
 pkgname=alsa-utils
-pkgver=1.2.10
+pkgver=1.2.11
 pkgrel=1
 pkgdesc="Advanced Linux Sound Architecture - Utilities"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://www.alsa-project.org"
-license=(GPL2)
+license=(GPL-2.0-or-later)
 depends=(
   gcc-libs
   glibc
@@ -32,11 +32,16 @@ optdepends=(
 )
 # we require /var/lib/alsa for state file
 options=(emptydirs)
-source=(https://www.alsa-project.org/files/pub/utils/$pkgname-$pkgver.tar.bz2{,.sig})
-sha512sums=('22adedf6d491d7768d24f054262a9c12bc952049db8374e104c0477ebf84266dcbeb0a2a3a1765b89958073d341f64dedbae63e3cae66f4983a0424e5cb3243f'
-            'SKIP')
-b2sums=('077b4ad090c1ab40dd4fa22db01ae2a080ca849a5564dfe612654993297c80bd3584541c7e68aaad56c4c05538ba0de449e4677b1c4a9dfe56d8e11706c4ca35'
-        'SKIP')
+source=(
+  $url/files/pub/utils/$pkgname-$pkgver.tar.bz2{,.sig}
+  $pkgname.tmpfiles
+)
+sha512sums=('5ce76807b53357584bfb4ace5acfdac4db9168ffaf5cdd1e499738eec046c36112bf84a99970f66368063a9baf73bad93af2d439630572f3eba5c9321071172d'
+            'SKIP'
+            '17ca2d760f383c02ccd00073d4fe73d6687ee58eb0ab5e458ad9d09845be7891cfe389e365bef00c7885e8afad45ea9ebf2925950f8d3fd8157feb818f986990')
+b2sums=('dcf96705f9e3f1b4abaa7e1f107d1154a05500bf1cd07c821e0fe8c4ba7d7f08de0cf126be8c9c8dda3980d85c144318c12ffc8a95d5da4e98c49a6e9c2ee8ef'
+        'SKIP'
+        '24b8e44833c7e8b142162878a837b10e1c2a862568280f2ce16fcb81ecc1383802654dbe88930f2cc13c345635c5003cbc3712e121e589dffc2e25c540749ee3')
 validpgpkeys=('F04DF50737AC1A884C4B3D718380596DA6E59C91') # ALSA Release Team (Package Signing Key v1) <release@alsa-project.org>
 
 prepare() {
@@ -55,6 +60,8 @@ build() {
 
   cd $pkgname-$pkgver
   ./configure "${configure_options[@]}"
+  # prevent excessive overlinking due to libtool
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
 }
 
@@ -71,6 +78,8 @@ package() {
 
   make DESTDIR="$pkgdir" install -C $pkgname-$pkgver
   install -vDm 644 $pkgname-$pkgver/README.md -t "$pkgdir/usr/share/doc/$pkgname/"
-  # dir where to save ALSA state
+
+  # dir for ALSA state
   install -vdm 755 "$pkgdir/var/lib/alsa/"
+  install -vDm 644 $pkgname.tmpfiles "$pkgdir/usr/lib/tmpfiles.d/$pkgname.conf"
 }
