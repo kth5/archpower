@@ -6,57 +6,81 @@
 # Contributor: judd <jvinet@zeroflux.org>
 
 pkgname=vsftpd
-pkgver=3.0.3
-pkgrel=9
+pkgver=3.0.5
+pkgrel=1
 pkgdesc='Very Secure FTP daemon'
 url='https://security.appspot.com/vsftpd.html'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=('GPL-2.0-only')
-depends=('glibc' 'openssl' 'libcap' 'pam' 'libnsl')
-optdepends=('logrotate')
-backup=('etc/vsftpd.conf'
-        "etc/logrotate.d/vsftpd")
-options=(!distcc)
-source=(https://security.appspot.com/downloads/${pkgname}-${pkgver}.tar.gz{,.asc}
-        vsftpd-ssl.socket
-        vsftpd.socket
-        vsftpd.service
-        vsftpd@.service
-        vsftpd-ssl.service
-        vsftpd-ssl@.service
-        vsftpd-fix-seccomp.patch
-        vsftpd-conf-pam.patch
-        vsftpd-disable-anonymous-access-by-default.patch)
-sha256sums=('9d4d2bf6e6e2884852ba4e69e157a2cecd68c5a7635d66a3a8cf8d898c955ef7'
+depends=(
+  glibc
+  libcap
+  libnsl
+  openssl
+  pam
+)
+optdepends=(
+  logrotate
+)
+backup=(
+  etc/logrotate.d/vsftpd
+  etc/pam.d/vsftpd
+  etc/vsftpd.conf
+  etc/ftpusers
+)
+source=(
+  https://security.appspot.com/downloads/${pkgname}-${pkgver}.tar.gz{,.asc}
+  vsftpd.socket
+  vsftpd.service
+  vsftpd@.service
+  ftpusers
+
+  CVE-2015-1419.patch
+  config-disable-anonymous-access-by-default.patch
+  config-set-PAM-service-name-to-vsftpd.patch
+  build-with-SSL-support.patch
+  adjust-usr-share-empty-to-var-empty.patch
+  fix-make-to-respect-distro-flags.patch
+  fix-build-with-openssl-1.1.patch
+  fix-handle-AUTH_TLS-reply-to-FEAT-for-all-TLS-varian.patch
+  fix-ssl_tlsv-documentation-and-config-tunables.patch
+  fix-seccomp-rules.patch
+)
+sha256sums=('26b602ae454b0ba6d99ef44a09b6b9e0dfa7f67228106736df1f278c70bc91d3'
             'SKIP'
-            'd5185e48fffc6253499a55e0fe0f90a3424fc639640af11a9d38df33fb145afe'
             '9fdbfd2ec0207170371ca3cf2b0ddca2dc2fe3d062e5792e0d3e51474c3198c9'
-            '0597e571718ba0f4dc4b32a4ddd148103758c48c7d65dcb8bbedafc9e810e83d'
+            '3a66daa30b53fa4f053121895671dcae113a38d121e979d16504bb3bdf39562d'
             'd7b8e4827d4f6bafcbf52f9d2d7380958c7b08bb3f757806aa89d4bc06c9671c'
-            'b88a50fc68b3bf746d13c9a777df77791cd3eac6eb7c2df655418071c2adf422'
-            '4a55c2468b08d858f71bacf1f4885847bec8e548b0e92088068d9bdd3884af84'
-            '8bb7e4e4640137d38a2944859c2f443eea559ecb7f594c0fa4e962539107af66'
-            '751715726c4b888d5c96846ac0bd0d64238cceb28ef3c2ef447af85cdc2b79f1'
-            '4baa5a2db122974fa2a9603d335aed59dee5ad4217615fbe247301d129281d20')
-validpgpkeys=('8660FD3291B184CDBC2F6418AA62EC463C0E751C') # Chris Evans
+            'd8d7a4cf9fc8e39c139813f034ac3fea816bc1f8fd69550f332ad14d431072bc'
+            '6c1e0e940e318eaa5aa8df387390bdace8072745ee24828ffbbd41be60e96f1c'
+            'd6b039a903103f6b97e81bd7a883203ccd71b0564050a895823f5b794015bffd'
+            'f929696bb8d25bc570a2a719cd316f740e5c9388e42006ec2839576718fc0f65'
+            '537257cf7ff60094f4a25959bd6ddca3075db14ae039a2943ec6b72c91e38b4a'
+            'aceb524443f1878d5843c6d2aef8d16fa827cebbd36e4d17588e120b3e3b57fd'
+            '06604afa4a844fd157875fe18aaae409e7db86fba32729b93b0c1499d4946b9a'
+            '5e5446c13f98ea7bfbf8a17f3d35cdf9fe35bc6118877afb84ff5be38772bc4c'
+            '93ce98f5967e645e49f0e51328a53783f68be86c0acf1187673a285c0756727f'
+            '8ccff548f7cc26e13552bc82dc351e5bc116a0198bcc4cb8c5440cea0e04c598'
+            '09bf31ede889407783d134ba576b0fe272544cc4896535b4760097e143679dbe')
+validpgpkeys=(
+  67A2AB4F41F9972C21F6BF667B89011BCAE1CFEA  # Chris Evans <scarybeasts@gmail.com>
+)
 
 prepare() {
   cd ${pkgname}-${pkgver}
-  # build-time config
-  sed -e 's|^#undef VSF_BUILD_SSL$|#define VSF_BUILD_SSL|' -i builddefs.h
-  sed -e 's|/usr/share/empty|/var/empty|g' -i tunables.c vsftpd.conf.5 INSTALL
-
-  # fix linking to openssl 1.1
-  sed -e 's|SSL_library_init|SSL_CTX_new|' -i vsf_findlibs.sh
-
-  patch -Np1 < ../vsftpd-fix-seccomp.patch
-  patch -Np1 < ../vsftpd-conf-pam.patch
-  patch -Np1 < ../vsftpd-disable-anonymous-access-by-default.patch
+  local src
+  for src in "${source[@]}"; do
+    src="${src%%::*}"
+    src="${src##*/}"
+    [[ $src = *.patch ]] || continue
+    msg2 "Applying patch $src..."
+    patch -Np1 < "../$src"
+  done
 }
 
 build() {
   cd ${pkgname}-${pkgver}
-  make LINK='' CFLAGS="${CFLAGS} ${CPPFLAGS}" LDFLAGS="${LDFLAGS}"
+  make
 }
 
 package() {
@@ -66,10 +90,9 @@ package() {
   install -dm 755 "${pkgdir}/var/empty"
   install -Dm 644 "${srcdir}"/{*.service,*.socket} -t "${pkgdir}/usr/lib/systemd/system"
 
-  install -Dm 644 ${pkgname}.conf -t "${pkgdir}/etc"
+  install -Dm 644 ${pkgname}.conf "${srcdir}"/ftpusers -t "${pkgdir}/etc"
   install -Dm 644 RedHat/vsftpd.log "${pkgdir}/etc/logrotate.d/${pkgname}"
   install -Dm 644 RedHat/vsftpd.pam "${pkgdir}/etc/pam.d/${pkgname}"
-  # TODO: check pam /etc/ftpusers files from debian and redhat, its linked
 
   install -Dm 644 ${pkgname}.8 -t "${pkgdir}/usr/share/man/man8"
   install -Dm 644 ${pkgname}.conf.5 -t "${pkgdir}/usr/share/man/man5"

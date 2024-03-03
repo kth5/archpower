@@ -1,0 +1,53 @@
+From 1cedb8fee186895d6828423ce4f7ca33d30ea7ad Mon Sep 17 00:00:00 2001
+From: Levente Polyak <levente@leventepolyak.net>
+Date: Sat, 27 Jan 2024 19:56:20 +0100
+Subject: [PATCH] fix: seccomp rules
+
+---
+ seccompsandbox.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/seccompsandbox.c b/seccompsandbox.c
+index bcd96a0..a265f93 100644
+--- a/seccompsandbox.c
++++ b/seccompsandbox.c
+@@ -307,14 +307,20 @@ seccomp_sandbox_setup_base()
+   allow_nr_1_arg_mask(__NR_mprotect, 3, PROT_READ);
+   allow_nr(__NR_munmap);
+   allow_nr(__NR_brk);
++  allow_nr(__NR_sysinfo);
++  allow_nr(__NR_getdents64);
+   /* glibc falls back gracefully if mremap() fails during realloc(). */
+   reject_nr(__NR_mremap, ENOSYS);
+ 
+   /* Misc simple low-risk calls. */
+   allow_nr(__NR_gettimeofday); /* Used by logging. */
++  allow_nr(__NR_clock_gettime); /* Used by logging. */
+   allow_nr(__NR_rt_sigreturn); /* Used to handle SIGPIPE. */
+   allow_nr(__NR_restart_syscall);
+   allow_nr(__NR_close);
++  allow_nr(__NR_alarm);
++  allow_nr(__NR_wait4);
++
+ 
+   /* Always need to be able to exit ! */
+   allow_nr(__NR_exit_group);
+@@ -343,6 +349,7 @@ seccomp_sandbox_setup_prelogin(const struct vsf_session* p_sess)
+   allow_nr(__NR_nanosleep); /* Used for bandwidth / login throttling. */
+   allow_nr(__NR_getpid); /* Used by logging. */
+   allow_nr(__NR_shutdown); /* Used for QUIT or a timeout. */
++  allow_nr(__NR_getrandom); /* Used by OpenSSL in SSL_accept. */
+   allow_nr_1_arg_match(__NR_fcntl, 2, F_GETFL);
+   /* It's safe to allow O_RDWR in fcntl because these flags cannot be changed.
+    * Also, sockets are O_RDWR.
+@@ -367,6 +374,7 @@ seccomp_sandbox_setup_prelogin(const struct vsf_session* p_sess)
+   {
+     allow_nr_1_arg_match(__NR_recvmsg, 3, 0);
+     allow_nr_2_arg_match(__NR_setsockopt, 2, IPPROTO_TCP, 3, TCP_NODELAY);
++    allow_nr_2_arg_match(__NR_setsockopt, 2, SOL_TCP, 3, TCP_ULP);
+   }
+   if (tunable_syslog_enable)
+   {
+-- 
+2.43.0
+
