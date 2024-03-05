@@ -1,11 +1,30 @@
-diff -r b22cb12f611c build/moz.configure/lto-pgo.configure
---- a/build/moz.configure/lto-pgo.configure	Thu Oct 07 08:11:19 2021 +0000
-+++ b/build/moz.configure/lto-pgo.configure	Sun Oct 10 20:36:46 2021 -0700
-@@ -81,17 +81,17 @@
+diff -r ac0e1ee8218f build/moz.configure/lto-pgo.configure
+--- a/build/moz.configure/lto-pgo.configure	Tue Feb 20 13:51:00 2024 +0000
++++ b/build/moz.configure/lto-pgo.configure	Sat Feb 24 22:47:17 2024 -0800
+@@ -2,17 +2,17 @@
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
  
- @depends(c_compiler, pgo_profile_path, target_is_windows)
+ # PGO
+ # ==============================================================
+ llvm_profdata = check_prog(
+-    "LLVM_PROFDATA", ["llvm-profdata"], allow_missing=True, paths=clang_search_path
++    "LLVM_PROFDATA", ["llvm-profdata-dont-even-think-about-it"], allow_missing=True, paths=clang_search_path
+ )
+ 
+ 
+ @depends_if(llvm_profdata)
+ @checking("whether llvm-profdata supports 'order' subcommand")
+ def llvm_profdata_order(profdata):
+     retcode, _, _ = get_cmd_output(profdata, "order", "--help")
+     return retcode == 0
+@@ -125,17 +125,17 @@
+     pgo_temporal,
+ )
  @imports("multiprocessing")
- def pgo_flags(compiler, profdata, target_is_windows):
+ def pgo_flags(compiler, linker, profdata, orderfile, target_is_windows, pgo_temporal):
      if compiler.type == "gcc":
          return namespace(
              gen_cflags=["-fprofile-generate"],
@@ -20,15 +39,15 @@ diff -r b22cb12f611c build/moz.configure/lto-pgo.configure
          if compiler.type == "clang-cl":
              prefix = "/clang:"
              gen_ldflags = None
-diff -r b22cb12f611c build/pgo/profileserver.py
---- a/build/pgo/profileserver.py	Thu Oct 07 08:11:19 2021 +0000
-+++ b/build/pgo/profileserver.py	Sun Oct 10 20:36:46 2021 -0700
-@@ -82,19 +82,32 @@
-         docroot=os.path.join(build.topsrcdir, "build", "pgo"),
+diff -r ac0e1ee8218f build/pgo/profileserver.py
+--- a/build/pgo/profileserver.py	Tue Feb 20 13:51:00 2024 +0000
++++ b/build/pgo/profileserver.py	Sat Feb 24 22:47:17 2024 -0800
+@@ -93,19 +93,32 @@
+         ),
          path_mappings=path_mappings,
      )
-     httpd.start(block=False)
- 
+     sp3_httpd.start(block=False)
+     print("started SP3 server on port 8000")
      locations = ServerLocations()
      locations.add_host(host="127.0.0.1", port=PORT, options="primary,privileged")
  
@@ -59,7 +78,7 @@ diff -r b22cb12f611c build/pgo/profileserver.py
              base_profiles = json.load(fh)["profileserver"]
  
          prefpaths = [
-@@ -207,16 +220,20 @@
+@@ -222,16 +235,20 @@
  
          # Try to move the crash reports to the artifacts even if Firefox appears
          # to exit successfully, in case there's a crash that doesn't set the
@@ -80,10 +99,10 @@ diff -r b22cb12f611c build/pgo/profileserver.py
                      "Could not find profraw files in the current directory: %s"
                      % os.getcwd()
                  )
-diff -r b22cb12f611c toolkit/components/terminator/nsTerminator.cpp
---- a/toolkit/components/terminator/nsTerminator.cpp	Thu Apr 07 15:11:19 2022 +0000
-+++ b/toolkit/components/terminator/nsTerminator.cpp	Thu Apr 07 20:44:28 2022 -0700
-@@ -461,16 +461,21 @@
+diff -r ac0e1ee8218f toolkit/components/terminator/nsTerminator.cpp
+--- a/toolkit/components/terminator/nsTerminator.cpp	Tue Feb 20 13:51:00 2024 +0000
++++ b/toolkit/components/terminator/nsTerminator.cpp	Sat Feb 24 22:47:17 2024 -0800
+@@ -455,16 +455,21 @@
        // Defend against overflow
        crashAfterMS = INT32_MAX;
      } else {
@@ -105,102 +124,3 @@ diff -r b22cb12f611c toolkit/components/terminator/nsTerminator.cpp
    DebugOnly<PRThread*> watchdogThread =
        CreateSystemThread(RunWatchdog, options.release());
    MOZ_ASSERT(watchdogThread);
-diff -r b22cb12f611c testing/mozbase/mozrunner/mozrunner/application.py
---- a/testing/mozbase/mozrunner/mozrunner/application.py	2024-01-25 00:10:58.000000000 -0800
-+++ b/testing/mozbase/mozrunner/mozrunner/application.py	2024-01-27 16:12:54.503893331 -0800
-@@ -1,16 +1,16 @@
- # This Source Code Form is subject to the terms of the Mozilla Public
- # License, v. 2.0. If a copy of the MPL was not distributed with this
- # file, You can obtain one at http://mozilla.org/MPL/2.0/.
- 
- import os
- import posixpath
- from abc import ABCMeta, abstractmethod
--from distutils.spawn import find_executable
-+from shutil import which
- 
- import six
- from mozdevice import ADBDeviceFactory
- from mozprofile import (
-     ChromeProfile,
-     ChromiumProfile,
-     FirefoxProfile,
-     Profile,
-@@ -46,17 +46,17 @@
-     profile_class = Profile
-     _bindir = None
-     remote_test_root = ""
-     remote_process = None
- 
-     @property
-     def bindir(self):
-         if self._bindir is None:
--            paths = [find_executable("emulator")]
-+            paths = [which("emulator")]
-             paths = [p for p in paths if p is not None if os.path.isfile(p)]
-             if not paths:
-                 self._bindir = ""
-             else:
-                 self._bindir = os.path.dirname(paths[0])
-         return self._bindir
- 
-     @property
-@@ -83,17 +83,17 @@
-         return self._remote_profile
- 
-     def which(self, binary):
-         paths = os.environ.get("PATH", {}).split(os.pathsep)
-         if self.bindir is not None and os.path.abspath(self.bindir) not in paths:
-             paths.insert(0, os.path.abspath(self.bindir))
-             os.environ["PATH"] = os.pathsep.join(paths)
- 
--        return find_executable(binary)
-+        return which(binary)
- 
-     @abstractmethod
-     def stop_application(self):
-         """Run (device manager) command to stop application."""
-         pass
- 
- 
- devices = {}
-diff -r b22cb12f611c testing/mozbase/mozdevice/mozdevice/adb.py
---- a/testing/mozbase/mozdevice/mozdevice/adb.py	2024-01-25 00:10:58.000000000 -0800
-+++ b/testing/mozbase/mozdevice/mozdevice/adb.py	2024-01-27 16:46:45.776346771 -0800
-@@ -10,17 +10,16 @@
- import shlex
- import shutil
- import signal
- import subprocess
- import sys
- import tempfile
- import time
- import traceback
--from distutils import dir_util
- from threading import Thread
- 
- import six
- from six.moves import range
- 
- from . import version_codes
- 
- _TEST_ROOT = None
-@@ -2978,17 +2977,17 @@
-         if os.path.isfile(local) and self.is_dir(remote):
-             # force push to use the correct filename in the remote directory
-             remote = posixpath.join(remote, os.path.basename(local))
-         elif os.path.isdir(local):
-             copy_required = True
-             temp_parent = tempfile.mkdtemp()
-             remote_name = os.path.basename(remote)
-             new_local = os.path.join(temp_parent, remote_name)
--            dir_util.copy_tree(local, new_local)
-+            shutil.copytree(local, new_local, dirs_exist_ok=True)
-             local = new_local
-             # See do_sync_push in
-             # https://android.googlesource.com/platform/system/core/+/master/adb/file_sync_client.cpp
-             # Work around change in behavior in adb 1.0.36 where if
-             # the remote destination directory exists, adb push will
-             # copy the source directory *into* the destination
-             # directory otherwise it will copy the source directory
-             # *onto* the destination directory.
