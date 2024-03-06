@@ -6,7 +6,7 @@ pkgname=(
   wpewebkit
   wpewebkit-docs
 )
-pkgver=2.42.4
+pkgver=2.42.5
 pkgrel=2
 pkgdesc="Embeddable web content engine"
 url="https://wpewebkit.org"
@@ -68,11 +68,17 @@ makedepends=(
 )
 source=(
   $url/releases/wpewebkit-$pkgver.tar.xz{,.asc}
+  reduce-memory-overheads.patch
+  unused_variable.patch
 )
-sha256sums=('8836040a3687581970b47a232b713e7023c080d5613427f52db619c29fb253a4'
-            'SKIP')
-b2sums=('cfce325c574a738c5c7c8b14365d4d07496bc62b54d67d1d1e82b7f497f747ef886ea418ab199d6cbb8c6ac5df76db5b5a092d98abbb95874f11e621241dfeff'
-        'SKIP')
+sha256sums=('4dbab6c5e6dc0c65a3d7dffc1c2390be5f9abd423faf983fe3a55fe081df0532'
+            'SKIP'
+            '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864'
+            '1307605918152d52b7adf02b07a2fb992aa9fe0a927b8f691578c3839689926c')
+b2sums=('a90431053235ae2ab90aeedec6a888a9aac80e691b05470448ffca9220dd4d28c479638708e250921521fd0d079f84027b528608cb8c0aed99bf9d7b9c68d3f8'
+        'SKIP'
+        'cc16462ce22df999b47ef477d4272ef3df2fbbfe5cdc585f3ce47e56cde65a1d7dd1105e6e7bbff41695f79b6394bc3e403e53a669bb7f456c733ed216372c9b'
+        '577073ae4b1b2a1b6d1aeb94b87ba097bd3663d281df4e583f62ec190d42857860278e7c41d355cba17eca6a49562d882e6a5026519b71e34cac34f5fd762599')
 validpgpkeys=(
   'D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
   '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B'  # Adrián Pérez de Castro <aperez@igalia.com>
@@ -80,6 +86,11 @@ validpgpkeys=(
 
 prepare() {
   cd wpewebkit-$pkgver
+
+  patch -Np1 -i ${srcdir}/reduce-memory-overheads.patch
+
+# Fixes: https://bugs.webkit.org/show_bug.cgi?id=268739
+  patch -Np1 -R -i ${srcdir}/unused_variable.patch
 }
 
 build() {
@@ -96,37 +107,33 @@ build() {
     -DENABLE_MINIBROWSER=ON
   )
 
-  # GCC with LTO fails to link jsc
-  #     /usr/bin/ld: /tmp/ccXxyWZV.ltrans0.ltrans.o: in function `ipint_table_size_validate':
-  #     <artificial>:(.text+0x49f0f): undefined reference to `ipint_extern_table_size'
-  #     /usr/bin/ld: /tmp/ccXxyWZV.ltrans0.ltrans.o: in function `ipint_table_fill_validate':
-  #     <artificial>:(.text+0x4a019): undefined reference to `ipint_extern_table_fill'
-  #     collect2: error: ld returned 1 exit status
-  export CC=clang CXX=clang++
-
   case "${CARCH}" in
+    powerpc64*)
+      CFLAGS+=' -mminimal-toc'
+      CXXFLAGS+=' -mminimal-toc'
+    ;;
     powerpc) 
       cmake_options+=(
         -DENABLE_WEBGL=OFF
         -DFORCE_32BIT=ON
       )
-      export CC=${CHOST}-gcc
-      export CXX=${CHOST}-g++
       export LDFLAGS+=" -Wl,--no-keep-memory"
     ;;
-    powerpc64*)
-      export CC=${CHOST}-gcc
-      export CXX=${CHOST}-g++
-      export CFLAGS+=' -mminimal-toc'
-      export CXXFLAGS+=' -mminimal-toc'
+    x86_64)
+      # GCC with LTO fails to link libjavascriptcoregtk
+      #     /usr/bin/ld: /tmp/ccXxyWZV.ltrans0.ltrans.o: in function `ipint_table_size_validate':
+      #     <artificial>:(.text+0x49f0f): undefined reference to `ipint_extern_table_size'
+      #     /usr/bin/ld: /tmp/ccXxyWZV.ltrans0.ltrans.o: in function `ipint_table_fill_validate':
+      #     <artificial>:(.text+0x4a019): undefined reference to `ipint_extern_table_fill'
+      #     collect2: error: ld returned 1 exit status
+      export CC=clang CXX=clang++
+      LDFLAGS+=" -fuse-ld=lld"
+
+      # JITted code crashes when CET is used
+      CFLAGS+=' -fcf-protection=none'
+      CXXFLAGS+=' -fcf-protection=none'
     ;;
   esac
-
-  if [ "${CC}" == 'clang' -a "${CXX}" == 'clang++' ]; then
-    export CFLAGS+=" -target ${CHOST}"
-    export CXXFLAGS+=" -target ${CHOST}"
-    export LDFLAGS+=" -fuse-ld=lld"
-  fi
 
   # Produce minimal debug info: 4.3 GB of debug data makes the
   # build too slow and is too much to package for debuginfod
