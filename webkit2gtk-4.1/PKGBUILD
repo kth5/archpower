@@ -7,8 +7,8 @@ pkgname=(
   webkit2gtk-4.1
   webkit2gtk-4.1-docs
 )
-pkgver=2.42.4
-pkgrel=1.1
+pkgver=2.42.5
+pkgrel=2
 pkgdesc="Web content engine for GTK"
 url="https://webkitgtk.org"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
@@ -63,6 +63,7 @@ depends=(
   zlib
 )
 makedepends=(
+  clang
   cmake
   gi-docgen
   gobject-introspection
@@ -76,26 +77,25 @@ makedepends=(
   unifdef
   wayland-protocols
 )
-makedepends_x86_64=(clang)
 source=(
   $url/releases/webkitgtk-$pkgver.tar.xz{,.asc}
   GTK-MiniBrowser-should-hide-the-toolbar-when-using-full-screen.patch
   GTK-Disable-DMABuf-renderer-for-NVIDIA-proprietary-drivers.patch
-  minibrowser-powerpc.patch
   reduce-memory-overheads.patch
+  unused_variable.patch
 )
-sha256sums=('52288b30bda22373442cecb86f9c9a569ad8d4769a1f97b352290ed92a67ed86'
+sha256sums=('b64278c1f20b8cfdbfb5ff573c37d871aba74a1db26d9b39f74e8953fe61e749'
             'SKIP'
             'a921d6be1303e9f23474971f381886fd291ec5bb1a7ff1e85acede8cfb88bef2'
             '655f3b2c96355ac83c4fa1fc6048e3256bbfdbfb9727e1e18c5af12613536206'
-            '795bd7e4e5fa5f17bca2a9edf39a13a92b325519f290d125b3f341cab31b77fa'
-            '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864')
-b2sums=('3a8cd0818e0d989ab778cda63dd873d7e185ec20fbfe609b9da70041fe38ac30351046516600cb8eb86089e43136487d81c922690468daa70ed2a436561c2401'
+            '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864'
+            '1307605918152d52b7adf02b07a2fb992aa9fe0a927b8f691578c3839689926c')
+b2sums=('4b772d91d3e2c3fc3a48455f43016d2cc1699b18fcc78253d1527eecabbfc1f47cd3bf3c512508fd683d29de68f980511d2057e4c65979bab38083a2da5cb516'
         'SKIP'
         'd440d82c769f1b35caf5464dc850cdf1c896224205c90c17d8b0a44aee62e4b1383e11306936aaca067fde8836770d346d5122d7b05c91a5c7c1741c89c65e2f'
         'daa782d4d40cc12a05c02b2494e879333f66f32820f1a1b89b7ab68f62fd53043b116ecb5ef476004095a7c7b924b12695b7e87e21dd547f66e72fa02a972f0d'
-        '7db786bed95773dcf6b0f2c459195f0eb6fe67b7635060ab3e5b30e92078e1fb656e46fe09d66f631de83fa678541e2c6cd675d5efb84d2f3e7907aba380a058'
-        'cc16462ce22df999b47ef477d4272ef3df2fbbfe5cdc585f3ce47e56cde65a1d7dd1105e6e7bbff41695f79b6394bc3e403e53a669bb7f456c733ed216372c9b')
+        'cc16462ce22df999b47ef477d4272ef3df2fbbfe5cdc585f3ce47e56cde65a1d7dd1105e6e7bbff41695f79b6394bc3e403e53a669bb7f456c733ed216372c9b'
+        '577073ae4b1b2a1b6d1aeb94b87ba097bd3663d281df4e583f62ec190d42857860278e7c41d355cba17eca6a49562d882e6a5026519b71e34cac34f5fd762599')
 validpgpkeys=(
   'D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
   '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B'  # Adrián Pérez de Castro <aperez@igalia.com>
@@ -103,6 +103,7 @@ validpgpkeys=(
 
 prepare() {
   cd webkitgtk-$pkgver
+
   # Requested by eworm
   # https://github.com/WebKit/WebKit/pull/17909
   patch -Np1 -i ../GTK-MiniBrowser-should-hide-the-toolbar-when-using-full-screen.patch
@@ -113,9 +114,9 @@ prepare() {
 
   patch -Np1 -i ${srcdir}/reduce-memory-overheads.patch
 
-  case "${CARCH}" in
-    powerpc) patch -Np1 -i ${srcdir}/minibrowser-powerpc.patch ;;
-  esac
+# Fixes: https://bugs.webkit.org/show_bug.cgi?id=268739
+  patch -Np1 -R -i ${srcdir}/unused_variable.patch
+
 }
 
 build() {
@@ -133,6 +134,10 @@ build() {
   )
 
   case "${CARCH}" in
+    powerpc64*)
+      CFLAGS+=' -mminimal-toc'
+      CXXFLAGS+=' -mminimal-toc'
+    ;;
     powerpc) 
       cmake_options+=(
         -DENABLE_WEBGL=OFF
@@ -149,8 +154,16 @@ build() {
       #     collect2: error: ld returned 1 exit status
       export CC=clang CXX=clang++
       LDFLAGS+=" -fuse-ld=lld"
+
+      # JITted code crashes when CET is used
+      CFLAGS+=' -fcf-protection=none'
+      CXXFLAGS+=' -fcf-protection=none'
     ;;
   esac
+
+  # JITted code crashes when CET is used
+  CFLAGS+=' -fcf-protection=none'
+  CXXFLAGS+=' -fcf-protection=none'
 
   # Produce minimal debug info: 4.3 GB of debug data makes the
   # build too slow and is too much to package for debuginfod
