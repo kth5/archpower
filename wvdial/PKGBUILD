@@ -5,26 +5,39 @@
 
 pkgname=wvdial
 pkgver=1.61
-pkgrel=8
+pkgrel=9
 pkgdesc="A dialer program to connect to the Internet"
 url="https://web.archive.org/web/20110504183753/http://alumnit.ca:80/wiki/index.php?page=WvDial"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=('custom')
 depends=('wvstreams' 'ppp' 'gcc-libs')
-makedepends=('lockdev')
-options=('!makeflags' '!buildflags')
-source=("https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/wvstreams/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('e949632583d889ad040c284f42c46790d247fffbc2d5e926c4b5836c970002f07741d26d052489bdc9c8144dcbb62a12851a3c275a5cecd5393d2722f43bb49a')
+options=('makeflags' 'buildflags')
+source=("https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/wvstreams/${pkgname}-${pkgver}.tar.gz"
+         wvdial-1.61-FTBFS-with-gcc-4.5.patch # Debian
+         wvdial-1.61-parallel-make.patch # Gentoo
+         wvdial-1.61-destdir.patch) # Gentoo
+sha512sums=('e949632583d889ad040c284f42c46790d247fffbc2d5e926c4b5836c970002f07741d26d052489bdc9c8144dcbb62a12851a3c275a5cecd5393d2722f43bb49a'
+            'edaee8a70dfa6de566aadd668e0f76336539eac278d7aa2f2d42ce35afd93940f4b63683389e0bd3a01a8acc8d329df16d3e3fe72a996152344521acbbd50c41'
+            'bc8f425b0ca6511729bbe0d3b57d39bbc0fb08aa544d97ba577bc07b67bce3502fcdf86c4e298641e0d61a1432f05aa9dcc7cf3e728daa42944a50363cf2d6b6'
+            '6f1394922aa75ab97e7a589935157ac2f15ed79cf90fa4a2e3bfa0dbe60a6c3a8e072b152c292d1ff02352c2c230a692d35fe23723e3a8c98558db441f49fa22')
+
+prepare() {
+  cd ${pkgname}-${pkgver}
+
+  patch -Np1 -i ../wvdial-1.61-FTBFS-with-gcc-4.5.patch
+  patch -Np1 -i ../wvdial-1.61-parallel-make.patch
+  patch -Np1 -i ../wvdial-1.61-destdir.patch
+}
 
 build() {
   cd "${srcdir}"/${pkgname}-${pkgver}
   ./configure
-  make LOCKDEV="-llockdev"
+  make CPPOPTS="$CPPFLAGS -D_DEFAULT_SOURCE"
 }
 
 package() {
   cd "${srcdir}"/${pkgname}-${pkgver}
-  make prefix="${pkgdir}"/usr PPPDIR="${pkgdir}"/etc/ppp/peers install
+  make DESTDIR="${pkgdir}" install
 
   install -Dm644 COPYING.LIB "${pkgdir}"/usr/share/licenses/${pkgname}/LICENSE
 }
