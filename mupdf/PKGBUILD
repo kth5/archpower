@@ -9,13 +9,17 @@
 
 pkgbase=mupdf
 pkgname=(libmupdf mupdf mupdf-gl mupdf-tools)
-pkgver=1.23.9
+case "${CARCH}" in
+  powerpc64*|riscv64|x86_64) pkgname+=('python-mupdf') ;;
+esac
+pkgver=1.23.11
 pkgrel=1
 pkgdesc='Lightweight PDF and XPS viewer'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://mupdf.com/'
 license=('AGPL-3.0-or-later')
 makedepends=(
+  'clang'
   'curl'
   'desktop-file-utils'
   'freeglut'
@@ -33,26 +37,53 @@ makedepends=(
   # 'mujs'  # is hardcoded and needs a patch to debundle
   'openjpeg2'
   'openssl'
+  'python'
   'tesseract'
   'zlib'
+)
+makedepends_powerpc64=(
+  'swig'
+)
+makedepends_powerpc64le=(
+  'swig'
+)
+makedepends_x86_64=(
+  'swig'
+)
+makedepends_riscv64=(
+  'swig'
 )
 options=('staticlibs')
 source=(
   "https://mupdf.com/downloads/archive/$pkgbase-${pkgver/_/}-source.tar.gz"
   $pkgbase.desktop
   $pkgbase.xpm
+  $pkgbase-1.23.9-no_venv.patch
+  $pkgbase-1.23.9-cpp_ldflags.patch
+  $pkgbase-1.23.9-install_targets.patch
 )
-sha256sums=('d4a5d66801d85f97d76da978b155f66a5659d1131070c0400f076883f604e297'
+sha256sums=('478f2a167feae2a291c8b8bc5205f2ce2f09f09b574a6eb0525bfad95a3cfe66'
             'ccff66979249bd4ab4ba8918660f194eb90eb0ae231b16e36a6cecdcf471883f'
-            'a435f44425f5432c074dee745d8fbaeb879038ec1f1ec64f037c74662f09aca8')
+            'a435f44425f5432c074dee745d8fbaeb879038ec1f1ec64f037c74662f09aca8'
+            'fed5ccebf5c8d3a4f4b777ce058f647cde673826b465c777994fc436dc1dca5a'
+            '152222c0bc066404d9e38be7abbba20748b0a4bbc9cb30403d19e3b176ab257f'
+            '87fd0544112ca8e8396dd3eb989907c110bad35de02ea425677b99a5d2532666')
 
 prepare() {
   cd $pkgbase-${pkgver/_/}-source
+
+  # do not use a venv for building language bindings
+  patch -Np1 -i ../$pkgbase-1.23.9-no_venv.patch
+  # use our LDFLAGS when building the C++ bindings to have full RELRO
+  patch -Np1 -i ../$pkgbase-1.23.9-cpp_ldflags.patch
+  # alter install-shared-* targets to not call one another (which fails on installing headers twice) and install libmupdfcpp.so with soname postfix
+  patch -Np1 -i ../$pkgbase-1.23.9-install_targets.patch
 
   # remove bundled packages, we want our system libraries
   rm -rf thirdparty/{curl,freeglut,freetype,gumbo-parser,harfbuzz,jbig2dec,leptonica,libjpeg,openjpeg,tesseract,zlib}
 
   {
+    printf "LINUX_OR_OPENBSD := yes\n"  # required so that Makefile sets soname symlink
     printf "USE_SYSTEM_CURL := yes\n"
     printf "USE_SYSTEM_FREETYPE := yes\n"
     printf "USE_SYSTEM_GLUT := yes\n"
@@ -63,6 +94,7 @@ prepare() {
     printf "USE_SYSTEM_LCMS2 := no\n"  # need lcms2-art fork
     printf "USE_SYSTEM_LEPTONICA := yes\n"
     printf "USE_SYSTEM_LIBJPEG := yes\n"
+    printf "USE_SYSTEM_LIBS := yes\n"
     printf "USE_SYSTEM_MUJS := no\n"  # needs patch to debundle
     printf "USE_SYSTEM_OPENJPEG := yes\n"
     printf "USE_SYSTEM_TESSERACT := yes\n"
@@ -73,7 +105,14 @@ prepare() {
 
 build() {
   cd $pkgbase-${pkgver/_/}-source
-  make shared=yes build=release libs apps
+  # Avoid python on powerpc
+  case "${CARCH}" in
+    powerpc) _enable_python="" ;;
+    *)       _enable_python="python" ;;
+  esac  
+
+  # Enforce -j1 to avoid concurrency issue during build
+  make -j1 shared=yes build=release libs apps c++ ${_enable_python}
 }
 
 package_libmupdf() {
@@ -91,16 +130,26 @@ package_libmupdf() {
     'tesseract'
     'zlib'
   )
+  provides=(
+    'libmupdf.so'
+    'libmupdfcpp.so'
+  )
 
   cd $pkgbase-${pkgver/_/}-source
+  make prefix=/usr DESTDIR="$pkgdir" install-shared-c install-shared-c++
+}
 
-  make shared=yes build=release prefix="$pkgdir"/usr install
+package_python-mupdf() {
+  pkgdesc='Library for Lightweight PDF and XPS viewer - Python bindings'
+  depends=(
+    'gcc-libs'
+    'glibc'
+    'libmupdf'
+    'python'
+  )
 
-  rm -rf "$pkgdir"/usr/{bin,share/man}
-  mv "$pkgdir"/usr/share/doc/$pkgbase "$pkgdir"/usr/share/doc/$pkgname
-
-  # work around find-libdeps bug: https://gitlab.archlinux.org/archlinux/devtools/-/issues/102
-  chmod +x "$pkgdir/usr/lib/$pkgname.so"
+  cd $pkgbase-${pkgver/_/}-source
+  make prefix=/usr DESTDIR="$pkgdir" install-shared-python
 }
 
 package_mupdf() {

@@ -1,0 +1,48 @@
+From: Victor Westerhuis <victor@westerhu.is>
+Date: Sun, 15 Jan 2023 00:21:34 +0100
+Subject: Add fallback for missing SA_NOCLDWAIT
+
+GNU Hurd does not implement SA_NOCLDWAIT. It also does not
+automatically reap zombies if SIGCHLD is ignored.
+
+This fallback does not check for failures from waitpid(2), because
+there is not much the program can do about them.
+---
+ platform/gl/gl-main.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/platform/gl/gl-main.c b/platform/gl/gl-main.c
+index b2eb0a4..b2ba019 100644
+--- a/platform/gl/gl-main.c
++++ b/platform/gl/gl-main.c
+@@ -3089,6 +3089,11 @@ static void signal_handler(int signal)
+ {
+ 	if (signal == SIGHUP)
+ 		reloadrequested = 1;
++#ifndef SA_NOCLDWAIT
++	else if (signal == SIGCHLD)
++		while (waitpid(-1, NULL, WNOHANG) > 0)
++			;
++#endif
+ }
+ #endif
+ 
+@@ -3106,11 +3111,18 @@ int main(int argc, char **argv)
+ #ifndef _WIN32
+ 
+ 	/* Never wait for termination of child processes. */
++#ifdef SA_NOCLDWAIT
+ 	struct sigaction arg = {
+ 		.sa_handler=SIG_IGN,
+ 		.sa_flags=SA_NOCLDWAIT
+ 	};
+ 	sigaction(SIGCHLD, &arg, NULL);
++#else
++	struct sigaction arg = {
++		.sa_handler=signal_handler
++	};
++	sigaction(SIGCHLD, &arg, NULL);
++#endif
+ 
+ 	signal(SIGHUP, signal_handler);
+ #endif
