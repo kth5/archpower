@@ -4,24 +4,39 @@
 # Contributor: Hussam Al-Tayeb <ht990332@gmail.com>
 
 pkgname=xmlsec
-pkgver=1.2.39
-pkgrel=1
+pkgver=1.3.3
+pkgrel=2
 pkgdesc="XML Security Library is a C library based on LibXML2"
-license=('custom')
+license=(MIT)
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://www.aleksey.com/xmlsec/index.html"
 depends=('libxslt' 'openssl' 'gnutls' 'nss' 'libltdl'
          'libgcrypt' 'nspr' 'libxml2' 'glibc')
 provides=('libxmlsec1.so' 'libxmlsec1-openssl.so' 'libxmlsec1-nss.so' 'libxmlsec1-gnutls.so' 'libxmlsec1-gcrypt.so')
 #source=(https://www.aleksey.com/xmlsec/download/${pkgname}1-${pkgver}.{tar.gz,sig}) # signature file not compatible
-source=(https://www.aleksey.com/xmlsec/download/${pkgname}1-${pkgver}.tar.gz)
-sha256sums=('15f2f55ea5968e578fcd24b3b427e553876c86c147dc7f03923e98fc2768a1fa')
+source=(https://www.aleksey.com/xmlsec/download/${pkgname}1-${pkgver}.tar.gz
+        0001-ensure-nss-algorithms-are-initialized.patch
+        0002-Fix-typo-with-xmlSecKeyDataEcGetKlass.patch)
+sha256sums=('ab5b9a9ffd6960f46f7466d9d91f174ec37e8c31989237ba6b9eacdd816464f2'
+            '44ffa8cd249e5580ee1256c5fe168ef2708dfce4b4b6dad56ae24a924fd3501c'
+            'b0c35d8449a1792cc11f5d5130d918f955f333c25c069711cfdaca7bcba920f3')
 # https://www.aleksey.com/xmlsec/download/aleksey%40aleksey.com.gpg
 #validpgpkeys=('00FDD6A7DFB81C88F34B9BF0E63ECDEF9E1D829E') # "Aleksey Sanin <aleksey@aleksey.com>"
 
+prepare() {
+  cd ${pkgname}1-${pkgver}
+  # fix NSS in debug builds
+  # https://github.com/lsh123/xmlsec/pull/754
+  patch -Np1 -i ../0001-ensure-nss-algorithms-are-initialized.patch
+  # fix a typo that breaks against it
+  patch -Np1 -i ../0002-Fix-typo-with-xmlSecKeyDataEcGetKlass.patch
+}
+
 build() {
   cd ${pkgname}1-${pkgver}
-  ./configure --prefix=/usr --disable-static
+  ./configure --prefix=/usr \
+    --disable-static \
+    --enable-files
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
 }
