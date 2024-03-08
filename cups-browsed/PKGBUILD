@@ -1,0 +1,57 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Andreas Radke <andyrtr@archlinux.org>
+
+pkgname=cups-browsed
+pkgver=2.0.0
+pkgrel=2
+pkgdesc="a helper daemon to browse the network for remote CUPS queues and IPP network printers"
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+url="https://wiki.linuxfoundation.org/openprinting/cups-filters"
+license=('Apache-2.0 WITH LLVM-exception')
+depends=('libcups' 'libcupsfilters' 'libppd'
+          'avahi' 'glib2' 'glibc' 'libldap')
+makedepends=('python')
+backup=(etc/cups/cups-browsed.conf)
+source=(https://github.com/OpenPrinting/$pkgname/releases/download/$pkgver/$pkgname-$pkgver.tar.xz
+        0001-Better-handle-damage-of-queues-created-by-cups-browsed.patch)
+sha256sums=('3a63793213f302787357f520a09e4aaae47aad67cd030d9b29de20e51649b38b'
+            '9a66f9a3d806726a90bc180d7a3d8999c8c806e117c750a45c18b9d4795ce008')
+
+prepare() {
+  cd "$pkgname"-$pkgver
+  # fix damage of queues - https://github.com/OpenPrinting/cups-browsed/issues/23
+  patch -Np1 -i ../0001-Better-handle-damage-of-queues-created-by-cups-browsed.patch
+}
+
+build() {
+  cd "$pkgname"-$pkgver
+  ./configure --prefix=/usr  \
+    --sysconfdir=/etc \
+    --sbindir=/usr/bin \
+    --localstatedir=/var \
+    --with-rcdir=no \
+    --enable-auto-setup-driverless-only
+  make
+}
+
+check() {
+  cd "$pkgname"-$pkgver
+# "make check" hangs
+#  make test - does nothing
+}
+
+package() {
+  cd "$pkgname"-$pkgver
+  make DESTDIR="$pkgdir/" install
+  
+  # add upstream systemd support file
+  install -Dm644 daemon/cups-browsed.service "${pkgdir}"/usr/lib/systemd/system/cups-browsed.service
+  sed -i "s|/usr/sbin/cups-browsed|/usr/bin/cups-browsed|" "${pkgdir}"/usr/lib/systemd/system/cups-browsed.service
+  
+  # use cups group from cups pkg FS#56818
+  chgrp -R 209 "${pkgdir}"/etc/cups
+
+  # license
+  mkdir -p "${pkgdir}"/usr/share/licenses/${pkgname}
+  install -m644 "${srcdir}"/${pkgname}-${pkgver}/{COPYING,NOTICE} "${pkgdir}"/usr/share/licenses/${pkgname}/
+}
