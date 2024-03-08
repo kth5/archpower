@@ -1,0 +1,118 @@
+From 8bb25dafc80802edde93b9d77e43abe370373dbe Mon Sep 17 00:00:00 2001
+From: Tomas Bzatek <tbzatek@redhat.com>
+Date: Tue, 10 Oct 2023 18:16:24 +0200
+Subject: [PATCH 1/2] util: Introduce alloc helper with alignment support
+
+Similar to nvme-cli an alloc helper is needed for a couple
+of ioctls sent out during tree scan.
+
+Signed-off-by: Tomas Bzatek <tbzatek@redhat.com>
+---
+ src/nvme/private.h |  2 ++
+ src/nvme/util.c    | 13 +++++++++++++
+ 2 files changed, 15 insertions(+)
+
+diff --git a/src/nvme/private.h b/src/nvme/private.h
+index 6fb9784a..ee9d738b 100644
+--- a/src/nvme/private.h
++++ b/src/nvme/private.h
+@@ -182,6 +182,8 @@ nvme_ctrl_t __nvme_lookup_ctrl(nvme_subsystem_t s, const char *transport,
+ 			       const char *host_iface, const char *trsvcid,
+ 			       const char *subsysnqn, nvme_ctrl_t p);
+ 
++void *__nvme_alloc(size_t len);
++
+ #if (LOG_FUNCNAME == 1)
+ #define __nvme_log_func __func__
+ #else
+diff --git a/src/nvme/util.c b/src/nvme/util.c
+index 8fe094d5..20679685 100644
+--- a/src/nvme/util.c
++++ b/src/nvme/util.c
+@@ -7,6 +7,7 @@
+  * 	    Chaitanya Kulkarni <chaitanya.kulkarni@wdc.com>
+  */
+ 
++#include <stdlib.h>
+ #include <stdio.h>
+ #include <stdbool.h>
+ #include <string.h>
+@@ -1058,3 +1059,15 @@ bool nvme_iface_primary_addr_matches(const struct ifaddrs *iface_list, const cha
+ }
+ 
+ #endif /* HAVE_NETDB */
++
++void *__nvme_alloc(size_t len)
++{
++	size_t _len = round_up(len, 0x1000);
++	void *p;
++
++	if (posix_memalign((void *)&p, getpagesize(), _len))
++		return NULL;
++
++	memset(p, 0, _len);
++	return p;
++}
+
+From a0b7cf48c0378f7892518eaf20ecaabae14521b0 Mon Sep 17 00:00:00 2001
+From: Tomas Bzatek <tbzatek@redhat.com>
+Date: Tue, 10 Oct 2023 18:18:38 +0200
+Subject: [PATCH 2/2] tree: Allocate aligned payloads for ns scan
+
+libnvme is actually doing some namespace identification
+during tree scan, leading to stack smash on some systems.
+
+Signed-off-by: Tomas Bzatek <tbzatek@redhat.com>
+---
+ src/nvme/tree.c | 29 ++++++++++++++++++-----------
+ 1 file changed, 18 insertions(+), 11 deletions(-)
+
+diff --git a/src/nvme/tree.c b/src/nvme/tree.c
+index 00cf96f7..5636aa18 100644
+--- a/src/nvme/tree.c
++++ b/src/nvme/tree.c
+@@ -2404,26 +2404,33 @@ static void nvme_ns_parse_descriptors(struct nvme_ns *n,
+ 
+ static int nvme_ns_init(struct nvme_ns *n)
+ {
+-	struct nvme_id_ns ns = { };
+-	uint8_t buffer[NVME_IDENTIFY_DATA_SIZE] = { };
+-	struct nvme_ns_id_desc *descs = (void *)buffer;
++	struct nvme_id_ns *ns;
++	struct nvme_ns_id_desc *descs;
+ 	uint8_t flbas;
+ 	int ret;
+ 
+-	ret = nvme_ns_identify(n, &ns);
+-	if (ret)
++	ns = __nvme_alloc(sizeof(*ns));
++	if (!ns)
++		return 0;
++	ret = nvme_ns_identify(n, ns);
++	if (ret) {
++		free(ns);
+ 		return ret;
++	}
+ 
+-	nvme_id_ns_flbas_to_lbaf_inuse(ns.flbas, &flbas);
+-	n->lba_shift = ns.lbaf[flbas].ds;
++	nvme_id_ns_flbas_to_lbaf_inuse(ns->flbas, &flbas);
++	n->lba_shift = ns->lbaf[flbas].ds;
+ 	n->lba_size = 1 << n->lba_shift;
+-	n->lba_count = le64_to_cpu(ns.nsze);
+-	n->lba_util = le64_to_cpu(ns.nuse);
+-	n->meta_size = le16_to_cpu(ns.lbaf[flbas].ms);
++	n->lba_count = le64_to_cpu(ns->nsze);
++	n->lba_util = le64_to_cpu(ns->nuse);
++	n->meta_size = le16_to_cpu(ns->lbaf[flbas].ms);
+ 
+-	if (!nvme_ns_identify_descs(n, descs))
++	descs = __nvme_alloc(NVME_IDENTIFY_DATA_SIZE);
++	if (descs && !nvme_ns_identify_descs(n, descs))
+ 		nvme_ns_parse_descriptors(n, descs);
+ 
++	free(ns);
++	free(descs);
+ 	return 0;
+ }
+ 
