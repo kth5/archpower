@@ -6,16 +6,15 @@
 pkgbase=opencv
 pkgname=(opencv
          opencv-samples
-         python-opencv
-)
+         python-opencv)
 case "${CARCH}" in
-  x86_64) pkgname+=(opencv-cuda)
+  x86_64) pkgname+=(opencv-cuda) ;;
 esac
 pkgver=4.9.0
-pkgrel=1
+pkgrel=2
 pkgdesc='Open Source Computer Vision Library'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=(BSD)
+license=(Apache-2.0)
 url='https://opencv.org/'
 depends=(abseil-cpp
          cblas
@@ -41,12 +40,13 @@ depends=(abseil-cpp
          protobuf
          onetbb
          zlib)
-makedepends=(
+makedepends=(ant
              cmake
              eigen
              fmt
              glew
              hdf5
+             java-environment
              lapacke
              mesa
              nlohmann-json
@@ -62,13 +62,22 @@ optdepends=('opencv-samples: samples'
             'glew: for the viz module'
             'qt6-base: for the HighGUI module'
             'hdf5: for the HDF5 module'
-            'opencl-icd-loader: For coding with OpenCL')
+            'opencl-icd-loader: For coding with OpenCL'
+            'java-runtime: Java interface')
 source=(https://github.com/opencv/opencv/archive/$pkgver/$pkgname-$pkgver.tar.gz
         https://github.com/opencv/opencv_contrib/archive/$pkgver/opencv_contrib-$pkgver.tar.gz
         vtk9.patch)
 sha256sums=('ddf76f9dffd322c7c3cb1f721d0887f62d747b82059342213138dc190f28bc6c'
             '8952c45a73b75676c522dd574229f563e43c271ae1d5bbbd26f8e2b6bc1a4dae'
             'f35a2d4ea0d6212c7798659e59eda2cb0b5bc858360f7ce9c696c77d3029668e')
+
+
+case "${CARCH}" in
+  riscv64)
+    # fix: relocation truncated to fit: R_RISCV_PCREL_HI20 against `.LC19'
+    options=(!lto)
+  ;;
+esac
 
 prepare() {
   patch -d $pkgname-$pkgver -p1 < vtk9.patch # Don't require all vtk optdepends
@@ -110,6 +119,7 @@ build() {
          -DLAPACK_LAPACKE_H=/usr/include/lapacke.h \
          -DOPENCV_GENERATE_PKGCONFIG=ON \
          -DOPENCV_ENABLE_NONFREE=ON \
+         -DOPENCV_JNI_INSTALL_PATH=lib \
          -DOPENCV_GENERATE_SETUPVARS=OFF \
          -DEIGEN_INCLUDE_PATH=/usr/include/eigen3 \
          -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
@@ -139,9 +149,6 @@ build() {
 package_opencv() {
   DESTDIR="$pkgdir" cmake --install build
 
-  # install license file
-  install -Dm644 $pkgbase-$pkgver/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
-
   # separate samples package
   mv "$pkgdir"/usr/share/opencv4/samples "$srcdir"
 
@@ -156,9 +163,6 @@ package_opencv-samples() {
 
   mkdir -p "$pkgdir"/usr/share/opencv4
   mv samples "$pkgdir"/usr/share/opencv4
-
-  # install license file
-  install -Dm644 $pkgbase-$pkgver/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
 }
 
 package_python-opencv() {
@@ -176,9 +180,6 @@ package_python-opencv() {
   unset optdepends
 
   DESTDIR="$pkgdir" cmake --install build/modules/python3
-
-  # install license file
-  install -Dm644 $pkgbase-$pkgver/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
 }
 
 package_opencv-cuda() {
@@ -190,11 +191,12 @@ package_opencv-cuda() {
 
   DESTDIR="$pkgdir" cmake --install build-cuda
 
-  # install license file
-  install -Dm644 $pkgbase-$pkgver/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
-
   # Split samples
   rm -r "$pkgdir"/usr/share/opencv4/samples
+
+  # Add java symlinks expected by some binary blobs
+  ln -sr "$pkgdir"/usr/share/java/{opencv4/opencv-${pkgver//./},opencv}.jar
+  ln -sr "$pkgdir"/usr/lib/{libopencv_java${pkgver//./},libopencv_java}.so
 
   # Split Python bindings
   rm -r "$pkgdir"/usr/lib/python3*
