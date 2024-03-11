@@ -3,15 +3,15 @@
 
 pkgname=python-eventlet
 _pyname=eventlet
-pkgver=0.33.3
-pkgrel=2
+pkgver=0.35.1
+pkgrel=1
 pkgdesc='Highly concurrent networking library'
 url='https://eventlet.net'
 arch=(any)
 license=('MIT')
-depends=('python' 'python-greenlet' 'python-six' 'python-dnspython')
-makedepends=('python-setuptools' 'python-sphinx')
-checkdepends=('python-psycopg2' 'python-nose' 'python-pyopenssl' 'python-httplib2' 'python-mock' 'python-pyzmq')
+depends=('python' 'python-greenlet' 'python-dnspython')
+makedepends=('python-build' 'python-installer' 'python-sphinx' 'python-sphinxcontrib-apidoc' 'python-hatchling' 'python-hatch-vcs')
+checkdepends=('python-psycopg2' 'python-pyopenssl' 'python-httplib2' 'python-mock' 'python-pyzmq' 'python-pytest')
 optdepends=(
   'python-psycopg2: non-blocking PostgreSQL support'
   'python-pyopenssl: non-blocking SSL support'
@@ -22,9 +22,9 @@ optdepends=(
 options=('!makeflags')
 source=(https://github.com/eventlet/eventlet/archive/v${pkgver}/${_pyname}-${pkgver}.tar.gz
         python310.patch)
-sha512sums=('b2e1818c7b6134be4020d2b4315bbb3db795960df76da08a490e0d952549eafb477800c884e7a99493146c1ac082aed5fb87c7e2882ee468ea42b5cc26b8517f'
+sha512sums=('aacfb0e8baf44815a471421fb51aa91c45bf587e184ecc4ea9605fc88bea0ef5584e9a1508cc7aeb5fa34f19ed28964728adc37b21cd29c80176e5bafe6fbc18'
             '07739075628ff9d140064e04189332b479f184e4647753f987b0818fa55aaca907d4880afb5cf31f980426f315e1014027dcd848551149000a12145f982cd883')
-b2sums=('19bcd7a5adc2ef24f2637bfd9b19e68a9a268ebb7791cc9c419d9da88e5860c4cbbf6ecbaa0f3c300246584082622e6dab7ab75374f7d54f3c4a65661e22dbfd'
+b2sums=('f665ec4c23222072925fb76ee89afb47adcf3951ce57d19c975013e9694ea1ed7b4306468d2de893599e8961d6762306bd1ebc06922cfa8a196910a76f95f639'
         '783445f708c12586e026f7feac982a7b6c21f86468609c375568b51ad6055977df3d0bc740f3127b9f8bc95c1c50e81aae02ca0e0be674ed4627910d39b1ef47')
 
 prepare() {
@@ -37,21 +37,22 @@ prepare() {
 
 build() {
   cd ${_pyname}-${pkgver}
-  python setup.py build
-  make -C doc text
+  SETUPTOOLS_SCM_PRETEND_VERSION=${pkgver} \
+  python -m build -wn
+  PYTHONPATH="$PWD" sphinx-build -b text doc/source doc/build/html
 }
 
 check() {
   cd ${_pyname}-${pkgver}
-  nosetests -sv tests -e test_018b_http_10_keepalive_framing # fails on build.a.o
+  pytest -v
 }
 
 package() {
   cd ${_pyname}-${pkgver}
-  python setup.py install --prefix=/usr --root="${pkgdir}" -O1
+  python -m installer --destdir="${pkgdir}" dist/*.whl
   install -Dm 644 LICENSE -t "${pkgdir}/usr/share/licenses/${pkgname}"
   install -d "${pkgdir}/usr/share/doc/${pkgname}"
-  cp -r doc/_build/text "${pkgdir}/usr/share/doc/${pkgname}"
+  cp -r doc/build/html "${pkgdir}/usr/share/doc/${pkgname}"
   cp -r examples "${pkgdir}/usr/share/doc/${pkgname}"
 }
 
