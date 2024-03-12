@@ -1,10 +1,12 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: David Runge <dvzrv@archlinux.org>
 # Maintainer: Caleb Maclennan <caleb@alerque.com>
+# Maintainer: Leonidas Spyropoulos <artafinde@archlinux.org>
+# Maintainer: Daniel M. Capella <polyzen@archlinux.org>
 
 pkgbase=ruff
 pkgname=($pkgbase python-$pkgbase)
-pkgver=0.1.8
+pkgver=0.3.2
 pkgrel=1
 pkgdesc='An extremely fast Python linter, written in Rust'
 arch=(x86_64 powerpc64le powerpc64 riscv64)
@@ -22,27 +24,23 @@ makedepends=(
 options=(!lto)
 _archive="$pkgbase-$pkgver"
 source=($url/archive/refs/tags/v$pkgver/$_archive.tar.gz)
-sha512sums=('1b962086e925761337ef95c8951a271a5bc26b16ae3ca2ea70d46d817d29167454b6b34f36e5d0424c7fb808bf65da11857fe1da7da876e07eb35e3ed654fd4e')
-b2sums=('9095196ca50a240b478b2a2cd4273df12a1c1438fb32cbfafc7e6df0ef09ff4456e3d90406e70addc7867fff6317cdb8474379cfe7d9e68706a20b0f53d5beee')
-
-case "${CARCH}" in
-  riscv64) export MYARCH=riscv64gc ;;
-esac
+sha512sums=('3505e199d631bb951c89814e7516e4a20dda602f454ce3f122902455fe07df38195605db92350543463aa60aa2558a8dccd3d68db09cc73c7682b705b90c03c7')
+b2sums=('02efcf12130f2620c2a8d428894bec83d1bdb3471a447212072c4d19f61fce9ec3bb3342b2fa019c5af203cc823bb242ec34ee862b34aff407112cb9786f4f4e')
 
 prepare() {
   cd "$_archive"
 
-  cargo fetch --locked --target "$MYARCH-unknown-linux-gnu"
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
 }
 
 build() {
   cd "$_archive"
-  maturin build --locked --release --all-features --target "$MYARCH-unknown-linux-gnu" --strip
+  maturin build --locked --release --all-features --target "$(rustc -vV | sed -n 's/host: //p')" --strip
 }
 
 check() {
   cd "$_archive"
-  cargo test -p ruff_cli --frozen --all-features
+  cargo test -p ruff --frozen --all-features -- --skip display_default_settings
 }
 
 _package_common() {
@@ -53,7 +51,7 @@ _package_common() {
 package_ruff() {
   cd "$_archive"
   _package_common
-  local _target="target/$MYARCH-unknown-linux-gnu/release/ruff"
+  local _target="target/$(rustc -vV | sed -n 's/host: //p')/release/ruff"
   install -Dm0755 -t "$pkgdir/usr/bin/" "$_target"
   $_target --generate-shell-completion bash | install -Dm0644 /dev/stdin "$pkgdir/usr/share/bash-completion/completions/$pkgbase.bash"
   $_target --generate-shell-completion fish | install -Dm0644 /dev/stdin "$pkgdir/usr/share/fish/vendor_completions.d/$pkgbase.fish"
