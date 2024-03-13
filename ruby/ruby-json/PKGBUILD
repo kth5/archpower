@@ -2,75 +2,97 @@
 # Maintainer: David Runge <dvzrv@archlinux.org>
 # Maintainer: Andreas 'Segaja' Schleifer <segaja at archlinux dot org>
 
-_gemname='json'
-pkgname="ruby-${_gemname}"
-pkgver=2.6.3
+_name=json
+pkgname="ruby-json"
+pkgver=2.7.1
 pkgrel=1
 pkgdesc="JSON implementation for Ruby"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url="https://github.com/flori/${_gemname}"
-license=('RUBY')
-depends=('ruby')
-makedepends=('ragel' 'ruby-rake' 'ruby-rdoc')
-checkdepends=('ruby-test-unit')
-source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('1bf9125266d8cdc565deb9e2fe3c884a1fc8d2f3b31caae67a154d0c47e30305074c1c08b49d180dd785c766762b46d3b3ef85919d53388797fcc2f37675317c')
-b2sums=('f6101f533159fb689b6bf22975137d34a77bd0926c164a9c14f2d5eab982778538ec40551709e8a6470f05e78584a3e5680be740314bb7829b48feb32fb258ae')
+url="https://github.com/flori/json"
+license=(Ruby)
+depends=(
+  glibc
+  ruby
+)
+makedepends=(
+  ragel
+  ruby-rake
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-test-unit
+  ruby-test-unit-ruby-core
+)
+source=($url/archive/v$pkgver/$pkgname-$pkgver.tar.gz)
+sha512sums=('81e7cf51363095088142a7ac15428765f296e9b8c205946abf9ab98ddf7c57aa732c8111e6b0e239606645dfbc24dd40fbe981a52ab2d9fac97c0e3fb08133a0')
+b2sums=('9921b8dd26123d27b752d3dd633f788437a1aa2003b09ad6d0f43e946362f48a8e5b8dcc70d08f61cc9affa2578750e40c5a78d3bf88e0417af8890100987c79')
 
 prepare() {
-  cd "${_gemname}-${pkgver}"
+  cd $_name-$pkgver
 
   # update gemspec/Gemfile to allow newer version of the dependencies
-  sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
+  sed -i -e 's|~>|>=|g' $_name.gemspec
 }
 
 build() {
-  cd "${_gemname}-${pkgver}"
+  local gemdir="$(gem env gemdir)"
+  local gem_install_options=(
+    --local
+    --verbose
+    --ignore-dependencies
+    --no-user-install
+    --install-dir tmp_install/$gemdir
+    --bindir tmp_install/usr/bin
+    $_name-$pkgver.gem
+  )
+  local unrepro_files=(
+    tmp_install/$gemdir/cache/
+    tmp_install/$gemdir/gems/$_name-$pkgver/vendor/
+    tmp_install/$gemdir/doc/$_name-$pkgver/ri/ext/
+  )
 
-  rake compile
-  rake build
+  cd $_name-$pkgver
+
+  gem build $_name.gemspec
+  gem install "${gem_install_options[@]}"
+
+  # remove unrepreducible files
+  rm -frv "${unrepro_files[@]}"
+
+  find tmp_install/$gemdir/gems/ \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find tmp_install/$gemdir/extensions/ \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
 }
 
 check() {
-  cd "${_gemname}-${pkgver}"
+  local gemdir="$(gem env gemdir)"
 
-  rake test
+  cd $_name-$pkgver
+
+  GEM_HOME="tmp_install/$gemdir" rake test
 }
 
 package() {
-  cd "${_gemname}-${pkgver}"
+  cd $_name-$pkgver
 
-  local _gemdir="$(gem env gemdir)"
-  local _platform="$(gem env platform | cut -d':' -f2)"
-  local _extension_api_version="$(ruby -e 'puts Gem.extension_api_version')"
+  mv -v tmp_install/* "$pkgdir/"
 
-  gem install \
-    --local \
-    --verbose \
-    --ignore-dependencies \
-    --no-user-install \
-    --install-dir "${pkgdir}/${_gemdir}" \
-    --bindir "${pkgdir}/usr/bin" \
-    "pkg/${_gemname}-${pkgver}.gem"
-
-  install --verbose --directory --mode=0755 \
-    "${pkgdir}/usr/lib/ruby/${_extension_api_version}/${_platform}" \
-    "${pkgdir}${_gemdir}/specifications/default"
-
-  mv --verbose "${pkgdir}${_gemdir}/specifications/${_gemname}-${pkgver}.gemspec" "${pkgdir}${_gemdir}/specifications/default/${_gemname}-${pkgver}.gemspec"
-  mv --verbose "${pkgdir}${_gemdir}/gems/${_gemname}-${pkgver}/lib/${_gemname}.rb" "${pkgdir}/usr/lib/ruby/${_extension_api_version}/${_gemname}.rb"
-  mv --verbose "${pkgdir}${_gemdir}/gems/${_gemname}-${pkgver}/lib/${_gemname}" "${pkgdir}/usr/lib/ruby/${_extension_api_version}/${_gemname}"
-  mv --verbose "${pkgdir}${_gemdir}/extensions/${_platform}/${_extension_api_version}/${_gemname}-${pkgver}/${_gemname}" "${pkgdir}/usr/lib/ruby/${_extension_api_version}/${_platform}/"
-
-  # remove unrepreducible files
-  rm --force --recursive --verbose \
-    "${pkgdir}${_gemdir}/cache/" \
-    "${pkgdir}${_gemdir}/build_info/" \
-    "${pkgdir}${_gemdir}/extensions/" \
-    "${pkgdir}${_gemdir}/gems/" \
-    "${pkgdir}${_gemdir}/plugins/" \
-    "${pkgdir}${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
-
-  install --verbose -D --mode=0644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
-  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+  install -vDm 0644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -vDm 0644 ./*.md -t "$pkgdir/usr/share/doc/$pkgname/"
 }
