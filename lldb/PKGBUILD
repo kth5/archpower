@@ -1,14 +1,16 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Evangelos Foutras <evangelos@foutrelis.com>
 # Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
 
 pkgname=lldb
 pkgver=17.0.6
-pkgrel=1
+pkgrel=1.1
 pkgdesc="Next generation, high-performance debugger"
 arch=(x86_64 powerpc64le powerpc64 riscv64)
 url="https://lldb.llvm.org/"
 license=('custom:Apache 2.0 with LLVM Exception')
-depends=('llvm-libs' 'clang' 'python' 'python-six')
+depends=('llvm-libs' 'clang' 'gcc-libs' 'zlib' 'xz' 'libedit' 'ncurses'
+         'libxml2' 'python')
 makedepends=('llvm' 'cmake' 'ninja' 'swig' 'python-sphinx')
 _source_base=https://github.com/llvm/llvm-project/releases/download/llvmorg-$pkgver
 source=($_source_base/lldb-$pkgver.src.tar.xz{,.sig}
@@ -29,23 +31,19 @@ prepare() {
 build() {
   cd lldb-$pkgver.src/build
 
+  # Build only minimal debug info to reduce size
+  CFLAGS=${CFLAGS/-g /-g1 }
+  CXXFLAGS=${CXXFLAGS/-g /-g1 }
+
   local cmake_args=(
     -G Ninja
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_INSTALL_PREFIX=/usr
     -DCMAKE_SKIP_RPATH=ON
     -DCLANG_LINK_CLANG_DYLIB=ON
-    -DLLDB_USE_SYSTEM_SIX=1
     -DLLVM_ENABLE_SPHINX=ON
     -DLLVM_LINK_LLVM_DYLIB=ON
   )
-
-  case "${CARCH}" in
-    riscv64)
-      CXXFLAGS+=' -latomic'
-    ;;
-  esac
-
   cmake .. "${cmake_args[@]}"
   ninja all docs-lldb-man
 }
