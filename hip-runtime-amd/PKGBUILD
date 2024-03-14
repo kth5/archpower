@@ -2,10 +2,10 @@
 # Maintainer: Torsten Keßler <tpkessler at archlinux dot org>
 # Contributor: acxz <akashpatel2008 at yahoo dot com>
 pkgname=hip-runtime-amd
-pkgver=5.6.1
+pkgver=6.0.0
 pkgrel=1
 pkgdesc="Heterogeneous Interface for Portability ROCm"
-arch=(x86_64 powerpc64le powerpc64)
+arch=(x86_64 powerpc64le powerpc64 riscv64)
 url='https://rocm.docs.amd.com/projects/HIP/en/latest/'
 license=('MIT')
 depends=('mesa' 'comgr' 'rocminfo' 'rocm-llvm' 'libelf')
@@ -20,13 +20,22 @@ _clr='https://github.com/ROCm-Developer-Tools/clr'
 _hipcc='https://github.com/ROCm-Developer-Tools/HIPCC'
 source=("$pkgname-$pkgver.tar.gz::$_hip/archive/rocm-$pkgver.tar.gz"
         "$pkgname-clr-$pkgver.tar.gz::$_clr/archive/rocm-$pkgver.tar.gz"
-        "$pkgname-hipcc-$pkgver.tar.gz::$_hipcc/archive/rocm-$pkgver.tar.gz")
-sha256sums=('4b3c4dfcf8595da0e1b8c3e8067b1ccebeaac337762ff098db14375fa8dd4487'
-            '0b88af1e99643899d11b1c8cf8a3c46601051b328a5e0ffbd44ee88b7eb0db33'
-            '5800fac92b841ef6f52acda78d9bf86f83970bec0fb848a6265d239bdb7eb51a')
+        "$pkgname-hipcc-$pkgver.tar.gz::$_hipcc/archive/rocm-$pkgver.tar.gz"
+        "$pkgname-disable-immintrin.patch::https://github.com/ROCm/clr/commit/12461dbd6a26e02d03b572399b6d629f44b0a318.diff"
+        "$pkgname-rv64gc.patch")
+sha256sums=('0d575788e0b731124a8489a36652014a165b9ebab92d5456ec3c976e062f3a82'
+            '798b55b5b5fb90dd19db54f136d8d8e1da9ae1e408d5b12b896101d635f97e50'
+            'e9cfaaecaf0e6ed363946439197f340c115e8e1189f96dbd716cf20245c29255'
+            'bf4fcef96619cbed5ec0f3f8ef02767347acfc883b6b67d300ccbe5e0e596efb'
+            'b8d9643df110fd016796fe5e3ffda0b13bfe6ba430304322684a691bc35b84ff')
 _dirhip="$(basename "$_hip")-$(basename "${source[0]}" ".tar.gz")"
 _dirclr="$(basename "$_clr")-$(basename "${source[1]}" ".tar.gz")"
 _dirhipcc="$(basename "$_hipcc")-$(basename "${source[2]}" ".tar.gz")"
+
+prepare() {
+  patch -Np1 -d "$srcdir/$_dirclr" -i "$srcdir/$pkgname-disable-immintrin.patch"
+  patch -Np1 -d "$srcdir/$_dirclr" -i "$srcdir/$pkgname-rv64gc.patch"
+}
 
 build() {
   local hipcc_args=(
@@ -49,6 +58,7 @@ build() {
     -DHIP_CATCH_TEST=0
     -DCLR_BUILD_HIP=ON
     -DCLR_BUILD_OCL=OFF
+    -D__HIP_ENABLE_PCH=OFF
   )
   cmake "${hip_args[@]}"
   cmake --build build
