@@ -5,7 +5,7 @@
 # Contributor: Ranieri Althoff <ranisalt+aur at gmail.com>
 
 pkgname=rocm-cmake
-pkgver=5.7.1
+pkgver=6.0.0
 pkgrel=1
 pkgdesc='CMake modules for common build tasks needed for the ROCm software stack'
 arch=(x86_64 powerpc64le powerpc64 riscv64)
@@ -13,13 +13,23 @@ url='https://github.com/RadeonOpenCompute/rocm-cmake'
 license=('MIT')
 depends=('cmake')
 checkdepends=('git' 'rocm-llvm')
-source=("${pkgname}-${pkgver}.tar.gz::$url/archive/rocm-$pkgver.tar.gz")
-sha256sums=('4a4c6aa09576ccb834f869bdcb49e98cc0f0bac3678b802358065d1179a9d6f1')
+source=("${pkgname}-${pkgver}.tar.gz::$url/archive/rocm-$pkgver.tar.gz"
+        "${pkgname}-old-policy-cmp0079.patch")
+sha256sums=('82bd97ba23d1883ef38bb667e92f7367fedc50d6c11c82f54cced4ab04b0412d'
+            '7c8d8351a8e85a0d122421d02ad967c75d4dd8442192662c1a1a68bacdfad67d')
 _dirname="$(basename "$url")-$(basename "${source[0]}" .tar.gz)"
 
 prepare() {
-    # Git version tests fail with cmake 3.12+
-    rm "$_dirname/test/pass/"{version-norepo.cmake,version-parent.cmake}
+    cd "$_dirname"
+    # Git version tests fail because we're not working in a local git checkout
+    rm test/pass/{version-norepo.cmake,version-parent.cmake}
+    # sphinx tests require a python module named rocm_docs,
+    # https://github.com/RadeonOpenCompute/rocm-docs-core
+    # As we don't package it, disable also this test
+    rm test/pass/doc-sphinxdoxygen.cmake
+
+    # With cmake 3.28.1+ setting cmp0079 to old results in a deprecation error
+    patch -Np1 -i "$srcdir/$pkgname-old-policy-cmp0079.patch"
 }
 
 build() {
