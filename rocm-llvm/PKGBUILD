@@ -4,29 +4,32 @@
 
 pkgname=rocm-llvm
 pkgdesc='Radeon Open Compute - LLVM toolchain (llvm, clang, lld)'
-pkgver=5.7.1
-pkgrel=2
+pkgver=6.0.0
+pkgrel=3
 arch=(x86_64 powerpc64le powerpc64 riscv64)
 url='https://rocm.docs.amd.com/en/latest/reference/rocmcc/rocmcc.html'
-license=('custom:Apache 2.0 with LLVM Exception')
-makedepends=('cmake' 'python' 'ninja' 'git')
-_git='https://github.com/RadeonOpenCompute/llvm-project'
+license=('Apache-2.0 WITH LLVM-exception')
+makedepends=('cmake' 'python' 'ninja')
+_git='https://github.com/ROCm/llvm-project'
 source=("${pkgname}-${pkgver}.tar.gz::$_git/archive/rocm-$pkgver.tar.gz"
-        "${pkgname}-gcc13-c++20.patch"
+        "${pkgname}-fix-segfault.patch"
         "llvm-ppc64-elfv2.patch"
         "clang-ppc64-dynamic-linker-path.patch"
-        "clang-ppc64-elfv2.patch")
-sha256sums=('6b54c422e45ad19c9bf5ab090ec21753e7f7d854ca78132c30eb146657b168eb'
-            '312a89d601ccea7e434c825d126135e266d87a974b0c16b0fb1d19cc1638514c'
+        "clang-ppc64-elfv2.patch"
+        "rocm-llvm-riscv-uleb128.patch")
+sha256sums=('c673708d413d60ca8606ee75c77e9871b6953c59029c987b92f2f6e85f683626'
+            '4d3f198c5422e9987f442c20963223c39b1548ffa00b6c9db81af5070278ce03'
             '8c4e8db0b80b1a86f8cff9aa678b70458503bc8926ecc41e0df953ea14ab3559'
             '654b9eafcd20125319b3c319ab6674a940ddef400821c80813c16011ef8b6086'
-            'f80157e9ef2bfea9dcb8560e17b76b7e4e9de72bab0c83b1802734ff83293411')
-options=(staticlibs !lto)
+            'f80157e9ef2bfea9dcb8560e17b76b7e4e9de72bab0c83b1802734ff83293411'
+            'a4dc17071cfc8248f33c74dca14df715710b375e8e1aefc46c4e505334f4bf9b')
+options=(!debug staticlibs !lto)
 _dirname="$(basename "$_git")-$(basename "${source[0]}" .tar.gz)"
 
 prepare() {
     cd "$_dirname"
-    patch -Np 1 -i "$srcdir/$pkgname-gcc13-c++20.patch"
+    patch -Np1 -i ../"${pkgname}-fix-segfault.patch"
+    patch -Np1 -i ../"${pkgname}-riscv-uleb128.patch"
 
     cd ${srcdir}/${_dirname}/llvm
     patch -Np2 -i ${srcdir}/llvm-ppc64-elfv2.patch
@@ -38,8 +41,8 @@ prepare() {
 
 build() {
     # Build only minimal debug info to reduce size
-    CFLAGS+=' -g1'
-    CXXFLAGS+=' -g1'
+    CFLAGS=${CFLAGS/-g /-g1 }
+    CXXFLAGS=${CXXFLAGS/-g /-g1 }
 
     case "${CARCH}" in
       powerpc*) _target=PowerPC ;;
@@ -52,9 +55,13 @@ build() {
         -B build
         -S "$_dirname/llvm"
         -DCMAKE_BUILD_TYPE=Release
-        -DCMAKE_INSTALL_PREFIX='/opt/rocm/llvm'
+        -DCMAKE_INSTALL_PREFIX='/opt/rocm/lib/llvm'
         -DLLVM_HOST_TRIPLE=$CHOST
-        -DLLVM_ENABLE_PROJECTS='llvm;clang;compiler-rt;lld'
+        -DLLVM_ENABLE_PROJECTS='llvm;clang;lld;compiler-rt;clang-tools-extra'
+        -DCLANG_ENABLE_AMDCLANG=ON
+        -DLLVM_ENABLE_RUNTIMES='libcxx;libcxxabi;libunwind'
+        -DLIBCXX_ENABLE_STATIC=ON
+        -DLIBCXXABI_ENABLE_STATIC=ON
         -DLLVM_TARGETS_TO_BUILD="AMDGPU;NVPTX;${_target}"
         -DCLANG_DEFAULT_LINKER=lld
         -DLLVM_INSTALL_UTILS=ON
@@ -70,7 +77,7 @@ build() {
         -DCLANG_INCLUDE_TESTS=OFF
         -DLLVM_BINUTILS_INCDIR=/usr/include
     )
-
+    
     cmake "${cmake_args[@]}"
     cmake --build build
 }
@@ -78,9 +85,12 @@ build() {
 package() {
     DESTDIR="$pkgdir" cmake --install build
 
+    # Provide symlink to old LLVM location, pre ROCm 6.0.0
+    ln -s /opt/rocm/lib/llvm "$pkgdir/opt/rocm/llvm"
+
     # https://bugs.archlinux.org/task/28479
-    install -d "$pkgdir/opt/rocm/llvm/lib/bfd-plugins"
-    ln -s /opt/rocm/llvm/lib/LLVMgold.so "$pkgdir/opt/rocm/llvm/lib/bfd-plugins/LLVMgold.so"
+    install -d "$pkgdir/opt/rocm/lib/llvm/lib/bfd-plugins"
+    ln -s /opt/rocm/lib/llvm/lib/LLVMgold.so "$pkgdir/opt/rocm/lib/llvm/lib/bfd-plugins/LLVMgold.so"
 
     cd "$_dirname"
     install -Dm644 llvm/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/llvm-LICENSE"
