@@ -2,44 +2,48 @@
 # Maintainer: Konstantin Gizdov <arch at kge dot pw>
 
 pkgname='msgpack-cxx'
-pkgver=4.0.3
-pkgrel=1
+pkgver=5.0.0
+pkgrel=2
 pkgdesc='An efficient object serialization library for C++'
 arch=("any")
 url='https://msgpack.org/'
-license=('custom:Boost')
+license=('BSL-1.0')
 makedepends=('cmake' 'doxygen' 'graphviz')
 depends=('boost')
 source=("https://github.com/msgpack/msgpack-c/releases/download/cpp-${pkgver}/${pkgname}-${pkgver}.tar.gz"
-        "LICENSE-${pkgname}-${pkgver}::https://raw.githubusercontent.com/msgpack/msgpack-c/cpp_master/COPYING")
-sha256sums=('9b3c1803b9855b7b023d7f181f66ebb0d6941275ba41d692037e0aa27736443f'
-            '664550b43996452a5a2c7471bb0ff77185a58c69ccafa60f983dc4c162e1ee22')
-_builddir='build-cxx'
+        "LICENSE-${pkgname}-${pkgver}::https://raw.githubusercontent.com/msgpack/msgpack-c/cpp_master/COPYING"
+        "${pkgname}-tests-gcc-13.patch")
+b2sums=('e631a47e8d39b6ad9c2dd5e782fbbd5044c177e18c619fb52d1293e2c5f2ea7e766e7b26ce6cac36a2ff98217143e12456e0541992afb4f78597ffd3852f2acf'
+        'f39585a8a06390e7677a46fd62c1836d2873ceb6e66927803fcbf42a572b5c6c0948b5191708bf1fe04c79b94de574d1d1ef19eaca28e81326af6ef1757c1d94'
+        'e4772d80efe00c87e5ad43c21d0f853329cfed72ca347dea40851c013fde8e88a62effd1f5eaafc99882210811ee0b4e9658f13993753f294a6202333043ab59')
 
 prepare() {
-  cd "${srcdir}"
-  mkdir "${_builddir}"
+  cd "${pkgname}-${pkgver}"
+  patch -Np1 -i "${srcdir}/${pkgname}-tests-gcc-13.patch"
 }
 
 build() {
-  cd "${srcdir}/${_builddir}"
-  cmake -DCMAKE_INSTALL_PREFIX=/usr \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_SHARED_LIBS=ON \
-        -DMSGPACK_CXX17=ON \
-        -DMSGPACK_BUILD_EXAMPLES=OFF \
-        -DMSGPACK_BUILD_TESTS=ON \
-        "${srcdir}/${pkgname}-${pkgver}"
-  make
+  local cmake_args=(
+    -Wno-dev
+    -S "${pkgname}-${pkgver}"
+    -B build
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_BUILD_TYPE=Release
+    -D BUILD_SHARED_LIBS=ON
+    -D MSGPACK_CXX17=ON
+    -D MSGPACK_BUILD_EXAMPLES=OFF
+    -D MSGPACK_BUILD_TESTS=ON
+  )
+  cmake "${cmake_args[@]}"
+  cmake --build build
 }
 
 check() {
-  cd "${srcdir}/${_builddir}"
+  cd build
   make test 
 }
 
 package() {
-  cd "${srcdir}/${_builddir}"
-  make DESTDIR="${pkgdir}" install
+  DESTDIR="${pkgdir}" cmake --install build
   install -Dm644 "${srcdir}/LICENSE-${pkgname}-${pkgver}" "${pkgdir}/usr/share/licenses/${pkgname}"/LICENSE
 }
