@@ -1,0 +1,60 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Torsten Keßler <tpkessler at archlinux dot org>
+# Contributor: Markus Näther <naether.markus@gmail.com>
+pkgname=rocblas
+pkgver=6.0.2
+pkgrel=1
+pkgdesc='Next generation BLAS implementation for ROCm platform'
+arch=(x86_64 powerpc64le powerpc64 riscv64)
+url='https://rocblas.readthedocs.io/en/latest'
+license=('MIT')
+depends=('rocm-core' 'hip' 'glibc' 'gcc-libs' 'openmp')
+makedepends=('rocm-cmake' 'python' 'python-virtualenv' 'python-pyaml' 'python-wheel'
+             'python-msgpack' 'python-joblib' 'perl-file-which' 'msgpack-cxx' 'gcc-fortran')
+_rocblas='https://github.com/ROCmSoftwarePlatform/rocBLAS'
+_tensile='https://github.com/ROCmSoftwarePlatform/Tensile'
+source=("$pkgname-$pkgver.tar.gz::$_rocblas/archive/rocm-$pkgver.tar.gz"
+        "$pkgname-tensile-$pkgver.tar.gz::$_tensile/archive/refs/tags/rocm-$pkgver.tar.gz"
+        "find-msgpack-5.patch")
+sha256sums=('d1bf31063a2d349797b88c994c91d05f94e681bafb5550ad9b53529703d89dbb'
+            '1d8a92422560c1e908fa25fd97a4aa07a96659528a543f77618408ffcfe1f307'
+            '3f91bf087e4ea72eaef5acd500e16b61aa69c029cfcca14666799a7c42a0c5aa')
+options=(!lto)
+_dirname="$(basename "$_rocblas")-$(basename "${source[0]}" ".tar.gz")"
+_tensile_dir="$(basename "$_tensile")-$(basename "${source[1]}" ".tar.gz")"
+
+prepare() {
+    cd "$_tensile_dir"
+    patch -Np1 -i "$srcdir/find-msgpack-5.patch"
+}
+
+build() {
+  # Compile source code for supported GPU archs in parallel
+  export HIPCC_COMPILE_FLAGS_APPEND="-parallel-jobs=$(nproc)"
+  export HIPCC_LINK_FLAGS_APPEND="-parallel-jobs=$(nproc)"
+  # -fcf-protection is not supported by HIP, see
+  # https://rocm.docs.amd.com/en/latest/reference/rocmcc.html#support-status-of-other-clang-options
+  local cmake_args=(
+    -Wno-dev
+    -S "$_dirname"
+    -B build
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc
+    -D CMAKE_TOOLCHAIN_FILE=toolchain-linux.cmake
+    -D CMAKE_CXX_FLAGS="${CXXFLAGS} -fcf-protection=none"
+    -D CMAKE_INSTALL_PREFIX=/opt/rocm
+    -D CMAKE_PREFIX_PATH=/opt/rocm/llvm/lib/cmake/llvm
+    -D amd_comgr_DIR=/opt/rocm/lib/cmake/amd_comgr
+    -D BUILD_WITH_TENSILE=ON
+    -D Tensile_LIBRARY_FORMAT=msgpack
+    -D Tensile_TEST_LOCAL_PATH="$srcdir/$_tensile_dir"
+  )
+  cmake "${cmake_args[@]}"
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+
+  install -Dm644 "$_dirname/LICENSE.md" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
