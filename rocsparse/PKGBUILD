@@ -1,0 +1,41 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Torsten Keßler <tpkessler at archlinux dot org>
+# Contributor: Markus Näther <naetherm@informatik.uni-freiburg.de>
+pkgname=rocsparse
+pkgver=6.0.2
+pkgrel=2
+pkgdesc='BLAS for sparse computation on top of ROCm'
+arch=(x86_64 powerpc64le powerpc64 riscv64)
+url='https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/index.html'
+license=('MIT')
+depends=('rocm-core' 'glibc' 'gcc-libs' 'hip' 'rocprim')
+makedepends=('cmake' 'rocm-cmake' 'gcc-fortran')
+_git='https://github.com/ROCmSoftwarePlatform/rocSPARSE'
+source=("$pkgname-$pkgver.tar.gz::$_git/archive/rocm-$pkgver.tar.gz")
+sha256sums=('00292eb7efe5719a65960bdbe391ba8e0ce610487eea11397aad6a14b11e12cd')
+# Disable default build flags and use release mode as otherwise the linker step
+# fails. The symbol offset size reaches the 32 bit integer limits.
+options=(!lto !buildflags)
+_dirname="$(basename "$_git")-$(basename "${source[0]}" ".tar.gz")"
+
+build() {
+  # -fcf-protection is not supported by HIP, see
+  # https://rocm.docs.amd.com/en/latest/reference/rocmcc.html#support-status-of-other-clang-options
+  local cmake_args=(
+    -Wno-dev
+    -S "$_dirname"
+    -B build
+    -D CMAKE_BUILD_TYPE=Release
+    -D CMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc
+    -D CMAKE_CXX_FLAGS="${CXXFLAGS} -fcf-protection=none"
+    -D CMAKE_INSTALL_PREFIX=/opt/rocm
+  )
+  cmake "${cmake_args[@]}"
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+
+  install -Dm644 "$_dirname/LICENSE.md" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
