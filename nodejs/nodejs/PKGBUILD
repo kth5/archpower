@@ -9,19 +9,27 @@
 # Contributor: TIanyi Cui <tianyicui@gmail.com>
 
 pkgname=nodejs
-pkgver=21.4.0
-_commit=67ada40a3bdd75ee4f9e6c88c4073e234680f795
-pkgrel=2
+pkgver=21.7.1
+_commit=84c7e6fad4adbc972e0fecf537d6c6a3accf6b9e
+pkgrel=1
 pkgdesc='Evented I/O for V8 javascript'
 arch=(x86_64 powerpc64le powerpc64 riscv64)
 url='https://nodejs.org/'
 license=('MIT')
 options=(!lto)
-depends=('brotli' 'openssl' 'zlib' 'icu' 'libuv' 'libnghttp2' 'c-ares') # 'http-parser' 'v8')
+depends=('icu' 'libuv' 'libnghttp2' 'libnghttp3' 'libngtcp2' 'openssl' 'zlib' 'brotli' 'c-ares') # 'http-parser' 'v8')
 makedepends=('git' 'python' 'procps-ng')
+makedepends_riscv64=('clang')
 optdepends=('npm: nodejs package manager')
 source=("git+https://github.com/nodejs/node.git#commit=$_commit")
 sha512sums=('SKIP')
+
+case "${CARCH}" in
+  riscv64)
+    export CC=/usr/bin/clang
+    export CXX=/usr/bin/clang++
+  ;;
+esac
 
 build() {
   cd node
@@ -32,16 +40,16 @@ build() {
 
   ./configure \
     --prefix=/usr \
-    --with-intl=system-icu \
     --without-npm \
-    --shared \
+    --with-intl=system-icu \
+    --shared-libuv \
+    --shared-nghttp2 \
+    --shared-nghttp3 \
+    --shared-ngtcp2 \
     --shared-openssl \
     --shared-zlib \
-    --shared-libuv \
-    --experimental-http-parser \
-    --shared-nghttp2 \
-    --shared-cares \
-    --shared-brotli
+    --shared-brotli \
+    --shared-cares
     # --shared-v8
     # --shared-http-parser
 
@@ -57,9 +65,6 @@ package() {
   cd node
   make DESTDIR="$pkgdir" install
   install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/nodejs/
-
-  cd "$pkgdir"/usr/lib
-  ln -s libnode.so.* libnode.so
 }
 
 # vim:set ts=2 sw=2 et:
