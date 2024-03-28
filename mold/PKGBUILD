@@ -3,9 +3,8 @@
 # Contributor: Adrian Perez de Castro <aperez@igalia.com>
 
 pkgname=mold
-pkgver=2.3.1
+pkgver=2.30.0
 pkgrel=1
-_commit='34c53777fbb4fe6bff59ed745321d92dbf7e4fab'
 pkgdesc='A Modern Linker'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://github.com/rui314/mold'
@@ -14,8 +13,8 @@ license=('MIT')
 depends=('glibc' 'gcc-libs' 'mimalloc' 'zlib' 'tbb' 'zstd')
 makedepends=('git' 'python' 'cmake' 'mold')
 checkdepends=('clang' 'libdwarf')
-options=(!distcc)
-source=("$pkgname::git+$url.git#commit=$_commit")
+options=(!debug !distcc)
+source=("$pkgname::git+$url.git#tag=v${pkgver}")
 b2sums=('SKIP')
 
 pkgver() {
@@ -25,6 +24,22 @@ pkgver() {
 }
 
 build() {
+  export LDFLAGS="${CFLAGS/-Wl,--no-warn-rwx-segments -Wl,--no-warn-execstack/}"
+
+  case "${CARCH}" in
+    powerpc64)
+      _cmake_options=(
+        -D MOLD_USE_MOLD=OFF
+      )
+    ;;
+    *)
+      _cmake_options=(
+        -D MOLD_LTO=ON
+        -D MOLD_USE_MOLD=ON
+      )
+    ;;
+  esac
+
   cmake \
   -S "$pkgname" \
   -B build \
@@ -33,8 +48,7 @@ build() {
   -D CMAKE_INSTALL_LIBEXECDIR='lib' \
   -D MOLD_USE_SYSTEM_MIMALLOC=ON \
   -D MOLD_USE_SYSTEM_TBB=ON \
-  -D MOLD_LTO=ON \
-  -D MOLD_USE_MOLD=ON
+  -D MOLD_LTO=ON ${_cmake_options[@]}
 
   cmake --build build
 }
