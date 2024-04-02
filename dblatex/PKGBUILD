@@ -5,19 +5,60 @@
 
 pkgname=dblatex
 pkgver=0.3.12
-pkgrel=7
+pkgrel=8
 pkgdesc='DocBook (XML and SGML) to DVI, PDF, PostScript converter using latex.'
 arch=(any)
-url='http://dblatex.sourceforge.net/'
-license=('GPL')
-depends=('docbook-xsl' 'docbook-xml' 'libxslt' 'python' 'texlive-basic' 'texlive-formatsextra'
-         'texlive-latexextra' 'texlive-pictures' 'texlive-mathscience')
-source=("https://downloads.sourceforge.net/project/dblatex/dblatex/${pkgname}-${pkgver}/${pkgname}3-${pkgver}.tar.bz2")
-md5sums=('550adafd078432ff144b57d90c647714')
-sha256sums=('16e82786272ed1806a079d37914d7ba7a594db792dc4cc34c1c3737dbd4da079')
+url='https://dblatex.sourceforge.net/'
+license=(
+  GPL-2.0-or-later
+  LicenseRef-Modified-MIT
+)
+depends=(
+  docbook-xsl
+  docbook-xml
+  libxslt
+  python
+  texlive-basic
+  texlive-formatsextra
+  texlive-latexextra
+  texlive-pictures
+  texlive-mathscience
+)
+makedepends=(
+  python-build
+  python-installer
+  python-setuptools
+  python-wheel
+)
+source=(
+  https://downloads.sourceforge.net/project/dblatex/dblatex/$pkgname-$pkgver/${pkgname}3-$pkgver.tar.bz2
+  $pkgname-0.3.12-replace-imp-by-importlib.patch
+  $pkgname-0.3.12-adjust-submodule-imports.patch
+)
+sha256sums=('16e82786272ed1806a079d37914d7ba7a594db792dc4cc34c1c3737dbd4da079'
+            '79ea2874990291b961d6005bcfb888377ba624b16ddcb4accd016ed89a384fdc'
+            'ba93a9528bcebd2190463636d16f7f9e0eeb086bdd0edcd55645bea836362d51')
+b2sums=('9310ce5db3b5f92e183f2656c5b1881edaf0208ae4f78f853332c844258fa38d443921fc42c03301773b1451ce272a538c305d765acbdc6eafbdcf25ebf5d2d3'
+        'a747ece1ec3717ba14d107eca93789464b6383ab652b37de8dcec691af39b38685870d579caeed90741c1ee4dd319a2c8a32cf1e038aca9445740b99afaa116f'
+        '11b5fdf9142b0e417bb401882cbcb753298fa94860b43c66c7b35b359905830aef7b635d9e2b67d5641d5056cd4361b193db379c5166fb18fbf9b397d54124d4')
+
+prepare() {
+  # use importlib instead of imp (removed in Python 3.12)
+  patch -Np1 -d ${pkgname}3-$pkgver -i ../$pkgname-0.3.12-replace-imp-by-importlib.patch
+  # fix module imports (otherwise problematic with Python >= 3.11)
+  patch -Np1 -d ${pkgname}3-$pkgver -i ../$pkgname-0.3.12-adjust-submodule-imports.patch
+}
+
+build() {
+  cd ${pkgname}3-$pkgver
+  python -m build --wheel --no-isolation
+}
 
 package() {
-  cd "${srcdir}/${pkgname}3-${pkgver}"
+  cd ${pkgname}3-$pkgver
 
-  python setup.py install --root "${pkgdir}" --catalogs=/etc/xml/docbook-xml
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  # install script file manually, because upstream uses deprecated, ancient `scripts` option in setuptools' setup() function
+  install -vDm 755 scripts/$pkgname -t "$pkgdir/usr/bin/"
+  install -vDm 644 COPYRIGHT -t "$pkgdir/usr/share/licenses/$pkgname/"
 }
