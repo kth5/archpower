@@ -3,39 +3,38 @@
 # Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
 
 pkgname=openjpeg2
-pkgver=2.5.0
-pkgrel=3
+pkgver=2.5.2
+pkgrel=1
 pkgdesc="An open source JPEG 2000 codec, version ${pkgver}"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=('custom: BSD')
+license=('BSD-2-Clause' 'MIT')
 url="https://github.com/uclouvain/openjpeg"
-makedepends=('cmake' 'doxygen')
-depends=('libpng' 'libtiff' 'lcms2')
+makedepends=('cmake' 'doxygen' 'graphviz')
+depends=('libpng' 'libtiff' 'lcms2' 'glibc')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/uclouvain/openjpeg/archive/v$pkgver.tar.gz")
-sha256sums=('0333806d6adecc6f7a91243b2b839ff4d2053823634d4f6ed7a59bc87409122a')
+sha256sums=('90e3896fed910c376aaf79cdd98bdfdaf98c6472efd8e1debf0a854938cbda6a')
 
 prepare() {
-  cd "${srcdir}"
-  mkdir build
+  # Remove all third party libraries just to be sure
+  find openjpeg-"${pkgver}"/thirdparty/ -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} \;
 }
 
 build() {
-  cd "${srcdir}/build"
-
-  cmake "../openjpeg-${pkgver}" \
-    -DCMAKE_BUILD_TYPE=Release \
+  cmake -B build -S openjpeg-"${pkgver}" \
+    -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DBUILD_SHARED_LIBS=ON \
     -DBUILD_STATIC_LIBS=OFF \
     -DBUILD_DOC=on
 
-  make
+  VERBOSE=1 cmake --build build
+}
+
+check() {
+  ctest --test-dir build --output-on-failure
 }
 
 package() {
-  cd "${srcdir}/build"
-  make DESTDIR="${pkgdir}" install
-  
-  install -m755 -d "${pkgdir}/usr/share/licenses/openjpeg2"
-  mv "${pkgdir}"/usr/share/doc/openjpeg-*/LICENSE "${pkgdir}"/usr/share/licenses/openjpeg2
+  DESTDIR="$pkgdir" cmake --install build
+  install -Dm 644 "${srcdir}"/openjpeg-"${pkgver}"/LICENSE -t "${pkgdir}"/usr/share/licenses/${pkgname}/  
 }
