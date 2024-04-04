@@ -5,10 +5,25 @@
 pkgbase=xorg-server
 pkgname=('xorg-server' 'xorg-server-xephyr' 'xorg-server-xvfb' 'xorg-server-xnest'
          'xorg-server-common' 'xorg-server-devel')
-pkgver=21.1.11
+pkgver=21.1.12
 pkgrel=1
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=(custom)
+license=('LicenseRef-Adobe-Display-PostScript'
+         'BSD-3-Clause' 
+         'LicenseRef-DEC-3-Clause' 
+         'HPND'
+         'LicenseRef-HPND-sell-MIT-disclaimer-xserver'
+         'HPND-sell-variant' 
+         'ICU'
+         'ISC'
+         'MIT'
+         'MIT-open-group'
+         'NTP'
+         'SGI-B-2.0'
+         'SMLNJ'
+         'X11'
+         'X11-distribute-modifications-variant'
+)
 groups=('xorg')
 url="https://xorg.freedesktop.org"
 makedepends=('xorgproto' 'pixman' 'libx11' 'mesa' 'mesa-libgl' 'xtrans'
@@ -17,8 +32,7 @@ makedepends=('xorgproto' 'pixman' 'libx11' 'mesa' 'mesa-libgl' 'xtrans'
              'xorg-xkbcomp' 'xorg-util-macros' 'xorg-font-util' 'libepoxy'
              'xcb-util' 'xcb-util-image' 'xcb-util-renderutil' 'xcb-util-wm' 'xcb-util-keysyms'
              'libxshmfence' 'libunwind' 'systemd' 'meson' 'git')
-#source=(${pkgbase}-${pkgver}::git+https://gitlab.freedesktop.org/xorg/xserver.git#commit=27a0ee32ccef8d621aaa758c804fc9a5ceeb5a56
-source=(https://xorg.freedesktop.org/releases/individual/xserver/${pkgbase}-${pkgver}.tar.xz{,.sig}
+source=(${pkgbase}::git+https://gitlab.freedesktop.org/xorg/xserver.git?signed#tag=${pkgbase}-${pkgver}
         xvfb-run # with updates from FC master
         xvfb-run.1
         hotfix-drm-busid.patch
@@ -26,26 +40,25 @@ source=(https://xorg.freedesktop.org/releases/individual/xserver/${pkgbase}-${pk
 validpgpkeys=('3C2C43D9447D5938EF4551EBE23B7E70B467F0BF'  # Peter Hutterer (Who-T) <office@who-t.net>
               '67DC86F2623FC5FD4BB5225D14706DBE1E4B4540'  # Olivier Fourdan <fourdan@xfce.org>
               'FD0004A26EADFE43A4C3F249C6F7AE200374452D') # Povilas Kanapickas <povilas@radix.lt>
-sha512sums=('ad5edacbe8c7e2ebe6b4a690af94c7ea5ebc781d00b0e58ae2d273c78ceee2fa00b86d10479ad69da1b3233490619bae5a33db64c967c24bbfc5d5d39ddce1cb'
-            'SKIP'
+sha512sums=('3a5c406debc694112ab4dd1b248c20e84aeefd1cf4417f6131beffcd02e4449129b9488ff17e46f47627d3e7f05b90d55db8096ebb1ab098bfd820afc2d3278d'
             '672375cb5028ba9cda286e317d17bd8c9a9039483e7f79c21f223fd08ba07655729e9f59a082f4b8f5d8de45a77a9e9affce1002fb8c6657e26ef1a490654e49'
             'de5e2cb3c6825e6cf1f07ca0d52423e17f34d70ec7935e9dd24be5fb9883bf1e03b50ff584931bd3b41095c510ab2aa44d2573fd5feaebdcb59363b65607ff22'
             '7325d3fa3ba7e563c94b836a804d9e1cdb632abf563569604cf6afb112c5e43bd40a9b12ce52b848fcc9060dd7662a766232a225320bfb6bffc718b86c1a7e6a')
 
 prepare() {
-  cd ${pkgbase}-$pkgver
+  cd ${pkgbase}
   patch -Np1 -i ${srcdir}/hotfix-drm-busid.patch
 }
 
 build() {
   # Since pacman 5.0.2-2, hardened flags are now enabled in makepkg.conf
-  # With them, module fail to load with undefined symbol.
+  # With them, modules fail to load with undefined symbol.
   # See https://bugs.archlinux.org/task/55102 / https://bugs.archlinux.org/task/54845
   export CFLAGS=${CFLAGS/-fno-plt}
   export CXXFLAGS=${CXXFLAGS/-fno-plt}
-  export LDFLAGS=${LDFLAGS/,-z,now}
+  export LDFLAGS=${LDFLAGS/-Wl,-z,now}
 
-  arch-meson ${pkgbase}-$pkgver build \
+  arch-meson ${pkgbase} build \
     -D ipv6=true \
     -D xvfb=true \
     -D xnest=true \
@@ -88,15 +101,16 @@ package_xorg-server-common() {
   _install fakeinstall/usr/lib/xorg/protocol.txt
   _install fakeinstall/usr/share/man/man1/Xserver.1
 
-  install -m644 -Dt "${pkgdir}/var/lib/xkb/" "${pkgbase}-${pkgver}"/xkb/README.compiled
+  install -m644 -Dt "${pkgdir}/var/lib/xkb/" "${pkgbase}"/xkb/README.compiled
   # license
-  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" "${pkgbase}-${pkgver}"/COPYING
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" "${pkgbase}"/COPYING
 }
 
 package_xorg-server() {
   pkgdesc="Xorg X server"
   depends=(libepoxy libxfont2 pixman xorg-server-common libunwind
            dbus libgl xf86-input-libinput nettle
+           libxdmcp sh glibc libxau systemd-libs libtirpc
            libpciaccess libdrm libxshmfence libxcvt) # FS#52949
   # see xorg-server-*/hw/xfree86/common/xf86Module.h for ABI versions - we provide major numbers that drivers can depend on
   # and /usr/lib/pkgconfig/xorg-server.pc in xorg-server-devel pkg
@@ -117,26 +131,30 @@ package_xorg-server() {
   install -m755 -d "${pkgdir}/etc/X11/xorg.conf.d"
 
   # license
-  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" "${pkgbase}-${pkgver}"/COPYING
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" "${pkgbase}"/COPYING
 }
 
 package_xorg-server-xephyr() {
   pkgdesc="A nested X server that runs as an X application"
-  depends=(libxfont2 libgl libepoxy libunwind systemd-libs libxv pixman xorg-server-common
+  depends=(libxfont2 libgl libepoxy libunwind systemd-libs pixman xorg-server-common
            xcb-util-image xcb-util-renderutil xcb-util-wm xcb-util-keysyms
-           nettle libtirpc)
+           nettle libtirpc
+           xcb-util libxdmcp libx11 libxau libxshmfence glibc)
 
   _install fakeinstall/usr/bin/Xephyr
   _install fakeinstall/usr/share/man/man1/Xephyr.1
 
   # license
-  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" "${pkgbase}-${pkgver}"/COPYING
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" "${pkgbase}"/COPYING
 }
 
 package_xorg-server-xvfb() {
   pkgdesc="Virtual framebuffer X server"
+  # xvfb-run is GPLv2, rest is MIT
+  license=('MIT' 'GPL-2.0-only')
   depends=(libxfont2 libunwind pixman xorg-server-common xorg-xauth 
-           libgl nettle libtirpc systemd-libs)
+           libgl nettle libtirpc systemd-libs
+           libxdmcp sh glibc libxau)
 
   _install fakeinstall/usr/bin/Xvfb
   _install fakeinstall/usr/share/man/man1/Xvfb.1
@@ -145,23 +163,25 @@ package_xorg-server-xvfb() {
   install -m644 "${srcdir}/xvfb-run.1" "${pkgdir}/usr/share/man/man1/" # outda
 
   # license
-  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" "${pkgbase}-${pkgver}"/COPYING
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" "${pkgbase}"/COPYING
 }
 
 package_xorg-server-xnest() {
   pkgdesc="A nested X server that runs as an X application"
-  depends=(libxfont2 libunwind libxext pixman xorg-server-common nettle libtirpc systemd-libs)
+  depends=(libxfont2 libunwind libxext pixman xorg-server-common nettle
+           libtirpc systemd-libs
+           libxdmcp glibc libx11 libxau)
 
   _install fakeinstall/usr/bin/Xnest
   _install fakeinstall/usr/share/man/man1/Xnest.1
 
   # license
-  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" "${pkgbase}-${pkgver}"/COPYING
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" "${pkgbase}"/COPYING
 }
 
 package_xorg-server-devel() {
   pkgdesc="Development files for the X.Org X server"
-  depends=('xorgproto' 'mesa' 'libpciaccess'
+  depends=('xorgproto' 'mesa' 'libpciaccess' 'pixman'
            # not technically required but almost every Xorg pkg needs it to build
            'xorg-util-macros')
 
@@ -170,7 +190,7 @@ package_xorg-server-devel() {
   _install fakeinstall/usr/share/aclocal/xorg-server.m4
 
   # license
-  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" "${pkgbase}-${pkgver}"/COPYING
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" "${pkgbase}"/COPYING
 
   # make sure there are no files left to install
   find fakeinstall -depth -print0 | xargs -0 rmdir
