@@ -1,0 +1,195 @@
+# HG changeset patch
+# User Cameron Kaiser <spectre@floodgap.com>
+# Date 1694807083 25200
+#      Fri Sep 15 12:44:43 2023 -0700
+# Node ID 3ac07c6a65bceaeb75d59aafa7728388c31ea11d
+# Parent  ba4e29926385c655d979fe4c3726f1bedbcc42b7
+PGO build stuff, hardcode ion off in test build
+
+diff -r ba4e29926385 -r 3ac07c6a65bc build/moz.configure/lto-pgo.configure
+--- a/build/moz.configure/lto-pgo.configure	Thu Sep 14 21:52:33 2023 -0700
++++ b/build/moz.configure/lto-pgo.configure	Fri Sep 15 12:44:43 2023 -0700
+@@ -81,17 +81,17 @@
+ 
+ @depends(c_compiler, pgo_profile_path, target_is_windows)
+ @imports("multiprocessing")
+ def pgo_flags(compiler, profdata, target_is_windows):
+     if compiler.type == "gcc":
+         return namespace(
+             gen_cflags=["-fprofile-generate"],
+             gen_ldflags=["-fprofile-generate"],
+-            use_cflags=["-fprofile-use", "-fprofile-correction", "-Wcoverage-mismatch"],
++            use_cflags=["-fprofile-use", "-fprofile-correction", "-Wno-coverage-mismatch"],
+             use_ldflags=["-fprofile-use"],
+         )
+ 
+     if compiler.type in ("clang-cl", "clang"):
+         prefix = ""
+         if compiler.type == "clang-cl":
+             prefix = "/clang:"
+             gen_ldflags = None
+diff -r ba4e29926385 -r 3ac07c6a65bc build/pgo/profileserver.py
+--- a/build/pgo/profileserver.py	Thu Sep 14 21:52:33 2023 -0700
++++ b/build/pgo/profileserver.py	Fri Sep 15 12:44:43 2023 -0700
+@@ -82,19 +82,32 @@
+         docroot=os.path.join(build.topsrcdir, "build", "pgo"),
+         path_mappings=path_mappings,
+     )
+     httpd.start(block=False)
+ 
+     locations = ServerLocations()
+     locations.add_host(host="127.0.0.1", port=PORT, options="primary,privileged")
+ 
+-    old_profraw_files = glob.glob("*.profraw")
+-    for f in old_profraw_files:
+-        os.remove(f)
++    using_gcc = False
++    try:
++        if build.config_environment.substs.get('CC_TYPE') == 'gcc':
++            using_gcc = True
++    except BuildEnvironmentNotFoundException:
++        pass
++
++    if using_gcc:
++        for dirpath, _, filenames in os.walk('.'):
++            for f in filenames:
++                if f.endswith('.gcda'):
++                    os.remove(os.path.join(dirpath, f))
++    else:
++        old_profraw_files = glob.glob('*.profraw')
++        for f in old_profraw_files:
++            os.remove(f)
+ 
+     with TemporaryDirectory() as profilePath:
+         # TODO: refactor this into mozprofile
+         profile_data_dir = os.path.join(build.topsrcdir, "testing", "profiles")
+         with open(os.path.join(profile_data_dir, "profiles.json"), "r") as fh:
+             base_profiles = json.load(fh)["profileserver"]
+ 
+         prefpaths = [
+@@ -208,16 +221,20 @@
+ 
+         # Try to move the crash reports to the artifacts even if Firefox appears
+         # to exit successfully, in case there's a crash that doesn't set the
+         # return code to non-zero for some reason.
+         if get_crashreports(profilePath, name="Firefox exited successfully?") != 0:
+             print("Firefox exited successfully, but produced a crashreport")
+             sys.exit(1)
+ 
++        print('Copying profile data....')
++        os.system('pwd');
++        os.system('tar cf profdata.tar.gz `find . -name "*.gcda"`; cd ..; tar xf instrumented/profdata.tar.gz;');
++
+         llvm_profdata = env.get("LLVM_PROFDATA")
+         if llvm_profdata:
+             profraw_files = glob.glob("*.profraw")
+             if not profraw_files:
+                 print(
+                     "Could not find profraw files in the current directory: %s"
+                     % os.getcwd()
+                 )
+diff -r ba4e29926385 -r 3ac07c6a65bc js/xpconnect/src/XPCJSContext.cpp
+--- a/js/xpconnect/src/XPCJSContext.cpp	Thu Sep 14 21:52:33 2023 -0700
++++ b/js/xpconnect/src/XPCJSContext.cpp	Fri Sep 15 12:44:43 2023 -0700
+@@ -895,18 +895,18 @@
+                                   false);
+     JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_JIT_HINTS_ENABLE, false);
+     sSelfHostedUseSharedMemory = false;
+   } else {
+     JS_SetGlobalJitCompilerOption(
+         cx, JSJITCOMPILER_BASELINE_ENABLE,
+         StaticPrefs::javascript_options_baselinejit_DoNotUseDirectly());
+     JS_SetGlobalJitCompilerOption(
+-        cx, JSJITCOMPILER_ION_ENABLE,
+-        StaticPrefs::javascript_options_ion_DoNotUseDirectly());
++        cx, JSJITCOMPILER_ION_ENABLE, false); // XXX
++        //StaticPrefs::javascript_options_ion_DoNotUseDirectly());
+     JS_SetGlobalJitCompilerOption(cx,
+                                   JSJITCOMPILER_JIT_TRUSTEDPRINCIPALS_ENABLE,
+                                   useJitForTrustedPrincipals);
+     JS_SetGlobalJitCompilerOption(
+         cx, JSJITCOMPILER_NATIVE_REGEXP_ENABLE,
+         StaticPrefs::javascript_options_native_regexp_DoNotUseDirectly());
+     // Only enable the jit hints cache for the content process to avoid
+     // any possible jank or delays on the parent process.
+diff -r ba4e29926385 -r 3ac07c6a65bc modules/libpref/init/all.js
+--- a/modules/libpref/init/all.js	Thu Sep 14 21:52:33 2023 -0700
++++ b/modules/libpref/init/all.js	Fri Sep 15 12:44:43 2023 -0700
+@@ -951,21 +951,21 @@
+ // that are associated with other domains which have
+ // user interaction (even if they don't have user
+ // interaction directly).
+ pref("privacy.purge_trackers.consider_entity_list", false);
+ 
+ pref("dom.event.contextmenu.enabled",       true);
+ 
+ pref("javascript.enabled",                  true);
+-pref("javascript.options.asmjs",                  true);
+-pref("javascript.options.wasm",                   true);
+-pref("javascript.options.wasm_trustedprincipals", true);
++pref("javascript.options.asmjs",                  false);
++pref("javascript.options.wasm",                   false);
++pref("javascript.options.wasm_trustedprincipals", false);
+ pref("javascript.options.wasm_verbose",           false);
+-pref("javascript.options.wasm_baselinejit",       true);
++pref("javascript.options.wasm_baselinejit",       false);
+ 
+ pref("javascript.options.parallel_parsing", true);
+ pref("javascript.options.source_pragmas",    true);
+ 
+ pref("javascript.options.asyncstack", true);
+ // Broadly capturing async stack data adds overhead that is only advisable for
+ // developers, so we only enable it when the devtools are open, by default.
+ pref("javascript.options.asyncstack_capture_debuggee_only", true);
+diff -r ba4e29926385 -r 3ac07c6a65bc third_party/libwebrtc/moz.build
+--- a/third_party/libwebrtc/moz.build	Thu Sep 14 21:52:33 2023 -0700
++++ b/third_party/libwebrtc/moz.build	Fri Sep 15 12:44:43 2023 -0700
+@@ -675,17 +675,22 @@
+         "/third_party/libwebrtc/modules/audio_processing/agc2/rnn_vad/vector_math_avx2_gn",
+         "/third_party/libwebrtc/modules/desktop_capture/desktop_capture_differ_sse2_gn"
+     ]
+ 
+ if CONFIG["CPU_ARCH"] == "ppc64" and CONFIG["MOZ_X11"] == "1" and CONFIG["OS_TARGET"] == "Linux":
+ 
+     DIRS += [
+         "/third_party/libwebrtc/modules/desktop_capture/desktop_capture_gn",
+-        "/third_party/libwebrtc/modules/desktop_capture/primitives_gn"
++        "/third_party/libwebrtc/modules/desktop_capture/primitives_gn",
++        "/third_party/libwebrtc/modules/portal/portal_gn",
++        "/third_party/libwebrtc/third_party/drm/drm_gn",
++        "/third_party/libwebrtc/third_party/gbm/gbm_gn",
++        "/third_party/libwebrtc/third_party/libepoxy/libepoxy_gn",
++        "/third_party/libwebrtc/third_party/pipewire/pipewire_gn"
+     ]
+ 
+ if CONFIG["CPU_ARCH"] == "riscv64" and CONFIG["MOZ_X11"] == "1" and CONFIG["OS_TARGET"] == "Linux":
+ 
+     DIRS += [
+         "/third_party/libwebrtc/modules/desktop_capture/desktop_capture_gn",
+         "/third_party/libwebrtc/modules/desktop_capture/primitives_gn"
+     ]
+diff -r ba4e29926385 -r 3ac07c6a65bc toolkit/components/terminator/nsTerminator.cpp
+--- a/toolkit/components/terminator/nsTerminator.cpp	Thu Sep 14 21:52:33 2023 -0700
++++ b/toolkit/components/terminator/nsTerminator.cpp	Fri Sep 15 12:44:43 2023 -0700
+@@ -455,16 +455,21 @@
+       // Defend against overflow
+       crashAfterMS = INT32_MAX;
+     } else {
+       crashAfterMS *= scaleUp;
+     }
+   }
+ #endif
+ 
++  // Disable watchdog for PGO train builds - writting profile information at
++  // exit may take time and it is better to make build hang rather than
++  // silently produce poorly performing binary.
++  crashAfterMS = INT32_MAX;
++
+   UniquePtr<Options> options(new Options());
+   // crashAfterTicks is guaranteed to be > 0 as
+   // crashAfterMS >= ADDITIONAL_WAIT_BEFORE_CRASH_MS >> HEARTBEAT_INTERVAL_MS
+   options->crashAfterTicks = crashAfterMS / HEARTBEAT_INTERVAL_MS;
+ 
+   DebugOnly<PRThread*> watchdogThread =
+       CreateSystemThread(RunWatchdog, options.release());
+   MOZ_ASSERT(watchdogThread);

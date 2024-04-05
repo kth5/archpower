@@ -1,0 +1,488 @@
+# HG changeset patch
+# User Cameron Kaiser <spectre@floodgap.com>
+# Date 1694573058 25200
+#      Tue Sep 12 19:44:18 2023 -0700
+# Node ID e3eda281a1dc739c862eb38c795833595724cefc
+# Parent  671b771fd1de061e02f382e0cb20237d0e3a84a8
+builds links
+
+diff -r 671b771fd1de -r e3eda281a1dc config/check_macroassembler_style.py
+--- a/config/check_macroassembler_style.py	Tue Sep 12 10:27:52 2023 -0700
++++ b/config/check_macroassembler_style.py	Tue Sep 12 19:44:18 2023 -0700
+@@ -21,22 +21,22 @@
+ # ----------------------------------------------------------------------------
+ 
+ import difflib
+ import os
+ import re
+ import sys
+ 
+ architecture_independent = set(["generic"])
+-all_unsupported_architectures_names = set(["mips32", "mips64", "mips_shared"])
++all_unsupported_architectures_names = set(["mips32", "mips64", "mips_shared", "ppc64"])
+ all_architecture_names = set(
+-    ["x86", "x64", "arm", "arm64", "loong64", "ppc64", "riscv64", "wasm32"]
++    ["x86", "x64", "arm", "arm64", "loong64", "riscv64", "wasm32"]
+ )
+ all_shared_architecture_names = set(
+-    ["x86_shared", "arm", "arm64", "loong64", "ppc64", "riscv64", "wasm32"]
++    ["x86_shared", "arm", "arm64", "loong64", "riscv64", "wasm32"]
+ )
+ 
+ reBeforeArg = "(?<=[(,\s])"
+ reArgType = "(?P<type>[\w\s:*&<>]+)"
+ reArgName = "(?P<name>\s\w+)"
+ reArgDefault = "(?P<default>(?:\s=(?:(?:\s[\w:]+\(\))|[^,)]+))?)"
+ reAfterArg = "(?=[,)])"
+ reMatchArg = re.compile(reBeforeArg + reArgType + reArgName + reArgDefault + reAfterArg)
+diff -r 671b771fd1de -r e3eda281a1dc js/moz.configure
+--- a/js/moz.configure	Tue Sep 12 10:27:52 2023 -0700
++++ b/js/moz.configure	Tue Sep 12 19:44:18 2023 -0700
+@@ -258,16 +258,18 @@
+     if target.cpu == "aarch64":
+         return namespace(arm64=True)
+     elif target.cpu == "x86_64":
+         return namespace(x64=True)
+     elif target.cpu == "loongarch64":
+         return namespace(loong64=True)
+     elif target.cpu == "riscv64":
+         return namespace(riscv64=True)
++    elif target.cpu == "ppc64":
++        return namespace(ppc64=True)
+ 
+     return namespace(**{str(target.cpu): True})
+ 
+ 
+ set_config("JS_CODEGEN_NONE", jit_codegen.none)
+ set_config("JS_CODEGEN_ARM", jit_codegen.arm)
+ set_config("JS_CODEGEN_ARM64", jit_codegen.arm64)
+ set_config("JS_CODEGEN_MIPS32", jit_codegen.mips32)
+@@ -281,17 +283,17 @@
+ 
+ set_define("JS_CODEGEN_NONE", jit_codegen.none)
+ set_define("JS_CODEGEN_ARM", jit_codegen.arm)
+ set_define("JS_CODEGEN_ARM64", jit_codegen.arm64)
+ set_define("JS_CODEGEN_MIPS32", jit_codegen.mips32)
+ set_define("JS_CODEGEN_MIPS64", jit_codegen.mips64)
+ set_define("JS_CODEGEN_LOONG64", jit_codegen.loong64)
+ set_define("JS_CODEGEN_RISCV64", jit_codegen.riscv64)
+-set_config("JS_CODEGEN_PPC64", jit_codegen.ppc64)
++set_define("JS_CODEGEN_PPC64", jit_codegen.ppc64)
+ set_define("JS_CODEGEN_X86", jit_codegen.x86)
+ set_define("JS_CODEGEN_X64", jit_codegen.x64)
+ set_define("JS_CODEGEN_WASM32", jit_codegen.wasm32)
+ 
+ 
+ # Profiling
+ # =======================================================
+ option(
+diff -r 671b771fd1de -r e3eda281a1dc js/src/jit/CodeGenerator.cpp
+--- a/js/src/jit/CodeGenerator.cpp	Tue Sep 12 10:27:52 2023 -0700
++++ b/js/src/jit/CodeGenerator.cpp	Tue Sep 12 19:44:18 2023 -0700
+@@ -12513,17 +12513,18 @@
+ 
+   // We're out-of-bounds. We only handle the index == initlength case.
+   // If index > initializedLength, bail out. Note that this relies on the
+   // condition flags sticking from the incoming branch.
+   // Also note: this branch does not need Spectre mitigations, doing that for
+   // the capacity check below is sufficient.
+   Label allocElement, addNewElement;
+ #if defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64) || \
+-    defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64)
++    defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64) || \
++    defined(JS_CODEGEN_PPC64)
+   // Had to reimplement for MIPS because there are no flags.
+   bailoutCmp32(Assembler::NotEqual, initLength, index, ins->snapshot());
+ #else
+   bailoutIf(Assembler::NotEqual, ins->snapshot());
+ #endif
+ 
+   // If index < capacity, we can add a dense element inline. If not, we need
+   // to allocate more elements first.
+diff -r 671b771fd1de -r e3eda281a1dc js/src/jit/MacroAssembler.cpp
+--- a/js/src/jit/MacroAssembler.cpp	Tue Sep 12 10:27:52 2023 -0700
++++ b/js/src/jit/MacroAssembler.cpp	Tue Sep 12 19:44:18 2023 -0700
+@@ -5183,17 +5183,17 @@
+   ma_sll(temp1, temp1, temp3);
+ #elif JS_CODEGEN_MIPS64
+   ma_dsll(temp1, temp1, temp3);
+ #elif JS_CODEGEN_LOONG64
+   as_sll_d(temp1, temp1, temp3);
+ #elif JS_CODEGEN_RISCV64
+   sll(temp1, temp1, temp3);
+ #elif JS_CODEGEN_PPC64
+-  as_sld(temp1, temp1, temp3)
++  as_sld(temp1, temp1, temp3);
+ #elif JS_CODEGEN_WASM32
+   MOZ_CRASH();
+ #elif JS_CODEGEN_NONE
+   MOZ_CRASH();
+ #else
+ #  error "Unknown architecture"
+ #endif
+ 
+diff -r 671b771fd1de -r e3eda281a1dc js/src/jit/ppc64/Assembler-ppc64.h
+--- a/js/src/jit/ppc64/Assembler-ppc64.h	Tue Sep 12 10:27:52 2023 -0700
++++ b/js/src/jit/ppc64/Assembler-ppc64.h	Tue Sep 12 19:44:18 2023 -0700
+@@ -175,25 +175,30 @@
+ static constexpr FloatRegister ReturnFloat32Reg = {FloatRegisters::f1,
+                                                    FloatRegisters::Single};
+ static constexpr FloatRegister ReturnDoubleReg = {FloatRegisters::f1,
+                                                   FloatRegisters::Double};
+ static constexpr FloatRegister ABINonArgDoubleReg = {FloatRegisters::f14,
+                                                      FloatRegisters::Double};
+ static constexpr ValueOperand JSReturnOperand = ValueOperand(JSReturnReg);
+ 
+-// Registers used in RegExpMatcher instruction (do not use JSReturnOperand).
++// Registers used by RegExpMatcher and RegExpExecMatch stubs (do not use
++// JSReturnOperand).
+ static constexpr Register RegExpMatcherRegExpReg = CallTempReg0;
+ static constexpr Register RegExpMatcherStringReg = CallTempReg1;
+ static constexpr Register RegExpMatcherLastIndexReg = CallTempReg2;
+ 
+-// Registers used in RegExpTester instruction (do not use ReturnReg).
+-static constexpr Register RegExpTesterRegExpReg = CallTempReg0;
+-static constexpr Register RegExpTesterStringReg = CallTempReg1;
+-static constexpr Register RegExpTesterLastIndexReg = CallTempReg2;
++// Registers used by RegExpExecTest stub (do not use ReturnReg).
++static constexpr Register RegExpExecTestRegExpReg = CallTempReg0;
++static constexpr Register RegExpExecTestStringReg = CallTempReg1;
++
++// Registers used by RegExpSearcher stub (do not use ReturnReg).
++static constexpr Register RegExpSearcherRegExpReg = CallTempReg0;
++static constexpr Register RegExpSearcherStringReg = CallTempReg1;
++static constexpr Register RegExpSearcherLastIndexReg = CallTempReg2;
+ 
+ // TLS pointer argument register for WebAssembly functions. This must not alias
+ // any other register used for passing function arguments or return values.
+ // Preserved by WebAssembly functions.
+ static constexpr Register InstanceReg = r18;
+ 
+ // Registers used for wasm table calls. These registers must be disjoint
+ // from the ABI argument registers, WasmTlsReg and each other.
+diff -r 671b771fd1de -r e3eda281a1dc js/src/jit/ppc64/CodeGenerator-ppc64.cpp
+--- a/js/src/jit/ppc64/CodeGenerator-ppc64.cpp	Tue Sep 12 10:27:52 2023 -0700
++++ b/js/src/jit/ppc64/CodeGenerator-ppc64.cpp	Tue Sep 12 19:44:18 2023 -0700
+@@ -1873,17 +1873,17 @@
+ CodeGeneratorPPC64::toMoveOperand(LAllocation a) const
+ {
+     if (a.isGeneralReg())
+         return MoveOperand(ToRegister(a));
+     if (a.isFloatReg()) {
+         return MoveOperand(ToFloatRegister(a));
+     }
+   MoveOperand::Kind kind =
+-      a.isStackArea() ? MoveOperand::EFFECTIVE_ADDRESS : MoveOperand::MEMORY;
++      a.isStackArea() ? MoveOperand::Kind::EffectiveAddress : MoveOperand::Kind::Memory;
+   Address address = ToAddress(a);
+   MOZ_ASSERT((address.offset & 3) == 0);
+   return MoveOperand(address, kind);
+ }
+ 
+ void
+ CodeGenerator::visitMathD(LMathD* math)
+ {
+diff -r 671b771fd1de -r e3eda281a1dc js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h	Tue Sep 12 10:27:52 2023 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h	Tue Sep 12 19:44:18 2023 -0700
+@@ -369,16 +369,23 @@
+ MacroAssembler::mulBy3(Register src, Register dest)
+ {
+     // I guess this *is* better than mulli.
+     MOZ_ASSERT(src != ScratchRegister);
+     as_add(ScratchRegister, src, src);
+     as_add(dest, ScratchRegister, src);
+ }
+ 
++void MacroAssembler::mulHighUnsigned32(Imm32 imm, Register src, Register dest) {
++  MOZ_ASSERT(src != ScratchRegister);
++  move32(imm, ScratchRegister);
++  as_mulhw(dest, ScratchRegister, src);
++  x_sldi(dest, dest, 32);
++}
++
+ void
+ MacroAssembler::inc64(AbsoluteAddress dest)
+ {
+     ma_li(SecondScratchReg, ImmWord(uintptr_t(dest.addr)));
+     as_ld(ThirdScratchReg, SecondScratchReg, 0);
+     as_addi(ScratchRegister, ThirdScratchReg, 1);
+     as_std(ScratchRegister, SecondScratchReg, 0);
+ }
+diff -r 671b771fd1de -r e3eda281a1dc js/src/jit/ppc64/MacroAssembler-ppc64.cpp
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	Tue Sep 12 10:27:52 2023 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	Tue Sep 12 19:44:18 2023 -0700
+@@ -5,27 +5,28 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "jit/ppc64/MacroAssembler-ppc64.h"
+ 
+ #include "mozilla/CheckedInt.h"
+ #include "mozilla/DebugOnly.h"
+ #include "mozilla/MathAlgorithms.h"
+ 
+-#include <cmath>
+-
++#include "jsmath.h"
+ #include "jit/Bailouts.h"
+ #include "jit/BaselineFrame.h"
+ #include "jit/JitFrames.h"
+ #include "jit/JitRuntime.h"
+ #include "jit/MacroAssembler.h"
+ #include "jit/MoveEmitter.h"
+ #include "jit/SharedICRegisters.h"
++#include "util/Memory.h"
+ 
+ #include "vm/JitActivation.h"
++#include "vm/JSContext.h"
+ #include "jit/MacroAssembler-inl.h"
+ 
+ using namespace js;
+ using namespace jit;
+ 
+ using mozilla::Abs;
+ using mozilla::CheckedInt;
+ 
+@@ -1225,18 +1226,17 @@
+ }
+ void
+ MacroAssemblerPPC64Compat::movePtr(wasm::SymbolicAddress imm, Register dest)
+ {
+     append(wasm::SymbolicAccess(CodeOffset(nextOffset().getOffset()), imm));
+     ma_liPatchable(dest, ImmWord(-1));
+ }
+ 
+-CodeOffset MacroAssembler::moveNearAddressWithPatch(Register dest)
+-{
++CodeOffset MacroAssembler::moveNearAddressWithPatch(Register dest) {
+     return movWithPatch(ImmPtr(nullptr), dest);
+ }
+ 
+ void
+ MacroAssembler::patchNearAddressMove(CodeLocationLabel loc,
+                                      CodeLocationLabel target)
+ {
+     PatchDataWithValueCheck(loc, ImmPtr(target.raw()), ImmPtr(nullptr));
+@@ -2579,35 +2579,23 @@
+                                          Label* label)
+ {
+     ADBlock();
+     MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+     Label done;
+     branchTestGCThing(Assembler::NotEqual, value,
+                       cond == Assembler::Equal ? &done : label);
+ 
+-    if (temp != InvalidReg) {
+-        unboxGCThingForGCBarrier(value, temp);
+-        orPtr(Imm32(gc::ChunkMask), temp);
+-        loadPtr(Address(temp, gc::ChunkStoreBufferOffsetFromLastByte), temp);
+-        branchPtr(InvertCondition(cond), temp, ImmWord(0), label);
+-    } else {
+-        // Honey, Ion stole the temp register again. Get out the baseball
+-        // bat, would you?
+-        //
+-        // Both constants are too large to be immediates.
+-        unboxGCThingForGCBarrier(value, ScratchRegister);
+-        ma_li(SecondScratchReg, gc::ChunkMask);
+-        as_or(SecondScratchReg, ScratchRegister, SecondScratchReg);
+-        ma_li(ScratchRegister, gc::ChunkStoreBufferOffsetFromLastByte);
+-        as_add(SecondScratchReg, SecondScratchReg, ScratchRegister);
+-        as_ld(ScratchRegister, SecondScratchReg, 0);
+-        as_cmpdi(ScratchRegister, 0);
+-        ma_bc(InvertCondition(cond), label);
+-    }
++  // getGCThingValueChunk uses r0 and may use r12.
++  ScratchRegisterScope scratch2(*this);
++
++  getGCThingValueChunk(value, scratch2);
++  loadPtr(Address(scratch2, gc::ChunkStoreBufferOffset), scratch2);
++  branchPtr(InvertCondition(cond), scratch2, ImmWord(0), label);
++
+     bind(&done);
+ }
+ 
+ void
+ MacroAssembler::branchTestValue(Condition cond, const ValueOperand& lhs,
+                                 const Value& rhs, Label* label)
+ {
+     ADBlock();
+@@ -4772,52 +4760,34 @@
+ 
+     addCodeLabel(cl);
+     return retAddr;
+ }
+ 
+ void
+ MacroAssembler::loadStoreBuffer(Register ptr, Register buffer)
+ {
+-    if (ptr != buffer)
+-        movePtr(ptr, buffer);
+-    orPtr(Imm32(gc::ChunkMask), buffer);
+-    loadPtr(Address(buffer, gc::ChunkStoreBufferOffsetFromLastByte), buffer);
++  ma_and(buffer, ptr, Imm32(int32_t(~gc::ChunkMask)));
++  loadPtr(Address(buffer, gc::ChunkStoreBufferOffset), buffer);
+ }
+ 
+ void
+ MacroAssembler::branchPtrInNurseryChunk(Condition cond, Register ptr, Register temp,
+                                         Label* label)
+ {
+     ADBlock();
+-    MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+-    MOZ_ASSERT(ptr != temp);
+-    MOZ_ASSERT(ptr != SecondScratchReg);
+-
+-    if (temp != InvalidReg) {
+-        movePtr(ptr, temp);
+-        orPtr(Imm32(gc::ChunkMask), temp);
+-        branchPtr(InvertCondition(cond),
+-                  Address(temp, gc::ChunkStoreBufferOffsetFromLastByte),
+-                  ImmWord(0), label);
+-    } else {
+-        // Why, those cheapskates. We have to provide our own temp too?
+-        // Did the bean counters cut our temp register budget this year?
+-        // (Ion hits this.)
+-        MOZ_ASSERT(ptr != ScratchRegister);
+-
+-        // Both offsets are too big to be immediate displacements.
+-        ma_li(ScratchRegister, gc::ChunkMask);
+-        as_or(SecondScratchReg, ptr, ScratchRegister);
+-        ma_li(ScratchRegister, gc::ChunkStoreBufferOffsetFromLastByte);
+-        as_add(SecondScratchReg, SecondScratchReg, ScratchRegister);
+-        as_ld(ScratchRegister, SecondScratchReg, 0);
+-        as_cmpdi(ScratchRegister, 0);
+-        ma_bc(InvertCondition(cond), label);
+-    }
++  MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
++  MOZ_ASSERT(ptr != temp);
++  MOZ_ASSERT(ptr != ScratchRegister);  // Both may be used internally.
++  MOZ_ASSERT(temp != ScratchRegister);
++  MOZ_ASSERT(temp != InvalidReg);
++
++  ma_and(temp, ptr, Imm32(int32_t(~gc::ChunkMask)));
++  branchPtr(InvertCondition(cond), Address(temp, gc::ChunkStoreBufferOffset),
++            ImmWord(0), label);
+ }
+ 
+ void
+ MacroAssembler::comment(const char* msg)
+ {
+     Assembler::comment(msg);
+ }
+ 
+diff -r 671b771fd1de -r e3eda281a1dc js/src/jit/ppc64/MacroAssembler-ppc64.h
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.h	Tue Sep 12 10:27:52 2023 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.h	Tue Sep 12 19:44:18 2023 -0700
+@@ -647,16 +647,31 @@
+     void unboxGCThingForGCBarrier(const Address& src, Register dest) {
+         loadPtr(src, dest);
+         as_rldicl(dest, dest, 0, 64-JSVAL_TAG_SHIFT); // "clrldi"
+     }
+     void unboxGCThingForGCBarrier(const ValueOperand& src, Register dest) {
+         as_rldicl(dest, src.valueReg(), 0, 64-JSVAL_TAG_SHIFT); // "clrldi"
+     }
+ 
++  // Like unboxGCThingForGCBarrier, but loads the GC thing's chunk base.
++  void getGCThingValueChunk(const Address& src, Register dest) {
++//    ScratchRegisterScope scratch(asMasm());
++//    MOZ_ASSERT(scratch != dest);
++    MOZ_ASSERT(dest != ScratchRegister);
++    loadPtr(src, dest);
++    movePtr(ImmWord(JS::detail::ValueGCThingPayloadChunkMask), ScratchRegister);
++    as_and(dest, dest, ScratchRegister);
++  }
++  void getGCThingValueChunk(const ValueOperand& src, Register dest) {
++    MOZ_ASSERT(src.valueReg() != dest);
++    movePtr(ImmWord(JS::detail::ValueGCThingPayloadChunkMask), dest);
++    as_and(dest, dest, src.valueReg());
++  }
++
+     void unboxInt32(const ValueOperand& operand, Register dest);
+     void unboxInt32(Register src, Register dest);
+     void unboxInt32(const Address& src, Register dest);
+     void unboxInt32(const BaseIndex& src, Register dest);
+     void unboxBoolean(const ValueOperand& operand, Register dest);
+     void unboxBoolean(Register src, Register dest);
+     void unboxBoolean(const Address& src, Register dest);
+     void unboxBoolean(const BaseIndex& src, Register dest);
+@@ -835,16 +850,20 @@
+     }
+     void pushValue(JSValueType type, Register reg) {
+         // Use SecondScratchReg as the temp since boxValue uses ScratchRegister
+         // for the tag.
+         boxValue(type, reg, SecondScratchReg);
+         push(SecondScratchReg);
+     }
+     void pushValue(const Address& addr);
++    void pushValue(const BaseIndex& addr, Register scratch) {
++      loadValue(addr, ValueOperand(scratch));
++      pushValue(ValueOperand(scratch));
++    }
+ 
+     void handleFailureWithHandlerTail(Label* profilerExitTail, Label* bailoutTail);
+ 
+     /////////////////////////////////////////////////////////////////
+     // Common interface.
+     /////////////////////////////////////////////////////////////////
+   public:
+     // The following functions are exposed for use in platform-shared code.
+diff -r 671b771fd1de -r e3eda281a1dc js/src/jit/ppc64/Trampoline-ppc64.cpp
+--- a/js/src/jit/ppc64/Trampoline-ppc64.cpp	Tue Sep 12 10:27:52 2023 -0700
++++ b/js/src/jit/ppc64/Trampoline-ppc64.cpp	Tue Sep 12 19:44:18 2023 -0700
+@@ -1,28 +1,28 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+  * vim: set ts=8 sts=4 et sw=4 tw=99:
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+-#include "mozilla/DebugOnly.h"
+-
+ #include "jit/Bailouts.h"
++#include "jit/BaselineFrame.h"
++#include "jit/CalleeToken.h"
+ #include "jit/JitFrames.h"
+-#include "jit/JitRealm.h"
+-#include "jit/JitSpewer.h"
+-#include "jit/Linker.h"
+-#include "jit/PerfSpewer.h"
+-#include "jit/ppc64/SharedICHelpers-ppc64.h"
++#include "jit/JitRuntime.h"
++#ifdef JS_ION_PERF
++#  include "jit/PerfSpewer.h"
++#endif
++#include "jit/ppc64/SharedICRegisters-ppc64.h"
+ #include "jit/VMFunctions.h"
+-#include "vm/Realm.h"
++#include "vm/JitActivation.h"  // js::jit::JitActivation
++#include "vm/JSContext.h"
+ 
+ #include "jit/MacroAssembler-inl.h"
+-#include "jit/SharedICHelpers-inl.h"
+ 
+ #if DEBUG
+ 
+ /* Useful class to print visual guard blocks. */
+ class TrampolineAutoDeBlock
+ {
+     private:
+         const char *blockname;
+@@ -891,17 +891,17 @@
+           case VMFunctionData::WordByValue:
+             if (f.argPassedInFloatReg(explicitArg))
+                 masm.passABIArg(MoveOperand(argsBase, argDisp), MoveOp::DOUBLE);
+             else
+                 masm.passABIArg(MoveOperand(argsBase, argDisp), MoveOp::GENERAL);
+             argDisp += sizeof(void*);
+             break;
+           case VMFunctionData::WordByRef:
+-            masm.passABIArg(MoveOperand(argsBase, argDisp, MoveOperand::EFFECTIVE_ADDRESS),
++            masm.passABIArg(MoveOperand(argsBase, argDisp, MoveOperand::Kind::EffectiveAddress),
+                             MoveOp::GENERAL);
+             argDisp += sizeof(void*);
+             break;
+           case VMFunctionData::DoubleByValue:
+           case VMFunctionData::DoubleByRef:
+             MOZ_CRASH("NYI: PPC64 callVM no support for 128-bit values");
+             break;
+         }

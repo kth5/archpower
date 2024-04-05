@@ -1,0 +1,236 @@
+# HG changeset patch
+# User Cameron Kaiser <spectre@floodgap.com>
+# Date 1695318886 25200
+#      Thu Sep 21 10:54:46 2023 -0700
+# Node ID 23890c8cfb6523602d62886442866799431e490d
+# Parent  bd8eea54a76bd887fd7741eb252ee8bc09bf79f2
+clean up more fails and unfunk wasm
+
+diff -r bd8eea54a76b -r 23890c8cfb65 js/src/builtin/TestingFunctions.cpp
+--- a/js/src/builtin/TestingFunctions.cpp	Wed Sep 20 13:08:34 2023 -0700
++++ b/js/src/builtin/TestingFunctions.cpp	Thu Sep 21 10:54:46 2023 -0700
+@@ -455,16 +455,25 @@
+   value = BooleanValue(true);
+ #else
+   value = BooleanValue(false);
+ #endif
+   if (!JS_SetProperty(cx, info, "riscv64", value)) {
+     return false;
+   }
+ 
++#ifdef JS_CODEGEN_PPC64
++  value = BooleanValue(true);
++#else
++  value = BooleanValue(false);
++#endif
++  if (!JS_SetProperty(cx, info, "ppc64", value)) {
++    return false;
++  }
++
+ #ifdef JS_SIMULATOR_RISCV64
+   value = BooleanValue(true);
+ #else
+   value = BooleanValue(false);
+ #endif
+   if (!JS_SetProperty(cx, info, "riscv64-simulator", value)) {
+     return false;
+   }
+diff -r bd8eea54a76b -r 23890c8cfb65 js/src/jit-test/tests/gc/gcparam.js
+--- a/js/src/jit-test/tests/gc/gcparam.js	Wed Sep 20 13:08:34 2023 -0700
++++ b/js/src/jit-test/tests/gc/gcparam.js	Thu Sep 21 10:54:46 2023 -0700
+@@ -25,17 +25,19 @@
+ testGetParam("totalChunks");
+ testGetParam("nurseryBytes");
+ testGetParam("majorGCNumber");
+ testGetParam("minorGCNumber");
+ testGetParam("chunkBytes");
+ testGetParam("helperThreadCount");
+ 
+ testChangeParam("maxBytes");
+-testChangeParam("minNurseryBytes", 16 * 1024);
++// This cannot be lower than 64K due to 64K page systems, like some ppc64le
++// machines in Linux.
++testChangeParam("minNurseryBytes", 64 * 1024);
+ testChangeParam("maxNurseryBytes", 1024 * 1024);
+ testChangeParam("incrementalGCEnabled");
+ testChangeParam("perZoneGCEnabled");
+ testChangeParam("sliceTimeBudgetMS");
+ testChangeParam("highFrequencyTimeLimit");
+ testChangeParam("smallHeapSizeMax");
+ testChangeParam("largeHeapSizeMin");
+ testChangeParam("highFrequencySmallHeapGrowth");
+diff -r bd8eea54a76b -r 23890c8cfb65 js/src/jit-test/tests/gc/oomInRegExp2.js
+--- a/js/src/jit-test/tests/gc/oomInRegExp2.js	Wed Sep 20 13:08:34 2023 -0700
++++ b/js/src/jit-test/tests/gc/oomInRegExp2.js	Thu Sep 21 10:54:46 2023 -0700
+@@ -1,5 +1,6 @@
+-// |jit-test| skip-if: !('oomTest' in this)
++// |jit-test| skip-if: !('oomTest' in this) || getBuildConfiguration().ppc64
++// On ppc64, this will never exhaust memory before timing out.
+ 
+ oomTest(() => assertEq("foobar\xff5baz\u1200".search(/bar\u0178\d/i), 3), {keepFailing: true});
+ oomTest(() => assertEq((/(?!(?!(?!6)[\Wc]))/i).test(), false), {keepFailing: true});
+ oomTest(() => assertEq((/bar\u0178\d/i).exec("foobar\xff5baz\u1200") != null, true), {keepFailing: true});
+diff -r bd8eea54a76b -r 23890c8cfb65 js/src/jit-test/tests/modules/bug1670236.js
+--- a/js/src/jit-test/tests/modules/bug1670236.js	Wed Sep 20 13:08:34 2023 -0700
++++ b/js/src/jit-test/tests/modules/bug1670236.js	Thu Sep 21 10:54:46 2023 -0700
+@@ -1,6 +1,8 @@
+-// |jit-test| skip-if: !('oomTest' in this)
++// |jit-test| skip-if: !('oomTest' in this) || getBuildConfiguration().ppc64
++// On ppc64, this will never exhaust memory before timing out.
++
+ o0=r=/x/;
+ this.toString=(function() {
+     evaluate("",({ element:o0 }));
+ })
+ oomTest(String.prototype.charCodeAt,{ keepFailing:true })
+diff -r bd8eea54a76b -r 23890c8cfb65 js/src/jit-test/tests/promise/unhandled-rejections-oom.js
+--- a/js/src/jit-test/tests/promise/unhandled-rejections-oom.js	Wed Sep 20 13:08:34 2023 -0700
++++ b/js/src/jit-test/tests/promise/unhandled-rejections-oom.js	Thu Sep 21 10:54:46 2023 -0700
+@@ -1,3 +1,4 @@
+-// |jit-test| allow-oom; skip-if: !('oomTest' in this)
++// |jit-test| allow-oom; skip-if: !('oomTest' in this) || getBuildConfiguration().ppc64
++// On ppc64, this will never exhaust memory before timing out.
+ 
+ oomTest(async function() {}, { keepFailing: true });
+diff -r bd8eea54a76b -r 23890c8cfb65 js/src/jit/ppc64/Architecture-ppc64.h
+--- a/js/src/jit/ppc64/Architecture-ppc64.h	Wed Sep 20 13:08:34 2023 -0700
++++ b/js/src/jit/ppc64/Architecture-ppc64.h	Thu Sep 21 10:54:46 2023 -0700
+@@ -12,24 +12,38 @@
+ 
+ #include "jit/shared/Architecture-shared.h"
+ 
+ #include "js/Utility.h"
+ 
+ namespace js {
+ namespace jit {
+ 
+-// Used to protect the stack from linkage area clobbers. Minimum size
+-// is 4 doublewords for SP, LR, CR and TOC.
+-static const uint32_t ShadowStackSpace = 32;
++// Despite my hopes, this does not help protect Wasm Frames from ABI callouts
++// unknowingly stomping on them expecting a regular linkage area; the "shadow
++// stack space" that this allocates is actually allocated at *higher* addresses
++// than the Frame. The Frame demands to be on top of the stack, but that's
++// exactly where the linkage area is supposed to go, and everything assumes
++// that the Frame will be exactly two pointers in size which defeats my earlier
++// attempt to just add the linkage area to the Frame. (On top of that, Wasm GC
++// won't let you nab more than 32 bytes anyway, the bare minimum space required
++// for simply LR, TOC, CR and SP, and includes no parameter area.) Instead, for
++// now we have to tediously pull down dummy frames on demand when calling out
++// to heavy functions that are ABI-compliant. This also does nothing for the
++// regular JIT, where periodically we need to do the same thing.
++//
++// See also MacroAssembler::call(wasm::SymbolicAddress) in
++// MacroAssembler-ppc64.cpp.
++static const uint32_t ShadowStackSpace = 0;
++
+ // The return address is in LR, not in memory/stack.
+ static const uint32_t SizeOfReturnAddressAfterCall = 0u;
+ 
+ // Size of each bailout table entry.
+-// For PowerPC this is a single bl.
++// For Power ISA this is a single bl.
+ static const uint32_t BAILOUT_TABLE_ENTRY_SIZE = sizeof(void *);
+ 
+ // Range of an immediate jump (26 bit jumps). Take a fudge out in case.
+ static constexpr uint32_t JumpImmediateRange = (32 * 1024 * 1024) - 32;
+ 
+ // GPRs.
+ class Registers
+ {
+diff -r bd8eea54a76b -r 23890c8cfb65 js/src/jit/ppc64/MacroAssembler-ppc64.cpp
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	Wed Sep 20 13:08:34 2023 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	Thu Sep 21 10:54:46 2023 -0700
+@@ -4621,18 +4621,36 @@
+ 
+     Assembler::WriteLoad64Instructions(inst, ScratchRegister, (uint64_t)offset);
+     FlushICache(inst, sizeof(uint32_t) * 5);
+ }
+ 
+ CodeOffset
+ MacroAssembler::call(wasm::SymbolicAddress target)
+ {
++    ADBlock();
++
++    // This call is very likely to ABI compliant code. Since this is coming
++    // from Wasm and Wasm Frames sit on the top of the stack where the linkage
++    // area goes, we need to pull down a dummy ABI stack frame to prevent the
++    // callee from unwittingly stomping on the Wasm Frame. ShadowStackSpace
++    // does not fix this; see Architecture-ppc64le.h for a more intemperate
++    // explanation. We can get away with this in the general case because the
++    // argument registers have already been calculated relative to the prior
++    // (unsafe) value of the stack pointer. If it's not to ABI compliant code,
++    // then we just bloat the stack temporarily and life goes on.
++    //
++    // 512 bytes ought to be enough for anybody ...
++    as_addi(StackPointer, StackPointer, -512);
+     movePtr(target, CallReg);
+-    return call(CallReg);
++    // XXX: No current consumer seems to care about the return value.
++    // Should it be after the call, or after the stack pointer adjustment?
++    CodeOffset c = call(CallReg);
++    as_addi(StackPointer, StackPointer, 512);
++    return c;
+ }
+ 
+ void
+ MacroAssembler::call(const Address& addr)
+ {
+     loadPtr(addr, CallReg);
+     call(CallReg);
+ }
+diff -r bd8eea54a76b -r 23890c8cfb65 js/src/wasm/WasmStubs.cpp
+--- a/js/src/wasm/WasmStubs.cpp	Wed Sep 20 13:08:34 2023 -0700
++++ b/js/src/wasm/WasmStubs.cpp	Thu Sep 21 10:54:46 2023 -0700
+@@ -2134,26 +2134,17 @@
+     masm.storePtr(scratch,
+                   Address(masm.getStackPointer(), i->offsetFromArgBase()));
+   }
+   i++;
+   MOZ_ASSERT(i.done());
+ 
+   // Make the call, test whether it succeeded, and extract the return value.
+   AssertStackAlignment(masm, ABIStackAlignment);
+-#ifdef JS_CODEGEN_PPC64
+-  // Because this is calling an ABI-compliant function, we have to pull down
+-  // a dummy linkage area or the values on the stack will be stomped on. The
+-  // minimum size is sufficient.
+-  masm.as_addi(masm.getStackPointer(), masm.getStackPointer(), -32);
+-#endif
+   masm.call(SymbolicAddress::CallImport_General);
+-#ifdef JS_CODEGEN_PPC64
+-  masm.as_addi(masm.getStackPointer(), masm.getStackPointer(), 32);
+-#endif
+   masm.branchTest32(Assembler::Zero, ReturnReg, ReturnReg, throwLabel);
+ 
+   ResultType resultType = ResultType::Vector(funcType.results());
+   ValType registerResultType;
+   for (ABIResultIter iter(resultType); !iter.done(); iter.next()) {
+     if (iter.cur().inRegister()) {
+       MOZ_ASSERT(!registerResultType.isValid());
+       registerResultType = iter.cur().type();
+@@ -2680,19 +2671,24 @@
+ // PushRegsInMask strips out the high lanes of the XMM registers in this case,
+ // while the singles will be stripped as they are aliased by the larger doubles.
+ static const LiveRegisterSet RegsToPreserve(
+     GeneralRegisterSet(Registers::AllMask &
+                        ~(Registers::SetType(1) << Registers::StackPointer)),
+     FloatRegisterSet(FloatRegisters::AllMask));
+ #elif defined(JS_CODEGEN_PPC64)
+ // Note that this includes no SPRs, since the JIT is unaware of them.
++// Since we ass-U-me that traps don't occur while LR (an SPR, not a GPR) is
++// live, then we can clobber it and don't have to push it anyway.
+ static const LiveRegisterSet RegsToPreserve(
+     GeneralRegisterSet(Registers::AllMask),
+     FloatRegisterSet(FloatRegisters::AllMask));
++#  ifdef ENABLE_WASM_SIMD
++#    error "high lanes of SIMD registers need to be saved too."
++#  endif
+ #else
+ static const LiveRegisterSet RegsToPreserve(
+     GeneralRegisterSet(0), FloatRegisterSet(FloatRegisters::AllDoubleMask));
+ #  ifdef ENABLE_WASM_SIMD
+ #    error "no SIMD support"
+ #  endif
+ #endif
+ 
