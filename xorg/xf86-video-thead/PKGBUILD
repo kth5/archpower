@@ -1,0 +1,48 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+
+pkgname=xf86-video-thead
+pkgver=1.0.1
+pkgrel=2
+epoch=1
+pkgdesc="X.org T-Head 1520 video driver"
+arch=(riscv64)
+url="https://xorg.freedesktop.org/"
+license=('custom')
+depends=('systemd-libs' 'mesa')
+makedepends=('xorg-server-devel' 'systemd' 'X-ABI-VIDEODRV_VERSION=25.2' 'git')
+conflicts=('xorg-server<21.1.1' 'X-ABI-VIDEODRV_VERSION<25' 'X-ABI-VIDEODRV_VERSION>=26')
+groups=('xorg-drivers')
+_commit=31abac58e9d97ab4878ff5de774b573eee8ee960
+source=("${pkgname}::git+https://github.com/revyos/xf86-video-thead#commit=$_commit")
+sha512sums=('SKIP')
+
+prepare() {
+  cd ${pkgname}
+
+  git submodule init
+  git submodule update
+
+  autoreconf -fiv
+}
+
+build() {
+  cd ${pkgname}
+
+  # Since pacman 5.0.2-2, hardened flags are now enabled in makepkg.conf
+  # With them, module fail to load with undefined symbol.
+  # See https://bugs.archlinux.org/task/55102 / https://bugs.archlinux.org/task/54845
+  export CFLAGS=${CFLAGS/-fno-plt}
+  export CXXFLAGS=${CXXFLAGS/-fno-plt}
+  export LDFLAGS=${LDFLAGS/,-z,now}
+
+  ./configure --prefix=/usr --build=${CHOST}
+  make
+}
+
+package() {
+  cd ${pkgname}
+
+  make "DESTDIR=${pkgdir}" install
+  install -m755 -d "${pkgdir}/usr/share/licenses/${pkgname}"
+  install -m644 COPYING "${pkgdir}/usr/share/licenses/${pkgname}/"
+}
