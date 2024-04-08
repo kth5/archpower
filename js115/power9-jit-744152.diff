@@ -1,0 +1,285 @@
+# HG changeset patch
+# User Cameron Kaiser <spectre@floodgap.com>
+# Date 1695240514 25200
+#      Wed Sep 20 13:08:34 2023 -0700
+# Node ID bd8eea54a76bd887fd7741eb252ee8bc09bf79f2
+# Parent  3ac07c6a65bceaeb75d59aafa7728388c31ea11d
+Ion fixes
+
+diff -r 3ac07c6a65bc -r bd8eea54a76b js/src/jit/JitFrames.cpp
+--- a/js/src/jit/JitFrames.cpp	Fri Sep 15 12:44:43 2023 -0700
++++ b/js/src/jit/JitFrames.cpp	Wed Sep 20 13:08:34 2023 -0700
+@@ -1701,17 +1701,25 @@
+ 
+     case RValueAllocation::CST_NULL:
+       return NullValue();
+ 
+     case RValueAllocation::DOUBLE_REG:
+       return DoubleValue(fromRegister<double>(alloc.fpuReg()));
+ 
+     case RValueAllocation::ANY_FLOAT_REG:
++#if defined(JS_CODEGEN_PPC64)
++      // There is no (simple) way from the ISA to determine if an arbitrary
++      // FPR contains a float or a double since the ISA treats them largely
++      // synonymously, so the MachineState will always contain a double even
++      // if it's encoding a float.
++      return Float32Value((float)fromRegister<double>(alloc.fpuReg()));
++#else
+       return Float32Value(fromRegister<float>(alloc.fpuReg()));
++#endif
+ 
+     case RValueAllocation::ANY_FLOAT_STACK:
+       return Float32Value(ReadFrameFloat32Slot(fp_, alloc.stackOffset()));
+ 
+     case RValueAllocation::TYPED_REG:
+       return FromTypedPayload(alloc.knownType(), fromRegister(alloc.reg2()));
+ 
+     case RValueAllocation::TYPED_STACK: {
+@@ -2316,20 +2324,21 @@
+     uintptr_t* addr = state_.as<SafepointState>().addressOfRegister(reg);
+     return *addr;
+   }
+   MOZ_CRASH("Invalid state");
+ }
+ 
+ template <typename T>
+ T MachineState::read(FloatRegister reg) const {
+-#if !defined(JS_CODEGEN_RISCV64)
++#if !defined(JS_CODEGEN_RISCV64) && !defined(JS_CODEGEN_PPC64)
+   MOZ_ASSERT(reg.size() == sizeof(T));
+ #else
+   // RISCV64 always store FloatRegister as 64bit.
++  // So does Power ISA (see SnapshotIterator::allocationValue).
+   MOZ_ASSERT(reg.size() == sizeof(double));
+ #endif
+ 
+ #if !defined(JS_CODEGEN_NONE) && !defined(JS_CODEGEN_WASM32)
+   if (state_.is<BailoutState>()) {
+     uint32_t offset = reg.getRegisterDumpOffsetInBytes();
+     MOZ_ASSERT((offset % sizeof(T)) == 0);
+     MOZ_ASSERT((offset + sizeof(T)) <= sizeof(RegisterDump::FPUArray));
+diff -r 3ac07c6a65bc -r bd8eea54a76b js/src/jit/LIR.h
+--- a/js/src/jit/LIR.h	Fri Sep 15 12:44:43 2023 -0700
++++ b/js/src/jit/LIR.h	Wed Sep 20 13:08:34 2023 -0700
+@@ -547,17 +547,17 @@
+   static LDefinition BogusTemp() { return LDefinition(); }
+ 
+   Policy policy() const {
+     return (Policy)((bits_ >> POLICY_SHIFT) & POLICY_MASK);
+   }
+   Type type() const { return (Type)((bits_ >> TYPE_SHIFT) & TYPE_MASK); }
+ 
+   static bool isFloatRegCompatible(Type type, FloatRegister reg) {
+-#ifdef JS_CODEGEN_RISCV64
++#if defined(JS_CODEGEN_RISCV64) || defined(JS_CODEGEN_PPC64)
+     if (type == FLOAT32 || type == DOUBLE) {
+       return reg.isSingle() || reg.isDouble();
+     }
+ #else
+     if (type == FLOAT32) {
+       return reg.isSingle();
+     }
+     if (type == DOUBLE) {
+diff -r 3ac07c6a65bc -r bd8eea54a76b js/src/jit/ppc64/CodeGenerator-ppc64.cpp
+--- a/js/src/jit/ppc64/CodeGenerator-ppc64.cpp	Fri Sep 15 12:44:43 2023 -0700
++++ b/js/src/jit/ppc64/CodeGenerator-ppc64.cpp	Wed Sep 20 13:08:34 2023 -0700
+@@ -1364,18 +1364,17 @@
+             MOZ_ASSERT(shift == 1);
+             masm.x_srwi(tmp, lhs, 31);
+             masm.add32(lhs, tmp);
+         }
+ 
+         // Do the shift.
+         masm.as_srawi(dest, tmp, shift);
+     } else {
+-        if (lhs != dest)        
+-            masm.move32(lhs, dest);
++        masm.move32(lhs, dest);
+     }
+ }
+ 
+ void
+ CodeGenerator::visitModI(LModI* ins)
+ {
+     ADBlock();
+ 
+@@ -1627,45 +1626,35 @@
+     Register dest = ToRegister(ins->output());
+ 
+     if (rhs->isConstant()) {
+         int32_t shift = ToInt32(rhs) & 0x1F;
+         switch (ins->bitop()) {
+           case JSOp::Lsh:
+             if (shift)
+                 masm.x_slwi(dest, lhs, shift);
+-            else if (dest != lhs)
++            else
+                 masm.move32(lhs, dest);
+             break;
+           case JSOp::Rsh:
+             if (shift)
+                 masm.as_srawi(dest, lhs, shift);
+-            else if (dest != lhs)
++            else
+                 masm.move32(lhs, dest);
+             break;
+           case JSOp::Ursh:
+             if (shift) {
+                 masm.x_srwi(dest, lhs, shift);
+-#if(0)
+-            } else if (ins->mir()->toUrsh()->fallible()) {
++            } else {
+                 // x >>> 0 can overflow.
+-                masm.as_extsw(ScratchRegister, lhs);
+-                bailoutCmp32(Assembler::LessThan, ScratchRegister, Imm32(0), ins->snapshot());
+-            } else {
++                if (ins->mir()->toUrsh()->fallible()) {
++                    bailoutCmp32(Assembler::LessThan, lhs, Imm32(0), ins->snapshot());
++                }
+                 masm.move32(lhs, dest);
+             }
+-#else
+-            } else {
+-                // x >>> 0 can overflow.
+-                if (ins->mir()->toUrsh()->fallible())
+-                    bailoutCmp32(Assembler::LessThan, lhs, Imm32(0), ins->snapshot());
+-                if (dest != lhs)
+-                    masm.move32(lhs, dest);
+-            }
+-#endif
+             break;
+           default:
+             MOZ_CRASH("Unexpected shift op");
+         }
+     } else {
+         // The shift amounts should be AND'ed into the 0-31 range.
+         masm.as_andi_rc(dest, ToRegister(rhs), 0x1f);
+ 
+@@ -1675,22 +1664,17 @@
+             break;
+           case JSOp::Rsh:
+             masm.as_sraw(dest, lhs, dest);
+             break;
+           case JSOp::Ursh:
+             masm.as_srw(dest, lhs, dest);
+             if (ins->mir()->toUrsh()->fallible()) {
+                 // x >>> 0 can overflow.
+-#if(0)
+-                masm.as_extsw(ScratchRegister, lhs);
+-                bailoutCmp32(Assembler::LessThan, ScratchRegister, Imm32(0), ins->snapshot());
+-#else
+                 bailoutCmp32(Assembler::LessThan, dest, Imm32(0), ins->snapshot());
+-#endif
+             }
+             break;
+           default:
+             MOZ_CRASH("Unexpected shift op");
+         }
+     }
+ }
+ 
+diff -r 3ac07c6a65bc -r bd8eea54a76b js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h	Fri Sep 15 12:44:43 2023 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h	Wed Sep 20 13:08:34 2023 -0700
+@@ -369,21 +369,29 @@
+ MacroAssembler::mulBy3(Register src, Register dest)
+ {
+     // I guess this *is* better than mulli.
+     MOZ_ASSERT(src != ScratchRegister);
+     as_add(ScratchRegister, src, src);
+     as_add(dest, ScratchRegister, src);
+ }
+ 
++// This is used in MacroAssembler::loadInt32ToStringWithBase. Instead of
++// letting us use our superior arithmetic instructions, the JIT has reduced
++// us to faffing around with magic constants because that's what x86* does.
++// This leads to sign extension hazards.
+ void MacroAssembler::mulHighUnsigned32(Imm32 imm, Register src, Register dest) {
+   MOZ_ASSERT(src != ScratchRegister);
++  // Compensate for (likely) sign extension by always clearing upper bits.
+   move32(imm, ScratchRegister);
+-  as_mulhw(dest, ScratchRegister, src);
+-  x_sldi(dest, dest, 32);
++  as_rldicl(ScratchRegister, ScratchRegister, 0, 32); // "clrldi"
++  // loadInt32ToStringWithBase expects what is effectively unsigned multiply.
++  as_mulhwu(dest, ScratchRegister, src);
++  // Clear upper bits again, as they are undefined by the spec.
++  as_rldicl(dest, dest, 0, 32); // "clrldi"
+ }
+ 
+ void
+ MacroAssembler::inc64(AbsoluteAddress dest)
+ {
+     ma_li(SecondScratchReg, ImmWord(uintptr_t(dest.addr)));
+     as_ld(ThirdScratchReg, SecondScratchReg, 0);
+     as_addi(ScratchRegister, ThirdScratchReg, 1);
+diff -r 3ac07c6a65bc -r bd8eea54a76b js/src/jit/ppc64/MacroAssembler-ppc64.cpp
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	Fri Sep 15 12:44:43 2023 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	Wed Sep 20 13:08:34 2023 -0700
+@@ -4769,21 +4769,23 @@
+ void
+ MacroAssembler::branchPtrInNurseryChunk(Condition cond, Register ptr, Register temp,
+                                         Label* label)
+ {
+     ADBlock();
+   MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+   MOZ_ASSERT(ptr != temp);
+   MOZ_ASSERT(ptr != ScratchRegister);  // Both may be used internally.
+-  MOZ_ASSERT(temp != ScratchRegister);
+-  MOZ_ASSERT(temp != InvalidReg);
+-
+-  ma_and(temp, ptr, Imm32(int32_t(~gc::ChunkMask)));
+-  branchPtr(InvertCondition(cond), Address(temp, gc::ChunkStoreBufferOffset),
++  MOZ_ASSERT(ptr != SecondScratchReg);
++  MOZ_ASSERT(temp != ScratchRegister); // probably unpossible
++  MOZ_ASSERT(temp != SecondScratchReg);
++  MOZ_ASSERT(gc::ChunkStoreBufferOffset < 32767);
++
++  ma_and(SecondScratchReg, ptr, Imm32(int32_t(~gc::ChunkMask)));
++  branchPtr(InvertCondition(cond), Address(SecondScratchReg, gc::ChunkStoreBufferOffset),
+             ImmWord(0), label);
+ }
+ 
+ void
+ MacroAssembler::comment(const char* msg)
+ {
+     Assembler::comment(msg);
+ }
+diff -r 3ac07c6a65bc -r bd8eea54a76b js/src/wasm/WasmFrameIter.cpp
+--- a/js/src/wasm/WasmFrameIter.cpp	Fri Sep 15 12:44:43 2023 -0700
++++ b/js/src/wasm/WasmFrameIter.cpp	Wed Sep 20 13:08:34 2023 -0700
+@@ -1286,17 +1286,33 @@
+ #elif defined(JS_CODEGEN_ARM)
+       if (offsetFromEntry == BeforePushRetAddr || codeRange->isThunk()) {
+         // The return address is still in lr and fp holds the caller's fp.
+         fixedPC = (uint8_t*)registers.lr;
+         fixedFP = fp;
+         AssertMatchesCallSite(fixedPC, fixedFP);
+       } else
+ #elif defined(JS_CODEGEN_PPC64)
+-      MOZ_ASSERT(0);
++      if (codeRange->isThunk()) {
++        // The FarJumpIsland sequence temporarily scrambles LR.
++        // Don't unwind to the caller.
++        fixedPC = pc;
++        fixedFP = fp;
++        *unwoundCaller = false;
++        AssertMatchesCallSite(
++            Frame::fromUntaggedWasmExitFP(fp)->returnAddress(),
++            Frame::fromUntaggedWasmExitFP(fp)->rawCaller());
++      } else if (offsetFromEntry < PushedFP) {
++        // On ppc64 we rely on register state instead of state saved on
++        // stack until the wasm::Frame is completely built.
++        // On entry the return address is in LR and fp holds the caller's fp.
++        fixedPC = (uint8_t*)registers.lr;
++        fixedFP = fp;
++        AssertMatchesCallSite(fixedPC, fixedFP);
++      } else
+ #endif
+           if (offsetFromEntry == PushedRetAddr || codeRange->isThunk()) {
+         // The return address has been pushed on the stack but fp still
+         // points to the caller's fp.
+         fixedPC = sp[0];
+         fixedFP = fp;
+         AssertMatchesCallSite(fixedPC, fixedFP);
+       } else if (offsetFromEntry == PushedFP) {

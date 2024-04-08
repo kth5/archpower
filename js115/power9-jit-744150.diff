@@ -1,0 +1,146 @@
+# HG changeset patch
+# User Cameron Kaiser <spectre@floodgap.com>
+# Date 1694753553 25200
+#      Thu Sep 14 21:52:33 2023 -0700
+# Node ID ba4e29926385c655d979fe4c3726f1bedbcc42b7
+# Parent  4311f1e4d21272333a719950b15b91a486687ee7
+passes blinterp and baseline except for wasm-containing tests
+
+diff -r 4311f1e4d212 -r ba4e29926385 js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h	Thu Sep 14 20:18:54 2023 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h	Thu Sep 14 21:52:33 2023 -0700
+@@ -1910,30 +1910,30 @@
+                             Label* label)
+ {
+     ma_bc(cond, lhs, rhs, label);
+ }
+ 
+ void
+ MacroAssembler::branchTruncateFloat32ToInt32(FloatRegister src, Register dest, Label* fail)
+ {
+-    MOZ_CRASH();
++    truncDoubleToInt32(src, dest, fail);
+ }
+ 
+ void
+ MacroAssembler::branchDouble(DoubleCondition cond, FloatRegister lhs, FloatRegister rhs,
+                              Label* label)
+ {
+     ma_bc(cond, lhs, rhs, label);
+ }
+ 
+ void
+ MacroAssembler::branchTruncateDoubleToInt32(FloatRegister src, Register dest, Label* fail)
+ {
+-    MOZ_CRASH();
++    truncDoubleToInt32(src, dest, fail);
+ }
+ 
+ void
+ MacroAssembler::branchMulPtr(Condition cond, Register src, Register dest, Label *overflow)
+ {
+     as_mulldo_rc(dest, src, dest);
+     ma_bc(cond, overflow);
+ }
+diff -r 4311f1e4d212 -r ba4e29926385 js/src/jit/ppc64/MacroAssembler-ppc64.cpp
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	Thu Sep 14 20:18:54 2023 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	Thu Sep 14 21:52:33 2023 -0700
+@@ -2579,22 +2579,19 @@
+                                          Label* label)
+ {
+     ADBlock();
+     MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+     Label done;
+     branchTestGCThing(Assembler::NotEqual, value,
+                       cond == Assembler::Equal ? &done : label);
+ 
+-  // getGCThingValueChunk uses r0 and may use r12.
+-  ScratchRegisterScope scratch2(*this);
+-
+-  getGCThingValueChunk(value, scratch2);
+-  loadPtr(Address(scratch2, gc::ChunkStoreBufferOffset), scratch2);
+-  branchPtr(InvertCondition(cond), scratch2, ImmWord(0), label);
++  getGCThingValueChunk(value, SecondScratchReg);
++  loadPtr(Address(SecondScratchReg, gc::ChunkStoreBufferOffset), ScratchRegister);
++  branchPtr(InvertCondition(cond), ScratchRegister, ImmWord(0), label);
+ 
+     bind(&done);
+ }
+ 
+ void
+ MacroAssembler::branchTestValue(Condition cond, const ValueOperand& lhs,
+                                 const Value& rhs, Label* label)
+ {
+diff -r 4311f1e4d212 -r ba4e29926385 js/src/jit/ppc64/Trampoline-ppc64.cpp
+--- a/js/src/jit/ppc64/Trampoline-ppc64.cpp	Thu Sep 14 20:18:54 2023 -0700
++++ b/js/src/jit/ppc64/Trampoline-ppc64.cpp	Thu Sep 14 21:52:33 2023 -0700
+@@ -297,22 +297,25 @@
+     CodeLabel returnLabel;
+     Label oomReturnLabel;
+     {
+         // Handle Interpreter -> Baseline OSR.
+         AllocatableGeneralRegisterSet regs(GeneralRegisterSet::All());
+         MOZ_ASSERT(!regs.has(FramePointer));
+         regs.take(OsrFrameReg);
+         regs.take(reg_code);
++        MOZ_ASSERT(reg_code == ReturnReg); // regs.take(ReturnReg);
++        MOZ_ASSERT(!regs.has(ReturnReg), "ReturnReg matches reg_code");
++#if(0)
+         // On Power reg_code and the ReturnReg are always aliased because of
+         // ABI requirements. The first argument passed, the code pointer,
+         // comes in r3, and the ABI requires that r3 be the return register.
+         // Therefore, we don't implement the changes in bug 1770922.
+-        MOZ_ASSERT(reg_code == ReturnReg); // regs.take(ReturnReg);
+         regs.take(JSReturnOperand); // ???
++#endif
+ 
+         Label notOsr;
+         masm.ma_bc(OsrFrameReg, OsrFrameReg, &notOsr, Assembler::Zero, ShortJump);
+ 
+         Register numStackValues = reg_values;
+         regs.take(numStackValues);
+         Register scratch = regs.takeAny();
+ 
+@@ -765,22 +768,22 @@
+ }
+ 
+ static void
+ GenerateBailoutThunk(MacroAssembler& masm, Label* bailoutTail)
+ {
+     PushBailoutFrame(masm, r3);
+ 
+     // Put pointer to BailoutInfo.
+-    static const uint32_t sizeOfBailoutInfo = sizeof(uintptr_t) * 2;
++    static const uint32_t sizeOfBailoutInfo = sizeof(uintptr_t); // * 2;
+     masm.subPtr(Imm32(sizeOfBailoutInfo), StackPointer);
+     masm.movePtr(StackPointer, r4);
+ 
+     using Fn = bool (*)(BailoutStack * sp, BaselineBailoutInfo * *info);
+-    masm.setupAlignedABICall();
++    masm.setupUnalignedABICall(r5);
+     masm.passABIArg(r3);
+     masm.passABIArg(r4);
+     masm.callWithABI<Fn, Bailout>(MoveOp::GENERAL,
+                                   CheckUnsafeCallWithABI::DontCheckOther);
+ 
+     // Get BailoutInfo pointer.
+     masm.loadPtr(Address(StackPointer, 0), r5);
+ 
+@@ -986,16 +989,17 @@
+     ADBlock("generatePreBarrier");
+ 
+     uint32_t offset = startTrampolineCode(masm);
+ 
+     MOZ_ASSERT(PreBarrierReg == r4);
+     Register temp1 = r3;
+     Register temp2 = r5;
+     Register temp3 = r6;
++    // TODO: could be more efficient with multipush/pop
+     masm.push(temp1);
+     masm.push(temp2);
+     masm.push(temp3);
+ 
+     Label noBarrier;
+     masm.emitPreBarrierFastPath(cx->runtime(), type, temp1, temp2, temp3, &noBarrier);
+ 
+     // Call into C++ to mark this GC thing.

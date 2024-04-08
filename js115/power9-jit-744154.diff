@@ -1,0 +1,70 @@
+# HG changeset patch
+# User Cameron Kaiser <spectre@floodgap.com>
+# Date 1695355123 25200
+#      Thu Sep 21 20:58:43 2023 -0700
+# Node ID 1771d1807f7bfd16be4631b7485f010cfb64031d
+# Parent  23890c8cfb6523602d62886442866799431e490d
+last wasm fails fixed, passes jit_test and jstests
+
+diff -r 23890c8cfb65 -r 1771d1807f7b js/src/jit/ppc64/Assembler-ppc64.cpp
+--- a/js/src/jit/ppc64/Assembler-ppc64.cpp	Thu Sep 21 10:54:46 2023 -0700
++++ b/js/src/jit/ppc64/Assembler-ppc64.cpp	Thu Sep 21 20:58:43 2023 -0700
+@@ -38,32 +38,35 @@
+ {
+     switch (type) {
+       case MIRType::Int32:
+       case MIRType::Int64:
+       case MIRType::Pointer:
+       case MIRType::RefOrNull:
+       case MIRType::StackResults: {
+         if (usedGPRs_ > 7) {
+-            MOZ_ASSERT(IsCompilingWasm(), "no stack corruption from GPR overflow kthxbye");
++            // We only support spilling arguments to the stack with Wasm calls,
++            // but we could be generating Wasm code from the interpreter, so
++            // we can't assume there is a JIT context available.
++            MOZ_ASSERT(!MaybeGetJitContext() || IsCompilingWasm(), "no stack corruption from GPR overflow kthxbye");
+             current_ = ABIArg(stackOffset_);
+             stackOffset_ += sizeof(uintptr_t);
+             break;
+         }
+         // Note: we could be passing a full 64-bit quantity as an argument to,
+         // say, uint32_t. We have to compensate for that in other ways when
+         // it makes a difference (see notes in wasm).
+         current_ = ABIArg(Register::FromCode((Register::Code)(usedGPRs_ + 3)));
+         usedGPRs_++;
+         break;
+       }
+       case MIRType::Float32:
+       case MIRType::Double: {
+         if (usedFPRs_ == 12) {
+-            MOZ_ASSERT(IsCompilingWasm(), "no stack corruption from FPR overflow kthxbye");
++            MOZ_ASSERT(!MaybeGetJitContext() || IsCompilingWasm(), "no stack corruption from FPR overflow kthxbye");
+             current_ = ABIArg(stackOffset_);
+             stackOffset_ += sizeof(double); // keep stack aligned to double
+             break;
+         }
+         current_ = ABIArg(FloatRegister(FloatRegisters::Encoding(usedFPRs_ + 1),
+             type == MIRType::Double ? FloatRegisters::Double : FloatRegisters::Single));
+         usedGPRs_++;
+         usedFPRs_++;
+diff -r 23890c8cfb65 -r 1771d1807f7b js/src/jit/ppc64/MacroAssembler-ppc64.cpp
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	Thu Sep 21 10:54:46 2023 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	Thu Sep 21 20:58:43 2023 -0700
+@@ -2235,16 +2235,17 @@
+     jump(bailoutTail);
+ 
+     // If we are throwing and the innermost frame was a wasm frame, reset SP and
+     // FP; SP is pointing to the unwound return address to the wasm entry, so
+     // we can just ret().
+     bind(&wasm);
+     loadPtr(Address(StackPointer, ResumeFromException::offsetOfFramePointer()), FramePointer);
+     loadPtr(Address(StackPointer, ResumeFromException::offsetOfStackPointer()), StackPointer);
++    ma_li(InstanceReg, ImmWord(wasm::FailInstanceReg));
+     ret();
+ 
+   // Found a wasm catch handler, restore state and jump to it.
+   bind(&wasmCatch);
+   loadPtr(Address(sp, ResumeFromException::offsetOfTarget()), r12);
+   xs_mtctr(r12);
+   loadPtr(Address(StackPointer, ResumeFromException::offsetOfFramePointer()),
+           FramePointer);
