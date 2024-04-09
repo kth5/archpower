@@ -6,23 +6,20 @@
 # Contributor: William Rea <sillywilly@gmail.com>
 # Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
 
-pkgname=xapian-core
-pkgver=1.4.24
+pkgbase=xapian-core
+pkgname=(xapian-core{,-docs})
+pkgver=1.4.25
 pkgrel=1
 epoch=1
-pkgdesc='Open source search engine library.'
+pkgdesc='Open source search engine library'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://www.xapian.org/"
-license=('GPL2')
-makedepends=('util-linux')
-depends=('bash' 'gcc-libs' 'glibc' 'zlib')
-provides=('libxapian.so')
-# xapian config requires libxapian.la
-options=('libtool')
+license=('GPL-2.0-or-later')
+makedepends=('util-linux' 'zlib')
 source=("https://oligarchy.co.uk/xapian/${pkgver}/${pkgname}-${pkgver}.tar.xz"{,.asc})
-sha512sums=('2b156dd90784264d6bf64e66aca559578f946c013bb52e14e56fcd96e9c2fece71c236735b13d2baad0d7f2d410dea3ae54c94cd80f735baf1071bafe2e5c01c'
+sha512sums=('e8069f2cb75554978716a99580fb57fc73bbdd607c82394f53d07205d8c78fb59265004be0c676a6806bb2840a3933499dfc867e36a28855278569a0676d469d'
             'SKIP')
-b2sums=('fc3484df448d2102d47005b2819eea8eee3fdb4337a42967e2b535187e4b7be9841a8e12b19291f29bdef52b3270529f94376fe91d5e4c70afebaf690a23b18f'
+b2sums=('7b03a8fabc3c688f58b3451541dedb664de0a02d7c46a4e8eac080c004232575c00428110eaab0ea463df5c3f43f2b4cebfbe6754f897e55f113683c1db43b2b'
         'SKIP')
 validpgpkeys=('08E2400FF7FE8FEDE3ACB52818147B073BAD2B07') # Olly Betts <olly@debian.org>
 
@@ -43,14 +40,46 @@ build() {
 }
 
 check() {
-  cd "${pkgname}-${pkgver}"
-  make check
+  make check -C $pkgname-$pkgver
 }
 
-package() {
-  depends+=('libuuid.so')
-  cd ${pkgname}-${pkgver}
-  make DESTDIR="${pkgdir}" install
-  install -vDm 644 {AUTHORS,ChangeLog,HACKING,NEWS,README} \
-    -t "${pkgdir}/usr/share/doc/${pkgname}"
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_xapian-core() {
+  depends=(
+    'bash'
+    'gcc-libs'
+    'glibc'
+    'util-linux-libs' 'libuuid.so'
+    'zlib' 'libz.so'
+  )
+  optdepends=(
+    'xapian-core-docs: for documentation'
+  )
+  provides=('libxapian.so')
+  # xapian-config requires libxapian.la
+  options=('libtool')
+
+  make DESTDIR="${pkgdir}" install -C $pkgname-$pkgver
+
+  (
+    cd "$pkgdir"
+    _pick $pkgbase-docs usr/share/doc
+  )
+
+  install -vDm 644 $pkgname-$pkgver/{AUTHORS,ChangeLog,HACKING,NEWS,README} -t "${pkgdir}/usr/share/doc/${pkgname}"
+}
+
+package_xapian-core-docs() {
+  pkgdesc+=' - documentation'
+
+  mv -v $pkgname/* "$pkgdir"
 }
