@@ -3,22 +3,26 @@
 # Contributor: Jan de Groot <jgc@archlinux.org>
 # Contributor: Michal Krenek <mikos@sg1.cz>
 
-pkgname=ttf-dejavu
 _commit=9b5d1b2ffeec20c7b46aa89c0223d783c02762cf # master
+
+pkgname=ttf-dejavu
 pkgver=2.37+18+g9b5d1b2f
-pkgrel=6
+pkgrel=7
 pkgdesc='Font family based on the Bitstream Vera Fonts with a wider range of characters'
 arch=(any)
 url='https://dejavu-fonts.github.io'
 license=(custom)
-makedepends=(git fontforge perl-font-ttf)
+makedepends=(fontforge
+             git
+             perl-font-ttf)
 provides=(ttf-font)
 source=("git+https://github.com/dejavu-fonts/dejavu-fonts.git#commit=$_commit")
-sha256sums=('SKIP')
+sha256sums=('9d38fcff213462f880756a4c7005cc4b43e90f1ba59d2bcb61e18450d376601a')
 
 pkgver() {
 	cd dejavu-fonts
-	git describe --tags | sed 's/^version_//;s/_/./;s/-/+/g'
+	git describe --tags |
+		sed 's/^version_//;s/_/./;s/-/+/g'
 }
 
 build() {
