@@ -7,10 +7,10 @@
 pkgbase=postfix
 pkgname=(
   postfix
-  postfix-{cdb,ldap,lmdb,mysql,pcre,pgsql,sqlite}
+  postfix-{cdb,ldap,lmdb,mongodb,mysql,pcre,pgsql,sqlite}
 )
-pkgver=3.8.5
-pkgrel=2
+pkgver=3.9.0
+pkgrel=1
 pkgdesc="Fast, easy to administer, secure mail server"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://www.postfix.org/"
@@ -20,13 +20,13 @@ license=(
 )
 depends=(glibc)
 makedepends=(
-  db
   icu
   libldap
   libnsl
   libsasl
   lmdb
   mariadb-libs
+  mongo-c-driver
   openssl
   pcre2
   postgresql-libs
@@ -37,19 +37,22 @@ source=(
   https://de.postfix.org/ftpmirror/official/$pkgbase-$pkgver.tar.gz
   $pkgbase-$pkgver.tar.gz.sig::https://de.postfix.org/ftpmirror/official/$pkgbase-$pkgver.tar.gz.gpg2
   $pkgbase-3.5.8-main_defaults.patch
+  $pkgbase-3.9.0-mail_params.patch
   $pkgbase.service
   $pkgbase.sysusers
   $pkgbase.tmpfiles
 )
-sha512sums=('26005da5750e7af742f4fc7596ae8320467176e069546c3487418c663b54f56734b4a6541665b8d72d94df2e0fd4f68a2bcc44c50a6d950334d5a5fb2293dff4'
+sha512sums=('46faaf529a6d2edc5ea747ee0d73a028f7061a923da0ea4b1e1828d935b15f5782d83f7a8472e7c74b45ea0e96666c871efd352934bead28a88ddd3561ade324'
             'SKIP'
-            '7b2785aa8120ca3ff91b405baf675e9e11f8d58b18a9b842672e7ae30932febddac10556a70823d8746fcb160bceb4dbabdee45cf46b02fc0127057656fb85c4'
+            '4630bb84206e0534723f50e4fb0e6f83a47cfd33187801eede052962d332b2754af8761a8d2b81f52cba9d07a7a0335eef06e22347ec7bc69b86f561685bd575'
+            '6ff26a9e2330c6a930b15953c1dd7cc730318e80bef47667c0271ddb8132e64005e0d075e84d9d7a970eed789694093626ebd9053b9499333c6d526b57b0ea4c'
             '27f54747ad480d65b560c9dbc97e12c6353e4bceca0ffe3e358e31de56db0ad79928164c9f8790c73a9f791daa378253d2ee29b5a766661778553ec889b2cf97'
             'a7f15970f613ae7b98ce1b84ca0a6034ce3cc7b2b9ce7160dad9731f740fb762f4a54f44acceb5f06f8744fa9e952b088086af8a69da388a600b742a3cda37f2'
             'd08574a6acd595fc146513c92dc1bb341c3432d67de1e93ab73a7ce60e385dd34f3a55e3d3d7aec5f358ac4aae260f028599ac47650ebc663cea3043a760a7bc')
-b2sums=('0de999c47a4130eb3418ec60b23c10be405b9bc4b2a6022671f9dc4713256d2b81d3b43f01d89e02d2593f87109dcde366b0265eb0cb13cb3118d0e60e36b48b'
+b2sums=('e07a525d9cbea43d3ed11f3d672452cf94f88ca7bbaf3c3254bf5be4ef675a1797a5fff2444c0db60c6eb53e43734a388a91faed72bb2fb4e3e5a353535602b0'
         'SKIP'
-        'b5f19e0619f1fb017cd889c14e341c21146b3afe7b9eefcdb7fb1eb83a357434b899d1e92f3ab0023c78ef8f2de6ae54c4599ee0f0bd04d257f4ca0a4dc9a16c'
+        'e101c31ff9b68ec025183cbb199109d5bc94135d247c06fa903b97ccea6d3255b39b2780f3d1e3848ea68109ba91cdde5886d0a18d547b2f41d9643d2ac5bf5f'
+        'e41d07edb0d2098deda9bf5c5e3a9c3f34f858579b7aedb72a3488828e1def993c8557fa477eab6df59bb9c6175984e1bac1213d29cef710c5a46b3b3faff015'
         '02dd441cf6e4a7c2bc0de876f020b0784d811f77a5c6102dd075d67b07158dbc53c8b4d62bc8035283d4f349008574b1c3fac03f4519d56ffd809cb5bcfb7bea'
         'db58b7deb24cea16fb84f56680f0000683f72e11a95039969878e3819607aad5e65af9d9f50007e7710609065c0e3ebb9b30c1d929162b74eca5e74434d82cf1'
         'de31693cea5f452a9c8c0d1cf5210a6e67c0176f8b1a4d74106f2e803911569e9fdbb2301b3b5dc7ad6a6da285026b1a3ed3de52117d216b030cf0d92348909d')
@@ -68,6 +71,7 @@ _pick() {
 prepare() {
   # add distribution defaults to main.cf (alias_maps and alias_database)
   patch -Np1 -d $pkgbase-$pkgver -i ../$pkgbase-3.5.8-main_defaults.patch
+  patch -Np1 -d $pkgbase-$pkgver -i ../$pkgbase-3.9.0-mail_params.patch
 }
 
 build() {
@@ -79,11 +83,14 @@ build() {
     '-DUSE_LDAP_SASL'
     '-DHAS_LMDB'
     '-DUSE_TLS'
+    '-DHAS_MONGODB' '-I/usr/include/libmongoc-1.0' '-I/usr/include/libbson-1.0'
     '-DHAS_MYSQL' '-I/usr/include/mysql'
     '-DHAS_PCRE=2'
     '-DHAS_PGSQL' '-I/usr/include/postgresql'
     '-DHAS_SQLITE'
     '-DHAS_CDB'
+    '-DNO_DB'
+    '-DDEF_DB_TYPE=\"lmdb\"'
     '-DDEF_COMMAND_DIR=\"/usr/bin\"'
     '-DDEF_DAEMON_DIR=\"/usr/lib/postfix/bin\"'
     '-DDEF_SENDMAIL_PATH=\"/usr/bin/sendmail\"'
@@ -101,6 +108,7 @@ build() {
     AUXLIBS_LDAP='-lldap -llber'
     AUXLIBS_LMDB="$(pkgconf --libs lmdb)"
     AUXLIBS_PCRE="$(pcre2-config --libs8)"
+    AUXLIBS_MONGODB="$(pkgconf --libs libmongoc-1.0)"
     AUXLIBS_MYSQL="$(pkgconf --libs mariadb)"
     AUXLIBS_PGSQL="$(pkgconf --libs libpq)"
     AUXLIBS_SQLITE="$(pkgconf --libs sqlite3)"
@@ -122,11 +130,11 @@ package_postfix() {
   local _files_dir="$pkgdir/etc/$pkgbase/$pkgbase-files.d"
 
   depends+=(
-    db
     icu libicuuc.so
     libnsl libnsl.so
     libsasl libsasl2.so
     openssl libcrypto.so libssl.so
+    postfix-lmdb
     sh
   )
   optdepends=(
@@ -134,6 +142,7 @@ package_postfix() {
     'postfix-cdb: for CDB integration'
     'postfix-ldap: for LDAP integration'
     'postfix-lmdb: for LMDB integration'
+    'postfix-mongodb: for MongoDB integration'
     'postfix-mysql: for MySQL integration'
     'postfix-pcre: for PCRE integration'
     'postfix-pgsql: for PostgreSQL integration'
@@ -170,7 +179,7 @@ package_postfix() {
 
   # create dynamicmaps.cf.d and postfix-files.d entries for split packages
   # remove targetted files from main configuration files
-  for _feature in {cdb,ldap,lmdb,mysql,pcre,pgsql,sqlite}; do
+  for _feature in {cdb,ldap,lmdb,mongodb,mysql,pcre,pgsql,sqlite}; do
     printf "Split out dynamicmaps file for %s\n" $pkgbase-$_feature
     grep "$pkgbase-$_feature" "$_dynamicmaps_file" > "$_dynamicmaps_dir/$pkgbase-$_feature.cf"
     sed -e "/$pkgbase-$_feature/d" -i "$_dynamicmaps_file"
@@ -240,6 +249,17 @@ package_postfix-lmdb() {
     postfix
   )
   pkgdesc+=' (LMDB integration)'
+
+  mv -v $pkgname/* "$pkgdir"
+  install -vDm 644 $pkgbase-$pkgver/{LICENSE,COPYRIGHT} -t "$pkgdir/usr/share/licenses/$pkgname/"
+}
+
+package_postfix-mongodb() {
+  depends+=(
+    mongo-c-driver
+    postfix
+  )
+  pkgdesc+=' (MongoDB integration)'
 
   mv -v $pkgname/* "$pkgdir"
   install -vDm 644 $pkgbase-$pkgver/{LICENSE,COPYRIGHT} -t "$pkgdir/usr/share/licenses/$pkgname/"
