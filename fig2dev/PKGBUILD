@@ -1,40 +1,54 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Konstantin Gizdov <arch at kge dot pw>
+# Maintainer: Caleb Maclennan <caleb@alerque.com>
 # Controbutor: Baptiste Jonglez <archlinux at bitsofnetworks dot org>
 
 pkgname=fig2dev
-pkgver=3.2.8.b
-_upstreamver=3.2.8b
+pkgver=3.2.9
 pkgrel=1
 pkgdesc="Format conversion utility that can be used with xfig"
-arch=(x86_64 powerpc64le powerpc)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="http://mcj.sourceforge.net/"
-license=('custom')
-depends=('libpng' 'libxpm' 'bc' 'netpbm' 'ghostscript')
+license=(Xfig)
+depends=('bash' 'bc' 'ghostscript' 'glibc' 'libpng' 'libxpm' 'netpbm' 'zlib')
 makedepends=()
 conflicts=('transfig')
 replaces=('transfig')
 provides=('transfig')
-source=("https://downloads.sourceforge.net/mcj/${pkgname}-${_upstreamver}.tar.xz"
-        "LICENSE")
-sha256sums=('418a164aa9fad72d25bb4fec8d7b452fe3a2f12f990cf22e05c0eb16cecb68cb'
-            'e7b5050c353602ff95c6baefea92eebabacbd90b8538495438c574f85c7f7514')
+source=(
+  "https://downloads.sourceforge.net/mcj/${pkgname}-${pkgver}.tar.xz"
+  $pkgname-3.2.9-remove_broken_tests.patch
+)
+sha256sums=('15e246c8d13cc72de25e08314038ad50ce7d2defa9cf1afc172fd7f5932090b1'
+            '32e1fe1d99c76db7d49cb46245442cdf0fce693c3ebcde7b47913ebafb0c72fa')
+
+prepare() {
+  # remove broken tests: https://sourceforge.net/p/mcj/tickets/171/
+  patch -Np1 -d $pkgname-$pkgver -i ../$pkgname-3.2.9-remove_broken_tests.patch
+  # delete pre-generated test script
+  rm -v $pkgname-$pkgver/$pkgname/tests/testsuite
+  # extract license file from sources
+  sed -n '1,17p' $pkgname-$pkgver/$pkgname/alloc.h > Xfig.txt
+
+  cd "${pkgname}-${pkgver}"
+  autoreconf -fiv
+}
 
 build() {
-  cd "${pkgname}-${_upstreamver}"
+  cd "${pkgname}-${pkgver}"
   ./configure --prefix=/usr --enable-transfig
-  make FIG2DEV_LIBDIR=/usr/share/fig2dev XFIGLIBDIR=/usr/share/xfig
+  make
 }
 
 check() {
-  cd "${pkgname}-${_upstreamver}"
+  cd "${pkgname}-${pkgver}"
   make check
 }
 
 package() {
-  cd "${pkgname}-${_upstreamver}"
+  cd "${pkgname}-${pkgver}"
   make DESTDIR="${pkgdir}" XFIGLIBDIR=/usr/share/xfig \
     FIG2DEV_LIBDIR=/usr/share/fig2dev MANPATH=/usr/share/man \
     install
-  install -Dm644 ../LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 ../Xfig.txt -t "${pkgdir}/usr/share/licenses/${pkgname}/"
 }
