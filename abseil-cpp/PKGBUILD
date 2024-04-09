@@ -1,19 +1,20 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
+# Maintainer: Christian Heusel <gromit@archlinux.org>
 # Contributor: Aleksandar Trifunović <akstrfn at gmail dot com>
 
 pkgname=abseil-cpp
-pkgver=20230802.1
+pkgver=20240116.1
 pkgrel=1
 pkgdesc="Collection of C++ library code designed to augment the C++ standard library"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://abseil.io'
-license=('Apache')
+license=('Apache-2.0')
 depends=('gcc-libs')
 makedepends=('cmake' 'gtest')
 source=("https://github.com/abseil/abseil-cpp/archive/$pkgver/$pkgname-$pkgver.tar.gz"
          scoped-mock-log.patch)
-sha256sums=('987ce98f02eefbaf930d6e38ab16aa05737234d7afbab2d5c4ea7adbe50c28ed'
+sha256sums=('3c743204df78366ad2eaf236d6631d83f6bc928d1705dd0000b872e53b73dc6a'
             'a6cbc612a2b96fcbd52d081e03e8581107ceb4827edb19d96510a31c568e1396')
 
 prepare() {
@@ -23,6 +24,11 @@ prepare() {
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"
+
+  case "${CARCH}" in
+    powerpc) CXXFLAGS+=' -latomic' ;;
+  esac
+
   cmake -Bbuild \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCMAKE_CXX_FLAGS="${CXXFLAGS} -DNDEBUG" \
@@ -31,9 +37,15 @@ build() {
     -DBUILD_SHARED_LIBS=ON \
     -DABSL_BUILD_TEST_HELPERS=ON \
     -DABSL_USE_EXTERNAL_GOOGLETEST=ON \
-    -DABSL_FIND_GOOGLETEST=ON
+    -DABSL_FIND_GOOGLETEST=ON \
+    -DABSL_BUILD_TESTING=ON
   cd build
-  cmake --build .
+  cmake --build . --target all
+}
+
+check() {
+  cd "$srcdir/$pkgname-$pkgver/build"
+  ctest
 }
 
 package() {
