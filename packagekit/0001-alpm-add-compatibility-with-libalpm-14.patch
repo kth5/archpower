@@ -1,0 +1,74 @@
+From 40728db86389fa1254258ae60b462a9f8acf2786 Mon Sep 17 00:00:00 2001
+From: Jelle van der Waa <jelle@archlinux.org>
+Date: Fri, 8 Mar 2024 18:06:46 +0100
+Subject: [PATCH] alpm: add compatibility with libalpm 14
+
+In libalpm alpm_conflict_t package struct members are now of type
+alpm_pkg_t instead of char*.
+
+Don't crash on the new directive CacheServer.
+---
+ backends/alpm/meson.build           |  2 +-
+ backends/alpm/pk-alpm-config.c      |  5 +++++
+ backends/alpm/pk-alpm-transaction.c | 15 +++++++++------
+ 3 files changed, 15 insertions(+), 7 deletions(-)
+
+diff --git a/backends/alpm/meson.build b/backends/alpm/meson.build
+index eb4d5b373..50301466a 100644
+--- a/backends/alpm/meson.build
++++ b/backends/alpm/meson.build
+@@ -1,4 +1,4 @@
+-alpm_dep = dependency('libalpm', version: '>=13.0.0')
++alpm_dep = dependency('libalpm', version: '>=14.0.0')
+ 
+ shared_module(
+   'pk_backend_alpm',
+diff --git a/backends/alpm/pk-alpm-config.c b/backends/alpm/pk-alpm-config.c
+index c96b4e167..3954a45fb 100644
+--- a/backends/alpm/pk-alpm-config.c
++++ b/backends/alpm/pk-alpm-config.c
+@@ -615,6 +615,11 @@ pk_alpm_config_parse (PkAlpmConfig *config, const gchar *filename,
+ 			continue;
+ 		}
+ 
++		if (g_strcmp0 (key, "CacheServer") == 0 && str != NULL) {
++			/* Ignore "CacheServer" key instead of crashing */
++			continue;
++		}
++
+ 		/* report errors from above */
+ 		g_set_error (&e, PK_ALPM_ERROR, PK_ALPM_ERR_CONFIG_INVALID,
+ 			     "unrecognised directive '%s'", key);
+diff --git a/backends/alpm/pk-alpm-transaction.c b/backends/alpm/pk-alpm-transaction.c
+index 58f996067..bc1273375 100644
+--- a/backends/alpm/pk-alpm-transaction.c
++++ b/backends/alpm/pk-alpm-transaction.c
+@@ -865,16 +865,19 @@ pk_alpm_conflict_build_list (const alpm_list_t *i)
+ 		alpm_conflict_t *conflict = (alpm_conflict_t *) i->data;
+ 		alpm_depend_t *depend = conflict->reason;
+ 
+-		if (g_strcmp0 (conflict->package1, depend->name) == 0 ||
+-		    g_strcmp0 (conflict->package2, depend->name) == 0) {
++		const char *package_name1 = alpm_pkg_get_name (conflict->package1);
++		const char *package_name2 = alpm_pkg_get_name (conflict->package2);
++
++		if (g_strcmp0 (package_name1, depend->name) == 0 ||
++		    g_strcmp0 (package_name2, depend->name) == 0) {
+ 			g_string_append_printf (list, "%s <-> %s, ",
+-						conflict->package1,
+-						conflict->package2);
++						package_name1,
++						package_name2);
+ 		} else {
+ 			char *reason = alpm_dep_compute_string (depend);
+ 			g_string_append_printf (list, "%s <-> %s (%s), ",
+-						conflict->package1,
+-						conflict->package2, reason);
++						package_name1,
++						package_name2, reason);
+ 			free (reason);
+ 		}
+ 	}
+-- 
+2.44.0
+
