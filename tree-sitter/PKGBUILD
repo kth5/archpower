@@ -2,29 +2,47 @@
 # Maintainer: Filipe Laíns (FFY00) <lains@archlinux.org>
 # Maintainer: Daniel M. Capella <polyzen@archlinux.org>
 
-pkgname=tree-sitter
-pkgver=0.20.10
-pkgrel=2
-pkgdesc='Incremental parsing library'
+pkgbase=tree-sitter
+pkgname=('tree-sitter' 'tree-sitter-cli')
+pkgver=0.22.2
+pkgrel=1
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url='https://github.com/tree-sitter/tree-sitter'
+url=https://github.com/tree-sitter/tree-sitter
 license=('MIT')
-provides=('libtree-sitter.so')
-makedepends=('git')
-source=("git+$url.git#commit=c51896d32dcc11a38e41f36e3deb1a6a9c4f4b14")
-b2sums=('SKIP')
+makedepends=('git' 'rust')
+options=('!lto') # Needed for CLI build
+source=("git+$url.git#commit=v$pkgver?signed")
+b2sums=('29553d0ad6b3e0277afc056efe9ab7aec14300b01527afea836c124c2dd2ae6e1a76838935311213b6690c4c065153743b4ad53605c4d92d256f9068216bbe30')
+validpgpkeys=('FCC13F47A6900D64239FF13BE67890ADC4227273') # Amaan Qureshi <amaanq12@gmail.com>
+
+prepare() {
+  cd $pkgbase/cli
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
 
 build() {
-  cd $pkgname
+  cd $pkgbase
+  make PREFIX=/usr LDFLAGS="$LDFLAGS -flto" CFLAGS="$CFLAGS -flto" CXXFLAGS="$CXXFLAGS -flto"
 
-  make
+  cd cli
+  cargo build --release --locked --offline
 }
 
-package() {
-  cd $pkgname
+package_tree-sitter() {
+  pkgdesc='Incremental parsing library'
+  provides=('libtree-sitter.so')
 
+  cd $pkgbase
   make DESTDIR="$pkgdir" PREFIX=/usr install
-
-  install -Dm 644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
+  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgbase
 }
 
+package_tree-sitter-cli() {
+  pkgdesc='CLI tool for developing, testing, and using Tree-sitter parsers'
+  depends=('gcc-libs')
+  optdepends=('nodejs: for the generate subcommand')
+
+  cd $pkgbase
+  install -Dt "$pkgdir"/usr/bin target/release/$pkgbase
+  install -Dm644 -t "$pkgdir"/usr/share/licenses/${pkgbase}-cli LICENSE
+}
