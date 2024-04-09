@@ -1,32 +1,50 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer:
+# Maintainer: Caleb Maclennan <caleb@alerque.com>
 # Contributor: Ronald van Haren <ronald.archlinux.org>
 # Contributor: eric <eric@archlinux.org>
 # Contributor: Tom Newsom <Jeepster@gmx.co.uk>
  
 pkgname=psutils
-pkgver=2.10
+_pyname=pspdfutils
+pkgver=3.3.2
 pkgrel=1
+pkgdesc='A set of postscript utilities'
 arch=(any)
-pkgdesc="A set of postscript utilities"
-url="https://github.com/rrthomas/psutils"
-license=('GPL3')
-depends=('glibc' 'ghostscript' 'perl' 'perl-ipc-run3' 'libpaper')
-options=('!makeflags')
-source=("https://github.com/rrthomas/psutils/releases/download/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha256sums=('6f8339fd5322df5c782bfb355d9f89e513353220fca0700a5a28775404d7e98b')
+url="https://github.com/rrthomas/$pkgname"
+license=(GPL-3.0-only)
+depends=(libpaper
+         python
+         python-puremagic
+         python-pypdf)
+makedepends=(python-{build,installer,wheel}
+             python-argparse-manpage
+             python-setuptools)
+checkdepends=(ghostscript
+              python-pytest-datafiles
+              python-wand)
+# provides=("python-$_pyname=$pkgver")
+_archive="$_pyname-$pkgver"
+source=("$url/releases/download/v$pkgver/$_archive.tar.gz")
+sha256sums=('a20a2a1359811bd0ad72e15349351a26774ddf8e355c2cde4250a70cf77fdf0c')
+
+prepare() {
+	cd "$_archive"
+    sed -i -e '/pytest-datafiles/d' -e '/Wand/d' pyproject.toml
+}
 
 build() {
-  cd ${pkgname}-${pkgver}
-  
-  export CFLAGS="$CFLAGS -DPAPER=\\\"letter\\\" -DUNIX -Wall" \
-  export CCFLAGS="$LDFLAGS"
+	cd "$_archive"
+	python -m build -wn
+}
 
-  ./configure --prefix=/usr
-  make
+check() {
+	cd "$_archive"
+	export PYTHONPATH="."
+	pytest
 }
 
 package() {
-  cd ${pkgname}-${pkgver}
-  make DESTDIR="${pkgdir}" install
+	cd "$_archive"
+	python -m installer -d "$pkgdir" dist/*.whl
+	install -Dm0644 -t "$pkgdir/usr/share/licenses/$pkgname/" COPYING
 }
