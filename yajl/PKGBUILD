@@ -7,38 +7,56 @@
 
 pkgname=yajl
 pkgver=2.1.0
-pkgrel=5
+pkgrel=6
 pkgdesc='Yet Another JSON Library'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url='https://lloyd.github.com/yajl/'
-license=('ISC')
-depends=('glibc')
-makedepends=('cmake')
-provides=('libyajl.so')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/lloyd/${pkgname}/archive/refs/tags/${pkgver}.tar.gz")
-sha512sums=('9e786d080803df80ec03a9c2f447501e6e8e433a6baf636824bc1d50ecf4f5f80d7dfb1d47958aeb0a30fe459bd0ef033d41bc6a79e1dc6e6b5eade930b19b02')
-b2sums=('755ee1d9f8c59b730393468722dae9148cd63443a0c91f0e1894f5998b699303920b8f0748541bd280d132ee1c9dedd40ebc2a7e020a8fe65beb186f25af5402')
+url="https://github.com/lloyd/yajl"
+license=(ISC)
+depends=(glibc)
+makedepends=(cmake)
+provides=(libyajl.so)
+source=(
+  $pkgname-$pkgver.tar.gz::$url/archive/refs/tags/$pkgver.tar.gz
+  $pkgname-2.1.0-CVE-2017-16516.patch
+  $pkgname-2.1.0-CVE-2022-24795.patch
+  $pkgname-2.1.0-memory_leak.patch
+)
+sha512sums=('9e786d080803df80ec03a9c2f447501e6e8e433a6baf636824bc1d50ecf4f5f80d7dfb1d47958aeb0a30fe459bd0ef033d41bc6a79e1dc6e6b5eade930b19b02'
+            '6955d317643e0a0e0893e62acd8485ce9b5d22837faa4eadf9abe09e72fc4cc1a343edd1faaff75e7172063bdb0e9442cb5e3f491ec2cc4d770fcbcb011d6dae'
+            '75cac72797a694a044e83e03ab1a25d3cce376355d48214f6cdc8f4304776c1fd3b411d043e0e48022b219b00399f2bc730fe58b9e60737ef3ff66be54229722'
+            'a23e30a0c42097f41f1a0bc769a9c68409a615a4599ae9f090320d4413e24c4f1b524aaabcefd9e503bbb7389aaef86fe32cbfdc93969e883225dcdf487b7214')
+b2sums=('755ee1d9f8c59b730393468722dae9148cd63443a0c91f0e1894f5998b699303920b8f0748541bd280d132ee1c9dedd40ebc2a7e020a8fe65beb186f25af5402'
+        'cf5ff5e898166d3805abb8c3e793d1814559bb0b9a9bcaed9cd39195af82a7b112514a0ccd46f72a27d7ee488a8da998697614c69bc5944ae2a5faac860c0d61'
+        '1846dbae888c2bd6722501fad55b02f768d70c9141e00ac484be5cc98021af14f74d79edd50d486627df128ef34155d194545d7629951c96f53dd4b0cbac6ff0'
+        '1d5c6e000b5c73f61363fd5f8efea2dc43dc80124f587de3d3fa03f929dbfdc257b73799d4eb88a1bfafbe6634506c5d31c98d0d920faa468c1655e4c3e9ae7b')
+
+prepare() {
+  patch -Np1 -d $pkgname-$pkgver -i ../$pkgname-2.1.0-CVE-2017-16516.patch
+  patch -Np1 -d $pkgname-$pkgver -i ../$pkgname-2.1.0-CVE-2022-24795.patch
+  patch -Np1 -d $pkgname-$pkgver -i ../$pkgname-2.1.0-memory_leak.patch
+}
 
 build() {
-  cd "$pkgname-$pkgver"
+  local cmake_options=(
+    -B build
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -S $pkgname-$pkgver
+    -W no-dev
+  )
+
   export CFLAGS+=" -ffat-lto-objects"
-  cmake -DCMAKE_INSTALL_PREFIX='/usr' \
-        -DCMAKE_BUILD_TYPE='None' \
-        -Wno-dev \
-        -B build \
-        -S .
-  make VERBOSE=1 -C build
+  cmake "${cmake_options[@]}"
+  cmake --build build --verbose
 }
 
 check() {
-  cd "$pkgname-$pkgver"
   make VERBOSE=1 -C build test
   make VERBOSE=1 -C build test-api
 }
 
 package() {
-  cd "$pkgname-$pkgver"
-  make DESTDIR="$pkgdir" install -C build
-  install -vDm 644 COPYING -t "$pkgdir/usr/share/licenses/${pkgname}"
-  install -vDm 644 {ChangeLog,README,TODO} -t "$pkgdir/usr/share/doc/${pkgname}"
+  DESTDIR="$pkgdir" cmake --install build
+  install -vDm 644 $pkgname-$pkgver/COPYING -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -vDm 644 $pkgname-$pkgver/{ChangeLog,README,TODO} -t "$pkgdir/usr/share/doc/$pkgname/"
 }
