@@ -1,0 +1,130 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Contributor: Evangelos Foutras <evangelos@foutrelis.com>
+# Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
+
+pkgname=('llvm-julia' 'llvm-julia-libs')
+_pkgver=15.0.7-10
+pkgver=${_pkgver/-/.}
+pkgrel=2
+arch=(x86_64 powerpc64le)
+url='https://julialang.org/'
+license=('custom:Apache 2.0 with LLVM Exception')
+depends=(gcc-libs
+         glibc
+         zlib
+         zstd)
+makedepends=(cmake
+             libedit
+             libffi
+             libxml2
+             ncurses
+             ninja
+             python)
+options=(!lto) # https://github.com/llvm/llvm-project/issues/57740
+source=(https://github.com/JuliaLang/llvm-project/archive/julia-$_pkgver.tar.gz
+        llvm-ppc64-elfv2.patch)
+sha256sums=('c1ff5c68ccf8cb0deacf476bf98a88db219e41124ddb918c597457136481e6b4'
+            'd3b3d13f05b17c62108345aa4ac555c656c3f8dbdb24551004b06ef652bef94d')
+
+# Utilizing LLVM_DISTRIBUTION_COMPONENTS to avoid
+# installing static libraries; inspired by Gentoo
+_get_distribution_components() {
+  local target
+  ninja -t targets | grep -Po 'install-\K.*(?=-stripped:)' | while read -r target; do
+    case $target in
+      llvm-libraries|distribution)
+        continue
+        ;;
+      # shared libraries
+      LLVM|LLVMgold)
+        ;;
+      # libraries needed for clang-tblgen
+      LLVMDemangle|LLVMSupport|LLVMTableGen)
+        ;;
+      # exclude static libraries
+      LLVM*)
+        continue
+        ;;
+      # exclude llvm-exegesis (doesn't seem useful without libpfm)
+      llvm-exegesis)
+        continue
+        ;;
+    esac
+    echo $target
+  done
+}
+
+prepare() {
+  cd llvm-project-julia-$_pkgver/llvm
+  # we use elfv2 on powerpc64
+  patch -Np2 -i ${srcdir}/llvm-ppc64-elfv2.patch
+}
+
+build() {
+  # Build only minimal debug info to reduce size
+  CFLAGS=${CFLAGS/-g /-g1 }
+  CXXFLAGS=${CXXFLAGS/-g /-g1 }
+
+  _symver="JL_LLVM_$(echo $pkgver | cut -d. -f1-2)"
+  local cmake_args=(
+    -G Ninja
+    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_INSTALL_PREFIX=/usr/lib/llvm-julia
+    -DCMAKE_SKIP_RPATH=ON
+    -DLLVM_BINUTILS_INCDIR=/usr/include
+    -DLLVM_BUILD_LLVM_DYLIB=ON
+    -DLLVM_BUILD_TESTS=ON
+    -DLLVM_ENABLE_BINDINGS=OFF
+    -DLLVM_ENABLE_FFI=ON
+    -DLLVM_ENABLE_RTTI=ON
+    -DLLVM_HOST_TRIPLE=$CHOST
+    -DLLVM_INCLUDE_BENCHMARKS=OFF
+    -DLLVM_INSTALL_UTILS=ON
+    -DLLVM_LINK_LLVM_DYLIB=ON
+    -DLLVM_USE_PERF=ON
+    -DLLVM_VERSION_SUFFIX=jl
+    -DLLVM_SHLIB_SYMBOL_VERSION=$_symver
+  )
+
+  cmake -B build -S llvm-project-julia-$_pkgver/llvm \
+     "${cmake_args[@]}"
+  pushd build
+    local distribution_components=$(_get_distribution_components | paste -sd\;)
+    test -n "$distribution_components"
+    cmake_args+=(-DLLVM_DISTRIBUTION_COMPONENTS="$distribution_components")
+  popd
+
+  cmake -B build -S llvm-project-julia-$_pkgver/llvm \
+    "${cmake_args[@]}"
+  cmake --build build
+}
+
+package_llvm-julia() {
+  pkgdesc="Compiler infrastructure - Julia fork"
+  depends+=(llvm-julia-libs)
+
+  DESTDIR="$pkgdir" cmake --build build --target install-distribution
+
+  # The runtime libraries go into llvm-julia-libs
+  mv -f "$pkgdir"/usr/lib/llvm-julia/lib/libLLVM-{15,${pkgver%.*}}jl.so .
+  mv -f "$pkgdir"/usr/lib/llvm-julia/lib/LLVMgold.so "$srcdir/"
+
+  install -Dm644 llvm-project-julia-$_pkgver/llvm/LICENSE.TXT "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
+
+package_llvm-julia-libs() {
+  pkgdesc="LLVM runtime libraries - Julia fork"
+  depends+=(libedit
+            libffi
+            libxml2
+            ncurses)
+
+  install -d "$pkgdir/usr/lib/llvm-julia/lib"
+  cp -P libLLVM-{15,${pkgver%.*}}jl.so "$pkgdir"/usr/lib
+  ln -s ../../libLLVM-15jl.so "$pkgdir/usr/lib/llvm-julia/lib/libLLVM-15jl.so"
+  ln -s ../../libLLVM-15jl.so "$pkgdir/usr/lib/llvm-julia/lib/libLLVM-${pkgver}jl.so"
+  cp -P LLVMgold.so "$pkgdir/usr/lib/llvm-julia/lib/"
+
+  install -Dm644 llvm-project-julia-$_pkgver/llvm/LICENSE.TXT "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
