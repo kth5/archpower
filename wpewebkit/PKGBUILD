@@ -6,8 +6,8 @@ pkgname=(
   wpewebkit
   wpewebkit-docs
 )
-pkgver=2.42.5
-pkgrel=2
+pkgver=2.44.1
+pkgrel=1
 pkgdesc="Embeddable web content engine"
 url="https://wpewebkit.org"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
@@ -66,31 +66,29 @@ makedepends=(
   unifdef
   wayland-protocols
 )
+options=(!lto)
 source=(
   $url/releases/wpewebkit-$pkgver.tar.xz{,.asc}
   reduce-memory-overheads.patch
-  unused_variable.patch
+  webkit-b3jit-regression.patch
 )
-sha256sums=('4dbab6c5e6dc0c65a3d7dffc1c2390be5f9abd423faf983fe3a55fe081df0532'
+sha256sums=('2c9fbf4fcf8884d34102283e2b008ce0b0bc2cf07de78f564a8b34347e7bc19b'
             'SKIP'
             '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864'
-            '1307605918152d52b7adf02b07a2fb992aa9fe0a927b8f691578c3839689926c')
-b2sums=('a90431053235ae2ab90aeedec6a888a9aac80e691b05470448ffca9220dd4d28c479638708e250921521fd0d079f84027b528608cb8c0aed99bf9d7b9c68d3f8'
+            '35e71f03b8909bfb017d2ffb4132f9893cc40d8d57720cd8153ce41a13caec93')
+b2sums=('15c8a2a47d5dc836cbbb1deec81f52165f32ff7bb35332b7d03eb93d86fb548a165b76a26e233cffe5c5d31a495e202bf3a3ad653f81d68b631504227abec95c'
         'SKIP'
         'cc16462ce22df999b47ef477d4272ef3df2fbbfe5cdc585f3ce47e56cde65a1d7dd1105e6e7bbff41695f79b6394bc3e403e53a669bb7f456c733ed216372c9b'
-        '577073ae4b1b2a1b6d1aeb94b87ba097bd3663d281df4e583f62ec190d42857860278e7c41d355cba17eca6a49562d882e6a5026519b71e34cac34f5fd762599')
+        'd6c2b589bdf8cf3f75f698bcfa98247dd1fc260859cfefa8842ba11d32e7d2089f97c9b930427ccb6fa37cd58493c6e4c699e3e44327327da0ef1781c32bb7d9')
 validpgpkeys=(
-  'D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
-  '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B'  # Adrián Pérez de Castro <aperez@igalia.com>
+  D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3 # Carlos Garcia Campos <cgarcia@igalia.com>
+  5AA3BC334FD7E3369E7C77B291C559DBE4C9123B # Adrián Pérez de Castro <aperez@igalia.com>
 )
 
 prepare() {
   cd wpewebkit-$pkgver
-
   patch -Np1 -i ${srcdir}/reduce-memory-overheads.patch
-
-# Fixes: https://bugs.webkit.org/show_bug.cgi?id=268739
-  patch -Np1 -R -i ${srcdir}/unused_variable.patch
+  patch -Np1 -i ${srcdir}/webkit-b3jit-regression.patch
 }
 
 build() {
@@ -101,22 +99,26 @@ build() {
     -DCMAKE_INSTALL_LIBDIR=lib
     -DCMAKE_INSTALL_LIBEXECDIR=lib
     -DCMAKE_SKIP_RPATH=ON
-    -DUSE_AVIF=ON
-    -DENABLE_WPE_1_1_API=ON
+    -DUSE_LIBBACKTRACE=OFF
     -DENABLE_DOCUMENTATION=ON
     -DENABLE_MINIBROWSER=ON
+    -DUSE_OPENGL_OR_ES=ON
   )
 
   case "${CARCH}" in
     powerpc64*)
-      CFLAGS+=' -mminimal-toc'
-      CXXFLAGS+=' -mminimal-toc'
+      export CFLAGS+=' -mminimal-toc'
+      export CXXFLAGS+=' -mminimal-toc'
+      export LDFLAGS+=' -Wl,--no-keep-memory'
     ;;
     powerpc) 
       cmake_options+=(
         -DENABLE_WEBGL=OFF
         -DFORCE_32BIT=ON
       )
+      export LDFLAGS+=" -Wl,--no-keep-memory"
+    ;;
+    riscv64)
       export LDFLAGS+=" -Wl,--no-keep-memory"
     ;;
     x86_64)
@@ -150,7 +152,7 @@ package_wpewebkit() {
     libwpe-1.0.so
   )
   provides+=(
-    libWPEWebKit-1.1.so
+    libWPEWebKit-2.0.so
   )
   optdepends=(
     'geoclue: Geolocation support'
@@ -162,7 +164,7 @@ package_wpewebkit() {
   DESTDIR="$pkgdir" cmake --install build
 
   mkdir -p doc/usr/share
-  mv {"$pkgdir",doc}/usr/share/gtk-doc
+  mv {"$pkgdir",doc}/usr/share/doc
 
   cd wpewebkit-$pkgver
   find Source -name 'COPYING*' -or -name 'LICENSE*' -print0 | sort -z |
