@@ -1,0 +1,51 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Morten Linderud <foxboron@archlinux.org>
+
+pkgname=docker-scan
+pkgver=0.26.0
+pkgrel=1
+pkgdesc="Docker Scan is a Command Line Interface to run vulnerability detection on your Dockerfiles and Docker images"
+arch=(x86_64 powerpc64le riscv64)
+url="https://github.com/docker/scan-cli-plugin"
+license=("Apache")
+makedepends=('go' 'git')
+_commit=c7fa31d4c4cc150f5ac569a6786b0b616cf677e1	#refs/tags/v0.26.0
+source=("git+https://github.com/docker/scan-cli-plugin.git#commit=${_commit}")
+sha512sums=('SKIP')
+
+pkgver() {
+  cd "scan-cli-plugin"
+  git describe --tags | sed 's/^v//;s/-/+/g'
+}
+
+build() {
+  cd "scan-cli-plugin"
+  export CGO_CPPFLAGS="${CPPFLAGS}"
+  export CGO_CFLAGS="${CFLAGS}"
+  export CGO_CXXFLAGS="${CXXFLAGS}"
+  export CGO_LDFLAGS="${LDFLAGS}"
+  export GOFLAGS="-buildmode=pie -trimpath -modcacherw"
+
+  case "${CARCH}" in
+    riscv64)
+      export CGO_ENABLED=1
+      export GOFLAGS="${GOFLAGS/-buildmode=pie/}"
+    ;;
+  esac
+
+  make -f builder.Makefile build
+}
+
+check(){
+  cd "scan-cli-plugin"
+  # mkdir cli-plugins
+  # cp bin/docker-scan_linux_amd64 cli-plugins/docker-scan
+  # export DOCKER_CONFIG="$(PWD)"
+  # go test ./...
+}
+
+package() {
+  cd "scan-cli-plugin"
+  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  install -Dm755 bin/docker-scan_linux_amd64 "$pkgdir"/usr/lib/docker/cli-plugins/docker-scan
+}
