@@ -1,12 +1,11 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Antonio Rojas <arojas@archlinux.org>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=qt6-tools
-_qtver=6.6.2
+_qtver=6.7.0
 pkgver=${_qtver/-/}
-pkgrel=1.1
+pkgrel=2
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://www.qt.io'
 license=(GPL3 LGPL3 FDL custom)
@@ -17,27 +16,41 @@ depends=(gcc-libs
          zstd)
 makedepends=(clang
              cmake
+             git
+             litehtml
              llvm
              ninja
              qt6-declarative)
-           # litehtml
 optdepends=('clang: for qdoc and lupdate'
+            'litehtml: for assistant'
             'qt6-declarative: for qdoc and lupdate')
-          # 'litehtml: for assistant'
 groups=(qt6)
-_pkgfn=${pkgname/6-/}-everywhere-src-$_qtver
-source=(https://download.qt.io/official_releases/qt/${pkgver%.*}/$_qtver/submodules/$_pkgfn.tar.xz)
-sha256sums=('e6d49e9f52111287f77878ecb8b708cce682f10b03ba2476d9247603bc6c4746')
+_pkgfn=${pkgname/6-/}
+source=(git+https://code.qt.io/qt/$_pkgfn#tag=v$pkgver
+        git+https://code.qt.io/playground/qlitehtml
+        qttools-workaround-shared-zstd.patch)
+sha256sums=('fcf275b708870ab69df5b158629cfa9a00e260895a7f418d700eaba8a8ed3c9d'
+            'SKIP'
+            'f27ef8c15a7f44b7da8332b73f8708cd414b4b97da5474b2e60db74f8e9e108f')
 
 prepare() {
-# Fix build with system litehtml
-  sed -e '/qt_internal_set_exceptions_flags/d' -e '/qt_disable_warnings/d' -i $_pkgfn/src/assistant/CMakeLists.txt
+  cd $_pkgfn
+  git submodule init
+  git submodule set-url src/assistant/qlitehtml "$srcdir"/qlitehtml
+  git -c protocol.file.allow=always submodule update
+
+  # work around https://bugreports.qt.io/browse/QTBUG-119469
+  patch -Np0 -i ${srcdir}/qttools-workaround-shared-zstd.patch
 }
 
 build() {
+  # work around https://bugreports.qt.io/browse/QTBUG-119469
+  export CXXFLAGS+=' -lzstd'
+
   cmake -B build -S $_pkgfn -G Ninja \
     -DINSTALL_PUBLICBINDIR=usr/bin \
-    -DCMAKE_MESSAGE_LOG_LEVEL=STATUS
+    -DCMAKE_MESSAGE_LOG_LEVEL=STATUS \
+    -DQT_UNITY_BUILD=OFF
   cmake --build build
 }
 
