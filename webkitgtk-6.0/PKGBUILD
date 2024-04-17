@@ -7,8 +7,8 @@ pkgname=(
   webkitgtk-6.0
   webkitgtk-6.0-docs
 )
-pkgver=2.42.5
-pkgrel=2
+pkgver=2.44.1
+pkgrel=1
 pkgdesc="Web content engine for GTK"
 url="https://webkitgtk.org"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
@@ -79,44 +79,28 @@ makedepends=(
 )
 source=(
   $url/releases/webkitgtk-$pkgver.tar.xz{,.asc}
-  GTK-MiniBrowser-should-hide-the-toolbar-when-using-full-screen.patch
-  GTK-Disable-DMABuf-renderer-for-NVIDIA-proprietary-drivers.patch
   reduce-memory-overheads.patch
-  unused_variable.patch
+  webkit-b3jit-regression.patch
 )
-sha256sums=('b64278c1f20b8cfdbfb5ff573c37d871aba74a1db26d9b39f74e8953fe61e749'
+sha256sums=('425b1459b0f04d0600c78d1abb5e7edfa3c060a420f8b231e9a6a2d5d29c5561'
             'SKIP'
-            'a921d6be1303e9f23474971f381886fd291ec5bb1a7ff1e85acede8cfb88bef2'
-            '655f3b2c96355ac83c4fa1fc6048e3256bbfdbfb9727e1e18c5af12613536206'
             '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864'
-            '1307605918152d52b7adf02b07a2fb992aa9fe0a927b8f691578c3839689926c')
-b2sums=('4b772d91d3e2c3fc3a48455f43016d2cc1699b18fcc78253d1527eecabbfc1f47cd3bf3c512508fd683d29de68f980511d2057e4c65979bab38083a2da5cb516'
+            '35e71f03b8909bfb017d2ffb4132f9893cc40d8d57720cd8153ce41a13caec93')
+b2sums=('a5fff4c4fe90bcd0ea098930e51a36ea60152da47fd06e78abbc10f146437838aa19fed15cf58732b538046e1f42d8461cd5c0e0859096506932c9fae150cc16'
         'SKIP'
-        'd440d82c769f1b35caf5464dc850cdf1c896224205c90c17d8b0a44aee62e4b1383e11306936aaca067fde8836770d346d5122d7b05c91a5c7c1741c89c65e2f'
-        'daa782d4d40cc12a05c02b2494e879333f66f32820f1a1b89b7ab68f62fd53043b116ecb5ef476004095a7c7b924b12695b7e87e21dd547f66e72fa02a972f0d'
         'cc16462ce22df999b47ef477d4272ef3df2fbbfe5cdc585f3ce47e56cde65a1d7dd1105e6e7bbff41695f79b6394bc3e403e53a669bb7f456c733ed216372c9b'
-        '577073ae4b1b2a1b6d1aeb94b87ba097bd3663d281df4e583f62ec190d42857860278e7c41d355cba17eca6a49562d882e6a5026519b71e34cac34f5fd762599')
+        'd6c2b589bdf8cf3f75f698bcfa98247dd1fc260859cfefa8842ba11d32e7d2089f97c9b930427ccb6fa37cd58493c6e4c699e3e44327327da0ef1781c32bb7d9')
 validpgpkeys=(
-  'D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
-  '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B'  # Adrián Pérez de Castro <aperez@igalia.com>
+  D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3 # Carlos Garcia Campos <cgarcia@igalia.com>
+  5AA3BC334FD7E3369E7C77B291C559DBE4C9123B # Adrián Pérez de Castro <aperez@igalia.com>
 )
 
 prepare() {
   cd webkitgtk-$pkgver
 
-  # Requested by eworm
-  # https://github.com/WebKit/WebKit/pull/17909
-  patch -Np1 -i ../GTK-MiniBrowser-should-hide-the-toolbar-when-using-full-screen.patch
-
-  # https://bugs.archlinux.org/task/79783
-  # https://github.com/WebKit/WebKit/pull/18614
-  patch -Np1 -i ../GTK-Disable-DMABuf-renderer-for-NVIDIA-proprietary-drivers.patch
-
   patch -Np1 -i ${srcdir}/reduce-memory-overheads.patch
 
-# Fixes: https://bugs.webkit.org/show_bug.cgi?id=268739
-  patch -Np1 -R -i ${srcdir}/unused_variable.patch
-
+  patch -Np1 -i ${srcdir}/webkit-b3jit-regression.patch
 }
 
 build() {
@@ -127,8 +111,9 @@ build() {
     -DCMAKE_INSTALL_LIBDIR=lib
     -DCMAKE_INSTALL_LIBEXECDIR=lib
     -DCMAKE_SKIP_RPATH=ON
-    -DUSE_AVIF=ON
     -DUSE_GTK4=ON
+    -DUSE_LIBBACKTRACE=OFF
+    -DUSE_SOUP2=OFF
     -DENABLE_DOCUMENTATION=ON
     -DENABLE_MINIBROWSER=ON
   )
@@ -189,7 +174,7 @@ package_webkitgtk-6.0() {
   DESTDIR="$pkgdir" cmake --install build
 
   mkdir -p doc/usr/share
-  mv {"$pkgdir",doc}/usr/share/gtk-doc
+  mv {"$pkgdir",doc}/usr/share/doc
 
   cd webkitgtk-$pkgver
   find Source -name 'COPYING*' -or -name 'LICENSE*' -print0 | sort -z |
