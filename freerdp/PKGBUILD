@@ -5,14 +5,18 @@
 
 _name=FreeRDP
 pkgname=freerdp
-pkgver=2.11.5
-pkgrel=1
+pkgver=3.4.0
+_libver=${pkgver/.*/}
+pkgrel=5
 epoch=2
 pkgdesc="Free implementation of the Remote Desktop Protocol (RDP)"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://www.freerdp.com/"
 license=(Apache-2.0)
 depends=(
+  cjson
+  fuse3
+  gcc-libs
   glibc
   libcups
   libx11
@@ -27,49 +31,55 @@ depends=(
   libxrandr
   libxrender
   libxtst
-  pcsclite
+  sdl2
+  sdl2_ttf
   wayland
 )
 makedepends=(
   alsa-lib
   cmake
   docbook-xsl
+  e2fsprogs
   ffmpeg
+  glib2
+  gtk3
   icu
   krb5
-  libjpeg-turbo
+  libp11
   libpulse
   libusb
   openssl
   pam
-  systemd
+  pkcs11-helper
+  webkit2gtk-4.1
   xmlto
   xorgproto
+  zlib
 )
 provides=(
-  libfreerdp2.so
-  libfreerdp-client2.so
-  libfreerdp-server2
-  libfreerdp-shadow2.so
-  libfreerdp-shadow-subsystem2.so
-  libwinpr2.so
-  libwinpr-tools2.so
-  libuwac0.so
+  libfreerdp-client$_libver.so
+  libfreerdp-server-proxy$_libver.so
+  libfreerdp-server$_libver
+  libfreerdp-shadow-subsystem$_libver.so
+  libfreerdp-shadow$_libver.so
+  libfreerdp$_libver.so
+  libwinpr-tools$_libver.so
+  libwinpr$_libver.so
 )
-options=(!distcc)
 source=(
   https://github.com/$pkgname/$pkgname/archive/$pkgver/$pkgname-$pkgver.tar.gz
-  $pkgname-2.0.0-manpage_formatting.patch
+  0001-Use-webkit2gtk-4.1.patch
 )
-sha512sums=('7b89981a4d2773fdcf41f32d58ec7925765b3cedb7ebc77d54ded8c39f38d294f3adfdf5ab79ad23c5edd2cba456465ac9eafec437c004b5de7a9d76a6a94536'
-            'd960e042d1527b5d5721136b6b20fc36f65beafd010581ea5b908668537fe9fe622de6689a29c0274b0d6f1e513615f0d02e56c1d1d1e613d093e145d39af8d7')
-b2sums=('0b7365eccc625878c9543d8b6a92787b11e1c5463122e14536b2fb8ebc46d80b9e8b4274e6d5be8da0fe7a5a3578b907ff47267501b0fdc15dea64534a22f4a2'
-        '8242fe56ba9cf5352d836f656645a46142c1aecea3e8200203117a0cccc226135591c16fa0a24cfa196ade7b703832ff6871a948fd3bbbcc1d9c6df9885dc360')
+sha512sums=('aa96ad2bf30dbe09849ecfb64ec6e60ba4fd3bc2d144c7d576b1e59476ef45d9d744da37806b1c00e3a0413390b35c6d3d4401b89c07c5663122280eca39e501'
+            '0bfdf8825f586a548eaef309f64fb50ea9e2598592f778aa835bbec1a0600d715b8fb28f5950aaeb5ef981a33d5f9f3f39f4fd1800bdf9e5630d9925a9fbab04')
+b2sums=('d260fb47406d36b728ab24e323d06624d53c01bbdc877b3b97f3c1c159e87baaffa418279ba1cc6e4ba82f0f890deba357ddb325a54316a23f0dbfdff4609eff'
+        'bbee3975cdcd0ce421ecd8825d1b6dbdbd1565b612a51e7d9423e79226579587031b5ebe7e5251c88015e9047cd35818bad338a7048acfddac137ffe23197b71')
 
 prepare() {
-  # fix man page formatting:
-  # https://bugs.archlinux.org/task/64814
-  patch -d $_name-$pkgver -p1 -i ../$pkgname-2.0.0-manpage_formatting.patch
+  cd $_name-$pkgver
+
+  # Use the newer WebKit
+  patch -Np1 < ../0001-Use-webkit2gtk-4.1.patch
 }
 
 build() {
@@ -80,19 +90,28 @@ build() {
     -D CMAKE_INSTALL_LIBDIR=lib
     -D CMAKE_BUILD_TYPE=None
     -D CMAKE_SKIP_INSTALL_RPATH=ON
-    -D PROXY_PLUGINDIR=/usr/lib/freerdp2/server/proxy/plugins
+    -D PROXY_PLUGINDIR=/usr/lib/$pkgname/server/proxy/plugins
+    -D RDTK_FORCE_STATIC_BUILD=ON  # prevent file conflicts with freerdp2
+    -D UWAC_FORCE_STATIC_BUILD=ON  # prevent file conflicts with freerdp2
+    -D WITH_ALSA=ON
+    -D WITH_BINARY_VERSIONING=ON  # prevent file conflicts with freerdp2
     -D WITH_CHANNELS=ON
     -D WITH_CLIENT_CHANNELS=ON
     -D WITH_CUPS=ON
     -D WITH_DSP_FFMPEG=ON
     -D WITH_FFMPEG=ON
+    -D WITH_FUSE=ON
     -D WITH_ICU=ON
     -D WITH_JPEG=ON
     -D WITH_PCSC=ON
     -D WITH_PULSE=ON
     -D WITH_SERVER=ON
     -D WITH_SERVER_CHANNELS=ON
+    -D WITH_SYSTEMD=ON
     -D WITH_SWSCALE=ON
+    -D WITH_WAYLAND=ON
+    -D WITH_WINPR_TOOLS=ON
+    -D WITH_X11=ON
     -S $_name-$pkgver
     -W no-dev
   )
@@ -108,14 +127,18 @@ check() {
 package() {
   depends+=(
     alsa-lib libasound.so
+    e2fsprogs libcom_err.so
     ffmpeg libavcodec.so libavutil.so libswresample.so libswscale.so
+    glib2 libglib-2.0.so libgobject-2.0.so
+    gtk3 libgtk-3.so
     icu libicuuc.so
-    libjpeg-turbo libjpeg.so
+    krb5 libk5crypto.so libkrb5.so
     libpulse libpulse.so
     libusb libusb-1.0.so
     openssl libcrypto.so libssl.so
     pam libpam.so
-    systemd-libs libsystemd.so
+    webkit2gtk-4.1 libjavascriptcoregtk-4.1.so libwebkit2gtk-4.1.so
+    zlib libz.so
   )
 
   DESTDIR="$pkgdir" cmake --install build
