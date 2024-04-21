@@ -1,0 +1,112 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: Stijn Segers <francesco dot borromini at gmail dot com>
+
+_name=FreeRDP
+pkgname=freerdp2
+pkgver=2.11.5
+pkgrel=1
+pkgdesc="Free implementation of the Remote Desktop Protocol (RDP)"
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+url="https://www.freerdp.com/"
+license=(Apache-2.0)
+depends=(
+  glibc
+  libcups
+  libx11
+  libxcursor
+  libxext
+  libxdamage
+  libxfixes
+  libxkbcommon
+  libxi
+  libxinerama
+  libxkbfile
+  libxrandr
+  libxrender
+  libxtst
+  pcsclite
+  wayland
+)
+makedepends=(
+  alsa-lib
+  cmake
+  docbook-xsl
+  ffmpeg
+  icu
+  krb5
+  libjpeg-turbo
+  libpulse
+  libusb
+  openssl
+  pam
+  systemd
+  xmlto
+  xorgproto
+)
+provides=(
+  libfreerdp2.so
+  libfreerdp-client2.so
+  libfreerdp-server2
+  libfreerdp-shadow2.so
+  libfreerdp-shadow-subsystem2.so
+  libwinpr2.so
+  libwinpr-tools2.so
+  libuwac0.so
+)
+source=(
+  https://github.com/${_name,,}/${_name,,}/archive/$pkgver/${_name,,}-$pkgver.tar.gz
+)
+sha512sums=('7b89981a4d2773fdcf41f32d58ec7925765b3cedb7ebc77d54ded8c39f38d294f3adfdf5ab79ad23c5edd2cba456465ac9eafec437c004b5de7a9d76a6a94536')
+b2sums=('0b7365eccc625878c9543d8b6a92787b11e1c5463122e14536b2fb8ebc46d80b9e8b4274e6d5be8da0fe7a5a3578b907ff47267501b0fdc15dea64534a22f4a2')
+
+build() {
+  local cmake_options=(
+    -B build
+    -D CHANNEL_URBDRC_CLIENT=ON
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_INSTALL_LIBDIR=lib
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_SKIP_INSTALL_RPATH=ON
+    -D PROXY_PLUGINDIR=/usr/lib/freerdp2/server/proxy/plugins
+    -D WITH_CHANNELS=ON
+    -D WITH_CLIENT_CHANNELS=ON
+    -D WITH_CUPS=ON
+    -D WITH_DSP_FFMPEG=ON
+    -D WITH_FFMPEG=ON
+    -D WITH_ICU=ON
+    -D WITH_JPEG=ON
+    -D WITH_PCSC=ON
+    -D WITH_PULSE=ON
+    -D WITH_SERVER=ON
+    -D WITH_SERVER_CHANNELS=ON
+    -D WITH_SWSCALE=ON
+    -S $_name-$pkgver
+    -W no-dev
+  )
+
+  cmake "${cmake_options[@]}"
+  cmake --build build --verbose
+}
+
+check() {
+  ctest --test-dir build --output-on-failure
+}
+
+package() {
+  depends+=(
+    alsa-lib libasound.so
+    ffmpeg libavcodec.so libavutil.so libswresample.so libswscale.so
+    icu libicuuc.so
+    libjpeg-turbo libjpeg.so
+    libpulse libpulse.so
+    libusb libusb-1.0.so
+    openssl libcrypto.so libssl.so
+    pam libpam.so
+    systemd-libs libsystemd.so
+  )
+
+  DESTDIR="$pkgdir" cmake --install build
+  install -vDm 644 $_name-$pkgver/{ChangeLog,README.md} -t "$pkgdir/usr/share/doc/$pkgname/"
+}
