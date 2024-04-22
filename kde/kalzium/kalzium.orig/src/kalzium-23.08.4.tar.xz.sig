@@ -1,1 +1,0 @@
-/mnt/caches/sources/kalzium-23.08.4.tar.xz.sig
