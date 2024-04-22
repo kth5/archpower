@@ -3,9 +3,9 @@
 # Contributor: dracorp aka Piotr Rogoza <piotr.r.public at gmail.com>
 
 pkgbase=kimageannotator
-pkgname=(kimageannotator-qt5
-         kimageannotator-qt6)
-pkgver=0.7.0
+pkgname=(kimageannotator
+         kimageannotator-qt5)
+pkgver=0.7.1
 pkgrel=3
 pkgdesc='Tool for annotating images'
 arch=(x86_64 powerpc64le powerpc64 powerpc64 powerpc riscv64)
@@ -15,48 +15,49 @@ depends=(gcc-libs
          glibc
          libx11)
 makedepends=(cmake
+             kcolorpicker
              kcolorpicker-qt5
-             kcolorpicker-qt6
              qt5-svg
              qt5-tools
              qt6-svg
              qt6-tools)
-source=(https://github.com/ksnip/kImageAnnotator/archive/v$pkgver/$pkgbase-$pkgver.tar.gz)
-sha256sums=('66e6ff5de1f8f808834143130a0a06d203aa01fb8f02e65af73042e61342163a')
+source=(https://github.com/ksnip/kImageAnnotator/archive/v$pkgver/$pkgname-$pkgver.tar.gz
+        rename-qt5-version.patch)
+sha256sums=('2335c5be15a5dde34c3333c10a6339da114e2232e4c4642dea1793e491e09677'
+            '6e50870d20b6a9fd7ae8f36fd2f2e8156f98cbf6b5c572cd138e837f83464f35')
+
+prepare() {
+  cp -r kImageAnnotator{,-qt5}-$pkgver
+  patch -d kImageAnnotator-qt5-$pkgver -p1 < rename-qt5-version.patch # Make Qt5 and Qt6 versions coinstallable
+}
 
 build() {
-  cmake -B build5 -S kImageAnnotator-$pkgver \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DBUILD_SHARED_LIBS=ON
-  cmake --build build5
-
-  cmake -B build6 -S kImageAnnotator-$pkgver \
+  cmake -B build -S kImageAnnotator-$pkgver \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DBUILD_SHARED_LIBS=ON \
     -DBUILD_WITH_QT6=ON
-  cmake --build build6
+  cmake --build build
+
+  cmake -B build5 -S kImageAnnotator-qt5-$pkgver \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DBUILD_SHARED_LIBS=ON
+  cmake --build build5
+}
+
+package_kimageannotator() {
+  depends+=(kcolorpicker
+            qt6-base
+            qt6-svg)
+  conflicts=(kimageannotator-qt6)
+  replaces=(kimageannotator-qt6)
+
+  DESTDIR="$pkgdir" cmake --install build
 }
 
 package_kimageannotator-qt5() {
   depends+=(kcolorpicker-qt5
             qt5-base
             qt5-svg)
-  conflicts=(kimageannotator)
-  replaces=(kimageannotator)
-
+ 
   DESTDIR="$pkgdir" cmake --install build5
-# Symlinks for backwards compatibility
-  mkdir -p "$pkgdir"/usr/lib/cmake/kImageAnnotator
-  ln -sr "$pkgdir"/usr/lib/cmake/kImageAnnotator-Qt5/kImageAnnotator-Qt5Config.cmake "$pkgdir"/usr/lib/cmake/kImageAnnotator/kImageAnnotatorConfig.cmake
-  ln -sr "$pkgdir"/usr/lib/cmake/kImageAnnotator-Qt5/kImageAnnotator-Qt5Config-version.cmake "$pkgdir"/usr/lib/cmake/kImageAnnotator/kImageAnnotatorConfig-version.cmake
-  ln -sr "$pkgdir"/usr/lib/cmake/kImageAnnotator-Qt5/kImageAnnotator-targets* "$pkgdir"/usr/lib/cmake/kImageAnnotator/
-}
-
-package_kimageannotator-qt6() {
-  depends+=(kcolorpicker-qt6
-            qt6-base
-            qt6-svg)
-
-  DESTDIR="$pkgdir" cmake --install build6
-  rm -r "$pkgdir"/usr/share # Remove translations, conflict with Qt5
 }
