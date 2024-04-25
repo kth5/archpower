@@ -1,0 +1,201 @@
+diff -ruN ocaml-5.1.1.orig/asmcomp/power/arch.ml ocaml-5.1.1/asmcomp/power/arch.ml
+--- ocaml-5.1.1.orig/asmcomp/power/arch.ml	2024-04-25 22:57:10.214487401 +0200
++++ ocaml-5.1.1/asmcomp/power/arch.ml	2024-04-25 22:57:17.969705356 +0200
+@@ -29,7 +29,7 @@
+ let abi =
+   match Config.model with
+   | "ppc" -> ELF32
+-  | "ppc64" -> ELF64v1
++  | "ppc64" -> ELF64v2
+   | "ppc64le" -> ELF64v2
+   | _ -> assert false
+ 
+diff -ruN ocaml-5.1.1.orig/runtime/caml/stack.h ocaml-5.1.1/runtime/caml/stack.h
+--- ocaml-5.1.1.orig/runtime/caml/stack.h	2024-04-25 22:57:10.042504743 +0200
++++ ocaml-5.1.1/runtime/caml/stack.h	2024-04-25 22:58:01.425322507 +0200
+@@ -25,9 +25,9 @@
+ #ifdef TARGET_power
+ #if defined(MODEL_ppc)
+ #define Saved_return_address(sp) *((intnat *)((sp) - 4))
+-#elif defined(MODEL_ppc64)
++#elif _CALL_ELF == 1
+ #define Saved_return_address(sp) *((intnat *)((sp) + 16))
+-#elif defined(MODEL_ppc64le)
++#elif _CALL_ELF == 2
+ #define Saved_return_address(sp) *((intnat *)((sp) + 16))
+ #else
+ #error "TARGET_power: wrong MODEL"
+diff -ruN ocaml-5.1.1.orig/runtime/power.S ocaml-5.1.1/runtime/power.S
+--- ocaml-5.1.1.orig/runtime/power.S	2024-04-25 22:57:10.034505550 +0200
++++ ocaml-5.1.1/runtime/power.S	2024-04-25 22:57:17.973704953 +0200
+@@ -13,7 +13,7 @@
+ /*                                                                        */
+ /**************************************************************************/
+ 
+-#if defined(MODEL_ppc64le)
++#if _CALL_ELF == 2
+         .abiversion 2
+ #endif
+ 
+@@ -51,8 +51,7 @@
+ #define TRAP_PREVIOUS_OFFSET 4
+ #define CALLBACK_LINK_SIZE 16
+ #define CALLBACK_LINK_OFFSET 0
+-#endif
+-#if defined(MODEL_ppc64)
++#elif _CALL_ELF == 1
+ #define RESERVED_STACK 48
+ #define PARAM_SAVE_AREA (8*8)
+ #define LR_SAVE 16
+@@ -63,8 +62,7 @@
+ #define TRAP_PREVIOUS_OFFSET 64
+ #define CALLBACK_LINK_SIZE 32
+ #define CALLBACK_LINK_OFFSET 48
+-#endif
+-#if defined(MODEL_ppc64le)
++#elif _CALL_ELF == 2
+ #define RESERVED_STACK 32
+ #define PARAM_SAVE_AREA 0
+ #define LR_SAVE 16
+@@ -90,9 +88,8 @@
+ #define ENDFUNCTION(name) \
+   .size name, . - name
+ 
+-#endif
+ 
+-#if defined(MODEL_ppc64)
++#elif _CALL_ELF == 1
+ #define FUNCTION(name) \
+   .section ".opd","aw"; \
+   .align 3; \
+@@ -106,9 +103,8 @@
+ #define ENDFUNCTION(name) \
+   .size name, . - .L.name
+ 
+-#endif
+ 
+-#if defined(MODEL_ppc64le)
++#elif _CALL_ELF == 2
+ #define FUNCTION(name) \
+   .section ".text"; \
+   .globl name; \
+@@ -150,7 +146,7 @@
+ 
+ #define Caml_state(var) 8*domain_field_caml_##var(DOMAIN_STATE_PTR)
+ 
+-#if defined(MODEL_ppc64)
++#if _CALL_ELF == 1
+         .section ".opd","aw"
+ #else
+         .section ".text"
+@@ -329,14 +325,14 @@
+ #if defined(MODEL_ppc)
+         mtctr   C_CALL_FUN
+         bctrl
+-#elif defined(MODEL_ppc64)
++#elif _CALL_ELF == 1
+         ld      0, 0(C_CALL_FUN)
+         mr      C_CALL_TOC, 2   /* save current TOC in a callee-save register */
+         mtctr   0
+         ld      2, 8(C_CALL_FUN)
+         bctrl
+         mr      2, C_CALL_TOC   /* restore current TOC */
+-#elif defined(MODEL_ppc64le)
++#elif _CALL_ELF == 2
+         mtctr   C_CALL_FUN
+         mr      12, C_CALL_FUN
+         mr      C_CALL_TOC, 2   /* save current TOC in a callee-save register */
+@@ -507,14 +503,14 @@
+ #if defined(MODEL_ppc)
+         mtctr   12
+ .L105:  bctrl
+-#elif defined(MODEL_ppc64)
++#elif _CALL_ELF == 1
+         ld      0, 0(12)
+         mtctr   0
+         std     2, TOC_SAVE(1)
+         ld      2, 8(12)
+ .L105:  bctrl
+         ld      2, TOC_SAVE(1)
+-#elif defined(MODEL_ppc64le)
++#elif _CALL_ELF == 2
+         mtctr   12
+         std     2, TOC_SAVE(1)
+ .L105:  bctrl
+@@ -633,7 +629,7 @@
+         b       .L102
+ ENDFUNCTION(caml_callback3_asm)
+ 
+-#if defined(MODEL_ppc64)
++#if _CALL_ELF == 1
+         .section ".opd","aw"
+ #else
+         .section ".text"
+diff -ruN ocaml-5.1.1.orig/testsuite/tools/asmgen_power.S ocaml-5.1.1/testsuite/tools/asmgen_power.S
+--- ocaml-5.1.1.orig/testsuite/tools/asmgen_power.S	2024-04-25 22:57:10.186490224 +0200
++++ ocaml-5.1.1/testsuite/tools/asmgen_power.S	2024-04-25 22:57:17.973704953 +0200
+@@ -25,12 +25,10 @@
+ #if defined(MODEL_ppc)
+ #define RESERVED_STACK 16
+ #define LR_SAVE_AREA 4
+-#endif
+-#if defined(MODEL_ppc64)
++#elif _CALL_ELF == 1
+ #define RESERVED_STACK 48
+ #define LR_SAVE_AREA 16
+-#endif
+-#if defined(MODEL_ppc64le)
++#elif _CALL_ELF == 2
+ #define RESERVED_STACK 32
+ #define LR_SAVE_AREA 16
+ #endif
+@@ -44,9 +42,8 @@
+   .type name, @function; \
+   .align 2; \
+   name:
+-#endif
+ 
+-#if defined(MODEL_ppc64)
++#elif _CALL_ELF == 1
+ #define FUNCTION(name) \
+   .section ".opd","aw"; \
+   .align 3; \
+@@ -56,9 +53,8 @@
+   .text; \
+   .align 2; \
+   .L.name:
+-#endif
+ 
+-#if defined(MODEL_ppc64le)
++#elif _CALL_ELF == 2
+ #define FUNCTION(name) \
+   .section ".text"; \
+   .globl name; \
+@@ -118,11 +114,11 @@
+     /* Get function pointer in CTR */
+ #if defined(MODEL_ppc)
+         mtctr   3
+-#elif defined(MODEL_ppc64)
++#elif _CALL_ELF == 1
+         ld      0, 0(3)
+         mtctr   0
+         ld      2, 8(3)
+-#elif defined(MODEL_ppc64le)
++#elif _CALL_ELF == 2
+         mtctr   3
+         mr      12, 3
+ #else
+@@ -184,11 +180,11 @@
+     /* Jump to C function (address in r28) */
+ #if defined(MODEL_ppc)
+         mtctr   28
+-#elif defined(MODEL_ppc64)
++#elif _CALL_ELF == 1
+         ld      0, 0(28)
+         mtctr   0
+         ld      2, 8(28)
+-#elif defined(MODEL_ppc64le)
++#elif _CALL_ELF == 2
+         mtctr   28
+         mr      12, 28
+ #else
