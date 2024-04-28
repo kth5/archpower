@@ -6,28 +6,33 @@
 _pyname=flask-sqlalchemy
 pkgname=python-flask-sqlalchemy
 pkgver=2.5.1
-pkgrel=5
+pkgrel=7
 pkgdesc='Adds SQLAlchemy support to your Flask application'
 url='http://flask-sqlalchemy.pocoo.org/'
 arch=(any)
-license=('BSD')
-depends=('python-flask' 'python-sqlalchemy')
-makedepends=('python-setuptools' 'python-sphinx' 'python-pallets-sphinx-themes' 'python-sphinx-issues')
-checkdepends=('python-pytest' 'python-blinker' 'python-mock')
-source=(${pkgname}-${pkgver}.tar.gz::https://github.com/mitsuhiko/flask-sqlalchemy/archive/${pkgver}.tar.gz
-        filter-warnings-test.patch)
+license=('BSD-3-Clause')
+depends=('python' 'python-flask' 'python-sqlalchemy')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel' 'python-sphinx' 'python-pallets-sphinx-themes' 'python-sphinx-issues')
+checkdepends=('python-pytest' 'python-blinker')
+source=(
+  ${pkgname}-${pkgver}.tar.gz::https://github.com/pallets-eco/flask-sqlalchemy/archive/${pkgver}.tar.gz
+  filter-warnings-test.patch
+  $pkgname-2.5.1-remove_mock.patch
+)
 sha512sums=('6780213b959bbc43306bad97ff6d3bf120baeff26cdaeba84b98b1b5b288a78fcbe80884e5342e8907bdfd2a7acd87aa0a8e761018bf8662b9509c1227b443cd'
-            '9cc30ac4650bbd54ee44d3ce9be985edf8c23e1747bd608167afdedde400b7556096d608985e56033867453e0c196193506ba89f298b241fed0a68bc7c593513')
+            '9cc30ac4650bbd54ee44d3ce9be985edf8c23e1747bd608167afdedde400b7556096d608985e56033867453e0c196193506ba89f298b241fed0a68bc7c593513'
+            '624de9773520711a939307f880ed45c94612256f7b75fef73d35e0ee95e5de8067145e53311b4ad8ee364297cde5740347417556cdf1d2d54114a6325b2334f0')
 
 prepare() {
   sed -r "s|(release =)|\\1 '${pkgver}'  #|" -i ${_pyname}-${pkgver}/docs/conf.py
   cd ${_pyname}-${pkgver}
-  patch -Np1 -i ${srcdir}/filter-warnings-test.patch
+  patch -Np1 -i ../filter-warnings-test.patch
+  patch -Np1 -i ../$pkgname-2.5.1-remove_mock.patch
 }
 
 build() {
   cd ${_pyname}-${pkgver}
-  python setup.py build
+  python -m build --wheel --no-isolation
   make -j1 -C docs man text SPHINXBUILD=sphinx-build PYTHONPATH=..
 }
 
@@ -38,7 +43,7 @@ check() {
 
 package() {
   cd ${_pyname}-${pkgver}
-  python setup.py install --root="${pkgdir}" -O1 --skip-build
+  python -m installer --destdir="$pkgdir" dist/*.whl
   install -Dm 644 LICENSE.rst -t "${pkgdir}/usr/share/licenses/${pkgname}"
   install -Dm 644 CHANGES.rst README.rst  -t "${pkgdir}/usr/share/doc/${pkgname}"
   cp -r docs/_build/text "${pkgdir}/usr/share/doc/${pkgname}/text"
