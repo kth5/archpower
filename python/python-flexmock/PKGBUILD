@@ -2,37 +2,35 @@
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=python-flexmock
-pkgver=0.11.3
-pkgrel=2
+pkgver=0.12.0
+pkgrel=1
 pkgdesc="Mock/Stub/Spy library for Python"
 arch=(any)
-license=('BSD')
 url="https://flexmock.readthedocs.io"
+license=('BSD-2-Clause')
 depends=('python')
-makedepends=('python-setuptools')
+makedepends=('python-build' 'python-installer' 'python-poetry-core')
 checkdepends=('python-pytest' 'python-teamcity-messages' 'python-testtools' 'python-twisted')
 source=("https://github.com/flexmock/flexmock/archive/$pkgver/$pkgname-$pkgver.tar.gz")
-sha512sums=('58c84317fb687fd708db7c909fe7109b8b9c37a932fd1a46c9f62d28bbcc56a807b35a6790bf1393289f85fdffdfa2367f7ccc05bff260a167731471a50d2685')
-
-export LC_CTYPE=en_US.UTF-8
-
-prepare() {
-  cd flexmock-$pkgver
-  sed -i 's/PYTHONPATH=\$(shell pwd) //' Makefile
-}
+sha512sums=('a157c5ccb88a1e00bac9124145f882e59633f406971df0940579a12b9e161a787790a0ce27664997faa6ddc7c8926122359bd5b31fae0d31c729e5ed140e745e')
 
 build() {
   cd flexmock-$pkgver
-  python setup.py build
+  python -m build --wheel --skip-dependency-check --no-isolation
 }
 
 check() {
   cd flexmock-$pkgver
-  PYTHONPATH="$PWD":"$PWD"/build/lib make test
+  PYTHONPATH="$PWD/src" pytest -p flexmock._pytest_plugin
 }
 
 package() {
   cd flexmock-$pkgver
-  python setup.py install --root="$pkgdir" --optimize=1
-  install -D -m644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # Symlink license file
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "$pkgdir"/usr/share/licenses/$pkgname
+  ln -s "$site_packages"/flexmock-$pkgver.dist-info/LICENSE \
+    "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
