@@ -4,29 +4,40 @@
 
 _pkgname=lupa
 pkgname=python-lupa
-pkgver=2.0
+pkgver=2.1
 pkgrel=2
 pkgdesc='Python wrapper around Lua and LuaJIT'
-arch=(x86_64 powerpc64le powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://github.com/scoder/$_pkgname"
 license=(MIT)
-depends=(python)
-makedepends=(python-{build,installer,wheel}
+depends=(gcc-libs # libgcc_s.so
+         glibc # libc.so
+         python)
+makedepends=(cython
+             python-{build,installer,wheel}
              python-setuptools)
 _archive="$_pkgname-$pkgver"
 source=("https://files.pythonhosted.org/packages/source/${_pkgname::1}/$_pkgname/$_archive.tar.gz")
-sha256sums=('ad3fef486be7adddd349fe9a9c393789061312cf98ebc533b489be34f484cb79')
+sha256sums=('760030712d5273396f5e963dd8731aefb5ac65d92eff8bf8fd4124c1630fe950')
+
+MYARCH=${CARCH}
+case "${CARCH}" in
+  powerpc*) MYARCH=${CARCH/powerpc/ppc} ;;
+esac
+export MYARCH
 
 build() {
 	cd "$_archive"
 	python -m build -wn
+	# https://gitlab.archlinux.org/archlinux/packaging/packages/python-lupa/-/issues/1
+	local _pyver=$(python -c 'import sys; print("".join(map(str, sys.version_info[:2])))')
+	cp -r lupa/tests "build/lib.linux-$MYARCH-cpython-$_pyver/lupa"
 }
 
 check() {
-	cd "$_archive"
-	local _pyver=cpython-$(python -c 'import sys; print("".join(map(str, sys.version_info[:2])))')
-	cd "$PWD/build/lib.linux-$CARCH-$_pyver"
-	python -m unittest discover
+	local _pyver=$(python -c 'import sys; print("".join(map(str, sys.version_info[:2])))')
+	export PYTHONPATH="$PWD/$_archive/build/lib.linux-$MYARCH-cpython-$_pyver"
+	python -m unittest discover "$_archive/$_pkgname/tests"
 }
 
 package() {
