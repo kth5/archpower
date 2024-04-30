@@ -2,42 +2,42 @@
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=python-cryptography
-pkgver=41.0.7
-_commit=4054596afc6f2b6cfcc54f56c35c34e0e429cb6
+pkgver=42.0.5
+_commit=33833f031d9d36234e11d9671be150d53b9e598d
 pkgrel=1
 pkgdesc="A package designed to expose cryptographic recipes and primitives to Python developers"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=('Apache')
 url="https://pypi.python.org/pypi/cryptography"
 depends=('python-cffi')
-makedepends=('git' 'python-setuptools-rust' 'llvm' 'clang' 'lld')
+makedepends=('git' 'python-setuptools-rust' 'llvm' 'clang' 'lld' 'python-build' 'python-installer' 'python-wheel')
 checkdepends=('python-pytest' 'python-pytest-subtests' 'python-iso8601' 'python-pretend'
-              'python-hypothesis' 'python-pytz' 'python-pytest-benchmark')
+              'python-hypothesis' 'python-pytz' 'python-pytest-benchmark' 'python-certifi')
 source=("git+https://github.com/pyca/cryptography.git#commit=$_commit")
 sha512sums=('SKIP')
 
 build() {
   cd cryptography
-  echo $RUSTFLAGS
-
   case "${CARCH}" in
-    powerpc|riscv64) ;;
+    powerpc) ;;
     *) 
       # https://github.com/pyca/cryptography/issues/9023
-      CC=clang RUSTFLAGS+="-Clinker-plugin-lto -Clinker=clang -Clink-arg=-fuse-ld=lld"
+      CC=clang
+      RUSTFLAGS+="-Clinker-plugin-lto -Clinker=clang -Clink-arg=-fuse-ld=lld"
     ;;
   esac
 
-  # https://github.com/pyca/cryptography/issues/9023
-  python setup.py build
+  echo $RUSTFLAGS
+  python -m build --wheel --no-isolation
 }
 
 check() {
   cd cryptography
-  PYTHONPATH="$PWD/build/lib.linux-$CARCH-cpython-311:$PWD/vectors" pytest
+  local python_version=$(python -c 'import sys; print("".join(map(str, sys.version_info[:2])))')
+  PYTHONPATH="$PWD/build/lib.linux-$CARCH-cpython-$python_version:$PWD/vectors" pytest
 }
 
 package() {
   cd cryptography
-  python setup.py install --root="$pkgdir" --optimize=1 --skip-build
+  python -m installer --destdir="$pkgdir" dist/*.whl
 }
