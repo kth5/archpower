@@ -7,25 +7,18 @@
 
 pkgname=wesnoth
 # NOTE: Odd minor versions are unstable! Do not package those.
-pkgver=1.16.11
+pkgver=1.18.0
 epoch=1
-pkgrel=1
+pkgrel=3
 pkgdesc="A turn-based strategy game on a fantasy world"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=('GPL')
 url="https://www.wesnoth.org/"
-depends=('sdl2_mixer' 'sdl2_image' 'boost-libs' 'pango' 'dbus')
-makedepends=('boost' 'cmake' 'git' 'ninja')
-replaces=('wesnoth-data')
+depends=('sdl2_mixer' 'sdl2_image' 'boost-libs' 'pango' 'dbus' 'lua')
+makedepends=('boost' 'cmake' 'git' 'ninja' 'python')
 options=(!emptydirs)
 source=("git+https://github.com/wesnoth/wesnoth.git#tag=${pkgver}")
-sha512sums=('SKIP')
-
-prepare() {
-  cd $pkgname
-  # Fix build with boost 1.83
-  git cherry-pick -n 182d0ff548b0149a17a6fefcf061074db05c82de
-}
+sha512sums=('6e7a66b6253fadc9346b8385f48b6fb184cc93c58c41e2fce02d9cfeb1a7d5b0b0f4d8488f9260e3a094f99027857dbcbabee0427f0f2e0df9878e01d79d7bb3')
 
 build() {
   cd "$pkgname"
@@ -36,7 +29,8 @@ build() {
       -DCMAKE_INSTALL_PREFIX=/usr \
       -DENABLE_TOOLS=ON \
       -DFIFO_DIR=/run/wesnothd \
-      -DENABLE_DISPLAY_REVISION=OFF
+      -DENABLE_DISPLAY_REVISION=OFF \
+      -DENABLE_SYSTEM_LUA=ON
   ninja -C build
 }
 
@@ -49,6 +43,7 @@ package() {
   echo "Linux repository" > "$pkgdir"/usr/share/wesnoth/data/dist
 
   mkdir -p "$pkgdir"/usr/lib/{tmpfiles.d,systemd/system}
+  install -Dm644 packaging/systemd/wesnothd.sysusers.conf.in "$pkgdir"/usr/lib/sysusers.d/wesnoth.conf
   sed "s|@FIFO_DIR@|/run/wesnothd|" packaging/systemd/wesnothd.tmpfiles.conf.in > "$pkgdir"/usr/lib/tmpfiles.d/wesnothd.conf
   sed -e "s|@FIFO_DIR@|/run/wesnothd|" -e "s|@BINARY_SUFFIX@||" -e "s|@CMAKE_INSTALL_FULL_BINDIR@|/usr/bin|" packaging/systemd/wesnothd.service.in > "$pkgdir"/usr/lib/systemd/system/wesnothd.service
 }
