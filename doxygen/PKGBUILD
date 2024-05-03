@@ -6,7 +6,7 @@
 pkgbase=doxygen
 pkgname=(doxygen doxygen-docs)
 pkgver=1.10.0
-pkgrel=3
+pkgrel=3.1
 pkgdesc='Documentation system for C++, C, Java, IDL and PHP'
 url='http://www.doxygen.nl'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
@@ -52,6 +52,12 @@ prepare() {
 }
 
 build() {
+  #FIXME: on powerpc64le doxygen pulls in clang which breaks libreoffice
+  case "${CARCH}" in
+    powerpc64le) _cmake_options=(-Duse_libclang:BOOL=OFF) ;;
+    *)           _cmake_options=(-Duse_libclang:BOOL=ON) ;;
+  esac
+
   cmake -B build -S $pkgbase-Release_${pkgver//./_} \
     -DCMAKE_BUILD_TYPE:STRING=None \
     -DCMAKE_INSTALL_PREFIX:PATH=/usr \
@@ -60,7 +66,7 @@ build() {
     -Dbuild_wizard:BOOL=ON \
     -Duse_sys_spdlog:BOOL=ON \
     -Duse_sys_sqlite3:BOOL=ON \
-    -Duse_libclang:BOOL=ON
+    ${_cmake_options[@]}
   cmake --build build --verbose
   cmake --build build --target docs
 }
@@ -71,12 +77,15 @@ check() {
 
 package_doxygen() {
   depends=(
-    clang
     fmt libfmt.so
     gcc-libs
     glibc
     sqlite libsqlite3.so
   )
+  depends_powerpc=(clang)
+  depends_powerpc64=(clang)
+  depends_riscv64=(clang)
+  depends_x86_64=(clang)
   optdepends=(
     'graphviz: for caller/callee graph generation'
     'qt6-base: for doxywizard'
