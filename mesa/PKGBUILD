@@ -8,20 +8,15 @@
 pkgbase=mesa
 pkgname=(
   'vulkan-mesa-layers'
-  'opencl-clover-mesa'
-  'opencl-rusticl-mesa'
   'vulkan-nouveau'
-  'vulkan-radeon'
-  'vulkan-swrast'
-  'vulkan-virtio'
   'libva-mesa-driver'
   'mesa-vdpau'
 )
 case "${CARCH}" in
-  powerpc64*|riscv64|x86_64) pkgname+=('vulkan-intel' 'vulkan-powervr') ;;
+  powerpc64le|riscv64|x86_64) pkgname+=('opencl-clover-mesa' 'opencl-rusticl-mesa' 'vulkan-intel' 'vulkan-powervr' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-virtio') ;;
 esac
 pkgname+=('mesa')
-pkgver=24.0.5
+pkgver=24.0.6
 pkgrel=1
 epoch=1
 pkgdesc="Open-source OpenGL drivers"
@@ -111,7 +106,7 @@ for _crate in "${!_crates[@]}"; do
   source+=($_crate-${_crates[$_crate]}.tar.gz::https://crates.io/api/v1/crates/$_crate/${_crates[$_crate]}/download)
 done
 
-sha256sums=('38cc245ca8faa3c69da6d2687f8906377001f63365348a62cc6f7fafb1e8c018'
+sha256sums=('8b7a92dbe6468c18f2383700135b5fe9de836cdf0cc8fd7dbae3c7110237d604'
             'SKIP'
             'a82392ed26b32a4edd57ec2ca40db0a556787932edd59681eeedf4a21861b9d0'
             '0a8f2792dfd0469bc41540884fe2a1dbf4f0fd92f53bad5b9db831ac1e59dd11'
@@ -122,7 +117,7 @@ sha256sums=('38cc245ca8faa3c69da6d2687f8906377001f63365348a62cc6f7fafb1e8c018'
             '3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b'
             '5267fca4496028628a95160fc423a33e8b2e6af8a5302579e322e4b520293cae'
             '23e78b90f2fcf45d3e842032ce32e3f2d1545ba6636271dcbf24fa306d87be7a')
-b2sums=('c4c5f493206f761a7171f19c6549dc791559a1fdbcf49aea98016f98c10f9130081a16df6b780062621495a42dc49ef5f0800bda64058e8ba60106f6a046ccef'
+b2sums=('531482c1a01ec4c0bd6b2f0857640c14fcc2ba70e85a14e4edf0f44ba466c12e39ad067690e6a571a0744ae06080943b1328a29263225cb7570f119464e17fbe'
         'SKIP'
         '73489865623395ee749742145ea2f75473a85c14c9a129f68f29ae5936ffb3ea6018a5d2f53c19aefdd8a2aff2f2d7c1d0f393b00496f11867b8588c99d26432'
         'c28718783873be25fa2d6c0f43fae900f93e2f20df1c11a40ec86622112b7be7e7f50c3b77e52849fec9288fb8da3744d8bc2027df941ffd0b8c558fe3a927ba'
@@ -158,20 +153,20 @@ prepare() {
 build() {
   case "${CARCH}" in
     x86_64)
-      _platform_vulkan_drivers=',virtio,swrast,iris,intel_hasvk,nouveau-experimental'
-      _platform_gallium_drivers=',crocus,i915,iris,svga'
+      _platform_vulkan_drivers='amd,virtio,swrast,iris,intel_hasvk,nouveau-experimental'
+      _platform_gallium_drivers=',crocus,i915,iris,svga,virgl,zink,d3d12'
     ;;
-    powerpc64*)
-      _platform_vulkan_drivers=',virtio,swrast,intel,intel,imagination-experimental,nouveau-experimental'
-      _platform_gallium_drivers=',i915,iris,etnaviv,lima'
+    powerpc64le)
+      _platform_vulkan_drivers='amd,virtio,swrast,intel,intel,imagination-experimental,nouveau-experimental'
+      _platform_gallium_drivers=',i915,iris,etnaviv,lima,swrast,virgl,zink,d3d12'
     ;;
-    powerpc*)
-      _platform_vulkan_drivers=',virtio,swrast,nouveau-experimental'
+    powerpc|powerpc64)
+      _platform_vulkan_drivers='nouveau-experimental'
       _platform_gallium_drivers=''
     ;;
     riscv64)
-      _platform_vulkan_drivers=',virtio,swrast,intel,intel,imagination-experimental,nouveau-experimental'
-      _platform_gallium_drivers=',i915,iris,etnaviv,lima'
+      _platform_vulkan_drivers='amd,virtio,swrast,intel,intel,imagination-experimental,nouveau-experimental'
+      _platform_gallium_drivers=',i915,iris,etnaviv,lima,swrast,virgl,zink,d3d12'
     ;;
   esac
 
@@ -180,12 +175,9 @@ build() {
     -D b_ndebug=true
     -D dri3=enabled
     -D egl=enabled
-    -D gallium-drivers=r300,r600,radeonsi,nouveau,virgl,swrast,zink,d3d12${_platform_gallium_drivers}
+    -D gallium-drivers=r300,r600,radeonsi,nouveau${_platform_gallium_drivers}
     -D gallium-extra-hud=true
-    -D gallium-nine=true
     -D gallium-omx=bellagio
-    -D gallium-opencl=icd
-    -D gallium-rusticl=true
     -D gallium-va=enabled
     -D gallium-vdpau=enabled
     -D gallium-xa=enabled
@@ -198,28 +190,47 @@ build() {
     -D libunwind=disabled
     -D lmsensors=enabled
     -D microsoft-clc=disabled
-    -D osmesa=true
     -D platforms=x11,wayland
     -D shared-glapi=enabled
     -D valgrind=enabled
     -D video-codecs=all
-    -D vulkan-drivers=amd${_platform_vulkan_drivers}
+    -D vulkan-drivers=${_platform_vulkan_drivers}
     -D vulkan-layers=device-select,intel-nullhw,overlay
     -D llvm-orcjit=true
   )
 
   case "${CARCH}" in
-    powerpc) meson_options+=(-D glx-direct=true -D llvm=enabled) ;;
-    powerpc64le) meson_options+=(-D power8=true -D llvm=enabled) ;;
-    powerpc64|powerpc) meson_options+=(-D power8=false -D llvm=enabled) ;;
+    powerpc|powerpc64) meson_options+=(
+               -D power8=false
+               -D gallium-nine=false
+               -D glx-direct=true
+               -D llvm=disabled
+               -D draw-use-llvm=false)
+    ;;
+    powerpc64le) meson_options+=(
+               -D power8=true
+               -D llvm=enabled
+               -D gallium-nine=true
+               -D gallium-opencl=icd
+               -D gallium-rusticl=true
+               -D osmesa=true) ;;
     riscv64) meson_options+=(
                -D llvm-orcjit=true
+               -D gallium-nine=true
                -D imagination-srv=true
-               #-D draw-use-llvm=false
                -D llvm=enabled
+               -D gallium-opencl=icd
+               -D gallium-rusticl=true
+               -D osmesa=true
              )
     ;;
-    *) meson_options=(-D llvm=enabled) ;;
+    *) meson_options+=(
+               -D power8=true
+               -D llvm=enabled
+               -D gallium-nine=true
+               -D gallium-opencl=icd
+               -D gallium-rusticl=true
+               -D osmesa=true) ;;
   esac
 
   # Build only minimal debug info to reduce size
@@ -570,9 +581,16 @@ package_mesa() {
     riscv64) _install fakeinstall/$_libdir/libomxil-bellagio0 ;;
     *)       _install fakeinstall/$_libdir/bellagio ;;
   esac
-  _install fakeinstall/$_libdir/d3d
+
+  case "${CARCH}" in
+    powerpc|powerpc64) ;;
+    *)
+      _install fakeinstall/$_libdir/d3d
+      _install fakeinstall/$_libdir/libOSMesa.so*
+    ;;
+  esac
+  
   _install fakeinstall/$_libdir/lib{gbm,glapi}.so*
-  _install fakeinstall/$_libdir/libOSMesa.so*
   _install fakeinstall/$_libdir/libxatracker.so*
 
   _install fakeinstall/usr/include
