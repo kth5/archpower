@@ -1,54 +1,60 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Daniel M. Capella <polyzen@archlinux.org>
 # Contributor: Jeremy "Ichimonji10" Audet <ichimonji10 at gmail dot com>
 # Contributor: pumpkin <pumpkin at mailoo dot org>
 # Contributor: Vsevolod Balashov <vsevolod at balashov dot name>
 
 pkgname=gunicorn
-pkgver=20.1.0
-pkgrel=11
+pkgver=22.0.0
+pkgrel=2
 pkgdesc='WSGI HTTP Server for UNIX'
 arch=(any)
 url='https://gunicorn.org/'
 license=('MIT')
-depends=('python')
-makedepends=('python-setuptools' 'python-build' 'python-installer' 'python-wheel')
-optdepends=('python-eventlet: For asynchronous request handling with eventlet.'
-            'python-gevent: For asynchronous request handling with gevent.'
-            'python-tornado: For asynchronous request handling with tornado.'
-            'python-setproctitle: For process renaming.')
-checkdepends=('python-aiohttp' 'python-coverage' 'python-pytest' 'python-pytest-cov'
-              'python-eventlet' 'python-gevent')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/benoitc/$pkgname/archive/$pkgver.tar.gz"
-        "$pkgname-eventlet-0.30.3.patch::https://github.com/benoitc/$pkgname/commit/6a8ebb4844b2.patch"
-        "$pkgname-use-importlib.patch::https://github.com/benoitc/$pkgname/pull/2963.patch")
-sha512sums=('4fd905f62adc30e044cf2a56a1a77e14bc633258267d6bfbd4f6a68494f93f377e9fb9ed94fab7f11f9d7813857a680974a88c4b6bf97d4f1b74792a81810111'
-            'b9c11eab4725a05fffc21b74636518674139d458eb7267729cfbad5f96470600396f71faa1027160dd51e610d74ff785fc03e2d661837808062328a66d6a0442'
-            '2f1f697489f1e80f3abaf15ad916abd3d689b1a84b2c366671760d21a222f6fd19075a1312d81aa6136ab765bb56af15749999749aeaa8fac2aebf7b9e1db380')
-
-prepare() {
-  cd gunicorn-$pkgver
-  sed -e 's/==/>=/' -e 's/,<.*$//' -i requirements_test.txt
-
-  # https://github.com/benoitc/gunicorn/pull/2581
-  patch -Np1 -i ../$pkgname-eventlet-0.30.3.patch
-  patch -Np1 -i ../$pkgname-use-importlib.patch
-}
+depends=('python-packaging')
+makedepends=(
+  'git'
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+)
+checkdepends=(
+  'python-aiohttp'
+  'python-eventlet'
+  'python-gevent'
+  'python-pytest'
+)
+optdepends=(
+  'python-eventlet: for asynchronous request handling with eventlet'
+  'python-gevent: for asynchronous request handling with gevent'
+  'python-setproctitle: for process renaming'
+  'python-tornado: for asynchronous request handling with tornado'
+)
+source=("git+https://github.com/benoitc/$pkgname.git#tag=$pkgver")
+b2sums=('ceba81b2dc5914f6f0aba0c8971ed36af1e0db078df3bcbb1381e3928a34152e2c251b145476522764582b556e176c1cbb3762e1a0ea2a2d8219f63f0e4a8180')
 
 build() {
-  cd gunicorn-$pkgver
+  cd $pkgname
   python -m build --wheel --no-isolation
 }
 
 check() {
-  cd gunicorn-$pkgver
-  python -m pytest
+  cd $pkgname
+  # Override addopts as they invoke coverage testing
+  python -m pytest --override-ini="addopts="
 }
 
 package() {
-  cd gunicorn-$pkgver
+  cd $pkgname
   python -m installer --destdir="$pkgdir" dist/*.whl
-  install -Dm 644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+
+  # Symlink license file
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "$pkgdir"/usr/share/licenses/$pkgname
+  ln -s "$site_packages"/$pkgname-$pkgver.dist-info/LICENSE \
+    "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
 
 # vim:set ts=2 sw=2 et:
