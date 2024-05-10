@@ -5,29 +5,41 @@
 
 pkgname=python-whoosh
 pkgver=2.7.4
-pkgrel=10
+pkgrel=12
 pkgdesc="Fast, pure-Python full text indexing, search, and spell checking library"
 arch=(any)
 url="https://github.com/mchaput/whoosh"
-license=("BSD")
+license=("BSD-2-Clause")
 depends=('python')
-makedepends=('python-setuptools' 'git')
-checkdepends=('python-pytest-runner')
+makedepends=('python-setuptools' 'python-build' 'python-installer' 'python-wheel' 'git')
+checkdepends=('python-pytest')
 source=("git+https://github.com/mchaput/whoosh#tag=v$pkgver")
-md5sums=('SKIP')
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$srcdir"/whoosh
+
+  # [PATCH] Fixed test case for ListCorrector; Fixed FSA __eq__ function
+  # The FSA part of the commit fixes a test failure
+  git cherry-pick -n f5a777572fb9c91fa10be3c1ffd5f65cc9323653
+  # Undo the spelling part of the commit that introduces a test failure
+  git checkout v$pkgver -- tests/test_spelling.py
+
+  sed -i 's/pytest/tool:pytest/' setup.cfg
+}
 
 build() {
   cd "$srcdir"/whoosh
-  python setup.py build
+  python -m build --wheel --no-isolation
 }
 
 check() {
   cd "$srcdir"/whoosh
-  python setup.py ptr || echo "Tests failed"
+  PYTHONPATH="$PWD/src" pytest
 }
 
 package() {
   cd whoosh
-  python setup.py install -O1 --root="$pkgdir"
+  python -m installer --destdir="$pkgdir" dist/*.whl
   install -D -m644 LICENSE.txt "$pkgdir"/usr/share/licenses/$pkgname/LICENSE.txt
 }
