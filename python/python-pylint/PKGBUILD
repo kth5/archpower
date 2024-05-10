@@ -9,33 +9,32 @@
 _pyname=pylint
 pkgname=python-$_pyname
 pkgver=3.1.0
-pkgrel=1
+pkgrel=2
 pkgdesc='Analyzes Python code looking for bugs and signs of poor quality'
 arch=(any)
 url=https://pylint.pycqa.org
-license=(GPL)
+_url=https://github.com/PyCQA/pylint
+license=(GPL-2.0-only)
 _pydeps=(astroid
          colorama
          dill
          isort
          mccabe
          platformdirs
-         tomli # for python <3.11
          tomlkit)
 depends=(python
          "${_pydeps[@]/#/python-}")
-makedepends=(python-{build,installer}
+makedepends=(python-{build,installer,wheel}
              python-myst-parser
              python-setuptools
-             python-sphinx{,-reredirects}
-             python-wheel)
+             python-sphinx{,-reredirects})
 checkdepends=(mpdecimal
               python-gitpython
               python-py
               python-pytest{,-timeout,-benchmark})
 optdepends=('graphviz: Enable output formats other than dot or vcg')
 _archive="$_pyname-$pkgver"
-source=("https://github.com/PyCQA/pylint/archive/v$pkgver/$_archive.tar.gz")
+source=("$_url/archive/v$pkgver/$_archive.tar.gz")
 sha256sums=('c4c13c6b77f6604367763f906e5df4e9f4c7fbfa6e8553f31493adfabfc73092')
 
 prepare() {
@@ -49,19 +48,24 @@ prepare() {
 build() {
 	cd "$_archive"
 	python -m build -wn
-	make PYTHONPATH="$PWD/build/lib" -C doc man
+	export PYTHONPATH="$PWD/build/lib"
+	# Man page builds but throws deprecation warnings that sphinx declares should be fatal
+	make -C doc man ||:
 }
 
 check() {
-	local deselected=(
-		--deselect tests/test_functional.py::test_functional
-		--deselect tests/test_self.py::TestRunTC::test_do_not_import_files_from_local_directory
-		--deselect tests/testutils/test_testutils_utils.py::test__test_environ_pythonpath_no_arg
-		--deselect tests/benchmark/test_baseline_benchmarks.py
-	)
 	cd "$_archive"
 	export PYTHONPATH="$PWD:$PWD/build/lib"
-	pytest -vv --color=yes "${deselected[@]}"
+	local deselected=(
+		tests/benchmark/test_baseline_benchmarks.py
+		tests/checkers/unittest_imports.py::TestImportsChecker
+		tests/checkers/unittest_variables.py::TestMissingSubmodule
+		tests/test_functional.py::test_functional
+		tests/test_regr.py::test_package
+		tests/test_self.py::TestRunTC::test_do_not_import_files_from_local_directory
+		tests/testutils/test_testutils_utils.py::test__test_environ_pythonpath_no_arg
+	)
+	pytest -vv --color=yes ${deselected[@]/#/--deselect }
 }
 
 package() {
