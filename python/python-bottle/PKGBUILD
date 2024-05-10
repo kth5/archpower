@@ -6,27 +6,34 @@
 
 pkgname=python-bottle
 pkgver=0.12.25
-pkgrel=4
+pkgrel=5
 pkgdesc="A fast and simple micro-framework for small web-applications"
 arch=(any)
 url="https://bottlepy.org"
 license=('MIT')
 options=(!emptydirs)
 depends=('python')
-makedepends=('python-setuptools' 'git')
+makedepends=('git' 'python-build' 'python-installer' 'python-setuptools'
+             'python-wheel')
 checkdepends=('python-mako' 'python-jinja' 'python-cherrypy' 'python-twisted'
               'python-tornado' 'python-paste' 'python-gevent' 'python-eventlet'
               'gunicorn')
 optdepends=('python-waitress: Waitress WSGI server'
             'python-cherrypy: Cherrypy WSGI server'
-            'python-eventlet: Eventlet server support'
-           )
-source=("$pkgname-$pkgver.tar.gz::https://github.com/defnull/bottle/archive/$pkgver.tar.gz")
-sha512sums=('b4b163d0225cc2be0f009427ac903dfbddc6f4bda89d3d7da2b201ccd2edbee97c2c08e7b210ffaa95077fe8ab6c1ff79ac5ffb212e8fdfed6268bfcfd6749bd')
+            'python-eventlet: Eventlet server support')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/defnull/bottle/archive/$pkgver.tar.gz"
+         python-3.12.patch)
+sha512sums=('b4b163d0225cc2be0f009427ac903dfbddc6f4bda89d3d7da2b201ccd2edbee97c2c08e7b210ffaa95077fe8ab6c1ff79ac5ffb212e8fdfed6268bfcfd6749bd'
+            'e1cef59f6ff005e78049c468942aef30ca1901a50466cf25d433f9aadbc3508a18e6b31bc302d02ee4f3d6d4801da5414762d6085166e40ad4568dea363cef6e')
+
+prepare() {
+  cd bottle-$pkgver
+  patch -p1 -i ../python-3.12.patch # Python 3.12 support (Fedora)
+}
 
 build() {
   cd bottle-$pkgver
-  python setup.py build
+  python -m build --wheel --skip-dependency-check --no-isolation
 }
 
 check() {
@@ -36,8 +43,13 @@ check() {
 
 package() {
   cd bottle-$pkgver
-  python setup.py install --root="$pkgdir" --optimize=1 --skip-build
-  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # Symlink license file
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "$pkgdir"/usr/share/licenses/$pkgname
+  ln -s "$site_packages"/bottle-$pkgver.dist-info/LICENSE \
+    "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
 
 # vim: ts=2 sw=2 et:
