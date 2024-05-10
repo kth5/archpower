@@ -3,15 +3,31 @@
 # Contributor: Ionut Biru <ibiru@archlinux.org>
 
 pkgbase=gdk-pixbuf2
-pkgname=(gdk-pixbuf2 gdk-pixbuf2-docs)
-pkgver=2.42.10
+pkgname=(
+  gdk-pixbuf2
+  gdk-pixbuf2-docs
+)
+pkgver=2.42.11
 pkgrel=2
 pkgdesc="An image loading library"
 url="https://wiki.gnome.org/Projects/GdkPixbuf"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=(LGPL)
-depends=(glib2 libpng libtiff libjpeg shared-mime-info)
-makedepends=(gobject-introspection git meson gi-docgen python-docutils)
+license=(LGPL-2.0-or-later)
+depends=(
+  glib2
+  glibc
+  libjpeg
+  libpng
+  libtiff
+  shared-mime-info
+)
+makedepends=(
+  gi-docgen
+  git
+  gobject-introspection
+  meson
+  python-docutils
+)
 optdepends=(
   "libwmf: Load .wmf and .apm"
   "libopenraw: Load .dng, .cr2, .crw, .nef, .orf, .pef, .arw, .erf, .mrw, and .raf"
@@ -21,28 +37,34 @@ optdepends=(
   "librsvg: Load .svg, .svgz, and .svg.gz"
   "webp-pixbuf-loader: Load .webp"
 )
-_commit=9ac257eb38f772fec4253e8051743029e75a2acd  # tags/2.42.10^0
 source=(
-  "git+https://gitlab.gnome.org/GNOME/gdk-pixbuf.git#commit=$_commit"
+  "git+https://gitlab.gnome.org/GNOME/gdk-pixbuf.git#tag=$pkgver"
   gdk-pixbuf-query-loaders.hook
+  0001-fix-build-failure-due-to-typo-in-the-build-script.patch
 )
-sha256sums=('SKIP'
-            '9fb71d95e6a212779eb0f88dde5a3cee0df7f4d9183f8f9ce286f8cdc14428f0')
-
-pkgver() {
-  cd gdk-pixbuf
-  git describe --tags | sed 's/[^-]*-g/r&/;s/-/+/g'
-}
+b2sums=('23af2f9f3cd542e6d6d14203a8037400df1e22e89884bddfc1439195e5c788ceec532a7bdda2c1685bb2355ea1303484872b836fdb6827cd448b57c36e6786a6'
+        '5a00d34888e207d70d02369015d029f4c0450fc5a02b4b257de8e5df04380dc550723f351433859224c96c3c6390896f2166673af65e8a09eb57024f5a34301b'
+        '16e5b72b2a50c1c733a1688c2ff6b55b6a920530bacc28e8e60dfe62c0b40c875611186c4962b2d183ef2e3ab26ea0a5108f3bbe20c1059fef0dbf4f16891f23')
 
 prepare() {
   cd gdk-pixbuf
+
+  # https://gitlab.archlinux.org/archlinux/packaging/packages/gdk-pixbuf2/-/issues/1
+  # https://gitlab.gnome.org/GNOME/gdk-pixbuf/-/merge_requests/165
+  git apply -3 ../0001-fix-build-failure-due-to-typo-in-the-build-script.patch
 }
 
 build() {
-  arch-meson gdk-pixbuf build \
-    -D builtin_loaders=all \
-    -D gtk_doc=true \
+  local meson_options=(
+    -D builtin_loaders=all
+    -D gtk_doc=true
     -D installed_tests=false
+    -D introspection=enabled
+    -D man=true
+    -D others=enabled
+  )
+
+  arch-meson gdk-pixbuf build "${meson_options[@]}"
   meson compile -C build
 }
 
