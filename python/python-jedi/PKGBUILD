@@ -1,27 +1,37 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Jelle van der Waa <jelle@archlinux.org>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Daniel M. Capella <polyzen@archlinux.org>
+# Contributor: Jelle van der Waa <jelle@archlinux.org>
 # Contributor: Danilo Bargen <gezuru@gmail.com>
 # Contributor: Simon Conseil <contact+aur at saimon dot org>
 # Contributor: Jesus Alvarez
 
 pkgname=python-jedi
-_gitcommit=4e175ca82bbd680cb90f462545c10a8b1c0b5f2e
 pkgver=0.19.1
-pkgrel=1
+pkgrel=2
 pkgdesc="Awesome autocompletion for python"
-url="https://github.com/davidhalter/jedi"
 arch=(any)
+url="https://github.com/davidhalter/jedi"
 license=('MIT')
 depends=('python' 'python-parso')
-makedepends=('git' 'python-setuptools' 'python-sphinx' 'python-sphinx_rtd_theme')
+makedepends=(
+  'git'
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+  'python-sphinx'
+  'python-sphinx_rtd_theme'
+)
 checkdepends=('python-pytest' 'python-parso')
-source=("git+https://github.com/davidhalter/jedi#commit=${_gitcommit}"
-        git+https://github.com/davidhalter/typeshed
-        git+https://github.com/davidhalter/django-stubs)
-sha256sums=('SKIP'
-            'SKIP'
-            'SKIP')
+source=(
+  "git+https://github.com/davidhalter/jedi.git#tag=v$pkgver"
+  git+https://github.com/davidhalter/typeshed.git
+  git+https://github.com/davidhalter/django-stubs.git
+)
+b2sums=('0636643f07cad437b411636730604d61d33b036882e5d231f6fcc94a3b7cfac7d68cee36bfb07b7677e2be5fcfeb4cbff7fb6513ee4c3ac085a911183e70c7ff'
+        'SKIP'
+        'SKIP')
 
 pkgver() {
   cd jedi
@@ -31,14 +41,14 @@ pkgver() {
 prepare() {
   cd jedi
   git submodule init
-  git config submodule."jedi/third_party/typeshed".url "${srcdir}/typeshed"
-  git config submodule."jedi/third_party/django-stubs".url "${srcdir}/django-stubs"
+  git config submodule."jedi/third_party/typeshed".url "$srcdir/typeshed"
+  git config submodule."jedi/third_party/django-stubs".url "$srcdir/django-stubs"
   git -c protocol.file.allow=always submodule update --recursive
 }
 
 build() {
   cd jedi
-  python setup.py build
+  python -m build --wheel --skip-dependency-check --no-isolation
   sphinx-build -b text docs docs/_build/text
   sphinx-build -b man docs docs/_build/man
 }
@@ -52,10 +62,15 @@ check() {
 
 package() {
   cd jedi
-  python setup.py install --root="$pkgdir" --optimize=1 --skip-build
-  install -Dm 644 LICENSE.txt -t "$pkgdir/usr/share/licenses/$pkgname"
+  python -m installer --destdir="$pkgdir" dist/*.whl
   install -Dm 644 CHANGELOG.rst README.rst docs/_build/text/*.txt -t "$pkgdir/usr/share/doc/$pkgname"
   install -Dm 644 docs/_build/man/jedi.1 "$pkgdir/usr/share/man/man1/$pkgname.1"
+
+  # Symlink license file
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "$pkgdir"/usr/share/licenses/$pkgname
+  ln -s "$site_packages"/jedi-$pkgver.dist-info/LICENSE.txt \
+    "$pkgdir"/usr/share/licenses/$pkgname/LICENSE.txt
 }
 
 # vim: ts=2 sw=2 et:
