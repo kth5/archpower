@@ -1,23 +1,37 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Jelle van der Waa <jelle@vdwaa.nl>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Daniel M. Capella <polyzen@archlinux.org>
+# Contributor: Jelle van der Waa <jelle@vdwaa.nl>
 
 # Check compatibility with jedi on potential version bumps
 _pkgbase=parso
 pkgname=python-parso
-epoch=1
-pkgver=0.8.3
+pkgver=0.8.4
 pkgrel=2
+epoch=1
 pkgdesc="Python parser that supports error recovery and round-trip parsing for different Python versions"
 arch=(any)
 url="https://github.com/davidhalter/parso"
 license=('MIT')
 depends=('python')
-makedepends=('python-setuptools' 'python-sphinx' 'python-sphinxcontrib-htmlhelp')
+makedepends=(
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-sphinx'
+  'python-wheel'
+)
 checkdepends=('python-pytest')
-source=(https://github.com/davidhalter/parso/archive/v$pkgver/$_pkgbase-$pkgver.tar.gz)
-sha512sums=('7874460053662d40c2cfcf0015e330e1c8201eeb07682e2079a636db553a82dc25b70b14ad0f0c82fb817f655359d695101a17f616abf9a39f49c61ae5fd49b1')
-b2sums=('8942408e27198075c92ef51f7a191cc7781eb3a5110119b91fd95f86e13ebe2fbfee11022a2bfec794150f60b3af8c4d5f324cb011703cd581c17f92232ae5bf')
+source=("https://github.com/davidhalter/parso/archive/v$pkgver/$_pkgbase-$pkgver.tar.gz")
+sha512sums=('da96f0ab6cfbcf2a54ee73262a672bb4d9720aa91fd884a8c17165d597eece97569b7ee87fd7ea1c0be663c0cb2930a66a03b4e305070f59f346485817607db3')
+b2sums=('5a8a81f64b20b52cd3349b7bc059621733debfaf5cc271f3e89423d63e4af67391f7740c34b450b2a91fafe34b8986926e8f7c4ca0b8600eafd0171c01e664b0')
+
+build() {
+  cd "$_pkgbase-$pkgver"
+  python -m build --wheel --skip-dependency-check --no-isolation
+  sphinx-build -b text docs docs/_build/text
+  sphinx-build -b man docs docs/_build/man
+}
 
 check() {
   cd "$_pkgbase-$pkgver"
@@ -26,19 +40,17 @@ check() {
   pytest test -k 'not test_python_exception_matches'
 }
 
-build() {
-  cd "$_pkgbase-$pkgver"
-  python setup.py build
-  sphinx-build -b text docs docs/_build/text
-  sphinx-build -b man docs docs/_build/man
-}
-
 package() {
   cd "$_pkgbase-$pkgver"
-  python setup.py install --root="$pkgdir" --optimize=1 --skip-build
-  install -Dm 644 LICENSE.txt -t "$pkgdir/usr/share/licenses/$pkgname"
+  python -m installer --destdir="$pkgdir" dist/*.whl
   install -Dm 644 CHANGELOG.rst README.rst docs/_build/text/*.txt -t "$pkgdir/usr/share/doc/$pkgname"
   install -Dm 644 docs/_build/man/parso.1 "$pkgdir/usr/share/man/man1/$pkgname.1"
+
+  # Symlink license file
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "$pkgdir"/usr/share/licenses/$pkgname
+  ln -s "$site_packages"/$_pkgbase-$pkgver.dist-info/LICENSE.txt \
+    "$pkgdir"/usr/share/licenses/$pkgname/LICENSE.txt
 }
 
 # vim: ts=2 sw=2 et:
