@@ -5,30 +5,45 @@
 
 pkgname=python-pyquery
 pkgver=2.0.0
-pkgrel=3
+pkgrel=4
 pkgdesc="A jquery-like library for python."
 arch=(any)
 url="https://github.com/gawel/pyquery/"
 license=('BSD')
 depends=('python-lxml' 'python-cssselect')
 optdepends=('python-webob: query wsgi app')
-makedepends=('python-setuptools')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
 checkdepends=('python-requests' 'python-webob' 'python-pytest' 'python-webtest')
-source=("https://github.com/gawel/pyquery/archive/$pkgver/$pkgname-$pkgver.tar.gz")
-sha512sums=('0c44ca00ee30922e72aff23764d4a6a8ab9f4df684de77703b69b87af4b461ee2338ef5fb134dce280926e2575b976a1b86d16b1234e13fc450811e4874a34e9')
+source=(
+  "https://github.com/gawel/pyquery/archive/$pkgver/$pkgname-$pkgver.tar.gz"
+  "pyquery-py312-test-fix.patch::https://github.com/gawel/pyquery/commit/60ea3abafdf3e9cddcc580b9f94197c6badab09b.patch"
+)
+sha512sums=('0c44ca00ee30922e72aff23764d4a6a8ab9f4df684de77703b69b87af4b461ee2338ef5fb134dce280926e2575b976a1b86d16b1234e13fc450811e4874a34e9'
+            '00bb7a1b9c38e8a4cba8d92f0daf7fcf5649653f24188abf3b4dac074d598a47442abc016c6f80af1d427d3e4ef545bf93b35c0aa165e72327c00b6465c8226c')
+
+prepare() {
+  cd pyquery-$pkgver
+  patch --forward --strip=1 --input=../pyquery-py312-test-fix.patch
+}
 
 build() {
   cd pyquery-$pkgver
-  python setup.py build
+  python -m build --wheel --skip-dependency-check --no-isolation
 }
 
 check() {
   cd pyquery-$pkgver
-  pytest
+  # Test removed upstream
+  pytest -k 'not test_selector_html'
 }
 
 package() {
   cd pyquery-$pkgver
-  python setup.py install -O1 --root="$pkgdir"
-  install -Dm644 LICENSE.txt -t "$pkgdir"/usr/share/licenses/$pkgname/
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # Symlink license file
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "$pkgdir"/usr/share/licenses/$pkgname
+  ln -s "$site_packages"/pyquery-$pkgver.dist-info/LICENSE.txt \
+    "$pkgdir"/usr/share/licenses/$pkgname/LICENSE.txt
 }
