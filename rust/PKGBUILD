@@ -11,7 +11,7 @@ pkgname=(
   rust-src
 )
 epoch=1
-pkgver=1.77.0
+pkgver=1.78.0
 pkgrel=1
 pkgdesc="Systems programming language focused on safety, speed and concurrency"
 url=https://www.rust-lang.org/
@@ -51,11 +51,11 @@ source=(
   0003-compiler-Change-LLVM-targets.patch
   xxxx-Use-ELFv2-ABI-on-all-powerpc64-targets.patch
 )
-b2sums=('7cad0a664dbdc12ca3390bd05911072516b91f60eaab9b2c88e2fc005afd0cc698de641f44ad7fe524b89d97fdd4b49c1f6c6be0de1c7b7a6c82d1973a217a02'
+b2sums=('3f43a1c50e268afbe76755ae24bccb3db9ff4dd8bbb8130c75d486c4c0e40f0253c4d4cad1de1040600c090d03d93b08adee5b16fa8abcf36d47a3c14024719f'
         'SKIP'
-        'a55e8eca7d700f4dad9a09030cab97a5d7b28a56d4dfb03d75b09f66d04c05907a8e81df95af21f0caad12dcad17a292de55a4eb5eedf4f1a6d4a5f8dd053c83'
-        'd3050f44d166530c65f98f0546fbbfe1f924789db66a9982d5e6591029355da6ce0a471c98bab153bcdff4ebe9cd68622e2b697694c880a875e2b5ca8f49822b'
-        '0a1d5e8709a73a4f0825231362c1cb0f6b4fdc72d0082f222da6479e6075e945fb041b43a57fbe2844247c9a2f148d335c723bdf0d92083c62f6c19f56ce5c0c'
+        'ef56a70741bae70a95695b4d05d1a6395f545e671c9d016c7180732f69a09b828ff5e16964ef16f9ebec55dd778a1b50927275cd4c21a7b78ae4959946a0657c'
+        'd20861a8a8e16d4bb0143f00d4beb42e2c52eeb2c1894e9f9c04e3d74ecd750d9bdacf15bb39fd0ade4487b9d3d14da24cf5f25ceab112f096fddcd329320a15'
+        '64391cf17e7d801fb263e9d637928c3a2f6aa11aca6afbf115be4e38e9afce42371ed4884929cf11d6c74c2aa497fb26abbba1812d4f31f44dcda38e4978a33f'
         'a12ab3f62987d3de257ef4bb66220559efe46c92f0d9820390ed36bf404c56f05253619b5c46e37b44dc30386f54ef3c856124a1cc1a8b854b7f6426183b2d6d')
 validpgpkeys=(
   108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE  # Rust Language (Tag and Release Signing Key) <rust-key@rust-lang.org>
@@ -81,7 +81,7 @@ prepare() {
   case "${CARCH}" in
     powerpc)
       # fails to link with -O3 due to 32bit related relocation problems
-      export RUSTFLAGS="-C opt-level=2"
+      export RUSTFLAGS="-C opt-level=1"
     ;;
     riscv64)
       _rust_target='"riscv64gc-unknown-linux-gnu"'
@@ -90,7 +90,7 @@ prepare() {
 
   cat >config.toml <<END
 profile = "user"
-change-id = 116881
+change-id = 121754
 
 [llvm]
 link-shared = true
@@ -124,10 +124,12 @@ docs = false
 prefix = "/usr"
 
 [rust]
+debuginfo-level = 1
 debuginfo-level-std = 2
 channel = "stable"
 description = "Arch POWER $pkgbase $epoch:$pkgver-$pkgrel"
 rpath = false
+frame-pointers = true
 backtrace-on-ice = true
 jemalloc = true
 
@@ -171,23 +173,27 @@ build() {
   cd rustc-$pkgver-src
 
   export RUST_BACKTRACE=1
+  unset CFLAGS CXXFLAGS LDFLAGS
 
   DESTDIR="$srcdir/dest-rust" python ./x.py install -j "$(nproc)"
 
   cd ../dest-rust
 
   # delete unnecessary files, e.g. files only used for the uninstall script
-  rm usr/bin/*.old
-  rm usr/lib/rustlib/{components,install.log,rust-installer-version,uninstall.sh}
-  rm usr/lib/rustlib/manifest-*
+  rm -v usr/lib/rustlib/{components,install.log,rust-installer-version,uninstall.sh}
+  rm -v usr/lib/rustlib/manifest-*
 
-
-  # rustbuild always installs copies of the shared libraries to /usr/lib,
-  # overwrite them with symlinks to the per-architecture versions
-  ln -srft usr/lib usr/lib/rustlib/${_rust_target}/lib/*.so
-
-  mkdir -p usr/share/licenses/rust
-  mv -t usr/share/licenses/rust usr/share/doc/rust/{COPYRIGHT,LICENSE*}
+  # licenses for main rust package
+  local ldir="usr/share/licenses/rust" f d
+  mkdir -p "$ldir"
+  for f in usr/share/doc/*/{COPYRIGHT,LICENSE}*; do
+    d="$(dirname "$f")"
+    case $f in
+      */LICENSE-APACHE) rm -v "$f" ;;
+      *) mv -v "$f" "$ldir/${f##*/}.${d##*/}" ;;
+    esac
+    rmdir -p --ignore-fail-on-non-empty "$d"
+  done
 
   _pick dest-src  usr/lib/rustlib/src
 }
@@ -222,8 +228,8 @@ package_rust-src() {
 
   cp -a dest-src/* "$pkgdir"
 
-  mkdir -p "$pkgdir/usr/share/licenses"
-  ln -s rust "$pkgdir/usr/share/licenses/$pkgname"
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 \
+    rustc-$pkgver-src/{COPYRIGHT,LICENSE-MIT}
 }
 
 # vim:set ts=2 sw=2 et:
