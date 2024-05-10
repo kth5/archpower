@@ -1,0 +1,161 @@
+From 0aa10490242aa53417e2d90c986a61cea7361222 Mon Sep 17 00:00:00 2001
+From: Alex Hall <alex.mojaki@gmail.com>
+Date: Wed, 27 Sep 2023 15:52:44 +0200
+Subject: [PATCH] Use tb_lineno to point to correct line in traceback (#17)
+
+* Use tb_lineno to point to correct line in traceback
+
+* Keep the original co_firstlineno
+
+* Adjust co_firstlineno so that the pytest includes the correct context.
+
+* Loosen testing result.outlines
+---
+ pytest_examples/traceback.py |   26 +++++++++++++-------------
+ tests/test_run_examples.py   |   15 ++++++++++-----
+ 2 files changed, 23 insertions(+), 18 deletions(-)
+
+diff --git a/pytest_examples/traceback.py b/pytest_examples/traceback.py
+index 7dedfa1..94ede45 100644
+--- a/pytest_examples/traceback.py
++++ b/pytest_examples/traceback.py
+@@ -1,7 +1,6 @@
+ from __future__ import annotations as _annotations
+ 
+ import sys
+-import traceback
+ from types import CodeType, FrameType, TracebackType
+ from typing import TYPE_CHECKING
+ 
+@@ -21,27 +20,28 @@ def create_example_traceback(exc: Exception, module_path: str, example: CodeExam
+         # f_code.co_posonlyargcount was added in 3.8
+         return None
+     frames = []
+-    for frame, _ in traceback.walk_tb(exc.__traceback__):
++    tb = exc.__traceback__
++    while tb is not None:
++        frame = tb.tb_frame
+         if frame.f_code.co_filename == module_path:
+-            frames.append(create_custom_frame(frame, example))
++            frames.append((create_custom_frame(frame, example), tb.tb_lasti, tb.tb_lineno + example.start_line))
++        tb = tb.tb_next
+ 
+     frames.reverse()
+     new_tb = None
+-    for altered_frame in frames:
+-        new_tb = TracebackType(
+-            tb_next=new_tb, tb_frame=altered_frame, tb_lasti=altered_frame.f_lasti, tb_lineno=altered_frame.f_lineno
+-        )
++    for altered_frame, lasti, lineno in frames:
++        new_tb = TracebackType(tb_next=new_tb, tb_frame=altered_frame, tb_lasti=lasti, tb_lineno=lineno)
+     return new_tb
+ 
+ 
+ def create_custom_frame(frame: FrameType, example: CodeExample) -> FrameType:
+     """
+-    Create a new frame that mostly matches `frame` but with a filename from `example` and line number
+-    altered to match the example.
++    Create a new frame that mostly matches `frame` but with a code object that has
++    a filename from `example` and adjusted an adjusted first line number
++    so that pytest shows the correct code context in the traceback.
+ 
+     Taken mostly from https://naleraphael.github.io/blog/posts/devlog_create_a_builtin_frame_object/
+-    With the CodeType creation inspired by https://stackoverflow.com/a/16123158/949890. However, we use
+-    `frame.f_lineno` for the line number instead of `f_code.co_firstlineno` as that seems to work.
++    With the CodeType creation inspired by https://stackoverflow.com/a/16123158/949890.
+     """
+     import ctypes
+ 
+@@ -77,7 +77,7 @@ def create_custom_frame(frame: FrameType, example: CodeExample) -> FrameType:
+             str(example.path),
+             f_code.co_name,
+             f_code.co_qualname,
+-            frame.f_lineno + example.start_line,
++            f_code.co_firstlineno + example.start_line,
+             f_code.co_lnotab,
+             f_code.co_exceptiontable,
+         )
+@@ -95,7 +95,7 @@ def create_custom_frame(frame: FrameType, example: CodeExample) -> FrameType:
+             f_code.co_varnames,
+             str(example.path),
+             f_code.co_name,
+-            frame.f_lineno + example.start_line,
++            f_code.co_firstlineno + example.start_line,
+             f_code.co_lnotab,
+         )
+ 
+diff --git a/tests/test_run_examples.py b/tests/test_run_examples.py
+index 3142a79..4330d71 100644
+--- a/tests/test_run_examples.py
++++ b/tests/test_run_examples.py
+@@ -52,9 +52,11 @@ def test_find_run_examples(example: CodeExample, eval_example: EvalExample):
+     result = pytester.runpytest('-p', 'no:pretty', '-v')
+     result.assert_outcomes(passed=1, failed=1)
+ 
+-    # assert 'my_file_9_13.py:12: AssertionError' in '\n'.join(result.outlines)
+-    assert result.outlines[-8:-3] == [
++    assert result.outlines[-11].startswith('_ _ _ _ ')
++    assert result.outlines[-10:-3] == [
+         '',
++        '    a = 1',
++        '    b = 2',
+         '>   assert a + b == 4',
+         'E   AssertionError',
+         '',
+@@ -224,7 +226,10 @@ def test_run_directly(tmp_path, eval_example):
+ x = 4
+ 
+ def div(y):
+-    return x / y
++    try:
++        return x / y
++    finally:
++        str(y)
+ 
+ div(2)
+ div(0)"""
+@@ -244,10 +249,10 @@ div(0)"""
+ 
+     # debug(exc_info.traceback)
+     assert exc_info.traceback[-1].frame.code.path == md_file
+-    assert exc_info.traceback[-1].lineno == 6
++    assert exc_info.traceback[-1].lineno == 7
+ 
+     assert exc_info.traceback[-2].frame.code.path == md_file
+-    assert exc_info.traceback[-2].lineno == 9
++    assert exc_info.traceback[-2].lineno == 12
+ 
+ 
+ def test_print_sub(pytester: pytest.Pytester):
+diff --git a/pytest_examples/traceback.py b/pytest_examples/traceback.py
+index 94ede45..41880fe 100644
+--- a/pytest_examples/traceback.py
++++ b/pytest_examples/traceback.py
+@@ -62,7 +62,26 @@ def create_custom_frame(frame: FrameType, example: CodeExample) -> FrameType:
+     ctypes.pythonapi.PyThreadState_Get.restype = P_MEM_TYPE
+ 
+     f_code = frame.f_code
+-    if sys.version_info >= (3, 11):
++    if sys.version_info >= (3, 12):
++        code = CodeType(
++            f_code.co_argcount,
++            f_code.co_posonlyargcount,
++            f_code.co_kwonlyargcount,
++            f_code.co_nlocals,
++            f_code.co_stacksize,
++            f_code.co_flags,
++            f_code.co_code,
++            f_code.co_consts,
++            f_code.co_names,
++            f_code.co_varnames,
++            str(example.path),
++            f_code.co_name,
++            f_code.co_qualname,
++            f_code.co_firstlineno + example.start_line,
++            f_code.co_linetable,
++            f_code.co_exceptiontable,
++        )
++    elif sys.version_info >= (3, 11):
+         code = CodeType(
+             f_code.co_argcount,
+             f_code.co_posonlyargcount,
