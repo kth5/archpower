@@ -4,31 +4,38 @@
 pkgname="python-pecan"
 _pkgname="${pkgname#python-}"
 pkgdesc='A WSGI object-dispatching web framework, designed to be lean and fast with few dependencies.'
-pkgver=1.4.2
-pkgrel=3
+pkgver=1.5.1
+pkgrel=1
 arch=(any)
 url='https://github.com/pecan/pecan'
 license=('BSD')
-depends=('python' 'python-webob' 'python-mako' 'python-webtest' 'python-six'
+depends=('python' 'python-webob' 'python-mako' 'python-webtest'
          'python-logutils')
 makedepends=('python' 'python-setuptools' 'python-sphinx' 'python-webob'
-             'python-mako' 'python-webtest' 'python-six' 'python-logutils')
-checkdepends=('python-virtualenv' 'python-jinja' 'gunicorn'
-              'python-sqlalchemy' 'python-genshi' 'python-nine' 'uwsgi'
+             'python-mako' 'python-webtest' 'python-logutils'
+             'python-build' 'python-installer' 'python-wheel')
+checkdepends=('python-jinja' 'gunicorn'
+              'python-sqlalchemy' 'python-genshi' 'uwsgi'
               'python-pytest' 'python-kajiki')
 source=("${pkgname}-${pkgver}.tar.gz::https://github.com/${_pkgname}/${_pkgname}/archive/${pkgver}.tar.gz")
-sha512sums=('2080ba74fc75c458b927b28cbddbe1135da05fd0eff095942823cf43a6d7b03f438a12b46ba007cf45a128628078f3a404842ac2dced86c270b1a1e385feb83b')
+sha512sums=('47009084c134469d2e24a142288926a180f13fd1bb1b3546b0e1cc7e32f9c160d5580ecf86af7219accaf1118d6b73b2bafa755f0039a422317a429f6651a845')
 
 prepare(){
   cd "${srcdir}/${_pkgname}-${pkgver}"
   # fix manpage build
   sed -i '/^dist = /d' docs/source/conf.py
   sed -i "s/^version = release = .*\$/version = release = '${pkgver}'/" docs/source/conf.py
+
+  # remove scripts keyword otherwise installer errors out trying to install /usr/bin/pecan again
+  sed -i '/scripts=/d' setup.py
 }
 
 build() {
   cd "${srcdir}/${_pkgname}-${pkgver}"
-  python ./setup.py build
+  python -m build --wheel --skip-dependency-check --no-isolation
+
+  cd docs
+  PYTHONPATH="${PWD}/../" make man
 }
 
 check() {
@@ -38,10 +45,12 @@ check() {
 
 package() {
   cd "${srcdir}/${_pkgname}-${pkgver}"
-  python ./setup.py install --root="$pkgdir/" --optimize=1
-  install -D -m644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  python -m installer --destdir="${pkgdir}" dist/*.whl
+  install -D -m644 docs/build/man/pecan.1 "${pkgdir}/usr/share/man/man1/${pkgname}.1"
 
-  cd docs
-  PYTHONPATH="${PWD}/../" make man
-  install -D -m644 "./build/man/pecan.1" "${pkgdir}/usr/share/man/man1/${pkgname}.1"
+  # Symlink license file
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "${pkgdir}/usr/share/licenses/${pkgname}"
+  ln -s "${site_packages}/${_pkgname}-${pkgver}.dist-info/LICENSE" \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }
