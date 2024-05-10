@@ -4,22 +4,29 @@
 
 pkgname=python-webtest
 pkgver=3.0.0
-pkgrel=5
+pkgrel=6
 pkgdesc="Helper to test WSGI applications"
 arch=(any)
-url='http://webtest.pythonpaste.org/'
+url='https://docs.pylonsproject.org/projects/webtest/en/latest/'
 license=('MIT')
 depends=('python-webob' 'python-beautifulsoup4' 'python-waitress')
 optdepends=('python-pyquery: for response.pyquery'
             'python-lxml: for response.lxml')
-makedepends=('python-setuptools')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
 checkdepends=('python-pytest' 'python-pyquery' 'python-pastedeploy' 'python-wsgiproxy2')
-source=("https://pypi.io/packages/source/W/WebTest/WebTest-$pkgver.tar.gz")
-sha512sums=('b97a6311d7e3bf653bec93c2390fb75c991d0dea6148680d8b6ff87861c130518a5d150dd157eab9b032b278566ad12c0ac8f5fc2ddbeba31e35de1e1f06f747')
+source=("https://pypi.io/packages/source/W/WebTest/WebTest-$pkgver.tar.gz"
+        'webtest-py312-test-fix.patch::https://github.com/Pylons/webtest/commit/d82ec5bd2cf3c7109a1d49ad9fa802ae1eae1763.patch')
+sha512sums=('b97a6311d7e3bf653bec93c2390fb75c991d0dea6148680d8b6ff87861c130518a5d150dd157eab9b032b278566ad12c0ac8f5fc2ddbeba31e35de1e1f06f747'
+            'be5964cd8d01f2c1b396ee124fa60098e95a7b0b202d0212768a9f63c4a9faa029ec82ca5256c9356c709164b1db7d75056a718b3cdc9264a6fc76bcd3547e24')
+
+prepare() {
+  cd WebTest-$pkgver
+  patch --forward --strip=1 --input=../webtest-py312-test-fix.patch
+}
 
 build() {
   cd WebTest-$pkgver
-  python setup.py build
+  python -m build --wheel --skip-dependency-check --no-isolation
 }
 
 check() {
@@ -29,6 +36,11 @@ check() {
 
 package() {
   cd WebTest-$pkgver
-  python setup.py install --prefix=/usr --root="$pkgdir" --optimize=1 --skip-build
-  install -Dm644 license.rst "$pkgdir"/usr/share/licenses/$pkgname/license.rst
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # Symlink license file
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "$pkgdir"/usr/share/licenses/$pkgname
+  ln -s "$site_packages"/WebTest-$pkgver.dist-info/LICENSE.rst \
+    "$pkgdir"/usr/share/licenses/$pkgname/LICENSE.rst
 }
