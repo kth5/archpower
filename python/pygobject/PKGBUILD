@@ -1,0 +1,77 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+# Maintainer: Fabian Bornschein <fabiscafe@archlinux.org>
+# Contributor: Ionut Biru <ibiru@archlinux.org>
+
+pkgbase=pygobject
+pkgname=(
+  python-gobject
+  python-gobject-docs
+)
+pkgver=3.48.2
+pkgrel=1
+pkgdesc="Python bindings for GLib/GObject/GIO/GTK"
+url="https://pygobject.gnome.org/"
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+license=(LGPL-2.1-or-later)
+depends=(
+  gobject-introspection-runtime
+  python
+)
+makedepends=(
+  git
+  gobject-introspection
+  meson
+  python-cairo
+  python-setuptools
+  python-sphinx
+  python-sphinx-furo
+)
+checkdepends=(
+  gtk3
+  python-pytest
+  xorg-server-xvfb
+)
+optdepends=('cairo: Cairo bindings')
+source=("git+https://gitlab.gnome.org/GNOME/pygobject.git?signed#tag=$pkgver")
+b2sums=('6cd9fd5022fec4c93d844079e3cc0c124f8aed52d390a6b46c536a097b79be8452590a31ba5ce03fb77e3dc0dc2c744fd9efa1135d878c81935c8cd58f4df8b3')
+validpgpkeys=(
+  0EBF782C5D53F7E5FB02A66746BD761F7A49B0EC # Christoph Reiter <reiter.christoph@gmail.com>
+)
+
+prepare() {
+  cd pygobject
+}
+
+build() {
+  arch-meson pygobject build
+  meson compile -C build
+}
+
+check() {
+  PYTEST_ADDOPTS="-v" PYGI_TEST_VERBOSE=1 \
+    xvfb-run -s '-nolisten local' \
+    meson test -C build --print-errorlogs
+}
+
+package_python-gobject() {
+  provides=("pygobject-devel=$pkgver")
+  conflicts=(pygobject-devel)
+  replaces=('pygobject-devel<=3.36.1-1')
+
+  meson install -C build --destdir "$pkgdir"
+  python -m compileall -d /usr/lib "$pkgdir/usr/lib"
+  python -O -m compileall -d /usr/lib "$pkgdir/usr/lib"
+}
+
+package_python-gobject-docs() {
+  pkgdesc="Developer documentation for PyGObject"
+  depends=()
+  optdepends=()
+
+  python -m sphinx -b html pygobject/docs "$pkgdir/usr/share/doc/pygobject/html"
+  rm -r "$pkgdir/usr/share/doc/pygobject/html/.doctrees"
+}
+
+
+# vim:set sw=2 sts=-1 et:
