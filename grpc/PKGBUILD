@@ -7,14 +7,13 @@ pkgbase='grpc'
 pkgname=('grpc' 'python-grpcio' 'python-grpcio-tools' 'php-grpc' 'php-legacy-grpc' 'grpc-cli')
 pkgver=1.62.1
 _gtestver=0e402173c97aea7a00749e825b194bfede4f2e45
-pkgrel=2
+pkgrel=5
 pkgdesc="High performance, open source, general RPC framework that puts mobile and HTTP/2 first."
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://grpc.io'
-license=('BSD')
+license=('Apache-2.0')
 makedepends=('re2' 're2c' 'protobuf' 'php' 'php-legacy' 'c-ares' 'openssl' 'chrpath' 'cython0'
-             'cmake' 'benchmark' 'python-setuptools' 'abseil-cpp' 'ninja')
-checkdepends=('python-six')
+             'cmake' 'benchmark' 'abseil-cpp' 'ninja' 'python-setuptools' 'python-build' 'python-installer' 'python-wheel')
 source=("https://github.com/grpc/grpc/archive/v$pkgver/$pkgbase-$pkgver.tar.gz"
         "https://github.com/google/googletest/archive/$_gtestver/googletest-$_gtestver.tar.gz")
 sha256sums=('c9f9ae6e4d6f40464ee9958be4068087881ed6aa37e30d0e64d40ed7be39dd01'
@@ -36,7 +35,10 @@ prepare() {
       -e '/^PROTOBUF_SUBMODULE_VERSION=/d' \
       tools/distrib/python/grpcio_tools/protoc_lib_deps.py
   ln -s ../../../.. tools/distrib/python/grpcio_tools/grpc_root
+}
 
+build() {
+  cd "$srcdir/$pkgbase-$pkgver"
   case "${CARCH}" in
     powerpc|riscv64) export CXXFLAGS+=" -latomic" ;;
   esac
@@ -51,14 +53,11 @@ prepare() {
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DgRPC_BUILD_TESTS=ON \
     -DgRPC_BUILD_CODEGEN=ON \
-    -DgRPC_BUILD_CSHARP_EXT=ON \
-    -DgRPC_BACKWARDS_COMPATIBILITY_MODE=OFF \
     -DgRPC_ZLIB_PROVIDER='package' \
     -DgRPC_CARES_PROVIDER='package' \
     -DgRPC_RE2_PROVIDER='package' \
     -DgRPC_SSL_PROVIDER='package' \
     -DgRPC_PROTOBUF_PROVIDER='package' \
-    -DgRPC_PROTOBUF_PACKAGE_TYPE='MODULE' \
     -DgRPC_BENCHMARK_PROVIDER:STRING='package' \
     -DgRPC_ABSL_PROVIDER:STRING='package' \
     -DgRPC_USE_PROTO_LITE=OFF \
@@ -70,11 +69,8 @@ prepare() {
     -DgRPC_BUILD_GRPC_PYTHON_PLUGIN=ON \
     -DgRPC_BUILD_GRPC_RUBY_PLUGIN=ON \
     -GNinja
-}
 
-build() {
-  cd "$srcdir/$pkgbase-$pkgver/build"
-
+  cd build
   cmake --build .
   export LDFLAGS="$LDFLAGS -L$PWD"
 
@@ -102,13 +98,13 @@ build() {
 
   cd "$srcdir/$pkgbase-$pkgver"
   GRPC_PYTHON_CFLAGS="-fvisibility=hidden -fno-wrapv -fno-exceptions $(pkg-config --cflags protobuf) -std=c++17" \
-  python setup.py build
+  python -m build --wheel --no-isolation
 
   # grpcio-tools
   cd tools/distrib/python/grpcio_tools
   GRPC_PYTHON_CFLAGS="-fno-wrapv -frtti $(pkg-config --cflags protobuf)" \
   GRPC_PYTHON_LDFLAGS="$(pkg-config --libs protobuf) -lprotoc" \
-  python setup.py build
+  python -m build --wheel --no-isolation
 }
 
 check() {
@@ -141,10 +137,10 @@ package_grpc() {
 
 package_python-grpcio() {
   pkgdesc='Python language bindings for grpc, remote procedure call (RPC) framework'
-  depends=('c-ares' 'python' 'python-six' 're2' 'abseil-cpp')
+  depends=('c-ares' 'python' 're2' 'abseil-cpp')
 
   cd "$srcdir/$pkgbase-$pkgver"
-  python setup.py install -O1 --skip-build --root="$pkgdir"
+  python -m installer --destdir="$pkgdir" dist/*.whl
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
 
@@ -156,7 +152,7 @@ package_python-grpcio-tools() {
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 
   cd tools/distrib/python/grpcio_tools
-  python setup.py install -O1 --skip-build --root="$pkgdir"
+  python -m installer --destdir="$pkgdir" dist/*.whl
 }
 
 package_php-grpc() {
