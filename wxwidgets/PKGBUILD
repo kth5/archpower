@@ -6,36 +6,33 @@ pkgbase=wxwidgets
 pkgname=(wxwidgets-common
          wxwidgets-gtk3
          wxwidgets-qt5)
-pkgver=3.2.4
-pkgrel=4
+pkgver=3.2.4.1
+pkgrel=1
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://wxwidgets.org'
 license=(custom:wxWindows)
 makedepends=(cmake
+             git
              glu
              gst-plugins-base
              libmspack
              libnotify
+             nanosvg
              qt5-base
              sdl2
              webkit2gtk-4.1)
-source=(https://github.com/wxWidgets/wxWidgets/releases/download/v$pkgver/wxWidgets-$pkgver.tar.bz2
-        https://github.com/wxWidgets/wxWidgets/commit/ed510012.patch
-        https://github.com/wxWidgets/wxWidgets/commit/8ea22b5e.patch
-        https://github.com/wxWidgets/wxWidgets/commit/9174c672.patch)
-sha256sums=('0640e1ab716db5af2ecb7389dbef6138d7679261fbff730d23845ba838ca133e'
-            '0f714caa562269ba40ea55e1ef2f1c800d0669f01c3862f47db183eb2db91567'
-            '4e79b54088e513010cb2442d95ef23d6ab1cafd6a434090e1ead5c7b67c81e15'
-            '8dbfe2f5b8e1bee17786e27d7260d045094ccc519c6fae50ae013e10b3d5ade8')
+source=(git+https://github.com/wxWidgets/wxWidgets#tag=v$pkgver)
+sha256sums=('00ee216ed103a197493ee22a34d9be0cb639d91c6dd163e494b445007fbc6c7b')
 
 prepare() {
-  patch -d wxWidgets-$pkgver -p1 < ed510012.patch # Fix undefined symbols in Qt build
-  patch -d wxWidgets-$pkgver -p1 < 8ea22b5e.patch # Avoid crash with GTK3 if console program is using a GUI wxApp
-  patch -d wxWidgets-$pkgver -p1 < 9174c672.patch # Fix KiCad glitches in Plasma 6
+  cd wxWidgets
+  git cherry-pick -n ed510012 # Fix undefined symbols in Qt build
+  git cherry-pick -n 8ea22b5e # Avoid crash with GTK3 if console program is using a GUI wxApp
+  git cherry-pick -n 9174c672 # Fix KiCad glitches in Plasma 6
 }
 
 build() {
-  cmake -B build-gtk3 -S wxWidgets-$pkgver \
+  cmake -B build-gtk3 -S wxWidgets \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=None \
     -DwxBUILD_TOOLKIT=gtk3 \
@@ -47,12 +44,13 @@ build() {
     -DwxUSE_LIBPNG=sys \
     -DwxUSE_LIBTIFF=sys \
     -DwxUSE_LIBLZMA=sys \
+    -DwxUSE_NANOSVG=sys \
     -DwxUSE_LIBMSPACK=ON \
     -DwxUSE_PRIVATE_FONTS=ON \
     -DwxUSE_GTKPRINT=ON
   cmake --build build-gtk3
 
-  cmake -B build-qt5 -S wxWidgets-$pkgver \
+  cmake -B build-qt5 -S wxWidgets \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=None \
     -DwxBUILD_TOOLKIT=qt \
@@ -64,13 +62,15 @@ build() {
     -DwxUSE_LIBPNG=sys \
     -DwxUSE_LIBTIFF=sys \
     -DwxUSE_LIBLZMA=sys \
+    -DwxUSE_NANOSVG=sys \
     -DwxUSE_LIBMSPACK=ON \
     -DwxUSE_PRIVATE_FONTS=ON
   cmake --build build-qt5
 
 # Run configure to generate the Makefile, cmake doesn't install translations
-  cd wxWidgets-$pkgver
-  ./configure --prefix=/usr
+  cd wxWidgets
+  ./configure --prefix=/usr --disable-tests
+  make -C locale allmo
 }
 
 package_wxwidgets-common() {
@@ -89,11 +89,11 @@ package_wxwidgets-common() {
 
   DESTDIR="$pkgdir" cmake --install build-gtk3
   rm -r "$pkgdir"/usr/{bin/wx-config,lib/{cmake,wx,libwx_gtk*}}
-  install -Dm644 wxWidgets-$pkgver/wxwin.m4 -t "$pkgdir"/usr/share/aclocal
+  install -Dm644 wxWidgets/wxwin.m4 -t "$pkgdir"/usr/share/aclocal
 # Install translations
-  make DESTDIR="$pkgdir" -C wxWidgets-$pkgver locale_install  
+  make DESTDIR="$pkgdir" -C wxWidgets locale_install  
 
-  install -Dm644 wxWidgets-$pkgver/docs/licence.txt "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  install -Dm644 wxWidgets/docs/licence.txt "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
 
 package_wxwidgets-gtk3() {
@@ -131,7 +131,7 @@ package_wxwidgets-gtk3() {
   DESTDIR="$pkgdir" cmake --install build-gtk3
   rm -r "$pkgdir"/usr/{include,lib/libwx_base*,bin/wxrc*}
   
-  install -Dm644 wxWidgets-$pkgver/docs/licence.txt "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  install -Dm644 wxWidgets/docs/licence.txt "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
 
 package_wxwidgets-qt5() {
@@ -158,5 +158,5 @@ package_wxwidgets-qt5() {
     mv $_f $(dirname $_f)/$(basename $_f | sed -e 's/wxWidgets/wxWidgetsQt/')
   done
 
-  install -Dm644 wxWidgets-$pkgver/docs/licence.txt "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  install -Dm644 wxWidgets/docs/licence.txt "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
