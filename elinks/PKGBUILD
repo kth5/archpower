@@ -1,5 +1,5 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer:
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
 # Contributor: Kyle Keen <keenerd@gmail.com>
 # Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
@@ -7,37 +7,63 @@
 # Contributor: Ben <contrasutra@myrealbox.com>
 
 pkgname=elinks
-pkgver=0.16.1.1
-pkgrel=2
-pkgdesc="Advanced, feature-rich text mode web browser"
+pkgver=0.17.0
+pkgrel=1
+pkgdesc='Advanced feature-rich text-mode web browser'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url="https://github.com/rkd77/elinks"
+url='https://github.com/rkd77/elinks'
 license=('GPL')
-depends=('bzip2' 'expat>=2.0' 'gpm>=1.20.4' 'openssl' 'lua' 'libidn' 'gc' 'tre'
-         'zlib')
-source=("elinks-$pkgver.tgz::https://github.com/rkd77/elinks/archive/v$pkgver.tar.gz")
-sha256sums=('d07e55ede144d532212b2b5b92fb81df4360ddd2b156ccaf09cfa4aa218e1aed')
-
-# todo: make it work with a modern 'js' package
-# (upstream has no interest in writing that)
+depends=(
+  'glibc'
+  'brotli'
+  'bzip2'
+  'gpm'
+  'openssl'
+  'lua'
+  'libdom'
+  'libcss'
+  'libidn2'
+  'xz'
+  'libwapcaplet'
+  'expat'
+  'zlib'
+  'curl'
+  'tre'
+)
+makedepends=(
+  'git'
+  'meson'
+  'dblatex'
+  'xmlto'
+  'libiconv'
+  'gc'
+  'cmake'
+)
+commit=f5ecff0fd0b16aaf110f808ea154dd94a080ef66
+source=("$pkgname::git+$url#commit=${commit}"
+        "$pkgname-gcc14.patch::https://github.com/rkd77/elinks/commit/6b053637b3811607d7a16e849cf5f51714db4355.patch")
+b2sums=('fce71e71804c9ca2d1c8f5c4abdcc90dddd56a7a4b4728750ee254cdd0d393d3cc7bcbd68db19f617c02161e31f9ea9ef571c597848524ddb256458ca5109403'
+        'b22eb8bb259874302eb80f6f2c7ea9d05659667e02004f43e9b893d70383728309d5c2d57ca5a3815ed9ce3e41f80cc9186d994e64065d0fef66753739f5b81e')
 
 build() {
-  cd elinks-$pkgver
-  sed -i 's/Terminal=1/Terminal=true/' "contrib/debian/$pkgname.desktop"
-  [ -x configure ] || sh autogen.sh
-  ./configure --prefix=/usr --mandir=/usr/share/man \
-              --sysconfdir=/etc \
-              --disable-smb --without-x --enable-cgi \
-              --enable-leds --enable-256-colors --enable-html-highlight \
-              --enable-gemini --with-zlib --with-luapkg=lua54
-  make -j1
+  arch-meson \
+    "$pkgname" \
+    build \
+    -D cgi=true \
+    -D true-color=true \
+    -D html-highlight=true \
+    -D bzlib=true \
+    -D brotli=true \
+    -D lzma=true \
+    -D luapkg=lua54 \
+    -D tre=true \
+    -D gemini=true \
+    -D reproducible=true \
+    -D source-date-epoch="$SOURCE_DATE_EPOCH"
+
+  meson compile -C build
 }
 
 package() {
-  cd elinks-$pkgver
-  make DESTDIR="$pkgdir" install
-  rm -f "$pkgdir/usr/share/locale/locale.alias"
-
-  install -D -m644 "contrib/debian/$pkgname.desktop" \
-    "$pkgdir/usr/share/applications/$pkgname.desktop"
+  meson install -C build --destdir="$pkgdir"
 }
