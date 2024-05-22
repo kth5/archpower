@@ -9,8 +9,8 @@
 
 pkgbase=mupdf
 pkgname=(libmupdf mupdf mupdf-gl mupdf-tools python-mupdf)
-pkgver=1.24.0
-pkgrel=1
+pkgver=1.24.1
+pkgrel=2
 pkgdesc='Lightweight PDF and XPS viewer'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://mupdf.com/'
@@ -21,6 +21,7 @@ makedepends=(
   'desktop-file-utils'
   'freeglut'
   'freetype2'
+  'git'
   'glu'
   'gumbo-parser'
   'harfbuzz'
@@ -37,32 +38,56 @@ makedepends=(
   'python'
   'swig'
   'tesseract'
+  'unzip'
   'zlib'
 )
 options=('staticlibs')
 source=(
-  "https://mupdf.com/downloads/archive/$pkgbase-${pkgver/_/}-source.tar.gz"
+  git+https://github.com/ArtifexSoftware/mupdf.git#tag=$pkgver
+  git+https://github.com/ArtifexSoftware/mujs.git
+  git+https://github.com/ArtifexSoftware/thirdparty-lcms2.git
+  git+https://github.com/ArtifexSoftware/extract.git
   $pkgbase.desktop
   $pkgbase.xpm
   $pkgbase-1.23.9-cpp_ldflags.patch
   $pkgbase-1.23.9-install_targets.patch
 )
-sha256sums=('52f63003a6f4d89f234e9edfb4b4c83d216b83aaeb323cfda6047cb754599ae0'
+sha256sums=('bba6c0b3f808a5233807f3777eb98f03d7740aa2125c1dd6c412180f4cd8a0b2'
+            'SKIP'
+            'SKIP'
+            'SKIP'
             'ccff66979249bd4ab4ba8918660f194eb90eb0ae231b16e36a6cecdcf471883f'
             'a435f44425f5432c074dee745d8fbaeb879038ec1f1ec64f037c74662f09aca8'
             '152222c0bc066404d9e38be7abbba20748b0a4bbc9cb30403d19e3b176ab257f'
             'ceb2b16a12bf193d514969f995dfca4c2d12d489c2690928db2db4afe09f6c8c')
 
 prepare() {
-  cd $pkgbase-${pkgver/_/}-source
+  cd $pkgbase
 
   # use our LDFLAGS when building the C++ bindings to have full RELRO
   patch -Np1 -i ../$pkgbase-1.23.9-cpp_ldflags.patch
   # alter install-shared-* targets to not call one another (which fails on installing headers twice) and install libmupdfcpp.so with soname postfix
   patch -Np1 -i ../$pkgbase-1.23.9-install_targets.patch
 
-  # remove bundled packages, we want our system libraries
-  rm -rf thirdparty/{curl,freeglut,freetype,gumbo-parser,harfbuzz,jbig2dec,leptonica,libjpeg,openjpeg,tesseract,zlib}
+  # init submodules and disable the ones we don't need, we want our system libraries instead
+  git submodule init
+  rm -rvf thirdparty/{curl,freeglut,freetype,gumbo-parser,harfbuzz,jbig2dec,leptonica,libjpeg,openjpeg,tesseract,zlib}
+  git submodule deinit thirdparty/curl
+  git submodule deinit thirdparty/freeglut
+  git submodule deinit thirdparty/freetype
+  git submodule deinit thirdparty/gumbo-parser
+  git submodule deinit thirdparty/harfbuzz
+  git submodule deinit thirdparty/jbig2dec
+  git submodule deinit thirdparty/leptonica
+  git submodule deinit thirdparty/libjpeg
+  git submodule deinit thirdparty/openjpeg
+  git submodule deinit thirdparty/tesseract
+  git submodule deinit thirdparty/zlib
+  # update required third party libraries
+  git config submodule.thirdparty/mujs.url "$srcdir/mujs" # is hardcoded and needs a patch to debundle
+  git config submodule.thirdparty/lcms2.url "$srcdir/thirdparty-lcms2" # requires fork (not the version we are packaging)
+  git config submodule.thirdparty/extract.url "$srcdir/extract" # we do not package this one
+  git -c protocol.file.allow=always submodule update
 
   {
     printf "LINUX_OR_OPENBSD := yes\n"  # required so that Makefile sets soname symlink
@@ -86,7 +111,7 @@ prepare() {
 }
 
 build() {
-  cd $pkgbase-${pkgver/_/}-source
+  cd $pkgbase
   # Enforce -j1 to avoid concurrency issue during build
   make -j1 VENV_FLAG= shared=yes build=release libs apps c++ python
 }
@@ -107,7 +132,7 @@ package_libmupdf() {
     'zlib'
   )
 
-  cd $pkgbase-${pkgver/_/}-source
+  cd $pkgbase
   make prefix=/usr DESTDIR="$pkgdir" SO_INSTALL_MODE=755 install-shared-c install-shared-c++
 }
 
@@ -120,7 +145,7 @@ package_python-mupdf() {
     'python'
   )
 
-  cd $pkgbase-${pkgver/_/}-source
+  cd $pkgbase
   make prefix=/usr DESTDIR="$pkgdir" SO_INSTALL_MODE=755 install-shared-python
 }
 
@@ -134,7 +159,7 @@ package_mupdf() {
     'libxext'
   )
 
-  cd $pkgbase-${pkgver/_/}-source
+  cd $pkgbase
 
   install -vDm 0755 build/shared-release/$pkgbase-x11 "$pkgdir"/usr/bin/$pkgbase
 
@@ -159,7 +184,7 @@ package_mupdf-gl() {
     'openssl'
   )
 
-  cd $pkgbase-${pkgver/_/}-source
+  cd $pkgbase
 
   install -vDm 0755 build/shared-release/$pkgbase-gl "$pkgdir"/usr/bin/$pkgbase
 
@@ -179,7 +204,7 @@ package_mupdf-tools() {
     'openssl'
   )
 
-  cd $pkgbase-${pkgver/_/}-source
+  cd $pkgbase
 
   install -vDm 0755 build/shared-release/{mutool,muraster} -t "$pkgdir"/usr/bin/
 
