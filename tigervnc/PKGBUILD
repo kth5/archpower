@@ -3,8 +3,8 @@
 
 pkgname=tigervnc
 pkgver=1.13.1
-pkgrel=3
-_xorgver=21.1.11
+pkgrel=4
+_xorgver=21.1.13
 pkgdesc="Suite of VNC servers and clients. Based on the VNC 4 branch of TightVNC."
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="http://www.tigervnc.org"
@@ -14,8 +14,8 @@ depends=('fltk' 'pam' 'gnutls' 'libjpeg-turbo' 'libxtst' 'pixman'
 	 'libgl' 'libgcrypt' 'perl' 'libxdamage' 'libxfont2' 'libdrm'
 	 'xorg-xinit' 'libxcvt' 'ffmpeg')
 makedepends=('cmake' 'xorg-font-util' 'xorg-util-macros'
-	     'xtrans' 'xorgproto'
-	     'mesa' 'imagemagick' 'java-environment')
+	     'git' 'xtrans' 'xorgproto'
+	     'mesa' 'imagemagick' 'java-environment>=8')
 makedepends_x86_64=('nasm')
 optdepends=('mesa: for OpenGL functionality in Xvnc')
 conflicts=('tightvnc')
@@ -23,40 +23,35 @@ backup=(etc/pam.d/tigervnc
 	etc/tigervnc/vncserver-config-defaults
 	etc/tigervnc/vncserver-config-mandatory
 	etc/tigervnc/vncserver.users)
-source=($pkgname-$pkgver.tar.gz::https://github.com/TigerVNC/tigervnc/archive/v${pkgver}.tar.gz
-	https://xorg.freedesktop.org/releases/individual/xserver/xorg-server-${_xorgver}.tar.xz
+source=(git+https://github.com/TigerVNC/tigervnc.git#tag=v${pkgver}
+        git+https://gitlab.freedesktop.org/xorg/xserver.git?#tag=xorg-server-${_xorgver}
 	Xsession
 	more-xsessions.patch
 	remove-selinux.patch)
-sha256sums=('b7c5b8ed9e4e2c2f48c7b2c9f21927db345e542243b4be88e066b2daa3d1ae25'
-            '1d3dadbd57fb86b16a018e9f5f957aeeadf744f56c0553f55737628d06d326ef'
+sha256sums=('a742d94c23ec632145afe613a4ce9c67cb32429dd47aba58fd01a7cbf6d5d8f2'
+            '63620c5faf0f76d6f52ee5aed57f3bc739a7868dac9379a1a7e36df6375540a0'
             'c9276f6ea277cf9654fb2cc3bc9dadbb2e596b5cf8ca867ee906c0080cf7f810'
             'cb57dece026b29d7019a3e1e42fd2fb201d37fc60a70c885d2a50acffb808c06'
             'fb8bb5bd3ec990720580a664326a70fd178ce94b97c2130462df9b1e3a3925c3')
 
 prepare() {
-  cd "$srcdir"/${pkgname}-${pkgver}
+  cd ${pkgname}
   patch -p1 -i "$srcdir"/more-xsessions.patch
   patch -p1 -i "$srcdir"/remove-selinux.patch
 
   cd unix/xserver
-  cp -r "$srcdir"/xorg-server-${_xorgver}/* .
+  cp -r "$srcdir"/xserver/* .
   patch -Np1 -i ../xserver21.1.1.patch
 }
 
 build() {
-  cd "$srcdir"/${pkgname}-${pkgver}
-
-  JAVA=TRUE
-  case "${CARCH}" in
-    riscv64) JAVA=FALSE ;;
-  esac
+  cd ${pkgname}
 
   cmake -G "Unix Makefiles" \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_INSTALL_SBINDIR=/usr/bin \
     -DCMAKE_INSTALL_LIBEXECDIR=/usr/bin \
-    -DBUILD_JAVA=${JAVA}
+    -DBUILD_JAVA=TRUE
   make
 
   cd unix/xserver
@@ -72,10 +67,9 @@ build() {
 }
 
 package() {
-  cd "$srcdir"/${pkgname}-${pkgver}
+  cd ${pkgname}
   make DESTDIR="$pkgdir" install
-  [ ! "${CARCH}" == 'riscv64' ] && \
-    install -Dm0644 java/VncViewer.jar "${pkgdir}"/usr/share/vnc/classes/VncViewer.jar
+  install -Dm0644 java/VncViewer.jar "${pkgdir}"/usr/share/vnc/classes/VncViewer.jar
   cd unix/xserver/hw/vnc
   make DESTDIR="$pkgdir" install
   install -Dm0755 "$srcdir"/Xsession "$pkgdir"/etc/X11/tigervnc/Xsession
