@@ -1,0 +1,61 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Sven-Hendrik Haase <svenstaro@archlinux.org>
+# Maintainer: Orhun Parmaksız <orhun@archlinux.org>
+# Contributor: Jonathon Fernyhough <jonathon_at_manjaro_dot_org>
+# Contributor: Jon Gjengset <jon@tsp.io>
+pkgname=rustup
+pkgver=1.27.1
+pkgrel=1
+pkgdesc="The Rust toolchain installer"
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+url="https://github.com/rust-lang/rustup.rs"
+license=('MIT' 'Apache-2.0')
+depends=('curl' 'xz' 'zstd')
+makedepends=('cargo')
+optdepends=('lldb: rust-lldb script'
+            'gdb: rust-gdb script')
+provides=('rust' 'cargo' 'rust-nightly' 'cargo-nightly' 'rustfmt' 'rust-src'
+          'lib32-rust-libs' 'rust-musl' 'rust-wasm' 'rust-analyzer')
+conflicts=('rust' 'cargo' 'rustfmt')
+replaces=('cargo-tree')
+install='post.install'
+options=("!lto")
+source=("rustup-${pkgver}.tar.gz::https://github.com/rust-lang/rustup.rs/archive/${pkgver}.tar.gz"
+        "rustup-profile.sh")
+sha512sums=('e0494678b7117464665c2aa88165e13baf2dcfb2a33c57dc78f669533111f773724d227ee05967de427845f8633e56fdf8159c7a5b96638413710beacb115075'
+            '18d5b4ab9a032cb43fd0b59fb553a878068981534e549935c5ff4a12dc2f74849ce36367eb59e670d674a19a7d4bc0056d0694d7f87ede187416c2ffcbb20355')
+_binlinks=('cargo' 'rustc' 'rustdoc' 'rust-gdb' 'rust-lldb' 'rustfmt' 'cargo-fmt' 'cargo-clippy' 'clippy-driver' 'cargo-miri')
+
+build() {
+  cd "$pkgname-${pkgver}"
+  cargo build --release --features no-self-update --bin rustup-init
+}
+
+package() {
+  cd "$pkgname-${pkgver}"
+  install -d "${pkgdir}/usr/lib/$pkgname/bin"
+  install -Dm755 "target/release/rustup-init" "${pkgdir}/usr/bin/rustup"
+  for link in "${_binlinks[@]}"; do
+      ln -s /usr/bin/rustup "${pkgdir}/usr/bin/${link}"
+  done
+
+  # Special treatment for rust-analyzer to still allow the separate package version to be used.
+  ln -s /usr/bin/rustup "${pkgdir}/usr/lib/$pkgname/bin/rust-analyzer"
+
+  install -Dm644 "$srcdir/$pkgname-profile.sh" "$pkgdir/etc/profile.d/$pkgname.sh"
+
+  # Generate completion files.
+  mkdir -p "$pkgdir/usr/share/bash-completion/completions"
+  "$pkgdir"/usr/bin/rustup completions bash > "$pkgdir/usr/share/bash-completion/completions/rustup"
+  "$pkgdir"/usr/bin/rustup completions bash cargo > "$pkgdir/usr/share/bash-completion/completions/cargo"
+  mkdir -p "$pkgdir/usr/share/fish/vendor_completions.d"
+  "$pkgdir"/usr/bin/rustup completions fish > "$pkgdir/usr/share/fish/vendor_completions.d/rustup.fish"
+  mkdir -p "$pkgdir/usr/share/zsh/site-functions"
+  "$pkgdir"/usr/bin/rustup completions zsh > "$pkgdir/usr/share/zsh/site-functions/_rustup"
+  "$pkgdir"/usr/bin/rustup completions zsh cargo > "$pkgdir/usr/share/zsh/site-functions/_cargo"
+
+  install -Dm644 LICENSE-MIT "${pkgdir}"/usr/share/licenses/$pkgname/LICENSE-MIT
+  install -Dm644 LICENSE-APACHE "${pkgdir}"/usr/share/licenses/$pkgname/LICENSE-APACHE
+}
+
+# vim:set ts=2 sw=2 et:
