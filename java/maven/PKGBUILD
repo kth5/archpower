@@ -4,15 +4,15 @@
 # Contributor: William Rea <sillywilly@gmail.com>
 
 pkgname=maven
-pkgver=3.8.7
+pkgver=3.9.7
 pkgrel=1
 pkgdesc='Java project management and project comprehension tool'
 url='https://maven.apache.org'
 arch=(any)
-license=('APACHE')
+license=('Apache-2.0')
 depends=('java-environment>=8' 'bash' 'procps-ng')
-makedepends=('maven' 'java-environment=8')
-backup=('opt/maven/conf/settings.xml')
+makedepends=('maven' 'java-environment=21')
+backup=('usr/share/java/maven/conf/settings.xml')
 source=(https://downloads.apache.org/maven/maven-3/${pkgver}/source/apache-maven-${pkgver}-src.tar.gz{,.asc}
         # both bin artifacts are only used for reproducible builds from source
         https://downloads.apache.org/maven/maven-3/${pkgver}/binaries/apache-maven-${pkgver}-bin.tar.gz{,.asc,.sha512}
@@ -25,13 +25,14 @@ validpgpkeys=(
   'BBE7232D7991050B54C8EA0ADC08637CA615D22C' # Enrico Olivelli <eolivelli@apache.org>
   'B02137D875D833D9B23392ECAE5A7FB608A0221C' # Robert Scholte <rfscholte@apache.org>
   '6A814B1F869C2BBEAB7CB7271A2A1C94BDE89688' # Michael Osipov (Java developer) <1983-01-06@gmx.net>
+  '29BEA2A645F2D6CED7FB12E02B172E3E156466E8' # Tamas Cservenak (ASF) (Release key) <cstamas@apache.org>
 )
-sha256sums=('fe13478988307e3160624e2f672fc3d63c7e528e78085885ee57342d693372e5'
+sha256sums=('469580a1f25b998f294a07391412f4ec6eefdd05c328c0068f44588e438e702d'
             'SKIP'
-            '628b49352130d1d25d5519b1c724f0efe58b86bad55f37a694ca8f73f11e3604'
+            'c8fb9f620e5814588c2241142bbd9827a08e3cb415f7aa437f2ed44a3eeab62c'
             'SKIP'
-            'ea9877cc10162f7503fc1ef29c6d81174c3eb0aa9de7d0b4381c9a40949b4213'
-            '17d9b8efa6a922907110026273443bcc8d83e061e14ac82cb5052b483acc9b76')
+            '8a6565146dd28be518cbcc89ce22d13775e4fdcd298d491f1caba09e43d63852'
+            '15557fc169d83396238df69b5c1d5551cb9c570629decedd6b484d3b4e422546')
 
 _buildnumber() {
   # use same build number as the binary dist but prove that our source build is
@@ -43,10 +44,13 @@ _buildnumber() {
 build() {
   cd apache-maven-${pkgver}
 
-  export PATH="/usr/lib/jvm/java-8-openjdk/bin:${PATH}"
+  export JAVA_HOME="/usr/lib/jvm/java-21-openjdk"
+  export PATH="/usr/lib/jvm/java-21-openjdk/bin:$PATH"
+  # Consult the link for JDK and line separator of buildpec for reproducible
+  # https://github.com/jvm-repo-rebuild/reproducible-central/blob/master/content/org/apache/maven/maven/README.md
   mvn package \
     -DbuildNumber="$(_buildnumber)" \
-    -Dline.separator=$'\r\n' \
+    -Dline.separator=$'\n' \
     -Dproject.build.sourceEncoding=UTF-8 -e \
     -Dmaven.repo.local="${srcdir}/repo" \
     -DskipTests
@@ -63,7 +67,8 @@ build() {
 check() {
   cd apache-maven-${pkgver}
 
-  export PATH="/usr/lib/jvm/java-8-openjdk/bin:${PATH}"
+  export JAVA_HOME="/usr/lib/jvm/java-21-openjdk"
+  export PATH="/usr/lib/jvm/java-21-openjdk/bin:$PATH"
   mvn test \
     -Dmaven.repo.local="${srcdir}/repo"
 }
@@ -73,14 +78,14 @@ package() {
 
   install -Dm 755 ../maven.sh -t "${pkgdir}/etc/profile.d"
 
-  install -d "${pkgdir}/opt/maven"
+  install -d "${pkgdir}/usr/share/java/${pkgname}"
   bsdtar xf apache-maven/target/apache-maven-${pkgver}-bin.tar.gz \
     --strip-components=1 \
-    -C "${pkgdir}/opt/maven"
+    -C "${pkgdir}/usr/share/java/${pkgname}"
 
   install -d "${pkgdir}/usr/bin"
-  ln -s /opt/maven/bin/mvn "${pkgdir}/usr/bin/mvn"
-  ln -s /opt/maven/bin/mvnDebug "${pkgdir}/usr/bin/mvnDebug"
+  ln -s "/usr/share/java/${pkgname}/bin/mvn" "${pkgdir}/usr/bin/mvn"
+  ln -s "/usr/share/java/${pkgname}/bin/mvnDebug" "${pkgdir}/usr/bin/mvnDebug"
 }
 
 # vim: ts=2 sw=2 et:
