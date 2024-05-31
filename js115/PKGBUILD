@@ -2,7 +2,7 @@
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
 pkgname=js115
-pkgver=115.9.0
+pkgver=115.11.0
 pkgrel=1
 pkgdesc="JavaScript interpreter and libraries - Version 115"
 url="https://spidermonkey.dev/"
@@ -32,6 +32,7 @@ makedepends=(
   unzip
   zip
 )
+makedepends_x86_64=(lld nasm yasm)
 checkdepends=(
   git
   mercurial
@@ -40,6 +41,11 @@ options=(!lto)
 _relver=${pkgver}esr
 source=(
   https://archive.mozilla.org/pub/firefox/releases/$_relver/source/firefox-$_relver.source.tar.xz{,.asc}
+  sqlite-ppc.patch
+  sandbox-fork.patch
+  big-endian-image-decoders.patch
+  fix-webrtc-glibcisms.patch
+  ppc32-fix-build.patch
   power9-jit-744146.diff
   power9-jit-744147.diff
   power9-jit-744148.diff
@@ -50,8 +56,13 @@ source=(
   power9-jit-744154.diff
   power9-jit-744155.diff
 )
-sha256sums=('db3b3371c5e6636de73798635531df137b17c5b78bdee03810930b29e8212803'
+sha256sums=('16be46f16a356a2b8bd3541805a24c8a2acf6f077cf8a65859689685c26025e0'
             'SKIP'
+            '5f0ca8811b4f4967b311270ccf0f5e1aca5917bec37eb54f2b241d0da1641a30'
+            'ef9bd794b322482ec7ba217da0cc7cf9e079e05e27bdb37b241b9e16551295ad'
+            '4eb95f37dfe07175a30d89b6b0a22a59adbc0bd211fedf975e450f8b407c6e45'
+            '0b33247a87160cc2d80827c1c3ae6ca915f4ea72ecc41be9c496ff402b3a5252'
+            'bb8aba9cb52ac497bb3f32c5b8d2fa44152b518913bc868d56bbbad90679e484'
             '7b98f766b632aab9c1247ecad0575b722fd8ff57ced3f5d8a9d2c8da6f6353d4'
             '75c96962ae0f1fffdd3e051bede12e7e0cdf2051c849cc7b03d462883a32bb39'
             'df2758a662f54270bf762e3afcb66b0ba287a56caf7d51202853ac6df81f4b1f'
@@ -61,8 +72,13 @@ sha256sums=('db3b3371c5e6636de73798635531df137b17c5b78bdee03810930b29e8212803'
             'd97aee7fd15ac27fe192eb3e412d3b0fb70427fed440e5b04525a487a55416b2'
             'abd67a5612bcb73a1fdf68753a076793deae609c26ff3adf21060cda610c363a'
             '6031f88d231b6f18c1ff482e364b3830b382b88365e11419092dcd2b81cb2817')
-b2sums=('2b70c0396763ef6662450c1001b847adfc7c8cbf6e4e2ffd3120473aebcc4ff9e25091e2d8e3f9462c2094de9211d658776746a0d8ce9ed73efa824b4e25b508'
+b2sums=('ced11d0665215dbf0aed710015a1e27863ecb8ccbba71ff6f6c57e1789e54c3c7c1940507db86ff2d8eea4d323a9ca7fbc40eaa6eaa7b0ec922ff69ffad64886'
         'SKIP'
+        '2100b761662aae4fa168081b78c287f7361c8c04304e192e29567d9e7e700940563f07030230d8b7ee6a997f4c98348a1500b2cbc98111dec073d174077baa14'
+        '14eb4e04155cfc814aa0c9102152753cf647edf62d1ebfb95ddc1e6e00d32557418d1cd584dc143f2bf6c5bf5fe2f343dc9f65936848f242ad39788b232f4395'
+        '5cbf300eb5706ccdc891c02076dc2607b12e218ba88963fde8fe1c3ae6ac2ea090d56b46cff4b4b4b02a8a3dbe6873c60f79088474f31db5f82189800eaeceaa'
+        'a9e707ec00ea7dd55bd2cacd6f7fa94998d30ee471a8b0f7067fcca3b7456457ee9caa5f340192c9cf2e7ebae8d60ab8ed75d45e469bcb957c1a99706d8c1dd5'
+        'b459f9264e7d1a431619d3e0a020f9cc22e273df75b512915f231e1c1fb2e55d5a8f5d2aedf1d23076b8a2f785918064014503b270656a7b56f021295eb2b730'
         '78a24d3978c542550e4af443862b0783736245c677569a2ef789936bd6a4146f720d21bb176b08b7b13855c1708358bc7906cf0689d6aa39f7e9814bda230647'
         '2e9ff759e7e3dbcdae1761e1d01ba7f97c8b9618de4a245ee49e15acc618d00427d21a38f262190805f2850d3d0358824354bf4d4b0b87508390e86b20b288bf'
         'a9fc1ae9c93625ec22c58f14c37e4f429601a11eeb58f7c8884e3ce58c486e6f11a1298b89568453215601bfa4a08549b6067db8ee15c054a2086cbe307ab519'
@@ -84,6 +100,12 @@ COMPRESSZST+=(--long)
 prepare() {
   mkdir mozbuild
   cd firefox-$pkgver
+
+  patch -Np1 -i ${srcdir}/sqlite-ppc.patch
+  patch -Np1 -i ${srcdir}/sandbox-fork.patch
+  patch -Np1 -i ${srcdir}/big-endian-image-decoders.patch
+  patch -Np1 -i ${srcdir}/fix-webrtc-glibcisms.patch
+  patch -Np1 -i ${srcdir}/ppc32-fix-build.patch
 
   patch -Np1 -i ${srcdir}/power9-jit-744146.diff
   patch -Np1 -i ${srcdir}/power9-jit-744147.diff
@@ -126,9 +148,6 @@ case "${CARCH}" in
     echo 'ac_add_options --enable-lto=full' >> ../mozconfig
     echo 'ac_add_options --enable-linker=bfd' >> ../mozconfig
     echo 'ac_add_options --without-wasm-sandboxed-libraries' >> ../mozconfig
-    echo 'export RUSTC_OPT_LEVEL=2' >> ../mozconfig
-    cat ../mozconfig
-    sleep 10
   ;;
   x86_64)
     echo 'ac_add_options --enable-jit' >> ../mozconfig
@@ -136,7 +155,8 @@ case "${CARCH}" in
   ;;
   *)
     echo 'ac_add_options --disable-jit' >> ../mozconfig
-    echo 'ac_add_options --enable-linker=lld' >> ../mozconfig
+    echo 'ac_add_options --enable-lto=full' >> ../mozconfig
+    echo 'ac_add_options --enable-linker=bfd' >> ../mozconfig
   ;;
 esac
 
@@ -146,9 +166,15 @@ build() {
   cd firefox-$pkgver
 
   export MOZ_NOSPAM=1
+  export MOZCONFIG="$srcdir/mozconfig"
   export MACH_BUILD_PYTHON_NATIVE_PACKAGE_SOURCE=pip
   export MOZBUILD_STATE_PATH="$srcdir/mozbuild"
+  export MOZ_ENABLE_FULL_SYMBOLS=1
   export MOZ_BUILD_DATE="$(date -u${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH} +%Y%m%d%H%M%S)"
+
+  export MOZ_BUILD_DATE=$(head -1 sourcestamp.txt)
+  export RUSTFLAGS="-C debuginfo=1"
+  export RUSTC_OPT_LEVEL=2
 
   # malloc_usable_size is used in various parts of the codebase
   CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
@@ -158,6 +184,16 @@ build() {
   # https://gitlab.archlinux.org/archlinux/rfcs/-/blob/master/rfcs/0023-pack-relative-relocs.rst
   LDFLAGS+=" -Wl,-z,pack-relative-relocs"
  
+  # LTO needs more open files
+  ulimit -n 4096
+
+  case "${CARCH}" in
+    powerpc*)
+      export CC=${CHOST}-gcc
+      export CXX=${CHOST}-g++
+    ;;
+  esac
+
   case "${CARCH}" in
     x86_64)
   # Do 3-tier PGO
@@ -196,10 +232,6 @@ ac_add_options --enable-lto=cross,full
 ac_add_options --enable-profile-use=cross
 ac_add_options --with-pgo-profile-path=${PWD@Q}/merged.profdata
 END
-    ;;
-    *)
-      export CC=${CHOST}-gcc
-      export CXX=${CHOST}-g++
     ;;
   esac
   ./mach build
