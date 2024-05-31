@@ -21,14 +21,22 @@ checkdepends=('python-jaraco.envs' 'python-jaraco.path' 'python-pip'
               'python-tomli-w')
 provides=('python-distribute')
 replaces=('python-distribute')
-source=("git+https://github.com/pypa/setuptools.git#tag=v$pkgver?signed")
-sha512sums=('198297cf5fb3631fd24e2f0aee4e0d7255728db8ffbf1a85af52a718b47dcfbd82de6246b69896a20465e3e5cb4936234f6a513ef21ec2edcc55671e07dcc229')
+source=("git+https://github.com/pypa/setuptools.git#tag=v$pkgver?signed"
+        system-validate-pyproject.patch
+        add-dependency.patch
+        build-no-isolation.patch)
+sha512sums=('198297cf5fb3631fd24e2f0aee4e0d7255728db8ffbf1a85af52a718b47dcfbd82de6246b69896a20465e3e5cb4936234f6a513ef21ec2edcc55671e07dcc229'
+            '390fea2c575a0042054f51d33e629b04a48f832f0a4a2dd07d34e23cdf330c382dba0f54bfb7c8a6a253bb248a4940f2a789672f715e4dc2aeb395fa185cae7a'
+            '9c5d80c753e78bf613572fb789a234984087d0ce96d0bad22b5ed731d83c77bf6d8acfa65c78f6c78f9063be7819c2b58988fdf8e7fc89b55339f94a87b3b21f'
+            '5b03349d09a6f1caff65684e746d3598f14172c3f4bd54981600598895baf08ba5cfaa3b0616af8ba0c1de607ca14cca8233358e5e34a7b9478f2522c0153ad5')
 validpgpkeys=('CE380CF3044959B8F377DA03708E6CB181B4C47E') # Jason R. Coombs <jaraco@jaraco.com>
 
 export SETUPTOOLS_INSTALL_WINDOWS_SPECIFIC_FILES=0
 
 prepare() {
   cd setuptools
+
+  patch -p1 -i ../system-validate-pyproject.patch
 
   rm -r {pkg_resources,setuptools}/{extern,_vendor} setuptools/config/_validate_pyproject
 
@@ -47,6 +55,12 @@ prepare() {
           -e 's/from \.\.extern\./from /' \
           {} +
   done
+
+  # Add the devendored dependencies into metadata of setuptools
+  patch -p1 -i ../add-dependency.patch
+
+  # Fix tests invoking python-build
+  patch -p1 -i ../build-no-isolation.patch
 
   # Remove post-release tag since we are using stable tags
   sed -e '/tag_build = .post/d' \
