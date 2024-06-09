@@ -5,8 +5,8 @@
 # Contributor: Paul Mattal <paul@archlinux.org>
 
 pkgname=ffmpeg
-pkgver=6.1.1
-pkgrel=7
+pkgver=7.0.1
+pkgrel=1
 epoch=2
 pkgdesc='Complete solution to record, convert and stream audio and video'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
@@ -118,37 +118,24 @@ provides=(
 options=(
   debug
 )
-_tag=6f4048827982a8f48f71f551a6e1ed2362816eec
 source=(
-  git+https://git.ffmpeg.org/ffmpeg.git?signed#tag=${_tag}
+  git+https://git.ffmpeg.org/ffmpeg.git?signed#tag=n${pkgver}
   add-av_stream_get_first_dts-for-chromium.patch
+  ffmpeg-6.1-gcc-14.patch
 )
-b2sums=('SKIP'
-        '555274228e09a233d92beb365d413ff5c718a782008075552cafb2130a3783cf976b51dfe4513c15777fb6e8397a34122d475080f2c4483e8feea5c0d878e6de')
+b2sums=('d2d6a645509e697932dc8f7a57719e069299e53eb37cda7bf01fd94c9e9956e5532dc5c923fa86d72d0e3a051a7f405e768c73c66ca8aea29271923a17222e03'
+        '555274228e09a233d92beb365d413ff5c718a782008075552cafb2130a3783cf976b51dfe4513c15777fb6e8397a34122d475080f2c4483e8feea5c0d878e6de'
+        'b82fc06a7eee0c7ab68ef78f3ac205f45a68a7799dc241f0a574afa48e4dbd477c0d67f7c5a7ff46971adc821ef1507f4957156200167a2c59f8c7f7867ac048')
 validpgpkeys=(DD1EC9E8DE085C629B3E1846B18E8928B3948D64) # Michael Niedermayer <michael@niedermayer.cc>
 
 prepare() {
   cd ffmpeg
-  # FS#79281: fix assembling with binutil as >= 2.41
-  git cherry-pick -n effadce6c756247ea8bae32dc13bb3e6f464f0eb
-  # FS#77813: fix playing ogg files with mplayer
-  git cherry-pick -n cbcc817353a019da4332ad43deb7bbc4e695d02a
   patch -Np1 -i ../add-av_stream_get_first_dts-for-chromium.patch # https://crbug.com/1251779
-  # use non-deprecated nvenc GUID for conftest
-  git cherry-pick -n 03823ac0c6a38bd6ba972539e3203a592579792f
-  git cherry-pick -n d2b46c1ef768bc31ba9180f6d469d5b8be677500
-  # Fix VDPAU vo
-  git cherry-pick -n e9c93009fc34ca9dfcf0c6f2ed90ef1df298abf7
-  # Fix bug in av_fft_end
-  git cherry-pick -n a562cfee2e214252f8b3f516527272ae32ef9532
-  git cherry-pick -n 250471ea1745fc703eb346a2a662304536a311b1
-  # Fix build with latest vulkan headers
-  git cherry-pick -n fef22c87ada4517441701e6e61e062c9f4399c8e
-}
 
-pkgver() {
-  cd ffmpeg
-  git describe --tags | sed 's/^n//'
+  #FIXES:
+  #libavutil/hwcontext_vaapi.c: In function ‘vaapi_map_from_drm’:
+  #libavutil/hwcontext_vaapi.c:1238:34: error: assignment to ‘uintptr_t *’ {aka ‘unsigned int *’} from incompatible pointer type ‘long unsigned int *’ [-Wincompatible-pointer-types]
+  patch -Np1 -i ../ffmpeg-6.1-gcc-14.patch
 }
 
 build() {
@@ -156,6 +143,7 @@ build() {
 
   case "${CARCH}" in
     powerpc|powerpc64) _configure_flags=(
+               --disable-asm
                --disable-altivec # altivec support on 32/64be is broken
                --disable-power8  # buildbot may be a power9
                --disable-vsx     # later SIMD, disable them forcefully
@@ -169,6 +157,8 @@ build() {
             )
     ;;
   esac
+
+  [[ "${CARCH}" == 'powerpc' ]] && _configure_flags+=(--disable-ffplay)
 
   ./configure \
     --prefix=/usr \
