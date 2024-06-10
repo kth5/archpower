@@ -23,10 +23,9 @@ pkgname=(
   pipewire-session-manager
   pulse-native-provider
 )
-_commit=f2874ad1c2f7f0b9a1da05cc4f402b3ea3761ee6  # tags/1.0.4
-pkgver=1.0.4
+pkgver=1.0.7
 _so_ver=0.3
-pkgrel=3
+pkgrel=2
 epoch=1
 pkgdesc="Low-latency audio/video router and processor"
 url="https://pipewire.org"
@@ -40,6 +39,7 @@ makedepends=(
   doxygen
   git
   glib2
+  glib2-devel
   graphviz
   gst-plugins-base
   jack2
@@ -78,24 +78,26 @@ checkdepends=(
   openal
 )
 source=(
-  "git+https://gitlab.freedesktop.org/pipewire/pipewire.git#commit=$_commit"
+  "git+https://gitlab.freedesktop.org/pipewire/pipewire.git#tag=$pkgver"
+  0001-gst-Add-support-for-DMA_DRM-explicit-modifiers.patch
+  0002-gst-Sanitize-caps-before-translating.patch
+  0003-gst-Fix-sanitization-of-non-writable-caps.patch
+  0004-gst-Re-enable-handling-of-single-long-modifiers.patch
 )
-b2sums=('SKIP')
-
-pkgver() {
-  cd pipewire
-  git describe --tags | sed 's/\([^-]*-g\)/r\1/;s/-/./g'
-}
+b2sums=('0f48332de9555b7eaca49f7ba1dfa6c86c9797ef161e1b3bec4c04dbf791e867e9e84e93fa6bc57426e79cdc4ee32c244a934064f4e5028d4310b5ec13a16b5d'
+        '562fbac6786773dca0d390aa738a3298fbd41b56b2e20fd3f4b8353f8d1ab1ace822194790f7eb530ac86f655ce44390bc02f22899424634dc5e62ee668c676c'
+        '5aca6a491907cabeee40765ef6591448bfd5a684327db5f0ffe0b59c99e23bd7cc13994f8aa42b8f5ae9c1bbd8cd69c487c4b04c6fa1dd98e9934bc4b80a17cb'
+        '902effec51d1c40191a0a5a8e5dcf54e24062f7228c8de1e25dae5ab622a3adcbbc8156d398fa14ea74a0c8e8fc489144771fbead86f91a79f4435c08f419767'
+        '87dc2c9e67121311cd960aae0751ac77652cacd6e27b70be71d0738d356d0675e731f0dad3a82f6e71b9ada2a458a13ebb572fccba3d33f88be4dc350cd5e8b3')
 
 prepare() {
   cd pipewire
 
   # Gst plugin fixes
-  git cherry-pick -n \
-    f1b75fc6f803f866d2ed0f7d1366f56ef96f0610 \
-    8a271a87b77e4508bb698f9b9e9fe3624884bfa6 \
-    1a6bb994a502d95434e326a35a83a1fb5f4ebad8 \
-    8848c7e7920618b97016243912bcb20c69a71960
+  git apply -3 ../0001-gst-Add-support-for-DMA_DRM-explicit-modifiers.patch
+  git apply -3 ../0002-gst-Sanitize-caps-before-translating.patch
+  git apply -3 ../0003-gst-Fix-sanitization-of-non-writable-caps.patch
+  git apply -3 ../0004-gst-Re-enable-handling-of-single-long-modifiers.patch
 }
 
 build() {
@@ -198,15 +200,17 @@ package_pipewire() {
     _pick audio usr/lib/pipewire-$_so_ver/libpipewire-module-fallback-sink.so
     _pick audio usr/lib/pipewire-$_so_ver/libpipewire-module-filter-chain*.so
     _pick audio usr/lib/pipewire-$_so_ver/libpipewire-module-loopback.so
-    _pick audio usr/lib/pipewire-$_so_ver/libpipewire-module-netjack2-*.so
+    _pick audio usr/lib/pipewire-$_so_ver/libpipewire-module-netjack2*.so
     _pick audio usr/lib/pipewire-$_so_ver/libpipewire-module-pipe-tunnel.so
     _pick audio usr/lib/pipewire-$_so_ver/libpipewire-module-protocol-simple.so
     _pick audio usr/lib/pipewire-$_so_ver/libpipewire-module-rtp-{sap,sink,source}.so
-    _pick audio usr/lib/pipewire-$_so_ver/libpipewire-module-vban-{recv,send}.so
+    _pick audio usr/lib/pipewire-$_so_ver/libpipewire-module-vban*.so
     _pick audio usr/lib/spa-0.2/{aec,alsa,audio*,avb,bluez5}
     _pick audio usr/lib/systemd/user/filter-chain.service
     _pick audio usr/share/alsa
     _pick audio usr/share/man/man1/pw-{cat,loopback,mididump}.1
+    _pick audio usr/share/man/man1/spa-{acp-tool,resample}.1
+    _pick audio usr/share/man/man5/pipewire-filter-chain.conf.5
     _pick audio usr/share/man/man7/libpipewire-module-{avb,echo-cancel,fallback-sink,filter-chain*,loopback,netjack2*,pipe-tunnel,protocol-simple,rtp-{sap,sink,source},vban*}.7
     _pick audio usr/share/pipewire/filter-chain*
     _pick audio usr/share/pipewire/pipewire-{aes67,avb}.conf
@@ -224,6 +228,7 @@ package_pipewire() {
     _pick jack usr/lib/libjack*
     _pick jack usr/lib/pkgconfig/jack.pc
     _pick jack usr/share/man/man1/pw-jack.1
+    _pick jack usr/share/man/man5/pipewire-jack.conf.5
     _pick jack usr/share/pipewire/jack.conf
 
     _pick pulse usr/bin/pipewire-pulse
@@ -246,6 +251,7 @@ package_pipewire() {
     _pick zeroconf usr/share/man/man7/libpipewire-module-{raop-*,rtp-session,zeroconf*}.7
 
     _pick v4l2 usr/bin/pw-v4l2 usr/lib/pipewire-$_so_ver/v4l2
+    _pick v4l2 usr/share/man/man1/pw-v4l2.1
 
     _pick x11-bell usr/lib/pipewire-$_so_ver/libpipewire-module-x11-bell.so
     _pick x11-bell usr/share/man/man7/libpipewire-module-x11-bell.7
