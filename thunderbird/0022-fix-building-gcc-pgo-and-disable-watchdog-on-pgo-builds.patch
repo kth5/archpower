@@ -1,0 +1,82 @@
+diff -Naur a/build/moz.configure/lto-pgo.configure b/build/moz.configure/lto-pgo.configure
+--- a/build/moz.configure/lto-pgo.configure	2023-08-01 09:34:24.624120874 +0300
++++ b/build/moz.configure/lto-pgo.configure	2023-08-01 09:42:14.109375611 +0300
+@@ -91,9 +91,9 @@
+ def pgo_flags(compiler, profdata, target_is_windows, pgo_temporal):
+     if compiler.type == "gcc":
+         return namespace(
+-            gen_cflags=["-fprofile-generate"],
++		    gen_cflags=["-fprofile-generate", "-DMOZ_PROFILE_INSTRUMENTATION"],
+             gen_ldflags=["-fprofile-generate"],
+-            use_cflags=["-fprofile-use", "-fprofile-correction", "-Wcoverage-mismatch"],
++            use_cflags=["-fprofile-use", "-fprofile-correction", "-Wno-coverage-mismatch"],
+             use_ldflags=["-fprofile-use"],
+         )
+ 
+@@ -105,7 +105,7 @@
+         else:
+             gen_ldflags = ["-fprofile-generate"]
+ 
+-        gen_cflags = [prefix + "-fprofile-generate"]
++        gen_cflags = [prefix + "-fprofile-generate", "-DMOZ_PROFILE_INSTRUMENTATION"]
+         if target_is_windows:
+            # native llvm-profdata.exe on Windows can't read profile data
+
+ 
+diff -Naur a/build/pgo/profileserver.py b/build/pgo/profileserver.py
+--- a/build/pgo/profileserver.py	2023-08-01 09:34:24.630120978 +0300
++++ b/build/pgo/profileserver.py	2023-08-01 09:47:01.544871568 +0300
+@@ -87,9 +87,22 @@
+     locations = ServerLocations()
+     locations.add_host(host="127.0.0.1", port=PORT, options="primary,privileged")
+ 
+-    old_profraw_files = glob.glob("*.profraw")
+-    for f in old_profraw_files:
+-        os.remove(f)
++    using_gcc = False
++    try:
++        if build.config_environment.substs.get('CC_TYPE') == 'gcc':
++            using_gcc = True
++    except BuildEnvironmentNotFoundException:
++        pass
++
++    if using_gcc:
++        for dirpath, _, filenames in os.walk('.'):
++            for f in filenames:
++                if f.endswith('.gcda'):
++                    os.remove(os.path.join(dirpath, f))
++    else:
++        old_profraw_files = glob.glob('*.profraw')
++        for f in old_profraw_files:
++            os.remove(f)
+ 
+     with TemporaryDirectory() as profilePath:
+         # TODO: refactor this into mozprofile
+@@ -213,6 +226,10 @@
+             print("Firefox exited successfully, but produced a crashreport")
+             sys.exit(1)
+ 
++        print('Copying profile data....')
++        os.system('pwd');
++        os.system('tar cf profdata.tar.gz `find . -name "*.gcda"`; cd ..; tar xf instrumented/profdata.tar.gz;');
++
+         llvm_profdata = env.get("LLVM_PROFDATA")
+         if llvm_profdata:
+             profraw_files = glob.glob("*.profraw")
+diff -Naur a/toolkit/components/terminator/nsTerminator.cpp b/toolkit/components/terminator/nsTerminator.cpp
+--- a/toolkit/components/terminator/nsTerminator.cpp	2023-08-01 09:34:19.635034175 +0300
++++ b/toolkit/components/terminator/nsTerminator.cpp	2023-08-01 09:43:37.076062984 +0300
+@@ -460,6 +460,13 @@
+   }
+ #endif
+ 
++  // Disable watchdog for PGO train builds - writting profile information at
++  // exit may take time and it is better to make build hang rather than
++  // silently produce poorly performing binary.
++#ifdef MOZ_PROFILE_INSTRUMENTATION
++  crashAfterMS = INT32_MAX;
++#endif
++
+   UniquePtr<Options> options(new Options());
+   // crashAfterTicks is guaranteed to be > 0 as
+   // crashAfterMS >= ADDITIONAL_WAIT_BEFORE_CRASH_MS >> HEARTBEAT_INTERVAL_MS

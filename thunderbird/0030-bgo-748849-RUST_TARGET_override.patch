@@ -1,0 +1,61 @@
+From: Sam James <sam@gentoo.org>
+Subject: Allow RUST_TARGET override for detected Rust triplet (fixes musl build)
+
+Respect RUST_TARGET from the environment to override Mozilla's
+own triplet detection.
+
+If the variable is unset, the old logic is used.
+
+The issue is that Gentoo supports both, say:
+- x86_64-unknown-linux-musl, and
+- x86-64-gentoo-linux-musl
+
+Our Rust is built to understand
+-gentoo- as a vendor target, but
+our Rust only actually includes
+-unknown-.
+
+Mozilla's configure sees -gentoo-
+in CHOST and that Rust _understands_
+-gentoo- and tries to use it, without
+verifying that we actually have
+-gentoo- installed as a Rust target.
+
+This requires exporting RUST_TARGET
+in the ebuild, possibly like:
+````
+inherit rust-toolchain
+
+src_configure() {
+	[...]
+	export RUST_TARGET=$(rust_abi)
+	[...]
+}
+````
+
+Inspired by Alpine's patch at
+https://git.alpinelinux.org/aports/tree/community/firefox/fix-rust-target.patch?id=740922900cf8042be6751fcfcccdd3fc11bd77d3.
+
+Bug: https://bugs.gentoo.org/748849
+Bug: https://bugs.gentoo.org/779178
+Bug: https://bugs.gentoo.org/836226
+Thanks-to: Georgy Yakovlev <gyakovlev@gentoo.org>
+--- a/build/moz.configure/rust.configure
++++ b/build/moz.configure/rust.configure
+@@ -275,6 +275,7 @@ def rust_supported_targets(rustc):
+     return data
+ 
+ 
++@imports('os')
+ def detect_rustc_target(
+     host_or_target, compiler_info, arm_target, rust_supported_targets
+ ):
+@@ -396,7 +397,7 @@ def detect_rustc_target(
+ 
+         return None
+ 
+-    rustc_target = find_candidate(candidates)
++    rustc_target = os.environ.get('RUST_TARGET', find_candidate(candidates))
+ 
+     if rustc_target is None:
+         die("Don't know how to translate {} for rustc".format(host_or_target.alias))
