@@ -6,7 +6,7 @@
 pkgbase=ksanecore
 pkgname=(ksanecore
          ksanecore5)
-pkgver=24.02.2
+pkgver=24.05.0
 pkgrel=1
 pkgdesc='Library providing logic to interface scanners'
 url='https://www.kde.org/'
@@ -19,7 +19,7 @@ makedepends=(extra-cmake-modules
              ki18n
              ki18n5)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgbase-$pkgver.tar.xz{,.sig})
-sha256sums=('18636264095bb56ee64185b4189d7ea14f33a69e392b818bbb0de6ffc1bb8170'
+sha256sums=('ca4f80b9b7d7c26483d3ebd7279a7f6b0e08d17c9419dde061780b3bfbc115bd'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
