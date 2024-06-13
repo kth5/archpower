@@ -5,19 +5,21 @@
 
 pkgbase='grpc'
 pkgname=('grpc' 'python-grpcio' 'python-grpcio-tools' 'php-grpc' 'php-legacy-grpc' 'grpc-cli')
-pkgver=1.62.1
+pkgver=1.64.2
 _gtestver=0e402173c97aea7a00749e825b194bfede4f2e45
-pkgrel=5
+pkgrel=2
 pkgdesc="High performance, open source, general RPC framework that puts mobile and HTTP/2 first."
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://grpc.io'
 license=('Apache-2.0')
-makedepends=('re2' 're2c' 'protobuf' 'php' 'php-legacy' 'c-ares' 'openssl' 'chrpath' 'cython0'
+makedepends=('re2' 're2c' 'protobuf' 'php' 'php-legacy' 'c-ares' 'openssl' 'chrpath' 'cython'
              'cmake' 'benchmark' 'abseil-cpp' 'ninja' 'python-setuptools' 'python-build' 'python-installer' 'python-wheel')
 source=("https://github.com/grpc/grpc/archive/v$pkgver/$pkgbase-$pkgver.tar.gz"
-        "https://github.com/google/googletest/archive/$_gtestver/googletest-$_gtestver.tar.gz")
-sha256sums=('c9f9ae6e4d6f40464ee9958be4068087881ed6aa37e30d0e64d40ed7be39dd01'
-            'c8de6c60e12ad014a28225c5247ee735861d85cf906df617f6a29954ca05f547')
+        "https://github.com/google/googletest/archive/$_gtestver/googletest-$_gtestver.tar.gz"
+        "grpc-no-sse2-on-unsupported-isa.patch")
+sha256sums=('c682fc39baefc6e804d735e6b48141157b7213602cc66dbe0bf375b904d8b5f9'
+            'c8de6c60e12ad014a28225c5247ee735861d85cf906df617f6a29954ca05f547'
+            '7151a85112baa206fdb3764c01671d0b0193d4e39bfb95139b8b5676df5ead76')
 
 prepare() {
   cd "$srcdir/$pkgbase-$pkgver"
@@ -35,10 +37,13 @@ prepare() {
       -e '/^PROTOBUF_SUBMODULE_VERSION=/d' \
       tools/distrib/python/grpcio_tools/protoc_lib_deps.py
   ln -s ../../../.. tools/distrib/python/grpcio_tools/grpc_root
+
+  patch -Np1 -i ${srcdir}/grpc-no-sse2-on-unsupported-isa.patch
 }
 
 build() {
   cd "$srcdir/$pkgbase-$pkgver"
+
   case "${CARCH}" in
     powerpc|riscv64) export CXXFLAGS+=" -latomic" ;;
   esac
@@ -61,6 +66,7 @@ build() {
     -DgRPC_BENCHMARK_PROVIDER:STRING='package' \
     -DgRPC_ABSL_PROVIDER:STRING='package' \
     -DgRPC_USE_PROTO_LITE=OFF \
+    -DgRPC_USE_SYSTEMD=ON \
     -DgRPC_BUILD_GRPC_CPP_PLUGIN=ON \
     -DgRPC_BUILD_GRPC_CSHARP_PLUGIN=ON \
     -DgRPC_BUILD_GRPC_NODE_PLUGIN=ON \
@@ -94,6 +100,7 @@ build() {
   export GRPC_PYTHON_BUILD_SYSTEM_CARES=1
   export GRPC_PYTHON_BUILD_SYSTEM_RE2=1
   export GRPC_PYTHON_BUILD_SYSTEM_ABSL=1
+  export GRPC_PYTHON_BUILD_WITH_SYSTEMD=1
   export GRPC_BUILD_WITH_BORING_SSL_ASM=0
 
   cd "$srcdir/$pkgbase-$pkgver"
