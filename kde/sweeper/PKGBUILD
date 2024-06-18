@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=sweeper
-pkgver=24.02.2
+pkgver=24.05.0
 pkgrel=1
 pkgdesc='System Cleaner'
 url='https://apps.kde.org/sweeper/'
@@ -28,7 +28,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-utilities)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('13755882e6c12e8c57655035c7e5f36d052c3c0bfcb40b1c067be3b93f7daddd'
+sha256sums=('6901c20f60fef3afdd32b256a062554198424447da760697061b75c104325656'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
