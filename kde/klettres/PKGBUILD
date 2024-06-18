@@ -3,7 +3,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=klettres
-pkgver=24.02.2
+pkgver=24.05.0
 pkgrel=1
 pkgdesc='Learn The Alphabet'
 url='https://apps.kde.org/klettres/'
@@ -27,7 +27,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-education)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('787fed5fa1effee56ce9698f28beda6b87969f8dac4f33778fd29b7f4448bb07'
+sha256sums=('d6235d6f93a0d9c86dfdd7aef833e0e3d9dd292b5154cf5f28cbba9b50641eca'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
