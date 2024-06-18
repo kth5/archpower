@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=libkdegames
-pkgver=24.02.2
+pkgver=24.05.0
 pkgrel=1
 pkgdesc='Common code and data for many KDE games'
 url='https://www.kde.org/'
@@ -31,7 +31,7 @@ depends=(gcc-libs
          qt6-svg)
 makedepends=(extra-cmake-modules)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('3c6bf773670e4509bbc71604bf0a14910d076434326a15756d3c47b1f5ae7e19'
+sha256sums=('8cbb3bbfbcc4e9c5fd15cb61ff542de17c1f5a668407a950d47a311ea0dd7ee4'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
