@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kdegraphics-thumbnailers
-pkgver=24.02.2
+pkgver=24.05.0
 pkgrel=1
 pkgdesc='Thumbnailers for various graphics file formats'
 url='https://apps.kde.org/kdegraphics_thumbnailers/'
@@ -24,7 +24,7 @@ makedepends=(extra-cmake-modules)
 groups=(kde-applications
         kde-graphics)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('b96912cb499a3b514e1755f920b7aa251b154212fc3c3f894b84ab409fbaf30a'
+sha256sums=('5325cee1325bf564b07067d6a666585d1ac78741288f45f628f5ed427081610c'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
