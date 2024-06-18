@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kcolorchooser
-pkgver=24.02.2
+pkgver=24.05.0
 pkgrel=1
 pkgdesc='Color Chooser'
 url='https://apps.kde.org/kcolorchooser/'
@@ -20,7 +20,7 @@ makedepends=(extra-cmake-modules)
 groups=(kde-applications
         kde-graphics)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('7f1d7c7bfda80cf627a72beb62d0944e052873f48804ee99aaec1339198005ac'
+sha256sums=('e46c0be9458c232a2105e9165d8dfc582499f7b072c1234ef65739657bba2ba5'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
