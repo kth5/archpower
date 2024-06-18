@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kio-zeroconf
-pkgver=24.02.2
+pkgver=24.05.0
 pkgrel=1
 pkgdesc='Network Monitor for DNS-SD services (Zeroconf)'
 url='https://apps.kde.org/kio_zeroconf'
@@ -24,7 +24,7 @@ replaces=(zeroconf-ioslave)
 groups=(kde-applications
         kde-network)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('a6784e8971c9eda45ee271928fdc0bff2b6ee0ed134ddb6488daaf1e886a144f'
+sha256sums=('a4e78d09a255b05134282e913bdf1d00bd5befb028ac68585021aa88285ed681'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
