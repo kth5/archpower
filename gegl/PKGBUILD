@@ -1,25 +1,40 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Daniel Isenmann <daniel@archlinux.org>
+# Maintainer: Christian Hesse <mail@eworm.de>
+# Maintainer: Christian Heusel <gromit@archlinux.org>
+# Contributor: Daniel Isenmann <daniel@archlinux.org>
 
 pkgname=gegl
-_tag='c7cd8520066a05c9502dfc93a39e97a9546dc824'
-pkgver=0.4.46
-pkgrel=2.1
+pkgver=0.4.48
+pkgrel=4
 pkgdesc='Graph based image processing framework'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://www.gegl.org/'
-license=('GPL3' 'LGPL3')
+license=('GPL-3.0-or-later OR LGPL-3.0-or-later')
 depends=('babl' 'cairo' 'gcc-libs' 'gdk-pixbuf2' 'glib2' 'glibc' 'jasper' 'json-glib' 'lcms2'
          'lensfun' 'libjpeg-turbo' 'libpng' 'libraw' 'librsvg' 'libspiro' 'libtiff' 'libwebp'
          'lua' 'openexr' 'pango' 'poppler-glib' 'suitesparse')
+makedepends_powerpc=('luajit')
+makedepends_powerpc64le=('luajit')
+makedepends_riscv64=('luajit')
+makedepends_x86_64=('luajit')
 makedepends=('ffmpeg' 'git' 'gobject-introspection' 'libgexiv2' 'meson' 'python-gobject' 'sdl2'
-             'vala')
+             'vala' 'gi-docgen')
 optdepends=('ffmpeg: FFmpeg Frame Loader and FFmpeg Frame Saver plugins'
             'graphviz: for gegl-introspect'
             'sdl2: SDL2 Display plugin')
-# TODO(gromit): switch this back to the gnome gitlab on next build
-source=("git+https://github.com/GNOME/gegl.git#tag=$_tag")
-sha256sums=('SKIP')
+source=("git+https://gitlab.gnome.org/GNOME/gegl.git#tag=GEGL_${pkgver//./_}")
+sha256sums=('bed1b1f0348519a175422800564c65c372b125b4230a0207342911bf07f34ded')
+
+prepare() {
+  cd "${pkgname}"
+  # https://gitlab.archlinux.org/archlinux/packaging/packages/gegl/-/issues/1
+  # https://gitlab.gnome.org/GNOME/gegl/-/issues/368
+  git cherry-pick --mainline 1 --no-commit \
+      ab6c62963dff7c7d464f4453f2f3f554221e5c16 \
+      a54105e15c9012933b5d830a32aef76f4e04290e \
+      66de8124f496617eee8e6b5c68138a00343882db \
+      298b6a2afb87b4b5b15c6e715967b57534cd0af0
+}
 
 pkgver() {
   cd "${pkgname}"
@@ -27,13 +42,18 @@ pkgver() {
 }
 
 build() {
+  case "${CARCH}" in
+    powerpc64)
+      _meson_options=(-Dlua=disabled)
+    ;;
+  esac
+
   mkdir -p build
   cd build
   arch-meson ../"${pkgname}" \
     -Dworkshop=true \
     -Dmrg=disabled \
-    -Dmaxflow=disabled \
-    -Dlua=disabled
+    -Dmaxflow=disabled ${_meson_options[@]}
   ninja
 }
 
