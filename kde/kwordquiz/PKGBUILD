@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kwordquiz
-pkgver=24.02.2
+pkgver=24.05.0
 pkgrel=1
 pkgdesc='Flash Card Trainer'
 url='https://apps.kde.org/kwordquiz/'
@@ -29,7 +29,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-education)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('e321b07d41c77475c2999440f8cc4b291bf45eebb43b8886aa944245e1aebae7'
+sha256sums=('6a4879b79dee390a01f41a14cc0e50427d83a230d9773ade4adfaf9a4740358d'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
