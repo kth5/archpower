@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=lokalize
-pkgver=24.02.2
+pkgver=24.05.0
 pkgrel=1
 pkgdesc='Computer-Aided Translation System'
 url='https://apps.kde.org/lokalize/'
@@ -36,7 +36,7 @@ optdepends=('languagetool: spell and grammar checking'
 groups=(kde-applications
         kdesdk)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('e19ba8314af637bc9573f9a400aaa92f136dbdf7f3687f1b920e0dca71e9af7c'
+sha256sums=('1276f8a369255db16f2d01c9b378bd93c2d6680fa3f529fc5a4489accaad24ad'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
