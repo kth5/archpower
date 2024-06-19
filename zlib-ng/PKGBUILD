@@ -1,0 +1,78 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Contributor: Chocobo1 <chocobo1 AT archlinux DOT net>
+# Contributor: Jacek Szafarkiewicz <szafar at linux dot pl>
+
+pkgname=zlib-ng
+pkgver=2.1.6
+pkgrel=1
+pkgdesc='zlib replacement with optimizations for next generation systems'
+url='https://github.com/zlib-ng/zlib-ng'
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+license=('custom:zlib')
+depends=(
+  glibc
+)
+makedepends=(
+  cmake
+  ninja
+)
+source=("${url}/archive/refs/tags/$pkgver/${pkgname}-${pkgver}.tar.gz")
+sha256sums=('a5d504c0d52e2e2721e7e7d86988dec2e290d723ced2307145dedd06aeb6fef2')
+b2sums=('9ca16c19c2c799e68e099d44721b27dc33ad9e859a3d6572bebe3a75c618bffd78e19f0d4c0607802d1c8fa6a8f328d62f9993648a99c1d2e0e5fdcaf87a2667')
+
+
+build() {
+  cd "${pkgbase}-${pkgver}"
+
+	# WITH_UNALIGNED - unaligned access invokes undefined behaviour,
+	#   see https://github.com/gentoo/gentoo/pull/17167 for more info.
+  local _options=(
+    -G Ninja
+    -DCMAKE_BUILD_TYPE=None
+    -DCMAKE_INSTALL_PREFIX=/usr
+    -DCMAKE_INSTALL_LIBDIR=lib
+    -Wno-dev
+    -DWITH_GTEST=OFF
+    -DWITH_UNALIGNED=OFF
+  )
+
+  msg2 "Building zlib-ng"
+  cmake -B build \
+    "${_options[@]}"
+  cmake --build build
+
+  msg2 "Building zlib-ng-compat"
+  cmake -B build-compat \
+    "${_options[@]}" \
+    -DZLIB_COMPAT=ON
+  cmake --build build-compat
+}
+
+check() {
+  cd "${pkgbase}-${pkgver}"
+  msg2 "Checking zlib-ng"
+  ctest --output-on-failure --test-dir build
+  msg2 "Checking zlib-ng-compat"
+  ctest --output-on-failure --test-dir build-compat
+}
+
+package_zlib-ng() {
+  cd "${pkgbase}-${pkgver}"
+  DESTDIR="${pkgdir}" cmake --install build
+  install -Dm 644 LICENSE.md -t "${pkgdir}/usr/share/licenses/${pkgname}"
+  install -Dm 644 README.md -t "${pkgdir}/usr/share/doc/${pkgname}"
+}
+
+package_zlib-ng-compat() {
+  pkgdesc+=" (zlib compat)"
+  provides=(zlib)
+  conflicts=(zlib)
+
+  cd "${pkgbase}-${pkgver}"
+  DESTDIR="${pkgdir}" cmake --install build-compat
+  install -Dm 644 LICENSE.md -t "${pkgdir}/usr/share/licenses/${pkgname}"
+  install -Dm 644 README.md -t "${pkgdir}/usr/share/doc/${pkgname}"
+}
+
+# vim: ts=2 sw=2 et:
