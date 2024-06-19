@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=svgpart
-pkgver=24.02.2
+pkgver=24.05.0
 pkgrel=1
 pkgdesc='A KPart for viewing SVGs'
 url='https://apps.kde.org/svgpart/'
@@ -22,7 +22,7 @@ makedepends=(extra-cmake-modules)
 groups=(kde-applications
         kde-graphics)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('4f860fc141984fefb249d80507c83ae67171982c852545f3395f3f9723102e28'
+sha256sums=('7d02438ac3b0d88e59a653f2302d1dbc7a2535ce627d49eb50a3a33852db42d4'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
