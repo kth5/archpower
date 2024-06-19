@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=klines
-pkgver=24.02.2
+pkgver=24.05.0
 pkgrel=1
 pkgdesc='A simple but highly addictive one player game'
 url='https://apps.kde.org/klines/'
@@ -27,7 +27,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-games)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('650305f5602a7dc923879a84cf4efde8e743d82611bba6fc402e22c9cecb08e6'
+sha256sums=('5008b0f3e4e176305c935bc75d490bf174c1d3ee67e13eb43ece6bcc911871d2'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
