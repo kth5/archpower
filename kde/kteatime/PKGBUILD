@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kteatime
-pkgver=24.02.2
+pkgver=24.05.0
 pkgrel=1
 pkgdesc='A handy timer for steeping tea'
 url='https://apps.kde.org/kteatime/'
@@ -28,7 +28,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-utilities)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('dcbd6676b2aa0b2125028b7d639da72cd0e2fc163dafa0f71eef8d8fffa57d92'
+sha256sums=('8790d57f1ccefa21011a10880ab2ec0f0aa66488bdf144acd8c18ad4b74bdb40'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
