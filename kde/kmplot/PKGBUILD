@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kmplot
-pkgver=24.02.2
+pkgver=24.05.0
 pkgrel=1
 pkgdesc='Mathematical Function Plotter'
 url='https://apps.kde.org/kmplot/'
@@ -32,7 +32,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-education)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('1f3518d1acc9cad4de496105612ee5e6bd3e8185984d60d56a57e7469b500282'
+sha256sums=('340f64ff504b246851a4099886757bb9596581f71ab8ea460e53861558569760'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
