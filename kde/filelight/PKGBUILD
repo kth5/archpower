@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=filelight
-pkgver=24.02.2
+pkgver=24.05.0
 pkgrel=1
 pkgdesc='View disk usage information'
 url='https://apps.kde.org/filelight/'
@@ -18,7 +18,6 @@ depends=(gcc-libs
          kio
          kirigami
          kirigami-addons
-         kquickcharts
          kwidgetsaddons
          kxmlgui
          qqc2-desktop-style
@@ -29,7 +28,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-utilities)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('1551bdfde7fc7e4234c6653d5a6138f9efefc9e8bdedaaaa683354728368bb8e'
+sha256sums=('0c776ff0db323d47dfb96772cef63b2311eceede940494943b0f3e8bf8a9ab8c'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
