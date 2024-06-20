@@ -1,0 +1,125 @@
+Description: xwayland: Detect gbm_bo_get_fd_for_plane at runtime
+ `gbm_bo_get_fd_for_plane` was introduced in Mesa 21 but some
+ proprietary GBM implementations (Xilinx) still haven't been updated
+ to support it:
+ ```
+ /usr/bin/Xwayland: symbol lookup error: /usr/bin/Xwayland: undefined symbol: gbm_bo_get_fd_for_plane
+ ```
+ .
+ Since distros would like to build a single Xwayland binary for all
+ OEMs of the same architecture, we now make the function always
+ available.
+ .
+ If a real implementation of `gbm_bo_get_fd_for_plane` exists at runtime
+ then it will be used, otherwise fall back to `gbm_bo_get_fd` or fail.
+Author: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Origin: https://gitlab.freedesktop.org/xorg/xserver/-/merge_requests/946
+Bug-Ubuntu: https://launchpad.net/bugs/1987628
+Forwarded: yes
+Last-Update: 2022-08-25
+
+--- a/hw/xwayland/xwayland-glamor-gbm.c
++++ b/hw/xwayland/xwayland-glamor-gbm.c
+@@ -32,6 +32,7 @@
+ 
+ #include <fcntl.h>
+ #include <errno.h>
++#include <dlfcn.h>
+ #include <sys/stat.h>
+ #include <xf86drm.h>
+ #include <drm_fourcc.h>
+@@ -147,6 +148,33 @@ is_device_path_render_node (const char *
+     return is_render_node;
+ }
+ 
++static int (*real_gbm_bo_get_fd_for_plane)(struct gbm_bo *, int);
++
++static void
++init_gbm_abi(void)
++{
++    if (!real_gbm_bo_get_fd_for_plane) {
++        real_gbm_bo_get_fd_for_plane = dlsym(RTLD_NEXT,
++                                             "gbm_bo_get_fd_for_plane");
++        if (!real_gbm_bo_get_fd_for_plane)
++            LogMessageVerb(X_WARNING, 0,
++                "gbm_bo_get_fd_for_plane is not supported natively.\n");
++    }
++}
++
++static int
++xwl_gbm_bo_get_fd_for_plane(struct gbm_bo *bo, int plane)
++{
++    if (real_gbm_bo_get_fd_for_plane)
++        return real_gbm_bo_get_fd_for_plane(bo, plane);
++
++    if (plane == 0)
++        return gbm_bo_get_fd(bo);
++
++    errno = ENOSYS;
++    return -1;
++}
++
+ static PixmapPtr
+ xwl_glamor_gbm_create_pixmap_for_bo(ScreenPtr screen, struct gbm_bo *bo,
+                                     int depth,
+@@ -155,7 +183,6 @@ xwl_glamor_gbm_create_pixmap_for_bo(Scre
+     PixmapPtr pixmap;
+     struct xwl_pixmap *xwl_pixmap;
+     struct xwl_screen *xwl_screen = xwl_screen_get(screen);
+-#ifdef GBM_BO_FD_FOR_PLANE
+     struct xwl_gbm_private *xwl_gbm = xwl_gbm_get(xwl_screen);
+     uint64_t modifier = gbm_bo_get_modifier(bo);
+     const int num_planes = gbm_bo_get_plane_count(bo);
+@@ -203,7 +230,6 @@ xwl_glamor_gbm_create_pixmap_for_bo(Scre
+     };
+ 
+     for (plane = 0; plane < num_planes; plane++) fds[plane] = -1;
+-#endif
+ 
+     xwl_pixmap = calloc(1, sizeof(*xwl_pixmap));
+     if (xwl_pixmap == NULL)
+@@ -224,7 +250,6 @@ xwl_glamor_gbm_create_pixmap_for_bo(Scre
+     xwl_pixmap->buffer = NULL;
+     xwl_pixmap->implicit_modifier = implicit_modifier;
+ 
+-#ifdef GBM_BO_FD_FOR_PLANE
+     if (xwl_gbm->dmabuf_capable) {
+ #define ADD_ATTR(attrs, num, attr)                                      \
+         do {                                                            \
+@@ -239,7 +264,7 @@ xwl_glamor_gbm_create_pixmap_for_bo(Scre
+         ADD_ATTR(img_attrs, attr_num, gbm_bo_get_format(bo));
+ 
+         for (plane = 0; plane < num_planes; plane++) {
+-            fds[plane] = gbm_bo_get_fd_for_plane(bo, plane);
++            fds[plane] = xwl_gbm_bo_get_fd_for_plane(bo, plane);
+             ADD_ATTR(img_attrs, attr_num, planeAttrs[plane][PLANE_FD]);
+             ADD_ATTR(img_attrs, attr_num, fds[plane]);
+             ADD_ATTR(img_attrs, attr_num, planeAttrs[plane][PLANE_OFFSET]);
+@@ -266,7 +291,6 @@ xwl_glamor_gbm_create_pixmap_for_bo(Scre
+         }
+     }
+     else
+-#endif
+     {
+         xwl_pixmap->image = eglCreateImageKHR(xwl_screen->egl_display,
+                                               EGL_NO_CONTEXT,
+@@ -1705,6 +1729,8 @@ xwl_glamor_init_gbm(struct xwl_screen *x
+         return FALSE;
+     }
+ 
++    init_gbm_abi();
++
+     dixSetPrivate(&xwl_screen->screen->devPrivates, &xwl_gbm_private_key,
+                   xwl_gbm);
+ 
+--- a/include/meson.build
++++ b/include/meson.build
+@@ -109,8 +109,6 @@ conf_data.set('GLAMOR_HAS_GBM_LINEAR',
+               build_glamor and gbm_dep.found() and gbm_dep.version().version_compare('>= 10.6') ? '1' : false)
+ conf_data.set('GBM_BO_WITH_MODIFIERS',
+               build_glamor and gbm_dep.found() and gbm_dep.version().version_compare('>= 17.1') ? '1' : false)
+-conf_data.set('GBM_BO_FD_FOR_PLANE',
+-              build_glamor and gbm_dep.found() and gbm_dep.version().version_compare('>= 21.1') ? '1' : false)
+ conf_data.set('GBM_BO_WITH_MODIFIERS2',
+               build_glamor and gbm_dep.found() and gbm_dep.version().version_compare('>= 21.3') ? '1' : false)
+ 
