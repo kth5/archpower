@@ -8,15 +8,15 @@
 
 _target=riscv64-unknown-linux-gnu
 pkgname=${_target}-glibc
-pkgver=2.38
-_commit=6b99458d197ab779ebb6ff632c168e2cbfa4f543
-pkgrel=3.1
+pkgver=2.39+r64+g70f560fc221
+_commit=70f560fc22212f733647c9121c26bbb2307f2e10
+pkgrel=1
 pkgdesc="GNU C Library (${_target})"
 arch=('any')
 url="http://www.gnu.org/software/libc/"
 license=(GPL LGPL)
-depends=("${_target}-linux-api-headers>=6.4")
-makedepends=("${_target}-gcc-stage2>=13.2.1" python git)
+depends=("${_target}-linux-api-headers>=6.8")
+makedepends=("${_target}-gcc-stage2>=14.1.1" python git)
 provides=("${_target}-glibc-headers=${pkgver}" "${_target}-eglibc")
 conflicts=("${_target}-glibc-headers" "${_target}-eglibc")
 replaces=("${_target}-glibc-headers")
@@ -24,17 +24,18 @@ options=(!buildflags !strip staticlibs)
 source=(git+https://sourceware.org/git/glibc.git#commit=${_commit}
         sdt-config.h
         sdt.h
-        fix-malloc-p1.patch
-        fix-malloc-p2.patch
         reenable_DT_HASH.patch)
 validpgpkeys=(7273542B39962DF7B299931416792B4EA25340F8 # Carlos O'Donell
               BC7C7372637EC10C57D7AA6579C43DFBF1CF2187) # Siddhesh Poyarekar
-sha256sums=('SKIP'
+sha256sums=('13ce6521ed9aee361246b299f3649f31956e7fb905827589a1ec014d4a27b38e'
             'cdc234959c6fdb43f000d3bb7d1080b0103f4080f5e67bcfe8ae1aaf477812f0'
             '774061aff612a377714a509918a9e0e0aafce708b87d2d7e06b1bd1f6542fe70'
-            '1e22a2226fe308154e70981c0036c7c4ebac488b26b9959cb803d7a3d831d0c4'
-            '59f37c6f3a27e08d846c1dcb0ac08c1aebb14c11afb9be10652ca1a80fd54c3e'
             'cf9fe494f7ec69752a63d1b0a9ad689aa620888ae9b902b6383a6fbc7c1726a7')
+
+pkgver() {
+  cd glibc
+  git describe --tags | sed 's/[^-]*-//;s/[^-]*-/&r/;s/-/+/g'
+}
 
 prepare() {
   mkdir -p glibc-build
@@ -100,6 +101,10 @@ build() {
 
   echo "build-programs=no" >> configparms
   make
+
+  case "${CARCH}" in
+    powerpc64) sed 's@RTLDLIST=.*@RTLDLIST="/usr/lib/ld64.so.2"@g' -i ${pkgdir}/usr/bin/ldd ;;
+  esac
 }
 
 package() {
