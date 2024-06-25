@@ -6,25 +6,56 @@
 # Contributor: Gaetan Bisson <bisson@archlinux.org>
 
 pkgname=clamav
-pkgver=1.2.1
+pkgver=1.3.1
 pkgrel=1
 pkgdesc='Anti-virus toolkit for Unix'
 url='https://www.clamav.net/'
-license=('GPL')
+license=(GPL-2.0-only)
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-depends=('bzip2' 'libltdl' 'libxml2' 'curl' 'systemd-libs' 'pcre2' 'json-c' 'libmspack'
-         'ncurses' libsystemd.so libncursesw.so libcurl.so libjson-c.so libbz2.so)
-makedepends=('libmilter' 'systemd' 'cmake' 'ninja' 'python' 'cargo' 'check')
-backup=('etc/clamav/clamd.conf'
-        'etc/clamav/freshclam.conf'
-        'etc/clamav/clamav-milter.conf'
-        'etc/logrotate.d/clamav')
-provides=(libclamav.so libclamunrar.so libclamunrar_iface.so)
-source=(https://www.clamav.net/downloads/production/${pkgname}-${pkgver}.tar.gz{,.sig}
-        clamav.logrotate
-        clamav.tmpfiles
-        clamav.sysusers)
-sha512sums=('20c796f3ce310a7198683db0582a2e37707790401eded35128bde8af0cfcee1f9184907bd56b29b9ea264ad3412ff590575a3caf49b4ebd99f191c8cc4c65f6d'
+depends=(
+  bash
+  bzip2
+  curl
+  gcc-libs
+  glibc
+  json-c
+  libltdl
+  libmspack
+  libxml2
+  ncurses
+  openssl
+  pcre2
+  systemd-libs
+  zlib
+)
+makedepends=(
+  cargo
+  check
+  cmake
+  libmilter
+  ninja
+  python
+  python-pytest
+  systemd
+)
+backup=(
+  etc/clamav/clamd.conf
+  etc/clamav/freshclam.conf
+  etc/clamav/clamav-milter.conf
+  etc/logrotate.d/clamav
+)
+provides=(
+  libclamav.so
+  libclamunrar.so
+  libclamunrar_iface.so
+)
+source=(
+  https://www.clamav.net/downloads/production/${pkgname}-${pkgver}.tar.gz{,.sig}
+  clamav.logrotate
+  clamav.tmpfiles
+  clamav.sysusers
+)
+sha512sums=('9df2648ee257ac6c8f69c9d884b746ee1eeee2241ff8805d2cec25c67b90fcf85077de38e22e317cf7b4c9872bb71d0a157c0dffd7241caa8d1d7d64daeac530'
             'SKIP'
             '9cb168c1c16bb43c99900d7ef34456e3f3b593d4d1943c875a0306bc86fd3872cb78e9e1413dcba93579e01b96d466c9eea1975e24190193663b7986c4525d48'
             'c5443634399bd87fe0d0192518538ffdb7296a8437b5b0160a0fbd58696b01285de3237e3feb552c0095c49e576832dec2e2b2107eef2be42424ed7edd13cd19'
@@ -69,10 +100,23 @@ build() {
 
 check() {
   cd ${pkgname}-${pkgver}
-  ninja -C build test
+  if ! ninja -C build test; then
+    error "test failure, rerun in verbose mode"
+    cat build/Testing/Temporary/LastTest.log
+    ctest --test-dir build --rerun-failed --output-on-failure --extra-verbose
+    exit 1
+  fi
 }
 
 package() {
+  depends+=(
+    libsystemd.so
+    libncursesw.so
+    libcurl.so
+    libjson-c.so
+    libbz2.so
+  )
+
   cd ${pkgname}-${pkgver}
   DESTDIR="${pkgdir}" ninja -C build install
 
