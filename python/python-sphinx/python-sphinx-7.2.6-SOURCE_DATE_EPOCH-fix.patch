@@ -1,0 +1,65 @@
+commit f06f188770f5654d0c680450fe8977a89d0bbd4e
+Author: James Addison <55152140+jayaddison@users.noreply.github.com>
+Date:   Sat Feb 24 15:21:29 2024 +0000
+
+    [config] copyright correction logic: handle year-to-year ranges without trailing authorship info (#11914)
+    
+    (cherry picked from commit 8aa5edd585957ae28ec6a8d1a5a581d2865fc013)
+    
+     Conflicts:
+            tests/test_config.py
+
+diff --git a/sphinx/config.py b/sphinx/config.py
+index 405ca5e8d..cc16a02aa 100644
+--- a/sphinx/config.py
++++ b/sphinx/config.py
+@@ -463,7 +463,7 @@ def _substitute_copyright_year(copyright_line: str, replace_year: str) -> str:
+     if copyright_line[4] != '-':
+         return copyright_line
+ 
+-    if copyright_line[5:9].isdigit() and copyright_line[9] in ' ,':
++    if copyright_line[5:9].isdigit() and copyright_line[9:10] in {'', ' ', ','}:
+         return copyright_line[:5] + replace_year + copyright_line[9:]
+ 
+     return copyright_line
+diff --git a/tests/test_config.py b/tests/test_config.py
+index 0be0a588c..b6fb98b99 100644
+--- a/tests/test_config.py
++++ b/tests/test_config.py
+@@ -7,7 +7,12 @@ from unittest import mock
+ import pytest
+ 
+ import sphinx
+-from sphinx.config import ENUM, Config, check_confval_types
++from sphinx.config import (
++    ENUM,
++    Config,
++    check_confval_types,
++    correct_copyright_year,
++)
+ from sphinx.errors import ConfigError, ExtensionError, VersionRequirementError
+ 
+ 
+@@ -515,3 +520,22 @@ def test_multi_line_copyright(source_date_year, app, monkeypatch):
+             f'    \n'
+             f'      &#169; Copyright 2022-{source_date_year}, Eve.'
+         ) in content
++
++
++@pytest.mark.parametrize(('conf_copyright', 'expected_copyright'), [
++    ('1970', '{current_year}'),
++    # https://github.com/sphinx-doc/sphinx/issues/11913
++    ('1970-1990', '1970-{current_year}'),
++    ('1970-1990 Alice', '1970-{current_year} Alice'),
++])
++def test_correct_copyright_year(conf_copyright, expected_copyright, source_date_year):
++    config = Config({}, {'copyright': conf_copyright})
++    config.init_values()
++    correct_copyright_year(_app=None, config=config)
++    actual_copyright = config['copyright']
++
++    if source_date_year is None:
++        expected_copyright = conf_copyright
++    else:
++        expected_copyright = expected_copyright.format(current_year=source_date_year)
++    assert actual_copyright == expected_copyright
