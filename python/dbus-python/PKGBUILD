@@ -3,34 +3,37 @@
 # Contributor: Jan de Groot <jgc@archlinux.org>
 
 pkgbase=dbus-python
-pkgname=(dbus-python dbus-python-docs)
+pkgname=(python-dbus python-dbus-docs)
 pkgver=1.3.2
-pkgrel=3.1
+pkgrel=4
 pkgdesc='Python bindings for D-Bus'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://www.freedesktop.org/wiki/Software/dbus/'
 license=('MIT')
 depends=('dbus' 'glib2' 'glibc' 'python')
-makedepends=('meson' 'python-sphinx' 'python-sphinxcontrib-jquery' 'python-sphinx_rtd_theme')
+makedepends=('git' 'meson' 'python-pyproject-metadata' 'python-sphinx'
+             'python-sphinxcontrib-jquery' 'python-sphinx_rtd_theme' 'python-tomli')
 optdepends=('python-gobject: D-Bus services via PyGI')
-source=("https://dbus.freedesktop.org/releases/$pkgname/$pkgname-$pkgver.tar.gz"{,.asc})
-sha256sums=('ad67819308618b5069537be237f8e68ca1c7fcc95ee4a121fe6845b1418248f8'
-            'SKIP')
-validpgpkeys=('DA98F25C0871C49A59EAFF2C4DE8FF2A63C7CC90')
+source=("git+https://gitlab.freedesktop.org/dbus/$pkgbase.git?signed#tag=$pkgbase-$pkgver")
+b2sums=('c1dbfb15103b0ab6309c1db218d01d8710c9101a7761f615aefc1d8e2944389e70cff4c1e709aa660ac1f2458163ceb4c5609aaf630d07ee63d33e19b1d9b575')
+validpgpkeys=('DA98F25C0871C49A59EAFF2C4DE8FF2A63C7CC90') # Simon McVittie <smcv@pseudorandom.co.uk>
 
 build() {
-  arch-meson $pkgname-$pkgver build -D doc=true
+  arch-meson $pkgbase build -D doc=true
   meson compile -C build
+
+  # Generate egg-info
+  python "$pkgbase/tools/generate-pkginfo.py" $pkgver PKG-INFO
 }
 
 check() {
   meson test -C build --print-errorlogs
 }
 
-package_dbus-python() {
-  conflicts=('python-dbus' 'python-dbus-common')
-  provides=("python-dbus=$pkgver" "python-dbus-common=$pkgver")
-  replaces=('python-dbus' 'python-dbus-common')
+package_python-dbus() {
+  conflicts=('dbus-python' 'python-dbus-common')
+  provides=("dbus-python=$pkgver" "python-dbus-common=$pkgver")
+  replaces=('dbus-python' 'python-dbus-common')
 
   meson install -C build --destdir "$pkgdir"
 
@@ -39,20 +42,22 @@ package_dbus-python() {
   python -O -m compileall -d /usr/lib "$pkgdir/usr/lib"
 
   # Install egg-info and license
-  install -Dm644 -t "$pkgdir`python -c 'import site; print(site.getsitepackages()[0])'`/dbus_python-$pkgver.egg-info/" "$srcdir"/$pkgname-$pkgver/dbus_python.egg-info/*
-  install -Dm644 "$pkgbase-$pkgver/COPYING" "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+  install -Dm644 -t "$pkgdir`python -c 'import site; print(site.getsitepackages()[0])'`/dbus_python.egg-info/" "$srcdir/PKG-INFO"
+  install -Dm644 "$pkgbase/COPYING" "$pkgdir/usr/share/licenses/$pkgname/COPYING"
 
   # Split documentation
   mkdir -p doc/usr/share
   mv {"$pkgdir",doc}/usr/share/doc
 }
 
-package_dbus-python-docs() {
+package_python-dbus-docs() {
   pkgdesc="Developer documentation for dbus-python"
   depends=()
   optdepends=()
+  conflicts=('dbus-python-docs')
+  replaces=('dbus-python-docs')
 
   mv doc/* "$pkgdir"
   rm -r "$pkgdir/usr/share/doc/$pkgbase/html/.doctrees"
-  install -Dm644 "$pkgbase-$pkgver/COPYING" "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+  install -Dm644 "$pkgbase/COPYING" "$pkgdir/usr/share/licenses/$pkgname/COPYING"
 }
