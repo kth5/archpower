@@ -2,33 +2,50 @@
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=towncrier
-pkgver=22.12.0
-pkgrel=4
+pkgver=23.11.0
+pkgrel=1
 pkgdesc="Utility to produce useful, summarised news files for your project"
 arch=(any)
-url="https://github.com/hawkowl/towncrier"
+url="https://github.com/twisted/towncrier"
 license=('MIT')
-depends=('python-click' 'python-click-default-group' 'python-incremental' 'python-jinja'
-         'python-setuptools' 'python-tomli')
-checkdepends=('git' 'python-twisted')
-source=("https://pypi.io/packages/source/t/towncrier/towncrier-$pkgver.tar.gz")
-sha512sums=('af602610ddf77ad2d241347bd59ac915637123b65aa9da41197674ea338f8d7c86d1faa59e58e8675286c44ea266915896041bf6e16c3e920e40ca85cf04e52d')
+depends=(
+  'python'
+  'python-click'
+  'python-incremental'
+  'python-jinja'
+)
+makedepends=(
+  'python-build'
+  'python-installer'
+  'python-hatchling'
+)
+checkdepends=(
+  'git'
+  'python-twisted'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/$pkgver.tar.gz")
+sha512sums=('f27f5755117071d8e49d95a18bbbacb089889fbd58706e3d21177367a6a29a6e8bd0679022ff270bf3453f4fd145466add4f57a417b298e7c7d93c63ac6f60a5')
+
+prepare() {
+  # we do not support byzantine pinning of build dependencies
+  sed -e 's/~=/>=/g; s/==/>=/g' -i $pkgname-$pkgver/pyproject.toml
+}
 
 build() {
   cd towncrier-$pkgver
-  python setup.py build
+  python -m build --wheel --no-isolation
 }
 
 check() {
   cd towncrier-$pkgver
-  python setup.py install --root="$PWD/tmp_install" --optimize=1
+  python -m installer --destdir=tmp_install dist/*.whl
   local python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
   PYTHONPATH="$PWD/tmp_install/usr/lib/python${python_version}/site-packages" PATH="$PWD/tmp_install/usr/bin:$PATH" trial towncrier
 }
 
 package() {
   cd towncrier-$pkgver
-  python setup.py install -O1 --prefix=/usr --root="$pkgdir"
+  python -m installer --destdir="$pkgdir" dist/*.whl
 
   install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
 }
