@@ -1,0 +1,62 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer:
+# Contributor: @RubenKelevra <cyrond@gmail.com>
+
+pkgname=python-watchfiles
+_name=${pkgname#python-}
+pkgver=0.22.0
+pkgrel=1
+pkgdesc='Simple, modern and high performance file watching and code reload in python'
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+url='https://github.com/samuelcolvin/watchfiles'
+license=(MIT)
+depends=(
+  gcc-libs
+  glibc
+  python
+  python-anyio
+)
+makedepends=(
+  python-build
+  python-installer
+  python-maturin
+)
+checkdepends=(
+  python-dirty-equals
+  python-pytest
+  python-pytest-mock
+  python-pytest-timeout
+)
+source=($url/archive/v$pkgver/$pkgname-$pkgver.tar.gz)
+b2sums=('505d67974bab8a0a14f25f64ebbe1013b4966ebd5531701b5f0297703692603120a034b09a3f17754b4c5de04605432006437eaabd6ed43ddddc11bf28a422fc')
+
+prepare() {
+  # remove __init__.py otherwise this prevents tests detecting the watchfiles module anywhere else
+  rm -v $_name-$pkgver/tests/__init__.py
+}
+
+build() {
+  cd $_name-$pkgver
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  local pytest_options=(
+    -vv
+    -o addopts=''
+    --deselect tests/test_watch.py::test_awatch_interrupt_raise
+  )
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+
+  cd $_name-$pkgver
+  # install to temporary location, as importlib is used
+  python -m installer --destdir=test_dir dist/*.whl
+  export PYTHONPATH="$PWD/test_dir/$site_packages:$PYTHONPATH"
+  pytest "${pytest_options[@]}" .
+}
+
+package() {
+  cd $_name-$pkgver
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
+}
