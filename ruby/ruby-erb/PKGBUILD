@@ -3,19 +3,36 @@
 
 _gemname='erb'
 pkgname="ruby-${_gemname}"
-pkgver=4.0.2
-pkgrel=2
+pkgver=4.0.4
+pkgrel=4
 pkgdesc='An easy to use but powerful templating system for Ruby'
-arch=(any)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://github.com/ruby/${_gemname}"
-license=('BSD' 'RUBY')
-depends=('ruby' 'ruby-cgi')
-makedepends=('tree')
-checkdepends=('ruby-rake' 'ruby-rake-compiler')
+license=(
+  BSD-2-Clause
+  Ruby
+)
+depends=(
+  glibc
+  ruby
+  ruby-cgi
+)
+makedepends=(
+  ruby-erb
+  ruby-rdoc
+  tree
+)
+checkdepends=(
+  ruby-bundler
+  ruby-rake
+  ruby-rake-compiler
+  ruby-test-unit
+  ruby-test-unit-ruby-core
+)
 options=('!emptydirs')
 source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('cfd9dc2888d2a1c2fa1ec85106dbd2e586af91b4e9f37939b8b7b482817656283004eb13e28907f3365855e8283879bbba21a629586a16629ce01e962a29ecc1')
-b2sums=('642ae82ffb216ec400f142ba2af9a935774cf7e8d23377c13b011e2583c32d12fe16458a533ce1919dcd03054999d8483aa6206e625d11946add8c3e1f19de09')
+sha512sums=('ee3b138db13a90825e00e94a285e5a53a46e154639fa05a6c8018560463f966709fb358d9f64936749049e19055c6a67d808d5fc844a797630e18e2a669ca6a3')
+b2sums=('b6982aa4f95188566eb9490d1d5adf0c55963797d4942c2d163162c2e4161b6a48aa9227100490b4dc8d17bd920b07828208ca85b9ae7d736895a818f90670ac')
 
 prepare() {
   cd "${_gemname}-${pkgver}"
@@ -31,6 +48,45 @@ build() {
   cd "${_gemname}-${pkgver}"
 
   local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+
+  # copy files to default gem directory
   local _platform="$(gem env platform | cut -d':' -f2)"
   local _extension_api_version="$(ruby -e 'puts Gem.extension_api_version')"
 
@@ -39,17 +95,6 @@ build() {
     "tmp_install_default/usr/bin" \
     "tmp_install/usr/lib/ruby/${_extension_api_version}/${_platform}" \
     "tmp_install${_gemdir}/specifications/default"
-
-  gem build "${_gemname}.gemspec"
-
-  gem install \
-    --local \
-    --verbose \
-    --ignore-dependencies \
-    --no-user-install \
-    --install-dir "tmp_install/${_gemdir}" \
-    --bindir "tmp_install/usr/bin" \
-    "${_gemname}-${pkgver}.gem"
 
   gem install \
     --default \
@@ -65,16 +110,6 @@ build() {
   mv --verbose "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/lib/${_gemname}.rb" "tmp_install/usr/lib/ruby/${_extension_api_version}/${_gemname}.rb"
   mv --verbose "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/lib/${_gemname}" "tmp_install/usr/lib/ruby/${_extension_api_version}/${_gemname}"
   mv --verbose "tmp_install${_gemdir}/extensions/${_platform}/${_extension_api_version}/${_gemname}-${pkgver}/${_gemname}" "tmp_install/usr/lib/ruby/${_extension_api_version}/${_platform}/${_gemname}"
-
-  # remove unrepreducible files
-  rm --force --recursive --verbose \
-    "tmp_install${_gemdir}/cache/" \
-    "tmp_install${_gemdir}/build_info/" \
-    "tmp_install${_gemdir}/extensions/" \
-    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/"{bin,ext,Gemfile,LICENSE.txt,*.md,Rakefile,erb.gemspec} \
-    "tmp_install${_gemdir}/plugins/" \
-    "tmp_install${_gemdir}/specifications/${_gemname}-${pkgver}.gemspec" \
-    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
 }
 
 check() {
@@ -82,7 +117,7 @@ check() {
 
   local _gemdir="$(gem env gemdir)"
 
-  GEM_HOME="tmp_install/${_gemdir}" rake test
+  GEM_HOME="tmp_install${_gemdir}" rake test
 }
 
 package() {
@@ -90,7 +125,7 @@ package() {
 
   cp --archive --verbose tmp_install/* "${pkgdir}"
 
-  install --verbose -D --mode=0644 LICENSE.txt "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install --verbose -D --mode=0644 LICENSE* --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
   install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
 }
 
