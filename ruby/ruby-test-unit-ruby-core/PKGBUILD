@@ -1,0 +1,84 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+
+_name=test-unit-ruby-core
+pkgname=ruby-test-unit-ruby-core
+pkgver=1.0.5
+pkgrel=2
+pkgdesc="Additional test assertions for Ruby standard libraries"
+arch=(any)
+url="https://github.com/ruby/test-unit-ruby-core"
+license=(BSD-2-Clause Ruby)
+depends=(ruby)
+makedepends=(
+  ruby-erb
+  ruby-rake
+  ruby-rdoc
+)
+source=($_name-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz)
+sha512sums=('5f107cc054abfa422c5a82c58b4a67de4c6c6cf60a0c3e18cc8408162cff5dd1689e1c61cff4900635f09b8ba908ec4394c2b5ef7e072c3eb4759463dc4b4f90')
+b2sums=('964e56fa67da961a827849481c77f91db019336844076818a9587b4dc6f7e26effa6eb8384aa7cfc6dbb4bac1681d3a6f10897c9de91dc9bd5d05f73c21ccc69')
+
+prepare() {
+  cd $_name-$pkgver
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed -i -e 's|~>|>=|g' $_name.gemspec
+}
+
+build() {
+  local gemdir="$(gem env gemdir)"
+  local gem_install_options=(
+    --local
+    --verbose
+    --ignore-dependencies
+    --no-user-install
+    --install-dir tmp_install/$gemdir
+    --bindir tmp_install/usr/bin
+    $_name-$pkgver.gem
+  )
+  local unrepro_files=(
+    tmp_install/$gemdir/cache/
+    tmp_install/$gemdir/gems/$_name-$pkgver/vendor/
+    tmp_install/$gemdir/doc/$_name-$pkgver/ri/ext/
+  )
+
+  cd $_name-$pkgver
+
+  gem build $_name.gemspec
+  gem install "${gem_install_options[@]}"
+
+  # remove unrepreducible files
+  rm -frv "${unrepro_files[@]}"
+
+  find tmp_install/$gemdir/gems/ \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find tmp_install/$gemdir/extensions/ \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+# NOTE: there is not test target
+
+package() {
+  cd $_name-$pkgver
+
+  mv -v tmp_install/* "$pkgdir/"
+
+  install -vDm 644 LICENSE.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -vDm 644 README.md -t "$pkgdir/usr/share/doc/$pkgname/"
+}
