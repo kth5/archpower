@@ -1,0 +1,101 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+_gemname=debug
+pkgname=ruby-${_gemname}
+pkgver=1.7.1
+pkgrel=1
+pkgdesc='Debugging functionality for Ruby'
+url='https://github.com/ruby/debug'
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+license=('BSD-2-Clause')
+depends=(
+  ruby
+  ruby-irb
+  ruby-reline
+)
+makedepends=(
+  git
+  ruby-rdoc
+  ruby-rake
+)
+checkdepends=(
+  ruby-test-unit
+  ruby-test-unit-rr
+  ruby-bundler
+)
+options=('!emptydirs')
+source=(${pkgname}::git+"${url}#tag=v${pkgver}")
+sha512sums=('888cff32b1497235a53719dfb46a46e3360b6b2e6b4b177937c5ed1d80774af845cf91d29f33833490aa4720d8cbc513e5a50f7648b320bb4174e733c0d1fb70')
+
+prepare() {
+  cd ${pkgname}
+  sed '/assert_equal(expected, colored_inspect(obj))/d' -i test/console/color_test.rb
+}
+
+build() {
+  cd "${pkgname}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install/${_gemdir}/cache/" \
+    "tmp_install/${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install/${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install/${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install/${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd ${pkgname}
+
+  local _gemdir="$(gem env gemdir)"
+
+  export RUBY_DEBUG_TEST_NO_REMOTE=1
+
+  GEM_HOME="tmp_install${_gemdir}" rake test_console
+}
+
+package() {
+  cd ${pkgname}
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  if [[ ! -f "${pkgdir}/usr/bin/rdbg" ]]; then
+    error "missing /usr/bin/rdbg"
+    exit 1
+  fi
+
+  install -Dm 644 README.md  -t "${pkgdir}/usr/share/doc/${pkgname}"
+  install -Dm 644 LICENSE.txt -t "${pkgdir}/usr/share/licenses/${pkgname}"
+}
+
+# vim: ts=2 sw=2 et:
