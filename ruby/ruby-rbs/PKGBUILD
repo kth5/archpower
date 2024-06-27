@@ -1,0 +1,95 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Andreas 'Segaja' Schleifer <segaja at archlinux dot org>
+
+_gemname='rbs'
+pkgname="ruby-${_gemname}"
+pkgver=3.4.4
+pkgrel=1
+pkgdesc='RBS is the language for type signatures for Ruby and standard library definitions'
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+url="https://github.com/ruby/${_gemname}"
+license=('custom:BSDL')
+depends=(ruby)
+checkdepends=(
+  ruby-bundler
+  ruby-rake
+  ruby-rake-compiler
+  ruby-rdoc
+  ruby-test-unit
+)
+options=('!emptydirs')
+source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('c6be887af1c89e7b9d8f01e248a24f571c189fc81f55d1625957434a3d1e74c5d23f9ba2089750cb742a82560165d9bab309cff8cdb6c9e455076051301c7dd4')
+b2sums=('19b95e7b162714738c37d9d8f740d11e5e4694f6e2c7e9ba9f01c74d8d318d0b848251276e421a80d8a5680ed60fa510d04d4a57ac72d0c376f1e9cfef2fe773')
+
+prepare() {
+  cd "${_gemname}-${pkgver}"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
+
+  # we don't build from a git checkout
+  sed --in-place --regexp-extended 's|`git ls-files -z`\.split\("\\x0"\)|`find . -type f -not -path "*/\.git*" -printf "%P\n"`\.split\("\n"\)|' "${_gemname}.gemspec"
+}
+
+build() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rake test
+}
+
+package() {
+  cd "${_gemname}-${pkgver}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 BSDL COPYING --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
+
+# vim: tabstop=2 shiftwidth=2 expandtab:
