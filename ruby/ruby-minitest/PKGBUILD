@@ -5,51 +5,42 @@
 
 _gemname='minitest'
 pkgname="ruby-${_gemname}"
-pkgver=5.20.0
+pkgver=5.22.3
 pkgrel=1
 pkgdesc='Complete suite of testing facilities supporting TDD, BDD, mocking, and benchmarking'
-url="https://github.com/seattlerb/${_gemname}"
+url="https://github.com/minitest/${_gemname}"
 arch=(any)
 license=('MIT')
 depends=('ruby')
-makedepends=('rubygems' 'ruby-hoe' 'ruby-rake' 'ruby-rdoc')
+makedepends=('ruby-hoe' 'ruby-rake')
 options=('!emptydirs')
 source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('4872ad67a92c3065e821042165b2a1feafbd71ef4713e522fcc04293c8262d09d916947a73e1709560ccf2491a67a1badaf9a8626fddf1643a7a429d719b125d')
+sha512sums=('122f69ad7de9c6b93d20cbf7e1301c8acbf1d184fa337412c01ee6b3f9e5d9b3dceb6658dfb00475f1fa5d6058ac666f4e1fbbebe365f3729c1aa73654ef70e4')
+b2sums=('e4327e0fed9ec65c736b03eee8b01c537992ee4635ba2da010a354b66554656ad1c5eb194d09d49e09c54ae44d584841ce17ce6d428dd20b4d07c932d631cdc6')
 
 build() {
   cd "${_gemname}-${pkgver}"
 
-  rake gem
-}
-
-check() {
-  cd "${_gemname}-${pkgver}"
-
-  rake test
-}
-
-package() {
-  cd "${_gemname}-${pkgver}"
-
   local _gemdir="$(gem env gemdir)"
+
+  rake gem
 
   gem install \
     --local \
     --verbose \
     --ignore-dependencies \
     --no-user-install \
-    --install-dir "${pkgdir}/${_gemdir}" \
-    --bindir "${pkgdir}/usr/bin" \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
     "pkg/${_gemname}-${pkgver}.gem"
 
   # remove unrepreducible files
   rm --force --recursive --verbose \
-    "${pkgdir}/${_gemdir}/cache/" \
-    "${pkgdir}/${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
-    "${pkgdir}/${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
 
-  find "${pkgdir}/${_gemdir}/gems/" \
+  find "tmp_install${_gemdir}/gems/" \
     -type f \
     \( \
       -iname "*.o" -o \
@@ -61,16 +52,30 @@ package() {
     \) \
     -delete
 
-  find "${pkgdir}/${_gemdir}/extensions/" \
+  find "tmp_install${_gemdir}/extensions/" \
     -type f \
     \( \
       -iname "mkmf.log" -o \
       -iname "gem_make.out" \
     \) \
     -delete
-
-  install -Dm 644 README.rdoc History.rdoc -t "${pkgdir}/usr/share/doc/${pkgname}"
-  install -Dm 644 README.rdoc -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
 
-# vim: ts=2 sw=2 et:
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rake test
+}
+
+package() {
+  cd "${_gemname}-${pkgver}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 README.rdoc --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.rdoc --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
+
+# vim: tabstop=2 shiftwidth=2 expandtab:
