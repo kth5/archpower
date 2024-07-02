@@ -8,30 +8,31 @@
 
 _target=m68k-unknown-linux-gnu
 pkgname=${_target}-glibc-headers
-pkgver=2.38
-_commit=6b99458d197ab779ebb6ff632c168e2cbfa4f543
-pkgrel=3.1
+pkgver=2.39+r64+g70f560fc221
+_commit=70f560fc22212f733647c9121c26bbb2307f2e10
+pkgrel=2
 pkgdesc="GNU C Library headers (${_target})"
 arch=('any')
 url="http://www.gnu.org/software/libc/"
 license=(GPL LGPL)
-depends=("${_target}-linux-api-headers>=6.4")
-makedepends=("${_target}-gcc-stage1>=13.2.1" python git)
+depends=("${_target}-linux-api-headers>=6.8")
+makedepends=("${_target}-gcc-stage1>=14.1.1" python git)
 options=(!buildflags !strip staticlibs)
 source=(git+https://sourceware.org/git/glibc.git#commit=${_commit}
         sdt-config.h
         sdt.h
-        local-dwarf2-buildfix.patch
-        local-reloc.patch
-        submitted-gcc34-seccomment.patch)
+        reenable_DT_HASH.patch)
 validpgpkeys=(7273542B39962DF7B299931416792B4EA25340F8 # Carlos O'Donell
               BC7C7372637EC10C57D7AA6579C43DFBF1CF2187) # Siddhesh Poyarekar
-sha256sums=('SKIP'
+sha256sums=('13ce6521ed9aee361246b299f3649f31956e7fb905827589a1ec014d4a27b38e'
             'cdc234959c6fdb43f000d3bb7d1080b0103f4080f5e67bcfe8ae1aaf477812f0'
             '774061aff612a377714a509918a9e0e0aafce708b87d2d7e06b1bd1f6542fe70'
-            '9f7f42d304bb629c5b807fa8460504d3861a5884e8f90fbc1c531419a5b6ed4e'
-            '286055e52c8b7bd5677e99c1fdde1fe639f5e4dbca0f22cb707f053366c770df'
-            '01208ec07d73e26bd251be97cd0345d8c5099439b87800b647279f1574a0b81a')
+            'cf9fe494f7ec69752a63d1b0a9ad689aa620888ae9b902b6383a6fbc7c1726a7')
+
+pkgver() {
+  cd glibc
+  git describe --tags | sed 's/[^-]*-//;s/[^-]*-/&r/;s/-/+/g'
+}
 
 prepare() {
   mkdir -p glibc-build
@@ -65,6 +66,7 @@ build() {
 
   case "${CARCH}" in
     x86_64) _configure_flags+=(--enable-cet --enable-multi-arch) ;;
+    powerpc64) _configure_flags+=(--disable-multi-arch --with-cpu=970); CFLAGS='-O2 -pipe' ;;
     *)      _configure_flags+=(--disable-multi-arch); CFLAGS='-O2 -pipe' ;;
   esac
 
@@ -83,6 +85,8 @@ build() {
   export CXX=${_target}-g++
   export AR=${_target}-ar
   export RANLIB=${_target}-ranlib
+  export OBJCOPY=${_target}-objcopy
+  export OBJDUMP=${_target}-objdump
 
   "$srcdir/glibc/configure" \
       --libdir=/usr/lib \
@@ -94,6 +98,10 @@ build() {
 
   # make some libs and stubs
   make csu/subdir_lib
+
+  case "${CARCH}" in
+    powerpc64) sed 's@RTLDLIST=.*@RTLDLIST="/usr/lib/ld64.so.2"@g' -i ${pkgdir}/usr/bin/ldd ;;
+  esac
 }
 
 package() {
