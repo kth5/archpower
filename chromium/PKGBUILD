@@ -5,112 +5,69 @@
 # Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
 
 pkgname=chromium
-pkgver=120.0.6099.224
+pkgver=126.0.6478.126
 pkgrel=1
 _launcher_ver=8
 _manual_clone=0
-_archpower_patchset=120.0.1
+_system_clang=1
 pkgdesc="A web browser built for speed, simplicity, and security"
 arch=(x86_64 powerpc64le riscv64)
 url="https://www.chromium.org/Home"
-license=('BSD')
+license=('BSD-3-Clause')
 depends=('gtk3' 'nss' 'alsa-lib' 'xdg-utils' 'libxss' 'libcups' 'libgcrypt'
-         'ttf-liberation' 'systemd' 'dbus' 'libpulse' 'pciutils' 'libva'
-         'libffi' 'desktop-file-utils' 'hicolor-icon-theme')
-makedepends=('python' 'gn' 'ninja' 'clang' 'lld' 'gperf' 'pipewire'
-             'java-runtime-headless' 'git')
-makedepends_powerpc64le=('nodejs')
-makedepends_riscv64=('nodejs')
-makedepends_x86_64=('nodejs')
+         'ttf-liberation' 'systemd' 'dbus' 'libdrm' 'libpulse' 'openh264'  'pciutils' 'libva'
+         'libffi' 'desktop-file-utils' 'hicolor-icon-theme' 'brotli' 'icu'
+         'webrtc-audio-processing' 'jsoncpp' 'openjpeg2' 'libxslt' 'dav1d' 'woff2'
+         'highway' 'snappy' 'minizip')
+makedepends=('python' 'gn' 'ninja' 'clang' 'lld' 'gperf' 'nodejs-lts-iron' 'npm' 'pipewire'
+             'rust' 'qt5-base' 'qt6-base' 'java-runtime-headless' 'git' 'quilt' 'rollup'
+             'libxnvctrl' 'elfutils')
 optdepends=('pipewire: WebRTC desktop sharing under Wayland'
             'kdialog: support for native dialogs in Plasma'
             'gtk4: for --gtk-version=4 (GTK4 IME might work better on Wayland)'
             'org.freedesktop.secrets: password storage backend on GNOME / Xfce'
             'kwallet: support for storing passwords in KWallet on Plasma')
-options=('!lto') # Chromium adds its own flags for ThinLTO
-source=(https://commondatastorage.googleapis.com/chromium-browser-official/chromium-$pkgver.tar.xz
+options=('!debug' '!lto') # Chromium adds its own flags for ThinLTO
+debian_chromium_version="126.0.6478.126-1~deb12u1"
+source=(http://ftp.de.debian.org/debian/pool/main/c/chromium/chromium_${pkgver}.orig.tar.xz
         https://github.com/foutrelis/chromium-launcher/archive/v$_launcher_ver/chromium-launcher-$_launcher_ver.tar.gz
-        https://gitlab.com/Matt.Jolly/chromium-patches/-/archive/${pkgver%%.*}/chromium-patches-${pkgver%%.*}.tar.bz2
-        libxml2-2.12.patch
-        icu-74.patch
-        drop-flags-unsupported-by-clang16.patch
+        allow-ANGLEImplementation-kVulkan.patch
+        compiler-rt-adjust-paths.patch
         use-oauth2-client-switches-as-default.patch
-      https://repo.archlinuxpower.org/distfiles/chromium/patchsets/archpower-chromium-patchset-${_archpower_patchset}.tar.zst{,.asc})
-validpgpkeys=(
-  8D3D6CE8D4F0625F4D7109022205B7A06C2656A3 # Alexander Baleck <alex.bldck@gmail.com>
-)
-sha256sums=('850a85c8d8a01041a07dfaaea8289fa5f8294b4e375e6b77997b61434e0a2f1a'
+        libpng-pdfium-compile-98.patch
+        fix-swiftshader-compile.patch
+        fix-breakpad-compile.patch
+        chromium-117-material-color-include.patch
+        http://ftp.de.debian.org/debian/pool/main/c/chromium/chromium_${debian_chromium_version}.debian.tar.xz
+        https://repo.archlinuxpower.org/distfiles/chromium/chromium-126.0.6478.126-tflite_support.tar.zst
+        chromium.desktop
+        chromium.appdata.xml
+        riscv-fix-rust-target.patch::https://github.com/riscv-forks/electron/raw/v31.0.1-riscv/patches/chromium/0005-Fix-Rust-target-triple-for-riscv64.patch
+        riscv-v8-fix-perf-regression.patch
+        riscv-sandbox.patch
+        riscv-ffmpeg.patch
+        riscv-dav1d.patch)
+sha256sums=('aa828cedf44c81e21282393b8436d9c75bb20f6427476d614649b0813bf5ee16'
             '213e50f48b67feb4441078d50b0fd431df34323be15be97c55302d3fdac4483a'
-            'ffee1082fbe3d0c9e79dacb8405d5a0e1aa94d6745089a30b093f647354894d2'
-            '1808df5ba4d1e2f9efa07ac6b510bec866fa6d60e44505d82aea3f6072105a71'
-            'ff9ebd86b0010e1c604d47303ab209b1d76c3e888c423166779cefbc22de297f'
-            '8d1cdf3ddd8ff98f302c90c13953f39cd804b3479b13b69b8ef138ac57c83556'
-            'e393174d7695d0bafed69e868c5fbfecf07aa6969f3b64596d0bae8b067e1711'
-            'e1282ee435f626600fa5a00dcbbf8b8ceb87db012f6dd945a62fdf2f7cefcae3'
-            'SKIP')
-
-if (( _manual_clone )); then
-  source[0]=fetch-chromium-release
-  makedepends+=('python-httplib2' 'python-pyparsing' 'python-six')
-fi
-
-# Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
-# Keys are the names in the above script; values are the dependencies in Arch
-declare -gA _system_libs=(
-  #[brotli]=brotli
-  [dav1d]=dav1d
-  [libevent]=libevent
-  #[ffmpeg]=ffmpeg    # YouTube playback stopped working in Chromium 120
-  [flac]=flac
-  [fontconfig]=fontconfig
-  [freetype]=freetype2
-  [harfbuzz-ng]=harfbuzz
-  [icu]=icu
-  #[jsoncpp]=jsoncpp  # needs libstdc++
-  #[libaom]=aom
-  #[libavif]=libavif  # needs https://github.com/AOMediaCodec/libavif/commit/5410b23f76
-  [libdrm]=
-  [libjpeg]=libjpeg
-  [libpng]=libpng
-  #[libvpx]=libvpx
-  [libwebp]=libwebp
-  [libxml]=libxml2
-  [libxslt]=libxslt
-  [opus]=opus
-  #[re2]=re2          # needs libstdc++
-  #[snappy]=snappy    # needs libstdc++
-  #[woff2]=woff2      # needs libstdc++
-  [zlib]=minizip
-)
-_unwanted_bundled_libs=(
-  $(printf "%s\n" ${!_system_libs[@]} | sed 's/^libjpeg$/&_turbo/')
-)
-depends+=(${_system_libs[@]})
-
-# Google API keys (see https://www.chromium.org/developers/how-tos/api-keys)
-# Note: These are for Arch Linux use ONLY. For your own distribution, please
-# get your own set of keys.
-#
-# Starting with Chromium 89 (2021-03-02) the OAuth2 credentials have been left
-# out: https://archlinux.org/news/chromium-losing-sync-support-in-early-march/
-_google_api_key=AIzaSyDwr302FpOSkGRpLlUpPThNTDPbXcIn_FM
+            '8f81059d79040ec598b5fb077808ec69d26d6c9cbebf9c4f4ea48b388a2596c5'
+            'b3de01b7df227478687d7517f61a777450dca765756002c80c4915f271e2d961'
+            'a9b417b96daec33c9059065e15b3a92ae1bf4b59f89d353659b335d9e0379db6'
+            '5569c938623f45008743cd2790e3895ae1fda75efbae13653500a4302dc562ba'
+            'cb3a1051898ab7dea02bfccbed6b6aa8d9feb342da47eefcf567e8f1aa016289'
+            '33ec8c74d34d7b568cd9f1b35ad316846c75a34cfcba301b95684cd934f33ad3'
+            'c94785e3258be7ebdb50fdc40044cf65a91fdb11772eabe7a58e260757453cae'
+            '9a9aae6d8371d22fcc0497db8dfd4fe8414d2f331a37e68c8b08517e7b3d4bfc'
+            'df0c99c269c26061410079e13e0015d2e86f64f34088e0beaf294f3bc24d69d9'
+            '6e49854d9fa380f6f39b8bed43ef643a188f6f37c4fdbdb1a9eb938882cba8de'
+            'a3293e043ead274762f8afc443d297ce65429c76d9a8c68c101d3dea77781360'
+            '9248bb9d12487fd763bc45524c5fc676580660a320a50436d200ab93afc844bd'
+            'e03f824676649821de5c3362264b8f7028e8d6c3cc4ad3d6e9da531c398c2dd7'
+            '1713cfc3c73d7f33fd7a9daba9b642869632468bc1068b727827a6b5320a7f88'
+            '64333a3c3f5230d58066c2ca1daacccab311066485cd905d1c387b1bc2ba3dbf'
+            '5689e9422624c8725509b6fdc277e20c3e8862cf515656faef7507978489bc4e')
 
 prepare() {
-  if (( _manual_clone )); then
-    ./fetch-chromium-release $pkgver
-  fi
   cd chromium-$pkgver
-
-  # Allow building against system libraries in official builds
-  sed -i 's/OFFICIAL_BUILD/GOOGLE_CHROME_BUILD/' \
-    tools/generate_shim_headers/generate_shim_headers.py
-
-  # https://crbug.com/893950
-  sed -i -e 's/\<xmlMalloc\>/malloc/' -e 's/\<xmlFree\>/free/' \
-    third_party/blink/renderer/core/xml/*.cc \
-    third_party/blink/renderer/core/xml/parser/xml_document_parser.cc \
-    third_party/libxml/chromium/*.cc \
-    third_party/maldoca/src/maldoca/ole/oss_utils.h
 
   # Use the --oauth2-client-id= and --oauth2-client-secret= switches for
   # setting GOOGLE_DEFAULT_CLIENT_ID and GOOGLE_DEFAULT_CLIENT_SECRET at
@@ -118,55 +75,47 @@ prepare() {
   patch -Np1 -i ../use-oauth2-client-switches-as-default.patch
 
   # Upstream fixes
-  patch -Np1 -i ../libxml2-2.12.patch
+  patch -Np1 -i ../allow-ANGLEImplementation-kVulkan.patch
 
-  # Fix build with ICU 74
-  patch -Np1 -i ../icu-74.patch
-
-  # Drop compiler flags that need newer clang
-  patch -Np1 -i ../drop-flags-unsupported-by-clang16.patch
+  # Allow libclang_rt.builtins from compiler-rt >= 16 to be used
+  patch -Np1 -i ../compiler-rt-adjust-paths.patch
 
   # Fixes for building with libstdc++ instead of libc++
-  patch -Np1 -i ../chromium-patches-*/chromium-119-at-spi-variable-consumption.patch
-  patch -Np1 -i ../chromium-patches-*/chromium-119-clang16.patch
+  patch -Np1 -i ../chromium-117-material-color-include.patch
 
   case "${CARCH}" in
-    powerpc64le|riscv64)
-      sh ${srcdir}/archpower-chromium-patchset-${_archpower_patchset}/apply-${CARCH}.sh
+    powerpc64le) 
+      sed 's@^bookworm/libxml-parseerr.patch@@g' \
+          -i ../debian/patches/series
+      sed 's@^system/rollup.patch.*@@g' \
+          -i ../debian/patches/series
+      sed 's@^debianization.*@@g' \
+          -i ../debian/patches/series
+      sed 's@^debian/patches/system/rollup.patch@@g' \
+          -i ../debian/patches/series
+      # 1-2-3 go
+      export QUILT_PATCHES=../debian/patches
+      quilt push -a
+    ;;
+    riscv64)
+      for rvpatch in riscv-{dav1d,fix-rust-target}.patch; do
+        patch -Np1 -i ../$rvpatch
+      done
+      patch -Np1 -d v8 < ../riscv-v8-fix-perf-regression.patch
+      patch -Np1 -d third_party/ffmpeg < ../riscv-ffmpeg.patch
     ;;
   esac
 
-  # upstream does not ship vpx properly, regenerate
-  case "${CARCH}" in
-    powerpc64le|riscv64)
-      pushd third_party/libvpx
-      mkdir -p source/config/linux/ppc64
-      sed -i -e "s|^update_readme||g; s|clang-format|${EPREFIX}/bin/true|g" generate_gni.sh
-      ./generate_gni.sh
-      popd
-    ;;
-  esac
+  cp -ra /usr/lib/node_modules/rollup third_party/node/node_modules/
+
+  ../debian/scripts/unbundle
+
+  cp -r ${srcdir}/tflite_support third_party/
 
   # Link to system tools required by the build
   mkdir -p third_party/node/linux/node-linux-x64/bin
   ln -s /usr/bin/node third_party/node/linux/node-linux-x64/bin/
   ln -s /usr/bin/java third_party/jdk/current/bin/
-
-  # Remove bundled libraries for which we will use the system copies; this
-  # *should* do what the remove_bundled_libraries.py script does, with the
-  # added benefit of not having to list all the remaining libraries
-  local _lib
-  for _lib in ${_unwanted_bundled_libs[@]}; do
-    find "third_party/$_lib" -type f \
-      \! -path "third_party/$_lib/chromium/*" \
-      \! -path "third_party/$_lib/google/*" \
-      \! -path "third_party/harfbuzz-ng/utils/hb_scoped.h" \
-      \! -regex '.*\.\(gn\|gni\|isolate\)' \
-      -delete
-  done
-
-  ./build/linux/unbundle/replace_gn_files.py \
-    --system-libraries "${!_system_libs[@]}"
 }
 
 build() {
@@ -180,44 +129,80 @@ build() {
   export NM=nm
 
   local _flags=(
-    'custom_toolchain="//build/toolchain/linux/unbundle:default"'
-    'host_toolchain="//build/toolchain/linux/unbundle:default"'
-    'clang_base_path="/usr"'
     'clang_use_chrome_plugins=false'
-    'is_official_build=true' # implies is_cfi=true on x86_64
-    'symbol_level=0' # sufficient for backtraces on x86(_64)
-    'chrome_pgo_phase=0' # needs newer clang to read the bundled PGO profile
-    'treat_warnings_as_errors=false'
-    'disable_fieldtrial_testing_config=true'
-    'blink_enable_generated_code_formatting=false'
-    'ffmpeg_branding="Chrome"'
-    'proprietary_codecs=true'
-    'rtc_use_pipewire=true'
-    'link_pulseaudio=true'
-    'use_custom_libcxx=true' # https://github.com/llvm/llvm-project/issues/61705
+    'host_toolchain="//build/toolchain/linux/unbundle:default"'
+    'custom_toolchain="//build/toolchain/linux/unbundle:default"'
+    'is_debug=false'
+    'use_goma=false'
     'use_sysroot=false'
-    'use_system_libffi=true'
-    'enable_hangout_services_extension=true'
-    'enable_widevine=true'
+    'use_libjpeg_turbo=true'
+    'use_custom_libcxx=false'
+    'use_unofficial_version_number=false'
+    'enable_vr=false'
     'enable_nacl=false'
-    'enable_rust=false'
-    "google_api_key=\"$_google_api_key\""
-    'use_qt=false'
+    'enable_swiftshader=false'
+    'dawn_use_swiftshader=false'
+    'build_dawn_tests=false'
+    'enable_reading_list=false'
+    'enable_iterator_debugging=false'
+    'enable_hangout_services_extension=false'
+    'angle_has_histograms=false'
+    'angle_build_tests=false'
+    'build_angle_perftests=false'
+    'treat_warnings_as_errors=false'
+    'use_qt6=true'
+    'moc_qt6_path="/usr/lib/qt6"'
+    'is_cfi=false'
+    'use_thin_lto=false'
+    'chrome_pgo_phase=0'
+    'use_gio=true'
+    'is_official_build=true'
+    'symbol_level=0'
+    'use_pulseaudio=true'
+    'link_pulseaudio=true'
+    'rtc_use_pipewire=true'
+    'icu_use_data_file=false'
+    'enable_widevine=true'
+    'v8_enable_backtrace=true'
+    'use_system_zlib=true'
+    'use_system_lcms2=true'
+    'use_system_libjpeg=true'
+    'use_system_libpng=true'
+    'use_system_freetype=true'
+    'use_system_harfbuzz=true'
+    'use_system_libopenjpeg2=true'
+    'concurrent_links=1'
+    'proprietary_codecs=true'
+    'ffmpeg_branding="Chrome"'
+    'disable_fieldtrial_testing_config=true'
+    'safe_browsing_mode=1'
+    'build_with_tflite_lib=true'
+    'host_cpu="ppc64"'
+    'use_v4l2_codec=false'
+    'use_vaapi=true'
+    'use_system_libdrm=true'
+    'use_system_libffi=true'
+    'enable_reporting=false'
   )
 
-  case "${CARCH}" in
-    powerpc64le)
-      _flags+=(
-        'enable_swiftshader=false'
-        'dawn_use_swiftshader=false'
-        'use_system_libdrm=true'
-      )
-    ;;
-  esac
+  local _clang_version=$(
+    clang --version | grep -m1 version | sed 's/.* \([0-9]\+\).*/\1/')
 
-  if [[ -n ${_system_libs[icu]+set} ]]; then
-    _flags+=('icu_use_data_file=false')
-  fi
+  _flags+=(
+    'clang_base_path="/usr"'
+    'clang_use_chrome_plugins=false'
+    "clang_version=\"$_clang_version\""
+    'chrome_pgo_phase=0' # needs newer clang to read the bundled PGO profile
+  )
+
+  # Allow the use of nightly features with stable Rust compiler
+  # https://github.com/ungoogled-software/ungoogled-chromium/pull/2696#issuecomment-1918173198
+  export RUSTC_BOOTSTRAP=1
+
+  _flags+=(
+    'rust_sysroot_absolute="/usr"'
+    "rustc_version=\"$(rustc --version)\""
+  )
 
   # Facilitate deterministic builds (taken from build/config/compiler/BUILD.gn)
   CFLAGS+='   -Wno-builtin-macro-redefined'
@@ -246,8 +231,10 @@ build() {
   # https://crbug.com/957519#c122
   CXXFLAGS=${CXXFLAGS/-Wp,-D_GLIBCXX_ASSERTIONS}
 
+  echo GN
   gn gen out/Release --args="${_flags[*]}"
-  ninja ${MAKEFLAGS} -C out/Release chrome chrome_sandbox chromedriver.unstripped
+  echo NINJA
+  ninja -C out/Release chrome chrome_sandbox chromedriver
 }
 
 package() {
@@ -259,10 +246,10 @@ package() {
   cd ../chromium-$pkgver
 
   install -D out/Release/chrome "$pkgdir/usr/lib/chromium/chromium"
-  install -D out/Release/chromedriver.unstripped "$pkgdir/usr/bin/chromedriver"
+  install -D out/Release/chromedriver "$pkgdir/usr/bin/chromedriver"
   install -Dm4755 out/Release/chrome_sandbox "$pkgdir/usr/lib/chromium/chrome-sandbox"
 
-  install -Dm644 chrome/installer/linux/common/desktop.template \
+  install -Dm644 ${srcdir}/chromium.desktop \
     "$pkgdir/usr/share/applications/chromium.desktop"
   install -Dm644 chrome/app/resources/manpage.1.in \
     "$pkgdir/usr/share/man/man1/chromium.1"
@@ -273,7 +260,7 @@ package() {
     "$pkgdir/usr/share/applications/chromium.desktop" \
     "$pkgdir/usr/share/man/man1/chromium.1"
 
-  install -Dm644 chrome/installer/linux/common/chromium-browser/chromium-browser.appdata.xml \
+  install -Dm644 ${srcdir}/chromium.appdata.xml \
     "$pkgdir/usr/share/metainfo/chromium.appdata.xml"
   sed -ni \
     -e 's/chromium-browser\.desktop/chromium.desktop/' \
@@ -286,6 +273,8 @@ package() {
     chrome_100_percent.pak
     chrome_200_percent.pak
     chrome_crashpad_handler
+    libqt5_shim.so
+    libqt6_shim.so
     resources.pak
     v8_context_snapshot.bin
 
@@ -305,10 +294,6 @@ package() {
       )
     ;;
   esac
-
-  if [[ -z ${_system_libs[icu]+set} ]]; then
-    toplevel_files+=(icudtl.dat)
-  fi
 
   cp "${toplevel_files[@]/#/out/Release/}" "$pkgdir/usr/lib/chromium/"
   install -Dm644 -t "$pkgdir/usr/lib/chromium/locales" out/Release/locales/*.pak
