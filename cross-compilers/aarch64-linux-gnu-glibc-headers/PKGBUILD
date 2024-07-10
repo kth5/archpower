@@ -9,28 +9,31 @@
 
 _target=aarch64-linux-gnu
 pkgname=${_target}-glibc-headers
-pkgver=2.37                                                                                                                                                                                                                                
-_commit=6fe86ecd787a2624cd638131629ba9a824040308
-pkgrel=1
+pkgver=2.39+r64+g70f560fc221
+_commit=70f560fc22212f733647c9121c26bbb2307f2e10
+pkgrel=2
 pkgdesc="GNU C Library headers (${_target})"
 arch=('any')
 url="http://www.gnu.org/software/libc/"
 license=(GPL LGPL)
-depends=("${_target}-linux-api-headers>=5.18.15")
-makedepends=("${_target}-gcc-stage1>=12.2.0" "python")
-options=(!buildflags !strip staticlibs)
+depends=("${_target}-linux-api-headers>=6.8")
+makedepends=("${_target}-gcc-stage1>=14.1.1" python git)
+options=(!buildflags !debug !strip staticlibs)
 source=(git+https://sourceware.org/git/glibc.git#commit=${_commit}
         sdt-config.h
         sdt.h
-	disable-clone3.diff
         reenable_DT_HASH.patch)
 validpgpkeys=(7273542B39962DF7B299931416792B4EA25340F8 # Carlos O'Donell
               BC7C7372637EC10C57D7AA6579C43DFBF1CF2187) # Siddhesh Poyarekar
-sha256sums=('SKIP'
+sha256sums=('13ce6521ed9aee361246b299f3649f31956e7fb905827589a1ec014d4a27b38e'
             'cdc234959c6fdb43f000d3bb7d1080b0103f4080f5e67bcfe8ae1aaf477812f0'
             '774061aff612a377714a509918a9e0e0aafce708b87d2d7e06b1bd1f6542fe70'
-            'f5df8fc95592cce7825744aeb8c9699a5b4b5b7ccf7bcf554355167c3a7e375e'
-            'bb2fc5a38158d339a51a4aaab3fe2d5cc496221f77cfce6f74768db91cb5ec1e')
+            'cf9fe494f7ec69752a63d1b0a9ad689aa620888ae9b902b6383a6fbc7c1726a7')
+
+pkgver() {
+  cd glibc
+  git describe --tags | sed 's/[^-]*-//;s/[^-]*-/&r/;s/-/+/g'
+}
 
 prepare() {
   mkdir -p glibc-build
@@ -50,8 +53,8 @@ prepare() {
 
 build() {
   local _configure_flags=(
-      --prefix=/
-      --with-headers=/usr/${_target}/include
+      --prefix=/usr
+      #--with-headers=/usr/${_target}/usr/include
       --enable-add-ons
       --enable-bind-now
       --enable-lock-elision
@@ -62,12 +65,15 @@ build() {
       --disable-werror
   )
 
+  _configure_flags+=(--disable-multi-arch);
+  CFLAGS='-O2 -pipe'
+
   cd glibc-build
 
-  echo "slibdir=/lib" >> configparms
-  echo "rtlddir=/lib" >> configparms
-  echo "sbindir=/bin" >> configparms
-  echo "rootsbindir=/bin" >> configparms
+  echo "slibdir=/usr/lib" >> configparms
+  echo "rtlddir=/usr/lib" >> configparms
+  echo "sbindir=/usr/bin" >> configparms
+  echo "rootsbindir=/usr/bin" >> configparms
 
   # remove fortify for building libraries
   CPPFLAGS=${CPPFLAGS/-D_FORTIFY_SOURCE=2/}
@@ -77,10 +83,12 @@ build() {
   export CXX=${_target}-g++
   export AR=${_target}-ar
   export RANLIB=${_target}-ranlib
+  export OBJCOPY=${_target}-objcopy
+  export OBJDUMP=${_target}-objdump
 
   "$srcdir/glibc/configure" \
-      --libdir=/lib \
-      --libexecdir=/lib \
+      --libdir=/usr/lib \
+      --libexecdir=/usr/lib \
       ${_configure_flags[@]} \
       --target=${_target} \
       --host=${_target} \
@@ -88,6 +96,10 @@ build() {
 
   # make some libs and stubs
   make csu/subdir_lib
+
+  case "${CARCH}" in
+    powerpc64) sed 's@RTLDLIST=.*@RTLDLIST="/usr/lib/ld64.so.2"@g' -i ${pkgdir}/usr/bin/ldd ;;
+  esac
 }
 
 package() {
@@ -98,15 +110,19 @@ package() {
 
   # glibc doesn't support eglibc's install-bootstrap-headers
   # Luckily a blank gnu/stubs.h is all we need
-  touch "$pkgdir/usr/$_target/include/gnu/stubs.h"
+  touch "$pkgdir/usr/$_target/usr/include/gnu/stubs.h"
 
-  mkdir -p "$pkgdir/usr/$_target/lib"
-  cp csu/crt1.o csu/crti.o csu/crtn.o "$pkgdir/usr/$_target/lib"
+  mkdir -p "$pkgdir/usr/$_target/usr/lib"
+  cp csu/crt1.o csu/crti.o csu/crtn.o "$pkgdir/usr/$_target/usr/lib"
 
   # create stub lib
   ${_target}-gcc -nostdlib -nostartfiles -shared -x c /dev/null \
-    -o "$pkgdir/usr/$_target/lib/libc.so"
+    -o "$pkgdir/usr/$_target/usr/lib/libc.so"
 
-  mkdir -p "$pkgdir/usr/$_target/usr"
-  ln -s ../{include,lib} "$pkgdir/usr/$_target/usr"
+  ln -s /usr/$_target/usr/lib "$pkgdir/usr/$_target/"
+
+  # Provide tracing probes to libstdc++ for exceptions, possibly for other
+  # libraries too. Useful for gdb's catch command.
+  install -Dm644 "${srcdir}"/sdt.h "${pkgdir}"/usr/${_target}/usr/include/sys/sdt.h
+  install -Dm644 "${srcdir}"/sdt-config.h "${pkgdir}"/usr/${_target}/usr/include/sys/sdt-config.h
 }
