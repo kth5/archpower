@@ -11,7 +11,7 @@
 
 pkgbase=firefox-esr
 pkgname=(firefox-esr)
-pkgver=115.10.0
+pkgver=115.13.0
 pkgrel=1
 pkgdesc="Standalone web browser from mozilla.org, Extended Support Release"
 arch=(x86_64 powerpc64le)
@@ -40,8 +40,8 @@ makedepends=(
   mesa
   nasm
   nodejs-lts-iron
-  python
-  rust
+  python311
+  rustup
   unzip
   wasi-compiler-rt
   wasi-libc
@@ -62,6 +62,8 @@ optdepends=('networkmanager: Location detection via available WiFi networks'
 options=(!emptydirs !makeflags !strip !lto !debug)
 source=(https://archive.mozilla.org/pub/firefox/releases/${pkgver}esr/source/firefox-${pkgver}esr.source.tar.xz{,.asc}
         $pkgname.desktop identity-icons-brand.svg
+        big-endian-image-decoders.patch
+        ppc32-fix-build.patch
         power9-jit-744146.diff
         power9-jit-744147.diff
         power9-jit-744148.diff
@@ -70,7 +72,37 @@ source=(https://archive.mozilla.org/pub/firefox/releases/${pkgver}esr/source/fir
         power9-jit-744152.diff
         power9-jit-744153.diff
         power9-jit-744154.diff
-        power9-jit-744155.diff)
+        power9-jit-744155.diff
+0001-Don-t-use-build-id.patch
+0002-Fortify-sources-properly.patch
+0003-bmo-847568-Support-system-harfbuzz.patch
+0004-bmo-847568-Support-system-graphite2.patch
+0005-bmo-1559213-Support-system-av1.patch
+0006-musl-Add-alternate-name-for-private-siginfo-struct-m.patch
+0007-musl-Fix-syscall-wrappers.patch
+0008-musl-Only-use-system-heap-reporter-with-glibc.patch
+0009-musl-Set-pthread-name-for-non-glibc-systems.patch
+0010-musl-sys-auvx.h-avaliable-on-more-then-just-glibc-sy.patch
+0011-musl-make-SYS_fork-non-fatal-musl-uses-it-for-fork-2.patch
+0012-Make-PGO-use-toolchain.patch
+0013-build-Disable-Werror.patch
+0014-LTO-Only-enable-LTO-for-Rust-when-complete-build-use.patch
+0015-Enable-FLAC-on-platforms-without-ffvpx-via-ffmpeg.patch
+0016-bgo-816975-fix-build-on-x86.patch
+0017-bmo-1559213-fix-system-av1-libs.patch
+0018-bmo-1196777-Set-GDK_FOCUS_CHANGE_MASK.patch
+0019-bmo-1754469-memory_mozalloc_throw.patch
+0020-bgo-860033-firefox-wayland-no-dbus.patch
+0021-qm-qm-fix-sqlite3-on-ppc-with-clang.patch
+0023-bgo-908297-ppc64-webrtc.patch
+0024-bmo-1516803-gcc-lto-sandbox.patch
+0025-enable-vaapi-on-all-amd-cards.patch
+0026-bgo-907963-rustflags-single-string.patch
+0027-bgo-910309-dont-link-widevineplugin-to-libgcc_s.patch
+0028-bmo-1853580-musl-non-lfs64-api-on-audio_thread_priority-crate.patch
+0029-bmo-1862601-system-icu-74.patch
+0030-bgo-748849-RUST_TARGET_override.patch
+0031-bgo-928729-libcxx-18.patch)
 
 validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
 
@@ -86,7 +118,14 @@ _google_api_key=AIzaSyDgkw4O3LM0Jnr2N7Wq2NG7iUVzRU5sBaA
 # more information.
 _mozilla_api_key=de0473f2-d53f-46da-956c-6aff61bda3ab
 
+# Make sure the duplication between bin and lib is found
+COMPRESSZST+=(--long)
+
 prepare() {
+  # packed_simd no longer builds with 1.78.0
+  rustup toolchain update --profile minimal 1.77.2
+  rustup default 1.77.2
+
   mkdir -p mozbuild
   cd firefox-$pkgver
 
@@ -94,6 +133,9 @@ prepare() {
 
   echo -n "$_google_api_key" >google-api-key
   echo -n "$_mozilla_api_key" >mozilla-api-key
+
+  patch -Np1 -i ${srcdir}/big-endian-image-decoders.patch
+  patch -Np1 -i ${srcdir}/ppc32-fix-build.patch
 
   # JIT enablement on powerpc64le provided for ESR by classilla
   #  https://github.com/chmeeedalf/gecko-dev/issues/4
@@ -106,6 +148,37 @@ prepare() {
   patch -Np1 -i ${srcdir}/power9-jit-744153.diff
   patch -Np1 -i ${srcdir}/power9-jit-744154.diff
   patch -Np1 -i ${srcdir}/power9-jit-744155.diff
+
+#  patch -Np1 -i ${srcdir}/0001-Don-t-use-build-id.patch
+#  patch -Np1 -i ${srcdir}/0002-Fortify-sources-properly.patch
+#  patch -Np1 -i ${srcdir}/0003-bmo-847568-Support-system-harfbuzz.patch
+#  patch -Np1 -i ${srcdir}/0004-bmo-847568-Support-system-graphite2.patch
+#  patch -Np1 -i ${srcdir}/0005-bmo-1559213-Support-system-av1.patch
+#  patch -Np1 -i ${srcdir}/0006-musl-Add-alternate-name-for-private-siginfo-struct-m.patch
+#  patch -Np1 -i ${srcdir}/0007-musl-Fix-syscall-wrappers.patch
+#  patch -Np1 -i ${srcdir}/0008-musl-Only-use-system-heap-reporter-with-glibc.patch
+#  patch -Np1 -i ${srcdir}/0009-musl-Set-pthread-name-for-non-glibc-systems.patch
+#  patch -Np1 -i ${srcdir}/0010-musl-sys-auvx.h-avaliable-on-more-then-just-glibc-sy.patch
+#  patch -Np1 -i ${srcdir}/0011-musl-make-SYS_fork-non-fatal-musl-uses-it-for-fork-2.patch
+#  patch -Np1 -i ${srcdir}/0012-Make-PGO-use-toolchain.patch
+#  patch -Np1 -i ${srcdir}/0013-build-Disable-Werror.patch
+#  patch -Np1 -i ${srcdir}/0014-LTO-Only-enable-LTO-for-Rust-when-complete-build-use.patch
+#  patch -Np1 -i ${srcdir}/0015-Enable-FLAC-on-platforms-without-ffvpx-via-ffmpeg.patch
+#  patch -Np1 -i ${srcdir}/0016-bgo-816975-fix-build-on-x86.patch
+#  patch -Np1 -i ${srcdir}/0017-bmo-1559213-fix-system-av1-libs.patch
+#  patch -Np1 -i ${srcdir}/0018-bmo-1196777-Set-GDK_FOCUS_CHANGE_MASK.patch
+#  patch -Np1 -i ${srcdir}/0019-bmo-1754469-memory_mozalloc_throw.patch
+#  patch -Np1 -i ${srcdir}/0020-bgo-860033-firefox-wayland-no-dbus.patch
+#  patch -Np1 -i ${srcdir}/0021-qm-qm-fix-sqlite3-on-ppc-with-clang.patch
+#  patch -Np1 -i ${srcdir}/0023-bgo-908297-ppc64-webrtc.patch
+#  patch -Np1 -i ${srcdir}/0024-bmo-1516803-gcc-lto-sandbox.patch
+#  patch -Np1 -i ${srcdir}/0025-enable-vaapi-on-all-amd-cards.patch
+#  patch -Np1 -i ${srcdir}/0026-bgo-907963-rustflags-single-string.patch
+#  patch -Np1 -i ${srcdir}/0027-bgo-910309-dont-link-widevineplugin-to-libgcc_s.patch
+#  patch -Np1 -i ${srcdir}/0028-bmo-1853580-musl-non-lfs64-api-on-audio_thread_priority-crate.patch
+#  patch -Np1 -i ${srcdir}/0029-bmo-1862601-system-icu-74.patch
+#  patch -Np1 -i ${srcdir}/0030-bgo-748849-RUST_TARGET_override.patch
+#  patch -Np1 -i ${srcdir}/0031-bgo-928729-libcxx-18.patch
 
   cat >../mozconfig <<END
 ac_add_options --enable-application=browser
@@ -154,6 +227,7 @@ END
      echo 'ac_add_options --enable-linker=bfd' >> ../mozconfig
      echo 'ac_add_options --enable-lto=full' >> ../mozconfig
      echo 'ac_add_options --without-wasm-sandboxed-libraries' >> ../mozconfig
+     echo 'ac_add_options --disable-sandbox' >> ../mozconfig
      echo 'ac_add_options MOZ_PGO=1' >> ../mozconfig
    ;;
    x86_64)
@@ -189,7 +263,7 @@ build() {
   ulimit -n 4096
 
   xvfb-run -s "-screen 0 1920x1080x24 -nolisten local" \
-  ./mach build
+  python3.11 ./mach build
 
   #echo "Building symbol archive..."
   #xvfb-run -s "-screen 0 1920x1080x24 -nolisten local" \
@@ -198,7 +272,7 @@ build() {
 
 package_firefox-esr() {
   cd firefox-$pkgver
-  DESTDIR="$pkgdir" ./mach install
+  DESTDIR="$pkgdir" python3.11 ./mach install
 
   local vendorjs="$pkgdir/usr/lib/$pkgname/browser/defaults/preferences/vendor.js"
   install -Dvm644 /dev/stdin "$vendorjs" <<END
@@ -270,10 +344,12 @@ END
 }
 
 # vim:set sw=2 et:
-sha256sums=('0afd3c733d95f7047f258d1a9768d06d856217fe736d85bfb370db9dd926eef2'
+sha256sums=('3fa20d1897100684d2560a193a48d4a413f31e61f2ed134713d607c5f30d5d5c'
             'SKIP'
             'c798853574da42bc22b066acb4b0bfdd630dc05b22560fcf0db9235b4207e051'
             'a9b8b4a0a1f4a7b4af77d5fc70c2686d624038909263c795ecc81e0aec7711e9'
+            '4eb95f37dfe07175a30d89b6b0a22a59adbc0bd211fedf975e450f8b407c6e45'
+            'bb8aba9cb52ac497bb3f32c5b8d2fa44152b518913bc868d56bbbad90679e484'
             '7b98f766b632aab9c1247ecad0575b722fd8ff57ced3f5d8a9d2c8da6f6353d4'
             '75c96962ae0f1fffdd3e051bede12e7e0cdf2051c849cc7b03d462883a32bb39'
             'df2758a662f54270bf762e3afcb66b0ba287a56caf7d51202853ac6df81f4b1f'
@@ -282,4 +358,34 @@ sha256sums=('0afd3c733d95f7047f258d1a9768d06d856217fe736d85bfb370db9dd926eef2'
             '3e2dfb0fe1602e8eba8d031a6477e07e112b6ed392a119c04bef07b5bf36739d'
             'd97aee7fd15ac27fe192eb3e412d3b0fb70427fed440e5b04525a487a55416b2'
             'abd67a5612bcb73a1fdf68753a076793deae609c26ff3adf21060cda610c363a'
-            '6031f88d231b6f18c1ff482e364b3830b382b88365e11419092dcd2b81cb2817')
+            '6031f88d231b6f18c1ff482e364b3830b382b88365e11419092dcd2b81cb2817'
+            '0921ed9bb168484a4d85a7c6979cabf11184b64806ba6eaae4727798b57b337c'
+            'a8c2459f4e316954da4859254dadf6aecad3e3279f26a8d7af05e875ca04aca5'
+            '87da448b7fe5604a0f2a351f44dd6f324e95bc553f8e5534fa289965dda70e61'
+            'fd83c836cc52bce2e3962392b63ad3ee2c69173f50fde00543f982981de1ddc8'
+            '7c6db1dd501c99cd5d4ba59e66dd1f5d3065008b2c343e733201982de0a89ac6'
+            '8d34520b8a8a5c6b0633a59a72e076df9621cf6e93e5e70f036223fbbab4a254'
+            '4d9d7ac287b37c950c70640addace870ee9a0c16d8e30d54883ee545bf77527b'
+            '8b6c802f6f429b2385cba2c8b2a68ee0b40adeeaa4dbcc9cb535ab379494b150'
+            'a3472d0922a800b2c3043089f13cc8f2dd5f6448af3a1dcb23f385783c91c75f'
+            'dc373813110d7a1035e8615ce5598e119b74c8c6d5c27dae09a79727933f4672'
+            'd32b4cc299882a6ca86ef231b3dcb6d44f517070656daae2143915894915d3a4'
+            '7b45e98356e6afbb67e0ff005cedd5b2022093bf1716ef0936ab3f6615f787da'
+            'e773d271fd7c74a725fb2709d6e4132dcfcf4df5a90c8c27d89a0d58330f7968'
+            '18fc8bab428137702d6774a93d3cc8d8f6b8ea68e1d86b32591e2c242e80e767'
+            '40cd47e73ac3e87f0f072f164ccd81d857c0cdb57c60e2077233952219d9b6e8'
+            '1d4add2a4afff50e4067ef4c404f781513c1c388126754fba1bf0323b1e093b3'
+            '31ba77f95e5fe8414aeeef6858c8a774fc83f8cbbf032c0b82910de55f4304f4'
+            'b47ea62937d7f87485e0f372c0110785bbb6f4dbc79d3d139d54887cac0773e3'
+            'ba1013f0b5a76312802ac62cc5dbc35ecdcd3d4946df78c4b3fc144afc829023'
+            'efdf58e256b298bf8f0c0b7ead119830e99d1b2bf29ba1e43a9e0eeb8ac2e538'
+            '5f0ca8811b4f4967b311270ccf0f5e1aca5917bec37eb54f2b241d0da1641a30'
+            'ec615e2cf8d228ad3cd9ea879b2913b48a39e902d710e4d5a850e55bb060f91f'
+            '16a3dfe3c7cdddec4fb952e1bfc239ec3e63abd24791dcc44d78e1e4f1a7f54b'
+            '4b9d46a5234b1a85860bb25498e64b3835a87eb66310b1dba453cd3d5b19d9f1'
+            '0174ea3524914a5f4434a221861041b978686b622f2a297c3a354f925f44fdbd'
+            '1d802d862298c6c00a1bd8972de1ddf9f3f1e2bb7c9be354636ee70f076d7f39'
+            'e4021d909c815317814bd81609c2b2d82f0b16bbd3b38d492f097cd640445131'
+            'b07223e5928a5a0d4cb53e5c1a80cd93289f2f69a622c08e76d41a2434277ecc'
+            '14249e4ff055151e54692377f1f7fa5dc4c32571236c5bd092af1f1399e5df3a'
+            '912cbf446b40a675ad4a0ecee7fc8c256a1125ddcea614441d905c2828cc8cfb')
