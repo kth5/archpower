@@ -2,30 +2,23 @@
 # Maintainer: David Runge <dvzrv@archlinux.org>
 
 pkgname=gnu-efi
-pkgver=3.0.15
-pkgrel=4
+pkgver=3.0.18
+pkgrel=1
 pkgdesc="Develop EFI applications using the GNU toolchain and the EFI development environment"
-arch=(x86_64 powerpc64le powerpc riscv64)
+arch=(x86_64 riscv64)
 url="https://sourceforge.net/projects/gnu-efi/"
-license=(BSD)
+license=(BSD-2-Clause)
 conflicts=(gnu-efi-libs)
 provides=(gnu-efi-libs)
 replaces=(gnu-efi-libs)
-makedepends=(clang)
-source=(https://download.sourceforge.net/$pkgname/$pkgname-$pkgver.tar.bz2
-        https://gitweb.gentoo.org/repo/gentoo.git/plain/sys-boot/gnu-efi/files/gnu-efi-3.0.9-fix-clang-build.patch)
-options=(!distcc !strip)
-sha512sums=('64d408b6d115bdc6eebae12fbd6cd907ed5f847f54e506c1e8f8ea5de38a95cf6fac66ab1009bd1d0bd2d54ad45ad598d29bcc303926a5899bf5cc25448cbb2f'
-            '1f77f4a5dcd2f1589cd6950da3462f2508d0ac51c2d2268400414c336ddd41fcf430e79fb702fd5aa99cb4be0bf0fc6eabe9362d736a1223b1c53c2c0b319584')
-b2sums=('0df93d8cacfa1e6d4b7731e32287d4386da9375c5e5c5847df8a29c99d70f5c24b14abc5e44ab9d0a39a6ec96682eb2b5e84d81a5a142d44a50a522a4ae0e3c2'
-        '5b3f60e27982cd9e2cfb385851af4840d0301c1fb590d34b029e18a239a232ecca6a62431e10138d4e12cb44a5f64b415936935c1bdaf601dcf605ebe892de54')
+source=(https://download.sourceforge.net/$pkgname/$pkgname-$pkgver.tar.bz2)
+options=(!lto !strip)
+sha512sums=('39f9fa14b880441a94a04400ff8850efdd9474929e5501dfd05af06e7747b4d0f7cb742ac811c7026cf52d00508efb73018be4d61d63a1211de0cd931cbc473d')
+b2sums=('e080fa4c57a281452a6473304871304d1b5c30d42ee728b4c0c084258ed2f6f2099c068ec5841cee81ecf664dd658dee3b94d68324ebaa498cb49cec4f7f7df9')
 
 prepare() {
   # -Werror, not even once
   sed -e 's/-Werror//g' -i $pkgname-$pkgver/Make.defaults
-
-  cd ${srcdir}/${pkgname}-${pkgver}
-  patch -Np1 -i ${srcdir}/gnu-efi-3.0.9-fix-clang-build.patch
 }
 
 build() {
@@ -33,24 +26,16 @@ build() {
   # NOTE: apply only minimal CFLAGS, as gnu-efi does not provide userspace
   # libs, but may be used in unitialized machine state and should therefore not
   # be architecture optmized
-  # NOTE: fat-lto-objects is required for non-mangled (static) object files
-  CFLAGS="-O2 -flto -ffat-lto-objects"
+  CFLAGS="-O2"
+  # upstream provides LDFLAGS directly to ld: https://sourceforge.net/p/gnu-efi/bugs/33/
+  LDFLAGS="${LDFLAGS//-Wl/}"
+  LDFLAGS="${LDFLAGS//,/ }"
   make
-  make -C lib
-  make -C gnuefi
-  make -C inc
-  # unset LDFLAGS for custom linker used in apps, as we have patched our
-  # LDFLAGS in manually in prepare()
-  LDFLAGS="--no-warn-rwx-segments"
-  make -C apps
 }
 
 package() {
   cd $pkgname-$pkgver
-  # not quite sure why CFLAGS gets reset
-  CFLAGS="-O2 -flto -ffat-lto-objects"
   make INSTALLROOT="$pkgdir" PREFIX=/usr install
-  install -vDm 644 apps/*.efi -t "$pkgdir/usr/share/$pkgname/apps/$CARCH/"
   install -vDm 644 README.efilib -t "$pkgdir/usr/share/licenses/$pkgname/"
   install -vDm 644 {ChangeLog,README.{gnuefi,git,elilo}} -t "$pkgdir/usr/share/doc/$pkgname/"
 }
