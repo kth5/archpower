@@ -1,0 +1,462 @@
+From f59d358752c2a63c94635511cd963bebb2706d64 Mon Sep 17 00:00:00 2001
+From: Dudemanguy <random342@airmail.cc>
+Date: Wed, 15 May 2024 09:03:14 -0500
+Subject: [PATCH 1/4] av_common: parent mp_get_lavf_demuxer contents to the
+ list
+
+The only usage of this function is freed in mpv's generic property code,
+so no other changes are needed.
+---
+ common/av_common.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/common/av_common.c b/common/av_common.c
+index 1a23d766b365..142699d4b4c6 100644
+--- a/common/av_common.c
++++ b/common/av_common.c
+@@ -265,7 +265,7 @@ char **mp_get_lavf_demuxers(void)
+         const AVInputFormat *cur = av_demuxer_iterate(&iter);
+         if (!cur)
+             break;
+-        MP_TARRAY_APPEND(NULL, list, num, talloc_strdup(NULL, cur->name));
++        MP_TARRAY_APPEND(NULL, list, num, talloc_strdup(list, cur->name));
+     }
+     MP_TARRAY_APPEND(NULL, list, num, NULL);
+     return list;
+
+From 6692f87b61d48e1523d6e0ef3d311ffff6e89a6e Mon Sep 17 00:00:00 2001
+From: Dudemanguy <random342@airmail.cc>
+Date: Wed, 15 May 2024 19:22:32 -0500
+Subject: [PATCH 2/4] stream: implement get_protocols method for stream_lavf
+
+Previously, all stream protocols were a static list in mpv. This is okay
+for own builtin stuff, but for protocols that depend on ffmpeg it's not
+so great. Support for certain protocols may or may not be enabled in a
+user's ffmpeg and the protocol list that mpv generates should ideally
+match this. Fix this by implementing a get_protocols method for
+stream_lavf that will have different results depending on the ffmpeg mpv
+is built against. We keep the safe and unsafe protocols separation. The
+former is essentially a whitelist. Any protocol that is found in ffmpeg
+but is not in the safe whitelist is considered unsafe. In the stream
+list, ffmpeg is moved to the bottom so any possible protocols that are
+added in the future don't automatically take precedence over any builtin
+mpv ones.
+---
+ common/av_common.c   |  12 +++++
+ common/av_common.h   |   1 +
+ stream/stream.c      |  44 ++++++++++++-------
+ stream/stream.h      |   2 +
+ stream/stream_lavf.c | 102 ++++++++++++++++++++++++++++++++++++++-----
+ 5 files changed, 136 insertions(+), 25 deletions(-)
+
+diff --git a/common/av_common.c b/common/av_common.c
+index 142699d4b4c6..a4fa5981ff9f 100644
+--- a/common/av_common.c
++++ b/common/av_common.c
+@@ -271,6 +271,18 @@ char **mp_get_lavf_demuxers(void)
+     return list;
+ }
+ 
++char **mp_get_lavf_protocols(void)
++{
++    char **list = NULL;
++    int num = 0;
++    void *opaque = NULL;
++    const char *name;
++    while ((name = avio_enum_protocols(&opaque, 0)))
++        MP_TARRAY_APPEND(NULL, list, num, talloc_strdup(list, name));
++    MP_TARRAY_APPEND(NULL, list, num, NULL);
++    return list;
++}
++
+ int mp_codec_to_av_codec_id(const char *codec)
+ {
+     int id = AV_CODEC_ID_NONE;
+diff --git a/common/av_common.h b/common/av_common.h
+index c584085890c2..b019aa88e17a 100644
+--- a/common/av_common.h
++++ b/common/av_common.h
+@@ -42,6 +42,7 @@ void mp_set_avcodec_threads(struct mp_log *l, AVCodecContext *avctx, int threads
+ void mp_add_lavc_decoders(struct mp_decoder_list *list, enum AVMediaType type);
+ void mp_add_lavc_encoders(struct mp_decoder_list *list);
+ char **mp_get_lavf_demuxers(void);
++char **mp_get_lavf_protocols(void);
+ int mp_codec_to_av_codec_id(const char *codec);
+ const char *mp_codec_from_av_codec_id(int codec_id);
+ bool mp_codec_is_lossless(const char *codec);
+diff --git a/stream/stream.c b/stream/stream.c
+index 06dd92930c01..eca44e4afb37 100644
+--- a/stream/stream.c
++++ b/stream/stream.c
+@@ -66,8 +66,6 @@ static const stream_info_t *const stream_list[] = {
+ #if HAVE_CDDA
+     &stream_info_cdda,
+ #endif
+-    &stream_info_ffmpeg,
+-    &stream_info_ffmpeg_unsafe,
+     &stream_info_avdevice,
+ #if HAVE_DVBIN
+     &stream_info_dvb,
+@@ -92,6 +90,8 @@ static const stream_info_t *const stream_list[] = {
+     &stream_info_slice,
+     &stream_info_fd,
+     &stream_info_cb,
++    &stream_info_ffmpeg,
++    &stream_info_ffmpeg_unsafe,
+ };
+ 
+ // Because of guarantees documented on STREAM_BUFFER_SIZE.
+@@ -325,12 +325,17 @@ static int stream_create_instance(const stream_info_t *sinfo,
+         if (!sinfo->local_fs)
+             return STREAM_NO_MATCH;
+     } else {
+-        for (int n = 0; sinfo->protocols && sinfo->protocols[n]; n++) {
+-            path = match_proto(url, sinfo->protocols[n]);
++        char **get_protocols = sinfo->get_protocols ? sinfo->get_protocols() : NULL;
++        char **protocols = get_protocols ? get_protocols : (char **)sinfo->protocols;
++
++        for (int n = 0; protocols && protocols[n]; n++) {
++            path = match_proto(url, protocols[n]);
+             if (path)
+                 break;
+         }
+ 
++        talloc_free(get_protocols);
++
+         if (!path)
+             return STREAM_NO_MATCH;
+     }
+@@ -864,16 +869,17 @@ char **stream_get_proto_list(void)
+     for (int i = 0; i < MP_ARRAY_SIZE(stream_list); i++) {
+         const stream_info_t *stream_info = stream_list[i];
+ 
+-        if (!stream_info->protocols)
+-            continue;
++        char **get_protocols = stream_info->get_protocols ? stream_info->get_protocols() : NULL;
++        char **protocols = get_protocols ? get_protocols : (char **)stream_info->protocols;
+ 
+-        for (int j = 0; stream_info->protocols[j]; j++) {
+-            if (*stream_info->protocols[j] == '\0')
+-               continue;
++        for (int j = 0; protocols && protocols[j]; j++) {
++            if (*protocols[j] == '\0')
++                continue;
+ 
+-            MP_TARRAY_APPEND(NULL, list, num,
+-                                talloc_strdup(NULL, stream_info->protocols[j]));
++            MP_TARRAY_APPEND(NULL, list, num, talloc_strdup(list, protocols[j]));
+         }
++
++        talloc_free(get_protocols);
+     }
+     MP_TARRAY_APPEND(NULL, list, num, NULL);
+     return list;
+@@ -888,7 +894,6 @@ void stream_print_proto_list(struct mp_log *log)
+     for (int i = 0; list[i]; i++) {
+         mp_info(log, " %s://\n", list[i]);
+         count++;
+-        talloc_free(list[i]);
+     }
+     talloc_free(list);
+     mp_info(log, "\nTotal: %d protocols\n", count);
+@@ -899,10 +904,19 @@ bool stream_has_proto(const char *proto)
+     for (int i = 0; i < MP_ARRAY_SIZE(stream_list); i++) {
+         const stream_info_t *stream_info = stream_list[i];
+ 
+-        for (int j = 0; stream_info->protocols && stream_info->protocols[j]; j++) {
+-            if (strcmp(stream_info->protocols[j], proto) == 0)
+-                return true;
++        bool match = false;
++        char **get_protocols = stream_info->get_protocols ? stream_info->get_protocols() : NULL;
++        char **protocols = get_protocols ? get_protocols : (char **)stream_info->protocols;
++
++        for (int j = 0; protocols && protocols[j]; j++) {
++            if (strcmp(protocols[j], proto) == 0) {
++                match = true;
++                break;
++            }
+         }
++
++        talloc_free(get_protocols);
++        return match;
+     }
+ 
+     return false;
+diff --git a/stream/stream.h b/stream/stream.h
+index 58b55e1a43ca..866affe1fef0 100644
+--- a/stream/stream.h
++++ b/stream/stream.h
+@@ -114,6 +114,8 @@ typedef struct stream_info_st {
+     // Alternative to open(). Only either open() or open2() can be set.
+     int (*open2)(struct stream *st, const struct stream_open_args *args);
+     const char *const *protocols;
++    // Alternative to protocols. For stream_lavf.
++    char **(*get_protocols)(void);
+     bool can_write;     // correctly checks for READ/WRITE modes
+     bool local_fs;      // supports STREAM_LOCAL_FS_ONLY
+     int stream_origin;  // 0 or set of STREAM_ORIGIN_*; if 0, the same origin
+diff --git a/stream/stream_lavf.c b/stream/stream_lavf.c
+index a2db55146668..30c823c58f62 100644
+--- a/stream/stream_lavf.c
++++ b/stream/stream_lavf.c
+@@ -238,6 +238,96 @@ void mp_setup_av_network_options(AVDictionary **dict, const char *target_fmt,
+     talloc_free(temp);
+ }
+ 
++#define PROTO(...) (const char *[]){__VA_ARGS__, NULL}
++
++// List of safe protocols and their aliases
++static const char **safe_protos[] = {
++    PROTO("data"),
++    PROTO("gopher"),
++    PROTO("gophers"),
++    PROTO("http", "dav", "webdav"),
++    PROTO("httpproxy"),
++    PROTO("https", "davs", "webdavs"),
++    PROTO("ipfs"),
++    PROTO("ipns"),
++    PROTO("mmsh", "mms", "mmshttp"),
++    PROTO("mmst"),
++    PROTO("rist"),
++    PROTO("rtmp"),
++    PROTO("rtmpe"),
++    PROTO("rtmps"),
++    PROTO("rtmpt"),
++    PROTO("rtmpte"),
++    PROTO("rtmpts"),
++    PROTO("rtp"),
++    PROTO("srt"),
++    PROTO("srtp"),
++    NULL,
++};
++
++static char **get_safe_protocols(void)
++{
++    int num = 0;
++    char **protocols = NULL;
++    char **ffmpeg_demuxers = mp_get_lavf_demuxers();
++    char **ffmpeg_protos = mp_get_lavf_protocols();
++
++    for (int i = 0; ffmpeg_protos[i]; i++) {
++        for (int j = 0; safe_protos[j]; j++) {
++            if (strcmp(ffmpeg_protos[i], safe_protos[j][0]) != 0)
++                continue;
++            for (int k = 0; safe_protos[j][k]; k++)
++                MP_TARRAY_APPEND(NULL, protocols, num, talloc_strdup(protocols, safe_protos[j][k]));
++            break;
++        }
++    }
++
++    // rtsp is a demuxer not protocol in ffmpeg so it is handled separately
++    for (int i = 0; ffmpeg_demuxers[i]; i++) {
++        if (strcmp("rtsp", ffmpeg_demuxers[i]) == 0) {
++            MP_TARRAY_APPEND(NULL, protocols, num, talloc_strdup(protocols, "rtsp"));
++            MP_TARRAY_APPEND(NULL, protocols, num, talloc_strdup(protocols, "rtsps"));
++            break;
++        }
++    }
++
++    MP_TARRAY_APPEND(NULL, protocols, num, NULL);
++
++    talloc_free(ffmpeg_demuxers);
++    talloc_free(ffmpeg_protos);
++
++    return protocols;
++}
++
++static char **get_unsafe_protocols(void)
++{
++    int num = 0;
++    char **protocols = NULL;
++    char **safe_protocols = get_safe_protocols();
++    char **ffmpeg_protos = mp_get_lavf_protocols();
++
++    for (int i = 0; ffmpeg_protos[i]; i++) {
++        bool safe_protocol = false;
++        for (int j = 0; safe_protocols[j]; j++) {
++            if (strcmp(ffmpeg_protos[i], safe_protocols[j]) == 0) {
++                safe_protocol = true;
++                break;
++            }
++        }
++        if (!safe_protocol)
++            MP_TARRAY_APPEND(NULL, protocols, num, talloc_strdup(protocols, ffmpeg_protos[i]));
++    }
++
++    MP_TARRAY_APPEND(NULL, protocols, num, talloc_strdup(protocols, "ffmpeg"));
++    MP_TARRAY_APPEND(NULL, protocols, num, talloc_strdup(protocols, "lavf"));
++
++    MP_TARRAY_APPEND(NULL, protocols, num, NULL);
++
++    talloc_free(ffmpeg_protos);
++    talloc_free(safe_protocols);
++    return protocols;
++}
++
+ // Escape http URLs with unescaped, invalid characters in them.
+ // libavformat's http protocol does not do this, and a patch to add this
+ // in a 100% safe case (spaces only) was rejected.
+@@ -431,12 +431,7 @@ done:
+ const stream_info_t stream_info_ffmpeg = {
+   .name = "ffmpeg",
+   .open = open_f,
+-  .protocols = (const char *const[]){
+-     "rtmp", "rtsp", "rtsps", "http", "https", "mms", "mmst", "mmsh", "mmshttp",
+-     "rtp", "httpproxy", "rtmpe", "rtmps", "rtmpt", "rtmpte", "rtmpts", "srt",
+-     "rist", "srtp", "gopher", "gophers", "data", "ipfs", "ipns", "dav",
+-     "davs", "webdav", "webdavs",
+-     NULL },
++  .get_protocols = get_safe_protocols,
+   .can_write = true,
+   .stream_origin = STREAM_ORIGIN_NET,
+ };
+@@ -448,10 +443,7 @@ const stream_info_t stream_info_ffmpeg = {
+ const stream_info_t stream_info_ffmpeg_unsafe = {
+   .name = "ffmpeg",
+   .open = open_f,
+-  .protocols = (const char *const[]){
+-     "lavf", "ffmpeg", "udp", "ftp", "tcp", "tls", "unix", "sftp", "md5",
+-     "concat", "smb",
+-     NULL },
++  .get_protocols = get_unsafe_protocols,
+   .stream_origin = STREAM_ORIGIN_UNSAFE,
+   .can_write = true,
+ };
+
+From 0f4fa329357f27d0c57f8f13b426d7450a29cfa4 Mon Sep 17 00:00:00 2001
+From: Dudemanguy <random342@airmail.cc>
+Date: Tue, 14 May 2024 13:32:18 -0500
+Subject: [PATCH 3/4] build: dynamically generate mpv.desktop file protocols
+
+If we can run the built mpv binary, then it is possible to use a custom
+target that reads the protocols we have available in mpv and write the
+mpv.desktop file based on the output. For cases where this is not
+possible (e.g. cross compiling), then just install the unmodified
+mpv.desktop file like before. Fixes #8731 and fixes #14124.
+---
+ TOOLS/gen-mpv-desktop.py | 45 ++++++++++++++++++++++++++++++++++++++++
+ meson.build              | 17 ++++++++++++++-
+ 2 files changed, 61 insertions(+), 1 deletion(-)
+ create mode 100755 TOOLS/gen-mpv-desktop.py
+
+diff --git a/TOOLS/gen-mpv-desktop.py b/TOOLS/gen-mpv-desktop.py
+new file mode 100755
+index 000000000000..2b05de1ec4cc
+--- /dev/null
++++ b/TOOLS/gen-mpv-desktop.py
+@@ -0,0 +1,45 @@
++#!/usr/bin/env python3
++
++# Modify X-KDE-Protocols in the mpv.desktop file based on output from
++# mpv --list-protocols.
++
++#
++# This file is part of mpv.
++#
++# mpv is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++#
++# mpv is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU Lesser General Public License for more details.
++#
++# You should have received a copy of the GNU Lesser General Public
++# License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
++#
++
++import sys
++from subprocess import check_output
++
++if __name__ == "__main__":
++    with open(sys.argv[1], "r", encoding="UTF-8") as f:
++        next(f)
++        mpv_desktop = dict([line.split("=", 1) for line in f])
++
++    if not mpv_desktop["X-KDE-Protocols"]:
++        raise ValueError("Missing X-KDE-Protocols entry in mpv.desktop file")
++
++    mpv_protocols = check_output([sys.argv[2], "--list-protocols"], encoding="UTF-8")
++    mpv_protocols = set(line.strip(" :/") for line in mpv_protocols.splitlines() if "://" in line)
++    if len(mpv_protocols) == 0:
++        raise ValueError("Unable to parse any protocols from mpv '--list-protocols'")
++
++    protocol_list = set(mpv_desktop["X-KDE-Protocols"].strip().split(","))
++    mpv_desktop["X-KDE-Protocols"] = ",".join(sorted(mpv_protocols & protocol_list)) + "\n"
++
++    with open(sys.argv[3], "w", encoding="UTF-8") as f:
++        f.write("[Desktop Entry]" + "\n")
++        for key, value in mpv_desktop.items():
++            f.write(f"{key}={value}")
+diff --git a/meson.build b/meson.build
+index c14bf47d5614..ae1eb9cfd903 100644
+--- a/meson.build
++++ b/meson.build
+@@ -581,6 +581,7 @@ tools_directory = join_paths(source_root, 'TOOLS')
+ docutils_wrapper = find_program(join_paths(tools_directory, 'docutils-wrapper.py'))
+ file2string = find_program(join_paths(tools_directory, 'file2string.py'))
+ matroska = find_program(join_paths(tools_directory, 'matroska.py'))
++mpv_desktop = find_program(join_paths(tools_directory, 'gen-mpv-desktop.py'))
+ 
+ ebml_defs = custom_target('ebml_defs.inc',
+     output: 'ebml_defs.inc',
+@@ -1796,7 +1797,6 @@ if get_option('cplayer')
+     zsh_install_dir = join_paths(datadir, 'zsh', 'site-functions')
+     install_data('etc/_mpv.zsh', install_dir: zsh_install_dir, rename: '_mpv')
+ 
+-    install_data('etc/mpv.desktop', install_dir: join_paths(datadir, 'applications'))
+     install_data('etc/mpv.metainfo.xml', install_dir: join_paths(datadir, 'metainfo'))
+     install_data('etc/encoding-profiles.conf', install_dir: join_paths(confdir, 'mpv'))
+ 
+@@ -1827,6 +1827,21 @@ if get_option('cplayer')
+             command: [osxbundle, mpv.full_path(), '@SOURCE_ROOT@'],
+         )
+     endif
++
++    if not win32 and not darwin
++        if meson.can_run_host_binaries()
++            mpv_desktop_path = join_paths(source_root, 'etc', 'mpv.desktop')
++            custom_target('mpv.desktop',
++                depends: mpv,
++                output: 'mpv.desktop',
++                command: [mpv_desktop, mpv_desktop_path, mpv.full_path(), '@OUTPUT@'],
++                install: true,
++                install_dir: join_paths(datadir, 'applications'),
++            )
++        else
++            install_data('etc/mpv.desktop', install_dir: join_paths(datadir, 'applications'))
++        endif
++    endif
+ endif
+ 
+ if get_option('tests')
+
+From 00506d51892c48cd91d3c88423f31df7b9328499 Mon Sep 17 00:00:00 2001
+From: Dudemanguy <random342@airmail.cc>
+Date: Wed, 22 May 2024 10:27:40 -0500
+Subject: [PATCH 4/4] stream_lavf: don't add ffmpeg bluray or dvd protocols
+
+The naming of these conflict with existing mpv protocols, so skip if we
+get them. Users can still use them via lavf://bluray: or lavf://dvd: if
+they wish.
+---
+ stream/stream_lavf.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/stream/stream_lavf.c b/stream/stream_lavf.c
+index 30c823c58f62..369f9cecc402 100644
+--- a/stream/stream_lavf.c
++++ b/stream/stream_lavf.c
+@@ -314,6 +314,10 @@ static char **get_unsafe_protocols(void)
+                 break;
+             }
+         }
++        // Skip to avoid name conflict with builtin mpv protocol.
++        if (strcmp(ffmpeg_protos[i], "bluray") == 0 || strcmp(ffmpeg_protos[i], "dvd") == 0)
++            continue;
++
+         if (!safe_protocol)
+             MP_TARRAY_APPEND(NULL, protocols, num, talloc_strdup(protocols, ffmpeg_protos[i]));
+     }
