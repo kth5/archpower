@@ -9,7 +9,7 @@ pkgname=('systemd'
 case "${CARCH}" in
   x86_64) pkgname+=('systemd-ukify') ;;
 esac
-_tag='255.7'
+_tag='256.2'
 # Upstream versioning is incompatible with pacman's version comparisons, one
 # way or another. So we replace dashes and tildes with the empty string to
 # make sure pacman's version comparing does the right thing for rc versions:
@@ -32,8 +32,7 @@ validpgpkeys=('63CDA1E5D3FC22B998D20DD6327F26951A015CC4'  # Lennart Poettering <
               'A9EA9081724FFAE0484C35A1A81CEA22BC8C7E2E'  # Luca Boccassi <luca.boccassi@gmail.com>
               '9A774DB5DB996C154EBBFBFDA0099A18E29326E1'  # Yu Watanabe <watanabe.yu+github@gmail.com>
               '5C251B5FC54EB2F80F407AAAC54CA336CFEB557E') # Zbigniew Jędrzejewski-Szmek <zbyszek@in.waw.pl>
-source=("git+https://github.com/systemd/systemd-stable#tag=v${_tag}?signed"
-        "git+https://github.com/systemd/systemd#tag=v${_tag%.*}?signed"
+source=("git+https://github.com/systemd/systemd#tag=v${_tag}?signed"
         '0001-Use-Arch-Linux-device-access-groups.patch'
         # bootloader files
         'arch.conf'
@@ -53,10 +52,9 @@ source=("git+https://github.com/systemd/systemd-stable#tag=v${_tag}?signed"
         '30-systemd-tmpfiles.hook'
         '30-systemd-udev-reload.hook'
         '30-systemd-update.hook')
-sha512sums=('224648e176fe48d0cb96ac740b4f239e7ddbbb6aed6299976f1df2d5825757021c7be243d187446c274715214c8175bf925ebb27eece18a02ce1884bac2c1f20'
-            'd430427987309483c99062adb02741d25239ba5fbb97053ef817c0c5a0a935328af9c8b651de2b119b0e851dcf6623f01343859735ff81d7013ab0133e67c7ea'
+sha512sums=('7440e619af100458ccd54ab1aafdaa339f473c226b6f7d9ceca35716ad30e9ed112ae8e2230116b2104e88171d92309ad78780f4f02d5f9f59c0e7fce15606c9'
             '3ccf783c28f7a1c857120abac4002ca91ae1f92205dcd5a84aff515d57e706a3f9240d75a0a67cff5085716885e06e62597baa86897f298662ec36a940cf410e'
-            '78c6b0d6dd971bfda7e5948f4048ffce041f2d8e79c865116fe8ab0cb6b588203ec4076f1d3a66bdeffbfa4c44af74bc230dc1adefbe4533a602c3e3719da822'
+            '76e58855f9025feffb21108f8714f7d8fa7cb163919b54128fb614c74af503f3ac651df7d6fefcee1dbc7753a63fb9edd342ea23f2106a1221c013af0078b89b'
             'c416e2121df83067376bcaacb58c05b01990f4614ad9de657d74b6da3efa441af251d13bf21e3f0f71ddcb4c9ea658b81da3d915667dc5c309c87ec32a1cb5a5'
             '5a1d78b5170da5abe3d18fdf9f2c3a4d78f15ba7d1ee9ec2708c4c9c2e28973469bc19386f70b3cf32ffafbe4fcc4303e5ebbd6d5187a1df3314ae0965b25e75'
             'b90c99d768dc2a4f020ba854edf45ccf1b86a09d2f66e475de21fe589ff7e32c33ef4aa0876d7f1864491488fd7edb2682fc0d68e83a6d4890a0778dc2d6fe19'
@@ -73,12 +71,14 @@ sha512sums=('224648e176fe48d0cb96ac740b4f239e7ddbbb6aed6299976f1df2d5825757021c7
             '825b9dd0167c072ba62cabe0677e7cd20f2b4b850328022540f122689d8b25315005fa98ce867cf6e7460b2b26df16b88bb3b5c9ebf721746dce4e2271af7b97')
 
 _meson_version="${pkgver}-${pkgrel}"
+_meson_vcs_tag='false'
 _meson_mode='release'
 _meson_compile=()
 _meson_install=()
 
 if ((_systemd_UPSTREAM)); then
   _meson_version="${pkgver}"
+  _meson_vcs_tag='true'
   _meson_mode='developer'
   pkgname+=('systemd-tests')
   makedepends+=('libarchive')
@@ -91,18 +91,13 @@ if ((_systemd_UPSTREAM)); then
 fi
 
 _backports=(
-  # 99-systemd.rules: rework SYSTEMD_READY logic for device mapper
-  'c072860593329293e19580b337504adb52248462'
 )
 
 _reverts=(
 )
 
 prepare() {
-  cd "$pkgbase-stable"
-
-  # add upstream repository for cherry-picking
-  git remote add -f upstream ../systemd
+  cd "${pkgbase}"
 
   local _c _l
   for _c in "${_backports[@]}"; do
@@ -137,19 +132,20 @@ build() {
 
   local _meson_options=(
     -Dversion-tag="${_meson_version}-arch"
+    -Dvcs-tag="${_meson_vcs_tag}"
     -Dshared-lib-tag="${_meson_version}"
     -Dmode="${_meson_mode}"
 
-    -Dapparmor=false
-    -Dxenctrl=false
-    -Dbpf-framework=true
+    -Dapparmor=disabled
+    -Dxenctrl=disabled
+    -Dbpf-framework=enabled
     -Dima=false
     -Dinstall-tests=true
-    -Dlibidn2=true
-    -Dlz4=true
-    -Dman=true
+    -Dlibidn2=enabled
+    -Dlz4=enabled
+    -Dman=enabled
     -Dnscd=false
-    -Dselinux=false
+    -Dselinux=disabled
 
     # We disable DNSSEC by default, it still causes trouble:
     # https://github.com/systemd/systemd/issues/10579
@@ -183,7 +179,7 @@ build() {
     *) _meson_options+=(-Dbootloader=false -Dukify=false) ;;
   esac
 
-  arch-meson "$pkgbase-stable" build "${_meson_options[@]}" $MESON_EXTRA_CONFIGURE_OPTIONS
+  arch-meson "${pkgbase}" build "${_meson_options[@]}" $MESON_EXTRA_CONFIGURE_OPTIONS
 
   meson compile -C build "${_meson_compile[@]}"
 }
@@ -201,7 +197,7 @@ package_systemd() {
   )
   depends=("systemd-libs=${pkgver}"
            'acl' 'libacl.so' 'bash' 'cryptsetup' 'libcryptsetup.so' 'dbus'
-           'dbus-units' 'kbd' 'kmod' 'libkmod.so' 'hwdata' 'libcap' 'libcap.so'
+           'dbus-units' 'kbd' 'kmod' 'hwdata' 'libcap' 'libcap.so'
            'libgcrypt' 'libxcrypt' 'libcrypt.so' 'libidn2' 'lz4' 'pam'
            'libelf' 'libseccomp' 'libseccomp.so' 'util-linux' 'libblkid.so'
            'libmount.so' 'xz' 'pcre2' 'audit' 'libaudit.so'
@@ -222,8 +218,10 @@ package_systemd() {
               'libfido2: unlocking LUKS2 volumes with FIDO2 token'
               'libp11-kit: support PKCS#11'
               'tpm2-tss: unlocking LUKS2 volumes with TPM2')
+  optdepends_x86_64=(
+              'systemd-ukify: combine kernel and initrd into a signed Unified Kernel Image'
+  )
   optdepends+=("${_optdepends_upstream[@]}")
-  optdepends_x86_64=('systemd-ukify: combine kernel and initrd into a signed Unified Kernel Image')
   backup=(etc/pam.d/systemd-user
           etc/systemd/coredump.conf
           etc/systemd/homed.conf
@@ -254,6 +252,7 @@ package_systemd() {
   mv "$pkgdir"/usr/lib/pkgconfig systemd-libs/lib/pkgconfig
   mv "$pkgdir"/usr/include systemd-libs/include
   mv "$pkgdir"/usr/share/man/man3 systemd-libs/man3
+
 
   case "${CARCH}" in
     x86_64)
