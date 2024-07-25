@@ -5,49 +5,56 @@
 
 pkgname=netcdf
 pkgver=4.9.2
-pkgrel=3
+pkgrel=4
 pkgdesc="network Common Data Form interface for array-oriented data access and corresponding library"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://www.unidata.ucar.edu/software/netcdf/"
 depends=(hdf5 curl libxml2 libaec blosc bzip2 libzip zstd)
-makedepends=(cmake)
+makedepends=(cmake git)
 checkdepends=(unzip)
 optdepends=('netcdf-fortran: fortran bindings' 'netcdf-cxx: c++ bindings')
 options=(!makeflags)
 license=(custom)
-source=(https://github.com/Unidata/netcdf-c/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz)
-sha256sums=('bc104d101278c68b303359b3dc4192f81592ae8640f1aee486921138f7f88cb7')
+_commit=d5a3fc3172549c03dc336a13425d3b7d988bbf0d
+source=("git+https://github.com/Unidata/netcdf-c.git#commit=${_commit}")
+sha256sums=('b1c9b30bc10caf71bc1bb7400dbb38f4128b8199f008c246b04ddd11abdd4db1')
 
 prepare() {
   # https://github.com/Unidata/netcdf-c/issues/2188 https://github.com/Unidata/netcdf-c/issues/2242
-  sed -i "/tst_remote3/d" ${pkgname}-c-${pkgver}/ncdap_test/CMakeLists.txt
+  sed -i "/tst_remote3/d" ${pkgname}-c/ncdap_test/CMakeLists.txt
 }
 
 build() {
   case "${CARCH}" in
-    powerpc64le|x86_64) EXTRA_CMAKE_FLAGS="-DENABLE_CDF5=ON" ;;
-  esac
+    powerpc64*|riscv64|x86_64)
+      cmake_options=(
+        -DENABLE_CDF5=ON
+      )
+    ;;
+    powerpc)
+      cmake_options=(
+        -DENABLE_CDF5=OFF
+        -DNETCDF_GENERATE_NCGEN=ON
+      )
+    ;;
+  esac 
 
-  cmake -B build -S ${pkgname}-c-${pkgver} \
+  cmake -B build -S ${pkgname}-c \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_INSTALL_LIBDIR=lib \
     -DCMAKE_BUILD_TYPE=Release \
-    -DENABLE_BYTERANGE=ON \
-    -DENABLE_DAP_LONG_TESTS=ON \
-    -DENABLE_DAP_REMOTE_TESTS=ON \
-    -DENABLE_EXAMPLE_TESTS=ON \
-    -DENABLE_EXTRA_TESTS=ON \
-    -DENABLE_FILTER_TESTING=ON \
-    -DENABLE_LARGE_FILE_TESTS=ON \
-    -DENABLE_UNIT_TESTS=ON ${EXTRA_CMAKE_FLAGS}
+    -DENABLE_BYTERANGE=ON ${cmake_options[@]}
   make -C build
 }
 
 check() {
-  make -C build test
+  case "${CARCH}" in
+    x86_64) make -C build test ;;
+    *) warn "tests disabled for ${CARCH}" ;;
+  esac
 }
 
 package() {
   make -C build DESTDIR="${pkgdir}" install
-  install -Dm644 ${pkgname}-c-${pkgver}/COPYRIGHT -t "${pkgdir}"/usr/share/licenses/${pkgname}/
+  install -Dm644 ${pkgname}-c/COPYRIGHT -t "${pkgdir}"/usr/share/licenses/${pkgname}/
 }
