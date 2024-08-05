@@ -10,8 +10,8 @@ pkgname=(opencv
 case "${CARCH}" in
   x86_64) pkgname+=(opencv-cuda) ;;
 esac
-pkgver=4.9.0
-pkgrel=6
+pkgver=4.10.0
+pkgrel=3
 pkgdesc='Open Source Computer Vision Library'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=(Apache-2.0)
@@ -44,6 +44,7 @@ makedepends=(ant
              cmake
              eigen
              fmt
+             git
              glew
              hdf5
              java-environment
@@ -56,7 +57,11 @@ makedepends=(ant
              python-setuptools
              qt6-5compat
              vtk)
-makedepends_x86_64=(cudnn)
+makedepends_x86_64=(
+             cuda
+             cudnn
+             gcc13
+)
 optdepends=('opencv-samples: samples'
             'vtk: for the viz module'
             'glew: for the viz module'
@@ -64,13 +69,12 @@ optdepends=('opencv-samples: samples'
             'hdf5: for the HDF5 module'
             'opencl-icd-loader: For coding with OpenCL'
             'java-runtime: Java interface')
-source=(https://github.com/opencv/opencv/archive/$pkgver/$pkgname-$pkgver.tar.gz
-        https://github.com/opencv/opencv_contrib/archive/$pkgver/opencv_contrib-$pkgver.tar.gz
+source=(git+https://github.com/opencv/opencv#tag=$pkgver
+        git+https://github.com/opencv/opencv_contrib#tag=$pkgver
         vtk9.patch)
-sha256sums=('ddf76f9dffd322c7c3cb1f721d0887f62d747b82059342213138dc190f28bc6c'
-            '8952c45a73b75676c522dd574229f563e43c271ae1d5bbbd26f8e2b6bc1a4dae'
+sha256sums=('3882d3fdbd782983dcab19cada16a9206165d153bc5528f9007a48f27e52dc68'
+            '24f040b420d63566aeb77191706ff08b446698adf13a715d1f3cc6b60d5c7c5b'
             'f35a2d4ea0d6212c7798659e59eda2cb0b5bc858360f7ce9c696c77d3029668e')
-
 
 case "${CARCH}" in
   riscv64)
@@ -80,19 +84,23 @@ case "${CARCH}" in
 esac
 
 prepare() {
-  patch -d $pkgname-$pkgver -p1 < vtk9.patch # Don't require all vtk optdepends
+  pushd opencv
+  patch -p1 < ../vtk9.patch # Don't require all vtk optdepends
+
+  # fix build with cudnn 9
+  git cherry-pick -n 05e48605a0aea00d3a89b9ab5e25cdf89568aa28
+  # fix build with CUDA 12.4
+  git cherry-pick -n 1668203a1c6474b8368e27c55abc10ae7f17c841
+  popd
+
+  pushd opencv_contrib
+  # fix build with CUDA 12.4
+  git cherry-pick -n 4e766a039eda04b75f28f6905e4192d99b7874c7
+  git cherry-pick -n 1ed3dd2c53888e3289afdb22ec4e9ebbff3dba87
+  git cherry-pick -n 8c16a489a1fa9e2ccf21ce8eeb7fbb1affe548b1
 }
 
 build() {
-  export LDFLAGS+=' -lverdict'
-  case "${CARCH}" in
-    powerpc) export CXXFLAGS+=' -latomic' ;;
-    powerpc64)
-      export CFLAGS='-O2 -pipe'
-      export CXXFLAGS='-O2 -pipe'
-    ;;
-  esac
-
   export JAVA_HOME="/usr/lib/jvm/default"
   # cmake's FindLAPACK doesn't add cblas to LAPACK_LIBRARIES, so we need to specify them manually
   _opts="-DWITH_OPENCL=ON \
@@ -112,7 +120,7 @@ build() {
          -DCMAKE_INSTALL_PREFIX=/usr \
          -DCPU_BASELINE_DISABLE=SSE3 \
          -DCPU_BASELINE_DISABLE=SSE2 \
-         -DOPENCV_EXTRA_MODULES_PATH=$srcdir/opencv_contrib-$pkgver/modules \
+         -DOPENCV_EXTRA_MODULES_PATH=$srcdir/opencv_contrib/modules \
          -DOPENCV_SKIP_PYTHON_LOADER=ON \
          -DLAPACK_LIBRARIES=/usr/lib/liblapack.so;/usr/lib/libblas.so;/usr/lib/libcblas.so \
          -DLAPACK_CBLAS_H=/usr/include/cblas.h \
@@ -123,22 +131,30 @@ build() {
          -DOPENCV_GENERATE_SETUPVARS=OFF \
          -DEIGEN_INCLUDE_PATH=/usr/include/eigen3 \
          -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
-         -Dprotobuf_MODULE_COMPATIBLE=ON \
-         -DBUILD_JAVA=OFF"
+         -Dprotobuf_MODULE_COMPATIBLE=ON"
 
-  cmake -B build -S $pkgname-$pkgver $_opts \
+  export LDFLAGS+=' -lverdict'
+  case "${CARCH}" in
+    powerpc) export CXXFLAGS+=' -latomic' ;;
+    powerpc64)
+      export CFLAGS='-O2 -pipe'
+      export CXXFLAGS='-O2 -pipe'
+    ;;
+  esac
+
+  cmake -B build -S $pkgname $_opts \
     -DBUILD_WITH_DEBUG_INFO=ON
   cmake --build build
 
   case "${CARCH}" in
     x86_64)
       CFLAGS="${CFLAGS} -fno-lto" CXXFLAGS="${CXXFLAGS} -fno-lto" LDFLAGS="${LDFLAGS} -fno-lto" \
-      cmake -B build-cuda -S $pkgname-$pkgver $_opts \
+      cmake -B build-cuda -S $pkgname $_opts \
         -DBUILD_WITH_DEBUG_INFO=OFF \
         -DWITH_CUDA=ON \
         -DWITH_CUDNN=ON \
-        -DCMAKE_C_COMPILER=gcc-12 \
-        -DCMAKE_CXX_COMPILER=g++-12 \
+        -DCMAKE_C_COMPILER=gcc-13 \
+        -DCMAKE_CXX_COMPILER=g++-13 \
         -DCUDA_ARCH_BIN='52-real;53-real;60-real;61-real;62-real;70-real;72-real;75-real;80-real;86-real;87-real;89-real;90-real;90-virtual' \
         -DCUDA_ARCH_PTX='90-virtual'
       cmake --build build-cuda
@@ -151,6 +167,14 @@ package_opencv() {
 
   # separate samples package
   mv "$pkgdir"/usr/share/opencv4/samples "$srcdir"
+
+  case "${CARCH}" in
+    powerpc64le|riscv64|x86_64)
+      # Add java symlinks expected by some binary blobs
+      ln -sr "$pkgdir"/usr/share/java/{opencv4/opencv-${pkgver//./},opencv}.jar
+      ln -sr "$pkgdir"/usr/lib/{libopencv_java${pkgver//./},libopencv_java}.so
+    ;;
+  esac
 
   # Split Python bindings
   rm -r "$pkgdir"/usr/lib/python3*
