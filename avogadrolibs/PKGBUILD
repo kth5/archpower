@@ -2,9 +2,10 @@
 # Maintainer: Antonio Rojas <arojas@archlinux.org>
 
 pkgbase=avogadrolibs
-pkgname=(avogadrolibs)
+pkgname=(avogadrolibs
+         avogadrolibs-qt5)
 pkgver=1.99.0
-pkgrel=4
+pkgrel=6
 pkgdesc='Libraries that provide 3D rendering, visualization, analysis and data processing useful in computational chemistry, molecular modeling, bioinformatics, materials science, and related areas'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://www.openchemistry.org/'
@@ -14,6 +15,7 @@ makedepends=(boost
              eigen
              fast_float
              fmt
+             git
              hdf5
              genxrdpattern
              glew
@@ -23,6 +25,7 @@ makedepends=(boost
              openmpi
              pybind11
              python
+             qt5-svg
              qt5-tools
              qt6-5compat
              qt6-declarative
@@ -33,14 +36,13 @@ makedepends=(boost
              utf8cpp
              verdict
              vtk)
-source=(https://github.com/OpenChemistry/avogadrolibs/archive/$pkgver/$pkgname-$pkgver.tar.gz
-        https://github.com/antonio-rojas/avogadrolibs/commit/6e2e84db.patch)
-sha256sums=('34808e3c602b0f60f3c160ff0220832aee777db86e962e3f958c6327fb434063'
-            '285d7b8aef7cd489a2829840519051dbdbe232c06a540268860a3a6dbc8d5ca9')
+source=(git+https://github.com/OpenChemistry/avogadrolibs#tag=$pkgver)
+sha256sums=('ad26ef7d887924a867c5aba68ecc3803b2684652d65a442516903c9343a332ff')
 
 prepare() {
   mkdir crystals fragments molecules # Dummy dirs to trick cmake, actually provided by avogadro-{crystals,fragments,molecules}
-  patch -d $pkgname-$pkgver -p1 < 6e2e84db.patch # Fix wrong cmake variable name
+  cd $pkgname
+  git cherry-pick -n 6e2e84dbb088a40d69117c1836f4306792f57acd # Fix wrong cmake variable name
 }
 
 build() {
@@ -51,7 +53,7 @@ build() {
     ;;
   esac
 
-  cmake -B build -S $pkgname-$pkgver \
+  cmake -B build -S $pkgname \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_C_FLAGS="$CFLAGS -ffat-lto-objects" \
     -DCMAKE_CXX_FLAGS="$CXXFLAGS -ffat-lto-objects" \
@@ -88,5 +90,30 @@ package_avogadrolibs() {
         "$pkgdir"/usr/include/avogadro/{molequeue,qt*,vtk} \
         "$pkgdir"/usr/lib/avogadro2/{scripts,staticplugins}
 
-  install -Dm644 $pkgname-$pkgver/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
+  install -Dm644 $pkgname/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
+}
+
+package_avogadrolibs-qt5() {
+  pkgdesc="Qt 5 modules for Avogadro"
+  depends=(avogadrolibs
+           fmt # needed by VTK dependencies
+           gcc-libs
+           glew
+           glibc
+           libarchive
+           libglvnd
+           libmsym
+           libxcursor # needed by VTK dependencies
+           openmpi # needed by VTK dependencies
+           qt5-base
+           qt5-svg
+           vtk)
+
+  DESTDIR="$pkgdir" cmake --install build/avogadro/molequeue
+  DESTDIR="$pkgdir" cmake --install build/avogadro/qtgui
+  DESTDIR="$pkgdir" cmake --install build/avogadro/qtopengl
+  DESTDIR="$pkgdir" cmake --install build/avogadro/qtplugins
+  DESTDIR="$pkgdir" cmake --install build/avogadro/vtk
+
+  install -Dm644 $pkgbase/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
 }
