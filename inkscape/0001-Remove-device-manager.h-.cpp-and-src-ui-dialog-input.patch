@@ -1,0 +1,2820 @@
+From 253126a4a02d6d7c8b1020d03420282d148b72c6 Mon Sep 17 00:00:00 2001
+From: Tavmjong Bah <tavmjong@free.fr>
+Date: Sat, 15 Jul 2023 09:35:58 +0000
+Subject: [PATCH 1/1] Remove device-manager.h/.cpp and
+ src/ui/dialog/input.h/.cpp.
+
+---
+ po/POTFILES.src.in                 |    1 -
+ share/ui/default-dialog-state.ini  |    8 +-
+ share/ui/menus.ui                  |    6 -
+ src/CMakeLists.txt                 |    2 -
+ src/desktop.cpp                    |    3 -
+ src/device-manager.cpp             |  682 -----------
+ src/device-manager.h               |   88 --
+ src/inkscape.cpp                   |    2 -
+ src/ui/CMakeLists.txt              |    2 -
+ src/ui/dialog/dialog-container.cpp |    2 -
+ src/ui/dialog/dialog-data.cpp      |    1 -
+ src/ui/dialog/input.cpp            | 1792 ----------------------------
+ src/ui/dialog/input.h              |   46 -
+ 13 files changed, 3 insertions(+), 2632 deletions(-)
+ delete mode 100644 src/device-manager.cpp
+ delete mode 100644 src/device-manager.h
+ delete mode 100644 src/ui/dialog/input.cpp
+ delete mode 100644 src/ui/dialog/input.h
+
+diff --git a/po/POTFILES.src.in b/po/POTFILES.src.in
+index d7b71f7ba2..b0961d4f35 100644
+--- a/po/POTFILES.src.in
++++ b/po/POTFILES.src.in
+@@ -301,7 +301,6 @@ ${_build_dir}/share/templates/templates.h
+ ../src/ui/dialog/guides.cpp
+ ../src/ui/dialog/icon-preview.cpp
+ ../src/ui/dialog/inkscape-preferences.cpp
+-../src/ui/dialog/input.cpp
+ ../src/ui/dialog/knot-properties.cpp
+ ../src/ui/dialog/layer-properties.cpp
+ ../src/ui/dialog/livepatheffect-add.cpp
+diff --git a/share/ui/default-dialog-state.ini b/share/ui/default-dialog-state.ini
+index 1de9a775be..05e6761016 100644
+--- a/share/ui/default-dialog-state.ini
++++ b/share/ui/default-dialog-state.ini
+@@ -29,9 +29,7 @@ dialogs4=FilterEffects;
+ state5=
+ dialogs5=FontCollections;
+ state6=
+-dialogs6=Input;
++dialogs6=Preferences;
+ state7=
+-dialogs7=Preferences;
+-state8=
+-dialogs8=XMLEditor;
+-count=8
++dialogs7=XMLEditor;
++count=7
+diff --git a/share/ui/menus.ui b/share/ui/menus.ui
+index 4ac039feb8..ef390e9e3c 100644
+--- a/share/ui/menus.ui
++++ b/share/ui/menus.ui
+@@ -350,12 +350,6 @@
+       </item>
+     </section>
+     <section>
+-      <item>
+-      	<attribute name='label' translatable="yes">_Input Devices...</attribute>
+-      	<attribute name='action'>win.dialog-open</attribute>
+-      	<attribute name='target'>Input</attribute>
+-      	<attribute name='icon'>dialog-input-devices</attribute>
+-      </item>
+       <item>
+       	<attribute name='label' translatable="yes">P_references</attribute>
+       	<attribute name='action'>win.dialog-open</attribute>
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 71aea04ad0..ad29bcb449 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -22,7 +22,6 @@ set(inkscape_SRC
+   desktop-events.cpp
+   desktop-style.cpp
+   desktop.cpp
+-  device-manager.cpp
+   distribution-snapper.cpp
+   document-subset.cpp
+   document-undo.cpp
+@@ -111,7 +110,6 @@ set(inkscape_SRC
+   desktop-events.h
+   desktop-style.h
+   desktop.h
+-  device-manager.h
+   distribution-snapper.h
+   document-subset.h
+   document-undo.h
+diff --git a/src/desktop.cpp b/src/desktop.cpp
+index bd2e5c264d..db005ae87d 100644
+--- a/src/desktop.cpp
++++ b/src/desktop.cpp
+@@ -32,7 +32,6 @@
+ #include "color.h"
+ #include "desktop-events.h"
+ #include "desktop-style.h"
+-#include "device-manager.h"
+ #include "document-undo.h"
+ #include "event-log.h"
+ #include "inkscape-window.h"
+@@ -134,8 +133,6 @@ SPDesktop::init (SPNamedView *nv, Inkscape::UI::Widget::Canvas *acanvas, SPDeskt
+     canvas = acanvas;
+     _widget = widget;
+ 
+-    // Temporary workaround for link order issues:
+-    Inkscape::DeviceManager::getManager().getDevices();
+     Inkscape::Preferences *prefs = Inkscape::Preferences::get();
+ 
+     _guides_message_context = std::unique_ptr<Inkscape::MessageContext>(new Inkscape::MessageContext(messageStack()));
+diff --git a/src/device-manager.cpp b/src/device-manager.cpp
+deleted file mode 100644
+index 09e6392fcb..0000000000
+--- a/src/device-manager.cpp
++++ /dev/null
+@@ -1,682 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0-or-later
+-
+-/*
+- * Inkscape::DeviceManager - a view of input devices available.
+- *
+- * Copyright 2010  Jon A. Cruz  <jon@joncruz.org>
+- *
+- * Released under GNU GPL v2+, read the file 'COPYING' for more information.
+- */
+-
+-#include "device-manager.h"
+-
+-#include <set>
+-#include <vector>
+-
+-#include "preferences.h"
+-
+-// Only needed for gtk_accelerator_parse(). Can probably drop when we switch to Gtk+ 4
+-#include <gtk/gtk.h>
+-
+-#include <glibmm/regex.h>
+-
+-#include <gdkmm/display.h>
+-#include <gdkmm/seat.h>
+-
+-#include <gtkmm/accelkey.h>
+-
+-#define noDEBUG_VERBOSE 1
+-
+-
+-// This is a copy of the private fields of the GdkDevice object, used in order
+-// to create a list of "fake" devices.
+-struct GdkDeviceFake {
+-        Glib::ustring    name;
+-        Gdk::InputSource source;
+-        Gdk::InputMode   mode;
+-	bool             has_cursor;
+-	int              num_axes;
+-	int              num_keys;
+-};
+-
+-
+-static void createFakeList();
+-static std::vector<GdkDeviceFake> fakeList;
+-
+-static bool isValidDevice(Glib::RefPtr<Gdk::Device> device)
+-{
+-    bool valid = true;
+-    for (std::vector<GdkDeviceFake>::iterator it = fakeList.begin(); it != fakeList.end() && valid; ++it) {
+-	const bool name_matches     = (device->get_name()   == (*it).name);
+-	const bool source_matches   = (device->get_source() == (*it).source);
+-	const bool mode_matches     = (device->get_mode()   == (*it).mode);
+-	const bool num_axes_matches = (device->get_n_axes() == (*it).num_axes);
+-	const bool num_keys_matches = (device->get_n_keys() == (*it).num_keys);
+-
+-	if (name_matches && source_matches && mode_matches 
+-			&& num_axes_matches && num_keys_matches)
+-		valid = false;
+-    }
+-
+-    return valid;
+-}
+-
+-namespace Inkscape {
+-
+-static int const NUM_AXES = 24;
+-static const int RUNAWAY_MAX = 1000;
+-
+-static Glib::ustring getBaseDeviceName(Gdk::InputSource source)
+-{
+-    Glib::ustring name;
+-    switch (source) {
+-        case Gdk::SOURCE_MOUSE:
+-            name = "pointer";
+-            break;
+-        case Gdk::SOURCE_PEN:
+-            name = "pen";
+-            break;
+-        case Gdk::SOURCE_ERASER:
+-            name = "eraser";
+-            break;
+-        case Gdk::SOURCE_CURSOR:
+-            name = "cursor";
+-            break;
+-        default:
+-            name = "tablet";
+-    }
+-    return name;
+-}
+-
+-static std::map<Glib::ustring, Gdk::AxisUse> &getStringToAxis()
+-{
+-    static bool init = false;
+-    static std::map<Glib::ustring, Gdk::AxisUse> mapping;
+-    if (!init) {
+-        init = true;
+-        mapping["ignore"]   = Gdk::AXIS_IGNORE;
+-        mapping["x"]        = Gdk::AXIS_X;
+-        mapping["y"]        = Gdk::AXIS_Y;
+-        mapping["pressure"] = Gdk::AXIS_PRESSURE;
+-        mapping["xtilt"]    = Gdk::AXIS_XTILT;
+-        mapping["ytilt"]    = Gdk::AXIS_YTILT;
+-        mapping["wheel"]    = Gdk::AXIS_WHEEL;
+-    }
+-    return mapping;
+-}
+-
+-static std::map<Gdk::AxisUse, Glib::ustring> &getAxisToString()
+-{
+-    static bool init = false;
+-    static std::map<Gdk::AxisUse, Glib::ustring> mapping;
+-    if (!init) {
+-        init = true;
+-        for (auto & it : getStringToAxis()) {
+-            mapping.insert(std::make_pair(it.second, it.first));
+-        }
+-    }
+-    return mapping;
+-}
+-
+-static std::map<Glib::ustring, Gdk::InputMode> &getStringToMode()
+-{
+-    static bool init = false;
+-    static std::map<Glib::ustring, Gdk::InputMode> mapping;
+-    if (!init) {
+-        init = true;
+-        mapping["disabled"] = Gdk::MODE_DISABLED;
+-        mapping["screen"]   = Gdk::MODE_SCREEN;
+-        mapping["window"]   = Gdk::MODE_WINDOW;
+-    }
+-    return mapping;
+-}
+-
+-static std::map<Gdk::InputMode, Glib::ustring> &getModeToString()
+-{
+-    static bool init = false;
+-    static std::map<Gdk::InputMode, Glib::ustring> mapping;
+-    if (!init) {
+-        init = true;
+-        for (auto & it : getStringToMode()) {
+-            mapping.insert(std::make_pair(it.second, it.first));
+-        }
+-    }
+-    return mapping;
+-}
+-
+-
+-
+-InputDevice::InputDevice()
+-    : Glib::Object()
+-{}
+-
+-InputDevice::~InputDevice() = default;
+-
+-class InputDeviceImpl : public InputDevice {
+-public:
+-    InputDeviceImpl(Glib::RefPtr<Gdk::Device> device, std::set<Glib::ustring> &knownIDs);
+-    ~InputDeviceImpl() override = default;
+-
+-    Glib::ustring getId() const override {return id;}
+-    Glib::ustring getName() const override {return name;}
+-    Gdk::InputSource getSource() const override {return source;}
+-    Gdk::InputMode getMode() const override {return (device->get_mode());}
+-    gint getNumAxes() const override {return device->get_n_axes();}
+-    bool hasCursor() const override {return device->get_has_cursor();}
+-    int getNumKeys() const override {return device->get_n_keys();}
+-    Glib::ustring getLink() const override {return link;}
+-    virtual void setLink( Glib::ustring const& link ) {this->link = link;}
+-    gint getLiveAxes() const override {return liveAxes;}
+-    virtual void setLiveAxes(gint axes) {liveAxes = axes;}
+-    gint getLiveButtons() const override {return liveButtons;}
+-    virtual void setLiveButtons(gint buttons) {liveButtons = buttons;}
+-
+-    // internal methods not on public superclass:
+-    virtual Glib::RefPtr<Gdk::Device> getDevice() {return device;}
+-
+-private:
+-    InputDeviceImpl(InputDeviceImpl const &) = delete; // no copy
+-    void operator=(InputDeviceImpl const &) = delete; // no assign
+-
+-    static Glib::ustring createId(Glib::ustring const &id, Gdk::InputSource source, std::set<Glib::ustring> &knownIDs);
+-
+-    Glib::RefPtr<Gdk::Device> device;
+-    Glib::ustring id;
+-    Glib::ustring name;
+-    Gdk::InputSource source;
+-    Glib::ustring link;
+-    guint liveAxes;
+-    guint liveButtons;
+-};
+-
+-class IdMatcher
+-{
+-public:
+-    IdMatcher(Glib::ustring const& target):target(target) {}
+-    bool operator ()(Glib::RefPtr<InputDeviceImpl>& dev) {return dev && (target == dev->getId());}
+-
+-private:
+-    Glib::ustring const& target;
+-};
+-
+-class LinkMatcher
+-{
+-public:
+-    LinkMatcher(Glib::ustring const& target):target(target) {}
+-    bool operator ()(Glib::RefPtr<InputDeviceImpl>& dev) {return dev && (target == dev->getLink());}
+-
+-private:
+-    Glib::ustring const& target;
+-};
+-
+-InputDeviceImpl::InputDeviceImpl(Glib::RefPtr<Gdk::Device> device, std::set<Glib::ustring> &knownIDs)
+-    : InputDevice(),
+-      device(device),
+-      id(),
+-      name(!device->get_name().empty() ? device->get_name() : ""),
+-      source(device->get_source()),
+-      link(),
+-      liveAxes(0),
+-      liveButtons(0)
+-{
+-    id = createId(name, source, knownIDs);
+-}
+-
+-
+-Glib::ustring InputDeviceImpl::createId(Glib::ustring const &id,
+-                                        Gdk::InputSource source,
+-                                        std::set<Glib::ustring> &knownIDs)
+-{
+-    // Start with only allowing printable ASCII. Check later for more refinements.
+-    bool badName = id.empty() || !id.is_ascii();
+-    for (Glib::ustring::const_iterator it = id.begin(); (it != id.end()) && !badName; ++it) {
+-        badName = *it < 0x20;
+-    }
+-
+-    Glib::ustring base;
+-    switch ( source ) {
+-        case Gdk::SOURCE_MOUSE:
+-            base = "M:";
+-            break;
+-        case Gdk::SOURCE_CURSOR:
+-            base = "C:";
+-            break;
+-        case Gdk::SOURCE_PEN:
+-            base = "P:";
+-            break;
+-        case Gdk::SOURCE_ERASER:
+-            base = "E:";
+-            break;
+-        default:
+-            base = "?:";
+-    }
+-
+-    if (badName) {
+-        base += getBaseDeviceName(source);
+-    } else {
+-        base += id;
+-    }
+-
+-    // now ensure that all IDs become unique in a session.
+-    int num = 1;
+-    Glib::ustring result = base;
+-    while ((knownIDs.find(result) != knownIDs.end()) && (num < RUNAWAY_MAX)) {
+-        result = Glib::ustring::compose("%1%2", base, ++num);
+-    }
+-
+-    knownIDs.insert(result);
+-    return result;
+-}
+-
+-
+-
+-
+-
+-class DeviceManagerImpl : public DeviceManager {
+-public:
+-    DeviceManagerImpl();
+-
+-    void loadConfig() override;
+-    void saveConfig() override;
+-
+-    std::list<Glib::RefPtr<InputDevice const> > getDevices() override;
+-
+-    sigc::signal<void (Glib::RefPtr<InputDevice const> )> signalDeviceChanged() override;
+-    sigc::signal<void (Glib::RefPtr<InputDevice const> )> signalAxesChanged() override;
+-    sigc::signal<void (Glib::RefPtr<InputDevice const> )> signalButtonsChanged() override;
+-    sigc::signal<void (Glib::RefPtr<InputDevice const> )> signalLinkChanged() override;
+-
+-    void addAxis(Glib::ustring const & id, gint axis) override;
+-    void addButton(Glib::ustring const & id, gint button) override;
+-    void setLinkedTo(Glib::ustring const & id, Glib::ustring const& link) override;
+-
+-    void setMode( Glib::ustring const & id, Gdk::InputMode mode ) override;
+-    void setAxisUse( Glib::ustring const & id, guint index, Gdk::AxisUse use ) override;
+-    void setKey( Glib::ustring const & id, guint index, guint keyval, Gdk::ModifierType mods ) override;
+-
+-protected:
+-    std::list<Glib::RefPtr<InputDeviceImpl> > devices;
+-
+-    sigc::signal<void (Glib::RefPtr<InputDevice const> )> signalDeviceChangedPriv;
+-    sigc::signal<void (Glib::RefPtr<InputDevice const> )> signalAxesChangedPriv;
+-    sigc::signal<void (Glib::RefPtr<InputDevice const> )> signalButtonsChangedPriv;
+-    sigc::signal<void (Glib::RefPtr<InputDevice const> )> signalLinkChangedPriv;
+-};
+-
+-
+-DeviceManagerImpl::DeviceManagerImpl() :
+-    DeviceManager(),
+-    devices()
+-{
+-    auto display = Gdk::Display::get_default();
+-    auto seat    = display->get_default_seat();
+-    auto devList = seat->get_slaves(Gdk::SEAT_CAPABILITY_ALL);
+-
+-    if (fakeList.empty()) {
+-        createFakeList();
+-    }
+-    //devList = fakeList;
+-
+-    std::set<Glib::ustring> knownIDs;
+-
+-    for (auto dev : devList) {
+-           // GTK+ 3 has added keyboards to the list of supported devices.
+-           if(dev->get_source() != Gdk::SOURCE_KEYBOARD) {
+-
+-#if DEBUG_VERBOSE
+-               g_message("device: name[%s] source[0x%x] mode[0x%x] cursor[%s] axis count[%d] key count[%d]", dev->name, dev->source, dev->mode,
+-                       dev->has_cursor?"Yes":"no", dev->num_axes, dev->num_keys);
+-#endif
+-
+-               InputDeviceImpl* device = new InputDeviceImpl(dev, knownIDs);
+-               device->reference();
+-               devices.emplace_back(device);
+-           }
+-    }
+-}
+-
+-void DeviceManagerImpl::loadConfig()
+-{
+-    Inkscape::Preferences *prefs = Inkscape::Preferences::get();
+-
+-    for (auto & device : devices) {
+-        if (device->getSource() != Gdk::SOURCE_MOUSE) {
+-            Glib::ustring path = "/devices/" + device->getId();
+-
+-            Gdk::InputMode mode = Gdk::MODE_DISABLED;
+-            Glib::ustring val = prefs->getString(path + "/mode");
+-            if (getStringToMode().find(val) != getStringToMode().end()) {
+-                mode = getStringToMode()[val];
+-            }
+-            if (device->getMode() != mode) {
+-                setMode( device->getId(), mode );
+-            }
+-
+-            //
+-
+-            val = prefs->getString(path + "/axes");
+-            if (!val.empty()) {
+-                std::vector<Glib::ustring> parts = Glib::Regex::split_simple(";", val);
+-                for (size_t i = 0; i < parts.size(); ++i) {
+-                    Glib::ustring name = parts[i];
+-                    if (getStringToAxis().find(name) != getStringToAxis().end()) {
+-                        Gdk::AxisUse use = getStringToAxis()[name];
+-                        setAxisUse( device->getId(), i, use );
+-                    }
+-                }
+-            }
+-
+-            val = prefs->getString(path + "/keys");
+-            if (!val.empty()) {
+-                std::vector<Glib::ustring> parts = Glib::Regex::split_simple(";", val);
+-                for (size_t i = 0; i < parts.size(); ++i) {
+-                    Glib::ustring keyStr = parts[i];
+-                    if (!keyStr.empty()) {
+-                        guint key = 0;
+-                        GdkModifierType mods = static_cast<GdkModifierType>(0);
+-                        gtk_accelerator_parse( keyStr.c_str(), &key, &mods );
+-                        setKey( device->getId(), i, key, static_cast<Gdk::ModifierType>(mods) );
+-                    }
+-                }
+-            }
+-        }
+-    }
+-}
+-
+-void DeviceManagerImpl::saveConfig()
+-{
+-    Inkscape::Preferences *prefs = Inkscape::Preferences::get();
+-
+-    for (auto & it : devices) {
+-        if (it->getSource() != Gdk::SOURCE_MOUSE) {
+-            Glib::ustring path = "/devices/" + it->getId();
+-
+-            prefs->setString( path + "/mode", getModeToString()[it->getMode()].c_str() );
+-
+-            Glib::ustring tmp;
+-            for (gint i = 0; i < it->getNumAxes(); ++i) {
+-                if (i > 0) {
+-                    tmp += ";";
+-                }
+-                Glib::RefPtr<Gdk::Device> device = it->getDevice();
+-                tmp += getAxisToString()[device->get_axis_use(i)];
+-            }
+-            prefs->setString( path + "/axes", tmp );
+-
+-            tmp = "";
+-            for (gint i = 0; i < it->getNumKeys(); ++i) {
+-                if (i > 0) {
+-                    tmp += ";";
+-                }
+-                Glib::RefPtr<Gdk::Device> device = it->getDevice();
+-		guint keyval;
+-                Gdk::ModifierType modifiers;
+-		device->get_key(i, keyval, modifiers);
+-                Gtk::AccelKey accelkey(keyval, modifiers);
+-                tmp += accelkey.get_abbrev();
+-            }
+-            prefs->setString( path + "/keys", tmp );
+-        }
+-    }
+-}
+-
+-std::list<Glib::RefPtr<InputDevice const> > DeviceManagerImpl::getDevices()
+-{
+-    std::list<Glib::RefPtr<InputDevice const> > tmp;
+-    for ( std::list<Glib::RefPtr<InputDeviceImpl> >::const_iterator it = devices.begin(); it != devices.end(); ++it ) {
+-        tmp.emplace_back(*it);
+-    }
+-    return tmp;
+-}
+-
+-void DeviceManagerImpl::setMode( Glib::ustring const & id, Gdk::InputMode mode )
+-{
+-    std::list<Glib::RefPtr<InputDeviceImpl> >::iterator it = std::find_if(devices.begin(), devices.end(), IdMatcher(id));
+-    if ( it != devices.end() ) {
+-        Glib::RefPtr<Gdk::Device> device = (*it)->getDevice();
+-        if (isValidDevice(device) && ((*it)->getMode() != mode) ) {
+-            bool success = device->set_mode(mode);
+-            if (success) {
+-                signalDeviceChangedPriv.emit(*it);
+-            } else {
+-                g_warning("Unable to set mode on extended input device [%s]", (*it)->getId().c_str());
+-            }
+-        }
+-    }
+-}
+-
+-void DeviceManagerImpl::setAxisUse( Glib::ustring const & id, guint index, Gdk::AxisUse use )
+-{
+-    std::list<Glib::RefPtr<InputDeviceImpl> >::iterator it = std::find_if(devices.begin(), devices.end(), IdMatcher(id));
+-    if ( it != devices.end() ) {
+-        if (isValidDevice((*it)->getDevice())) {
+-            if (static_cast<gint>(index) <= (*it)->getNumAxes()) {
+-                Glib::RefPtr<Gdk::Device> device = (*it)->getDevice();
+-
+-                if (device->get_axis_use(index) != use) {
+-                    device->set_axis_use(index, use);
+-                    signalDeviceChangedPriv.emit(*it);
+-                }
+-            } else {
+-                g_warning("Invalid device axis number %d on extended input device [%s]", index, (*it)->getId().c_str());
+-            }
+-        }
+-    }
+-}
+-
+-void DeviceManagerImpl::setKey( Glib::ustring const & id, guint index, guint keyval, Gdk::ModifierType mods )
+-{
+-    //static void setDeviceKey( GdkDevice* device, guint index, guint keyval, GdkModifierType modifiers )
+-    //
+-
+-    std::list<Glib::RefPtr<InputDeviceImpl> >::iterator it = std::find_if(devices.begin(), devices.end(), IdMatcher(id));
+-    if ( it != devices.end() ) {
+-        if (isValidDevice((*it)->getDevice())) {
+-            Glib::RefPtr<Gdk::Device> device = (*it)->getDevice();
+-            device->set_key(index, keyval, mods);
+-            signalDeviceChangedPriv.emit(*it);
+-        }
+-    }
+-}
+-
+-sigc::signal<void (Glib::RefPtr<InputDevice const> )> DeviceManagerImpl::signalDeviceChanged()
+-{
+-    return signalDeviceChangedPriv;
+-}
+-
+-sigc::signal<void (Glib::RefPtr<InputDevice const> )> DeviceManagerImpl::signalAxesChanged()
+-{
+-    return signalAxesChangedPriv;
+-}
+-
+-sigc::signal<void (Glib::RefPtr<InputDevice const> )> DeviceManagerImpl::signalButtonsChanged()
+-{
+-    return signalButtonsChangedPriv;
+-}
+-
+-sigc::signal<void (Glib::RefPtr<InputDevice const> )> DeviceManagerImpl::signalLinkChanged()
+-{
+-    return signalLinkChangedPriv;
+-}
+-
+-void DeviceManagerImpl::addAxis(Glib::ustring const & id, gint axis)
+-{
+-    if ( axis >= 0 && axis < NUM_AXES ) {
+-        std::list<Glib::RefPtr<InputDeviceImpl> >::iterator it = std::find_if(devices.begin(), devices.end(), IdMatcher(id));
+-        if ( it != devices.end() ) {
+-            gint mask = 1u << axis;
+-            if ( (mask & (*it)->getLiveAxes()) == 0 ) {
+-                (*it)->setLiveAxes((*it)->getLiveAxes() | mask);
+-
+-                // Only signal if a new axis was added
+-                (*it)->reference();
+-                signalAxesChangedPriv.emit(*it);
+-            }
+-        }
+-    }
+-}
+-
+-void DeviceManagerImpl::addButton(Glib::ustring const & id, gint button)
+-{
+-    if ( button >= 0 && button < NUM_AXES ) {
+-        std::list<Glib::RefPtr<InputDeviceImpl> >::iterator it = std::find_if(devices.begin(), devices.end(), IdMatcher(id));
+-        if ( it != devices.end() ) {
+-            gint mask = 1u << button;
+-            if ( (mask & (*it)->getLiveButtons()) == 0 ) {
+-                (*it)->setLiveButtons((*it)->getLiveButtons() | mask);
+-
+-                // Only signal if a new button was added
+-                (*it)->reference();
+-                signalButtonsChangedPriv.emit(*it);
+-            }
+-        }
+-    }
+-}
+-
+-void DeviceManagerImpl::setLinkedTo(Glib::ustring const & id, Glib::ustring const& link)
+-{
+-    std::list<Glib::RefPtr<InputDeviceImpl> >::iterator it = std::find_if(devices.begin(), devices.end(), IdMatcher(id));
+-    if ( it != devices.end() ) {
+-        Glib::RefPtr<InputDeviceImpl> dev = *it;
+-
+-        Glib::RefPtr<InputDeviceImpl> targetDev;
+-        if ( !link.empty() ) {
+-            // Need to be sure the target of the link exists
+-            it = std::find_if(devices.begin(), devices.end(), IdMatcher(link));
+-            if ( it != devices.end() ) {
+-                targetDev = *it;
+-            }
+-        }
+-
+-
+-        if ( (link.empty() && !dev->getLink().empty())
+-             || (targetDev && (targetDev->getLink() != id)) ) {
+-            // only muck about if they aren't already linked
+-            std::list<Glib::RefPtr<InputDeviceImpl> > changedItems;
+-
+-            if ( targetDev ) {
+-            // Is something else already using that link?
+-                it = std::find_if(devices.begin(), devices.end(), LinkMatcher(link));
+-                if ( it != devices.end() ) {
+-                    (*it)->setLink("");
+-                    changedItems.push_back(*it);
+-                }
+-            }
+-            it = std::find_if(devices.begin(), devices.end(), LinkMatcher(id));
+-            if ( it != devices.end() ) {
+-                (*it)->setLink("");
+-                changedItems.push_back(*it);
+-            }
+-            if ( targetDev ) {
+-                targetDev->setLink(id);
+-                changedItems.push_back(targetDev);
+-            }
+-            dev->setLink(link);
+-            changedItems.push_back(dev);
+-
+-            for ( std::list<Glib::RefPtr<InputDeviceImpl> >::const_iterator iter = changedItems.begin(); iter != changedItems.end(); ++iter ) {
+-                (*iter)->reference();
+-                signalLinkChangedPriv.emit(*iter);
+-            }
+-        }
+-    }
+-}
+-
+-
+-
+-
+-
+-
+-static DeviceManagerImpl* theInstance = nullptr;
+-
+-DeviceManager::DeviceManager()
+-    : Glib::Object()
+-{
+-}
+-
+-DeviceManager::~DeviceManager() = default;
+-
+-DeviceManager& DeviceManager::getManager() {
+-    if ( !theInstance ) {
+-        theInstance = new DeviceManagerImpl();
+-    }
+-
+-    return *theInstance;
+-}
+-
+-} // namespace Inkscape
+-
+-
+-static void createFakeList() {
+-    if (fakeList.empty()) {
+-        fakeList.resize(5);
+-        fakeList[0].name       = "pad";
+-        fakeList[0].source     = Gdk::SOURCE_PEN;
+-        fakeList[0].mode       = Gdk::MODE_SCREEN;
+-        fakeList[0].has_cursor = true;
+-        fakeList[0].num_axes   = 6;
+-        fakeList[0].num_keys   = 8;
+-
+-        fakeList[1].name       = "eraser";
+-        fakeList[1].source     = Gdk::SOURCE_ERASER;
+-        fakeList[1].mode       = Gdk::MODE_SCREEN;
+-        fakeList[1].has_cursor = true;
+-        fakeList[1].num_axes   = 6;
+-        fakeList[1].num_keys   = 7;
+-
+-        fakeList[2].name       = "cursor";
+-        fakeList[2].source     = Gdk::SOURCE_CURSOR;
+-        fakeList[2].mode       = Gdk::MODE_SCREEN;
+-        fakeList[2].has_cursor = true;
+-        fakeList[2].num_axes   = 6;
+-        fakeList[2].num_keys   = 7;
+-
+-        fakeList[3].name       = "stylus";
+-        fakeList[3].source     = Gdk::SOURCE_PEN;
+-        fakeList[3].mode       = Gdk::MODE_SCREEN;
+-        fakeList[3].has_cursor = true;
+-        fakeList[3].num_axes   = 6;
+-        fakeList[3].num_keys   = 7;
+-
+-        // try to find the first *real* core pointer
+-        auto display = Gdk::Display::get_default();
+-        auto seat    = display->get_default_seat();
+-        auto devList = seat->get_slaves(Gdk::SEAT_CAPABILITY_ALL);
+-
+-        // Set iterator to point at beginning of device list
+-        std::vector< Glib::RefPtr<Gdk::Device> >::iterator dev = devList.begin();
+-
+-        // Skip past any items in the device list that are not mice
+-        while (dev != devList.end() && (*dev)->get_source() != Gdk::SOURCE_MOUSE) {
+-            ++dev;
+-        }
+-
+-        if (dev != devList.end()) {
+-            Glib::RefPtr<Gdk::Device> device = *dev;
+-            fakeList[4].name       = device->get_name();
+-            fakeList[4].source     = device->get_source();
+-            fakeList[4].mode       = device->get_mode();
+-            fakeList[4].has_cursor = device->get_has_cursor();
+-            fakeList[4].num_axes   = device->get_n_axes();
+-            fakeList[4].num_keys   = device->get_n_keys();
+-        } else {
+-            fakeList[4].name       = "Core Pointer";
+-            fakeList[4].source     = Gdk::SOURCE_MOUSE;
+-            fakeList[4].mode       = Gdk::MODE_SCREEN;
+-            fakeList[4].has_cursor = true;
+-            fakeList[4].num_axes   = 2;
+-            fakeList[4].num_keys   = 0;
+-        }
+-    }
+-}
+-
+-/*
+-  Local Variables:
+-  mode:c++
+-  c-file-style:"stroustrup"
+-  c-file-offsets:((innamespace . 0)(inline-open . 0)(case-label . +))
+-  indent-tabs-mode:nil
+-  fill-column:99
+-  End:
+-*/
+-// vim: filetype=cpp:expandtab:shiftwidth=4:tabstop=8:softtabstop=4:fileencoding=utf-8:textwidth=99 :
+diff --git a/src/device-manager.h b/src/device-manager.h
+deleted file mode 100644
+index 4201e8f449..0000000000
+--- a/src/device-manager.h
++++ /dev/null
+@@ -1,88 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0-or-later
+-/*
+- * Inkscape::DeviceManager - a view of input devices available.
+- *
+- * Copyright 2010  Jon A. Cruz  <jon@joncruz.org>
+- *
+- * Released under GNU GPL v2+, read the file 'COPYING' for more information.
+- */
+-
+-#ifndef SEEN_INKSCAPE_DEVICE_MANAGER_H
+-#define SEEN_INKSCAPE_DEVICE_MANAGER_H
+-
+-
+-#include <gdkmm/device.h>
+-#include <list>
+-#include <glibmm/ustring.h>
+-
+-namespace Inkscape {
+-
+-class InputDevice : public Glib::Object {
+-public:
+-    virtual Glib::ustring getId() const = 0;
+-    virtual Glib::ustring getName() const = 0;
+-    virtual Gdk::InputSource getSource() const = 0;
+-    virtual Gdk::InputMode getMode() const = 0;
+-    virtual bool hasCursor() const = 0;
+-    virtual gint getNumAxes() const = 0;
+-    virtual gint getNumKeys() const = 0;
+-    virtual Glib::ustring getLink() const = 0;
+-    virtual gint getLiveAxes() const = 0;
+-    virtual gint getLiveButtons() const = 0;
+-
+-protected:
+-    InputDevice();
+-    ~InputDevice() override;
+-
+-private:
+-    InputDevice(InputDevice const &) = delete; // no copy
+-    void operator=(InputDevice const &) = delete; // no assign
+-};
+-
+-class DeviceManager : public Glib::Object {
+-public:
+-    static DeviceManager& getManager();
+-
+-    virtual void loadConfig() = 0;
+-    virtual void saveConfig() = 0;
+-
+-    virtual std::list<Glib::RefPtr<InputDevice const> > getDevices() = 0;
+-
+-    virtual sigc::signal<void (Glib::RefPtr<InputDevice const> )> signalDeviceChanged() = 0;
+-    virtual sigc::signal<void (Glib::RefPtr<InputDevice const> )> signalAxesChanged() = 0;
+-    virtual sigc::signal<void (Glib::RefPtr<InputDevice const> )> signalButtonsChanged() = 0;
+-    virtual sigc::signal<void (Glib::RefPtr<InputDevice const> )> signalLinkChanged() = 0;
+-
+-    virtual void addAxis(Glib::ustring const & id, gint axis) = 0;
+-    virtual void addButton(Glib::ustring const & id, gint button) = 0;
+-    virtual void setLinkedTo(Glib::ustring const & id, Glib::ustring const& link) = 0;
+-
+-    virtual void setMode( Glib::ustring const & id, Gdk::InputMode mode ) = 0;
+-    virtual void setAxisUse( Glib::ustring const & id, guint index, Gdk::AxisUse use ) = 0;
+-    virtual void setKey( Glib::ustring const & id, guint index, guint keyval, Gdk::ModifierType mods ) = 0;
+-
+-protected:
+-    DeviceManager();
+-    ~DeviceManager() override;
+-
+-private:
+-    DeviceManager(DeviceManager const &) = delete; // no copy
+-    void operator=(DeviceManager const &) = delete; // no assign
+-};
+-
+-
+-
+-} // namespace Inkscape
+-
+-#endif // SEEN_INKSCAPE_DEVICE_MANAGER_H
+-
+-/*
+-  Local Variables:
+-  mode:c++
+-  c-file-style:"stroustrup"
+-  c-file-offsets:((innamespace . 0)(inline-open . 0)(case-label . +))
+-  indent-tabs-mode:nil
+-  fill-column:99
+-  End:
+-*/
+-// vim: filetype=cpp:expandtab:shiftwidth=4:tabstop=8:softtabstop=4:fileencoding=utf-8:textwidth=99 :
+diff --git a/src/inkscape.cpp b/src/inkscape.cpp
+index b60a4e83dc..7ae0bf168d 100644
+--- a/src/inkscape.cpp
++++ b/src/inkscape.cpp
+@@ -31,7 +31,6 @@
+ #include <glibmm/convert.h>
+ 
+ #include "desktop.h"
+-#include "device-manager.h"
+ #include "document.h"
+ #include "inkscape.h"
+ #include "inkscape-application.h"
+@@ -247,7 +246,6 @@ Application::Application(bool use_gui) :
+         auto scale = prefs->getDoubleLimited(UI::ThemeContext::get_font_scale_pref_path(), 100, 50, 150);
+         themecontext->adjustGlobalFontScale(scale / 100.0);
+         Inkscape::UI::ThemeContext::initialize_source_syntax_styles();
+-        Inkscape::DeviceManager::getManager().loadConfig();
+     }
+ 
+     /* set language for user interface according setting in preferences */
+diff --git a/src/ui/CMakeLists.txt b/src/ui/CMakeLists.txt
+index fc18109636..59c3df5453 100644
+--- a/src/ui/CMakeLists.txt
++++ b/src/ui/CMakeLists.txt
+@@ -135,7 +135,6 @@ set(ui_SRC
+ 	dialog/guides.cpp
+ 	dialog/icon-preview.cpp
+ 	dialog/inkscape-preferences.cpp
+-	dialog/input.cpp
+ 	dialog/knot-properties.cpp
+ 	dialog/layer-properties.cpp
+ 	dialog/livepatheffect-add.cpp
+@@ -331,7 +330,6 @@ set(ui_SRC
+ 	dialog/guides.h
+ 	dialog/icon-preview.h
+ 	dialog/inkscape-preferences.h
+-	dialog/input.h
+ 	dialog/knot-properties.h
+ 	dialog/layer-properties.h
+ 	dialog/livepatheffect-add.h
+diff --git a/src/ui/dialog/dialog-container.cpp b/src/ui/dialog/dialog-container.cpp
+index 33bc377da7..4ec0887208 100644
+--- a/src/ui/dialog/dialog-container.cpp
++++ b/src/ui/dialog/dialog-container.cpp
+@@ -39,7 +39,6 @@
+ #include "ui/dialog/glyphs.h"
+ #include "ui/dialog/icon-preview.h"
+ #include "ui/dialog/inkscape-preferences.h"
+-#include "ui/dialog/input.h"
+ #include "ui/dialog/livepatheffect-editor.h"
+ #include "ui/dialog/memory.h"
+ #include "ui/dialog/messages.h"
+@@ -137,7 +136,6 @@ std::unique_ptr<DialogBase> DialogContainer::dialog_factory(Glib::ustring const
+     else if (dialog_type == "FontCollections")    return std::make_unique<FontCollectionsManager>();
+     else if (dialog_type == "Glyphs")             return std::make_unique<GlyphsPanel>();
+     else if (dialog_type == "IconPreview")        return std::make_unique<IconPreviewPanel>();
+-    else if (dialog_type == "Input")              return InputDialog::create();
+     else if (dialog_type == "LivePathEffect")     return std::make_unique<LivePathEffectEditor>();
+     else if (dialog_type == "Memory")             return std::make_unique<Memory>();
+     else if (dialog_type == "Messages")           return std::make_unique<Messages>();
+diff --git a/src/ui/dialog/dialog-data.cpp b/src/ui/dialog/dialog-data.cpp
+index b8acdb14ed..a90181a4cb 100644
+--- a/src/ui/dialog/dialog-data.cpp
++++ b/src/ui/dialog/dialog-data.cpp
+@@ -39,7 +39,6 @@ std::map<std::string, DialogData> const &get_dialog_data()
+     {"FontCollections",    {_("_Font Collections"),     INKSCAPE_ICON("font_collections"),            DialogData::Advanced,       ScrollProvider::NOPROVIDE }},
+     {"Glyphs",             {_("_Unicode Characters"),   INKSCAPE_ICON("accessories-character-map"),   DialogData::Basic,          ScrollProvider::NOPROVIDE }},
+     {"IconPreview",        {_("Icon Preview"),          INKSCAPE_ICON("dialog-icon-preview"),         DialogData::Basic,          ScrollProvider::NOPROVIDE }},
+-    {"Input",              {_("_Input Devices"),        INKSCAPE_ICON("dialog-input-devices"),        DialogData::Settings,       ScrollProvider::NOPROVIDE }},
+     {"LivePathEffect",     {_("Path E_ffects"),         INKSCAPE_ICON("dialog-path-effects"),         DialogData::Advanced,       ScrollProvider::NOPROVIDE }},
+     {"Memory",             {_("About _Memory"),         INKSCAPE_ICON("dialog-memory"),               DialogData::Diagnostics,    ScrollProvider::PROVIDE   }},
+     {"Messages",           {_("_Messages"),             INKSCAPE_ICON("dialog-messages"),             DialogData::Diagnostics,    ScrollProvider::NOPROVIDE }},
+diff --git a/src/ui/dialog/input.cpp b/src/ui/dialog/input.cpp
+deleted file mode 100644
+index 494843afee..0000000000
+--- a/src/ui/dialog/input.cpp
++++ /dev/null
+@@ -1,1792 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0-or-later
+-/**
+- * @file
+- * Input devices dialog (new) - implementation.
+- */
+-/* Author:
+- *   Jon A. Cruz
+- *
+- * Copyright (C) 2008 Author
+- * Released under GNU GPL v2+, read the file 'COPYING' for more information.
+- */
+-
+-#include <map>
+-#include <set>
+-#include <list>
+-#include "ui/widget/frame.h"
+-#include "ui/widget/scrollprotected.h"
+-
+-#include <glibmm/i18n.h>
+-
+-#include <gtkmm/buttonbox.h>
+-#include <gtkmm/cellrenderercombo.h>
+-#include <gtkmm/checkbutton.h>
+-#include <gtkmm/comboboxtext.h>
+-#include <gtkmm/grid.h>
+-#include <gtkmm/liststore.h>
+-#include <gtkmm/menubar.h>
+-#include <gtkmm/notebook.h>
+-#include <gtkmm/paned.h>
+-#include <gtkmm/progressbar.h>
+-#include <gtkmm/scrolledwindow.h>
+-#include <gtkmm/treestore.h>
+-#include <gtkmm/eventbox.h>
+-
+-#include "device-manager.h"
+-#include "preferences.h"
+-
+-#include "input.h"
+-
+-// clang-format off
+-/* XPM */
+-static char const * core_xpm[] = {
+-"16 16 4 1",
+-"   c None",
+-".  c #808080",
+-"+  c #000000",
+-"@  c #FFFFFF",
+-"                ",
+-"                ",
+-"                ",
+-"    .++++++.    ",
+-"    +@+@@+@+    ",
+-"    +@+@@+@+    ",
+-"    +.+..+.+    ",
+-"    +@@@@@@+    ",
+-"    +@@@@@@+    ",
+-"    +@@@@@@+    ",
+-"    +@@@@@@+    ",
+-"    +@@@@@@+    ",
+-"    .++++++.    ",
+-"                ",
+-"                ",
+-"                "};
+-
+-/* XPM */
+-static char const *eraser[] = {
+-/* columns rows colors chars-per-pixel */
+-"16 16 5 1",
+-"  c black",
+-". c green",
+-"X c #808080",
+-"o c gray100",
+-"O c None",
+-/* pixels */
+-"OOOOOOOOOOOOOOOO",
+-"OOOOOOOOOOOOO OO",
+-"OOOOOOOOOOOO . O",
+-"OOOOOOOOOOO . OO",
+-"OOOOOOOOOO . OOO",
+-"OOOOOOOOO . OOOO",
+-"OOOOOOOO . OOOOO",
+-"OOOOOOOXo OOOOOO",
+-"OOOOOOXoXOOOOOOO",
+-"OOOOOXoXOOOOOOOO",
+-"OOOOXoXOOOOOOOOO",
+-"OOOXoXOOOOOOOOOO",
+-"OOXoXOOOOOOOOOOO",
+-"OOXXOOOOOOOOOOOO",
+-"OOOOOOOOOOOOOOOO",
+-"OOOOOOOOOOOOOOOO"
+-};
+-
+-/* XPM */
+-static char const *mouse[] = {
+-/* columns rows colors chars-per-pixel */
+-"16 16 3 1",
+-"  c black",
+-". c gray100",
+-"X c None",
+-/* pixels */
+-"XXXXXXXXXXXXXXXX",
+-"XXXXXXXXXXXXXXXX",
+-"XXXXXXXXXXXXXXXX",
+-"XXXXXXXXXXXXXXXX",
+-"XXXXXXX  XXXXXXX",
+-"XXXXX  . XXXXXXX",
+-"XXXX .... XXXXXX",
+-"XXXX .... XXXXXX",
+-"XXXXX .... XXXXX",
+-"XXXXX .... XXXXX",
+-"XXXXXX .... XXXX",
+-"XXXXXX .... XXXX",
+-"XXXXXXX .  XXXXX",
+-"XXXXXXX  XXXXXXX",
+-"XXXXXXXXXXXXXXXX",
+-"XXXXXXXXXXXXXXXX"
+-};
+-
+-/* XPM */
+-static char const *pen[] = {
+-/* columns rows colors chars-per-pixel */
+-"16 16 3 1",
+-"  c black",
+-". c gray100",
+-"X c None",
+-/* pixels */
+-"XXXXXXXXXXXXXXXX",
+-"XXXXXXXXXXXXX XX",
+-"XXXXXXXXXXXX . X",
+-"XXXXXXXXXXX . XX",
+-"XXXXXXXXXX . XXX",
+-"XXXXXXXXX . XXXX",
+-"XXXXXXXX . XXXXX",
+-"XXXXXXX . XXXXXX",
+-"XXXXXX . XXXXXXX",
+-"XXXXX . XXXXXXXX",
+-"XXXX . XXXXXXXXX",
+-"XXX . XXXXXXXXXX",
+-"XX . XXXXXXXXXXX",
+-"XX  XXXXXXXXXXXX",
+-"XXXXXXXXXXXXXXXX",
+-"XXXXXXXXXXXXXXXX"
+-};
+-
+-/* XPM */
+-static char const *sidebuttons[] = {
+-/* columns rows colors chars-per-pixel */
+-"16 16 4 1",
+-"  c black",
+-". c #808080",
+-"o c green",
+-"O c None",
+-/* pixels */
+-"OOOOOOOOOOOOOOOO",
+-"OOOOOOOOOOOOOOOO",
+-"O..............O",
+-"O.OOOOOOOOOOOO.O",
+-"O   OOOOOOOO   O",
+-"O o OOOOOOOO o O",
+-"O o OOOOOOOO o O",
+-"O   OOOOOOOO   O",
+-"O.OOOOOOOOOOOO.O",
+-"O.OOOOOOOOOOOO.O",
+-"O.OOOOOOOOOOOO.O",
+-"O.OOOOOOOOOOOO.O",
+-"O.OOOOOOOOOOOO.O",
+-"O..............O",
+-"OOOOOOOOOOOOOOOO",
+-"OOOOOOOOOOOOOOOO"
+-};
+-
+-/* XPM */
+-static char const *tablet[] = {
+-/* columns rows colors chars-per-pixel */
+-"16 16 3 1",
+-"  c black",
+-". c gray100",
+-"X c None",
+-/* pixels */
+-"XXXXXXXXXXXXXXXX",
+-"XXXXXXXXXXXXXXXX",
+-"X              X",
+-"X ............ X",
+-"X ............ X",
+-"X ............ X",
+-"X ............ X",
+-"X ............ X",
+-"X ............ X",
+-"X ............ X",
+-"X ............ X",
+-"X ............ X",
+-"X ............ X",
+-"X              X",
+-"XXXXXXXXXXXXXXXX",
+-"XXXXXXXXXXXXXXXX"
+-};
+-
+-/* XPM */
+-static char const *tip[] = {
+-/* columns rows colors chars-per-pixel */
+-"16 16 5 1",
+-"  c black",
+-". c green",
+-"X c #808080",
+-"o c gray100",
+-"O c None",
+-/* pixels */
+-"OOOOOOOOOOOOOOOO",
+-"OOOOOOOOOOOOOXOO",
+-"OOOOOOOOOOOOXoXO",
+-"OOOOOOOOOOOXoXOO",
+-"OOOOOOOOOOXoXOOO",
+-"OOOOOOOOOXoXOOOO",
+-"OOOOOOOOXoXOOOOO",
+-"OOOOOOO oXOOOOOO",
+-"OOOOOO . OOOOOOO",
+-"OOOOO . OOOOOOOO",
+-"OOOO . OOOOOOOOO",
+-"OOO . OOOOOOOOOO",
+-"OO . OOOOOOOOOOO",
+-"OO  OOOOOOOOOOOO",
+-"OOOOXXXXXOOOOOOO",
+-"OOOOOOOOOXXXXXOO"
+-};
+-
+-/* XPM */
+-static char const *button_none[] = {
+-/* columns rows colors chars-per-pixel */
+-"8 8 3 1",
+-"  c black",
+-". c #808080",
+-"X c None",
+-/* pixels */
+-"XXXXXXXX",
+-"XX .. XX",
+-"X .XX. X",
+-"X.XX X.X",
+-"X.X XX.X",
+-"X .XX. X",
+-"XX .. XX",
+-"XXXXXXXX"
+-};
+-/* XPM */
+-static char const *button_off[] = {
+-/* columns rows colors chars-per-pixel */
+-"8 8 4 1",
+-"  c black",
+-". c #808080",
+-"X c gray100",
+-"o c None",
+-/* pixels */
+-"oooooooo",
+-"oo.  .oo",
+-"o. XX .o",
+-"o XXXX o",
+-"o XXXX o",
+-"o. XX .o",
+-"oo.  .oo",
+-"oooooooo"
+-};
+-/* XPM */
+-static char const *button_on[] = {
+-/* columns rows colors chars-per-pixel */
+-"8 8 3 1",
+-"  c black",
+-". c green",
+-"X c None",
+-/* pixels */
+-"XXXXXXXX",
+-"XX    XX",
+-"X  ..  X",
+-"X .... X",
+-"X .... X",
+-"X  ..  X",
+-"XX    XX",
+-"XXXXXXXX"
+-};
+-
+-/* XPM */
+-static char const * axis_none_xpm[] = {
+-"24 8 3 1",
+-"   c None",
+-".  c #000000",
+-"+  c #808080",
+-"                        ",
+-"  .++++++++++++++++++.  ",
+-" .+               . .+. ",
+-" +          . . .     + ",
+-" +     . . .          + ",
+-" .+. .               +. ",
+-"  .++++++++++++++++++.  ",
+-"                        "};
+-/* XPM */
+-static char const * axis_off_xpm[] = {
+-"24 8 4 1",
+-"   c None",
+-".  c #808080",
+-"+  c #000000",
+-"@  c #FFFFFF",
+-"                        ",
+-"  .++++++++++++++++++.  ",
+-" .+@@@@@@@@@@@@@@@@@@+. ",
+-" +@@@@@@@@@@@@@@@@@@@@+ ",
+-" +@@@@@@@@@@@@@@@@@@@@+ ",
+-" .+@@@@@@@@@@@@@@@@@@+. ",
+-"  .++++++++++++++++++.  ",
+-"                        "};
+-/* XPM */
+-static char const * axis_on_xpm[] = {
+-"24 8 3 1",
+-"   c None",
+-".  c #000000",
+-"+  c #00FF00",
+-"                        ",
+-"  ....................  ",
+-" ..++++++++++++++++++.. ",
+-" .++++++++++++++++++++. ",
+-" .++++++++++++++++++++. ",
+-" ..++++++++++++++++++.. ",
+-"  ....................  ",
+-"                        "};
+-// clang-format on
+-
+-using Inkscape::InputDevice;
+-
+-namespace Inkscape {
+-namespace UI {
+-namespace Dialog {
+-
+-
+-
+-class DeviceModelColumns : public Gtk::TreeModel::ColumnRecord
+-{
+-public:
+-    Gtk::TreeModelColumn<bool>                         toggler;
+-    Gtk::TreeModelColumn<Glib::ustring>                expander;
+-    Gtk::TreeModelColumn<Glib::ustring>                description;
+-    Gtk::TreeModelColumn<Glib::RefPtr<Gdk::Pixbuf> >   thumbnail;
+-    Gtk::TreeModelColumn<Glib::RefPtr<InputDevice const> > device;
+-    Gtk::TreeModelColumn<Gdk::InputMode>               mode;
+-
+-    DeviceModelColumns() { add(toggler), add(expander), add(description); add(thumbnail); add(device); add(mode); }
+-};
+-
+-static std::map<Gdk::InputMode, Glib::ustring> &getModeToString()
+-{
+-    static std::map<Gdk::InputMode, Glib::ustring> mapping;
+-    if (mapping.empty()) {
+-        mapping[Gdk::MODE_DISABLED] = _("Disabled");
+-        mapping[Gdk::MODE_SCREEN]   = C_("Input device", "Screen");
+-        mapping[Gdk::MODE_WINDOW]   = _("Window");
+-    }
+-
+-    return mapping;
+-}
+-
+-static int getModeId(Gdk::InputMode im)
+-{
+-    if (im == Gdk::MODE_DISABLED) return 0;
+-    if (im == Gdk::MODE_SCREEN) return 1;
+-    if (im == Gdk::MODE_WINDOW) return 2;
+-
+-    return 0;
+-}
+-
+-static std::map<Glib::ustring, Gdk::InputMode> &getStringToMode()
+-{
+-    static std::map<Glib::ustring, Gdk::InputMode> mapping;
+-    if (mapping.empty()) {
+-        mapping[_("Disabled")] = Gdk::MODE_DISABLED;
+-        mapping[_("Screen")]   = Gdk::MODE_SCREEN;
+-        mapping[_("Window")]   = Gdk::MODE_WINDOW;
+-    }
+-
+-    return mapping;
+-}
+-
+-
+-
+-class InputDialogImpl : public InputDialog {
+-public:
+-    InputDialogImpl();
+-    ~InputDialogImpl() override = default;
+-
+-private:
+-    class ConfPanel : public Gtk::Box
+-    {
+-    public:
+-        ConfPanel();
+-        ~ConfPanel() override;
+-
+-        class Blink : public Preferences::Observer
+-        {
+-        public:
+-            Blink(ConfPanel &parent);
+-            ~Blink() override;
+-            void notify(Preferences::Entry const &new_val) override;
+-
+-            ConfPanel &parent;
+-        };
+-
+-        static void commitCellModeChange(Glib::ustring const &path, Glib::ustring const &newText, Glib::RefPtr<Gtk::TreeStore> store);
+-        static void setModeCellString(Gtk::CellRenderer *rndr, Gtk::TreeIter const &iter);
+-
+-        static void commitCellStateChange(Glib::ustring const &path, Glib::RefPtr<Gtk::TreeStore> store);
+-        static void setCellStateToggle(Gtk::CellRenderer *rndr, Gtk::TreeIter const &iter);
+-
+-        void saveSettings();
+-        void onTreeSelect();
+-        void useExtToggled();
+-
+-        void onModeChange();
+-        void setKeys(gint count);
+-        void setAxis(gint count);
+-
+-        Glib::RefPtr<Gtk::TreeStore> confDeviceStore;
+-        Gtk::TreeIter confDeviceIter;
+-        Gtk::TreeView confDeviceTree;
+-        Gtk::ScrolledWindow confDeviceScroller;
+-        Blink watcher;
+-        Gtk::CheckButton useExt;
+-        Gtk::Button save;
+-        Gtk::Paned pane;
+-        Gtk::Box detailsBox;
+-        Gtk::Box titleFrame;
+-        Gtk::Label titleLabel;
+-        Inkscape::UI::Widget::Frame axisFrame;
+-        Inkscape::UI::Widget::Frame keysFrame;
+-        Gtk::Box axisVBox;
+-        Inkscape::UI::Widget::ScrollProtected<Gtk::ComboBoxText> modeCombo;
+-        Gtk::Label modeLabel;
+-        Gtk::Box modeBox;
+-
+-        class KeysColumns : public Gtk::TreeModel::ColumnRecord
+-        {
+-          public:
+-            KeysColumns()
+-            {
+-                add(name);
+-                add(value);
+-            }
+-            ~KeysColumns() override = default;
+-
+-            Gtk::TreeModelColumn<Glib::ustring> name;
+-            Gtk::TreeModelColumn<Glib::ustring> value;
+-        };
+-
+-        KeysColumns keysColumns;
+-        KeysColumns axisColumns;
+-
+-        Glib::RefPtr<Gtk::ListStore> axisStore;
+-        Gtk::TreeView     axisTree;
+-        Gtk::ScrolledWindow axisScroll;
+-
+-        Glib::RefPtr<Gtk::ListStore> keysStore;
+-        Gtk::TreeView     keysTree;
+-        Gtk::ScrolledWindow keysScroll;
+-        Gtk::CellRendererAccel _kb_shortcut_renderer;
+-
+-
+-    };
+-
+-    static DeviceModelColumns &getCols();
+-
+-    enum PixId {PIX_CORE, PIX_PEN, PIX_MOUSE, PIX_TIP, PIX_TABLET, PIX_ERASER, PIX_SIDEBUTTONS,
+-                PIX_BUTTONS_NONE, PIX_BUTTONS_ON, PIX_BUTTONS_OFF,
+-                PIX_AXIS_NONE, PIX_AXIS_ON, PIX_AXIS_OFF};
+-
+-    static Glib::RefPtr<Gdk::Pixbuf> getPix(PixId id);
+-
+-    std::map<Glib::ustring, std::set<guint> > buttonMap;
+-    std::map<Glib::ustring, std::map<guint, std::pair<guint, gdouble> > > axesMap;
+-
+-    Gdk::InputSource lastSourceSeen;
+-    Glib::ustring lastDevnameSeen;
+-
+-    Glib::RefPtr<Gtk::TreeStore> deviceStore;
+-    Gtk::TreeIter deviceIter;
+-    Gtk::TreeView deviceTree;
+-    Inkscape::UI::Widget::Frame testFrame;
+-    Inkscape::UI::Widget::Frame axisFrame;
+-    Gtk::ScrolledWindow treeScroller;
+-    Gtk::ScrolledWindow detailScroller;
+-    Gtk::Paned splitter;
+-    Gtk::Paned split2;
+-    Gtk::Label devName;
+-    Gtk::Label devKeyCount;
+-    Gtk::Label devAxesCount;
+-    Gtk::ComboBoxText axesCombo;
+-    Gtk::ProgressBar axesValues[6];
+-    Gtk::Grid axisTable;
+-    Gtk::ComboBoxText buttonCombo;
+-    Gtk::ComboBoxText linkCombo;
+-    sigc::connection linkConnection;
+-    Gtk::Label keyVal;
+-    Gtk::Entry keyEntry;
+-    Gtk::Notebook topHolder;
+-    Gtk::Image testThumb;
+-    Gtk::Image testButtons[24];
+-    Gtk::Image testAxes[8];
+-    Gtk::Grid imageTable;
+-    Gtk::EventBox testDetector;
+-
+-    ConfPanel cfgPanel;
+-
+-
+-    static void setupTree( Glib::RefPtr<Gtk::TreeStore> store, Gtk::TreeIter &tablet );
+-    void setupValueAndCombo( gint reported, gint actual, Gtk::Label& label, Gtk::ComboBoxText& combo );
+-    void updateTestButtons( Glib::ustring const& key, gint hotButton );
+-    void updateTestAxes( Glib::ustring const& key, GdkDevice* dev );
+-    void mapAxesValues( Glib::ustring const& key, gdouble const * axes, GdkDevice* dev);
+-    Glib::ustring getKeyFor( GdkDevice* device );
+-    bool eventSnoop(GdkEvent* event);
+-    void linkComboChanged();
+-    void resyncToSelection();
+-    void handleDeviceChange(Glib::RefPtr<InputDevice const> device);
+-    void updateDeviceAxes(Glib::RefPtr<InputDevice const> device);
+-    void updateDeviceButtons(Glib::RefPtr<InputDevice const> device);
+-    static void updateDeviceLinks(Glib::RefPtr<InputDevice const> device, Gtk::TreeIter tabletIter, Gtk::TreeView *tree);
+-
+-    static bool findDevice(const Gtk::TreeModel::iterator& iter,
+-                           Glib::ustring id,
+-                           Gtk::TreeModel::iterator* result);
+-    static bool findDeviceByLink(const Gtk::TreeModel::iterator& iter,
+-                                 Glib::ustring link,
+-                                 Gtk::TreeModel::iterator* result);
+-
+-}; // class InputDialogImpl
+-
+-
+-DeviceModelColumns &InputDialogImpl::getCols()
+-{
+-    static DeviceModelColumns cols;
+-    return cols;
+-}
+-
+-Glib::RefPtr<Gdk::Pixbuf> InputDialogImpl::getPix(PixId id)
+-{
+-    static std::map<PixId, Glib::RefPtr<Gdk::Pixbuf> > mappings;
+-
+-    mappings[PIX_CORE]          = Gdk::Pixbuf::create_from_xpm_data(core_xpm);
+-    mappings[PIX_PEN]           = Gdk::Pixbuf::create_from_xpm_data(pen);
+-    mappings[PIX_MOUSE]         = Gdk::Pixbuf::create_from_xpm_data(mouse);
+-    mappings[PIX_TIP]           = Gdk::Pixbuf::create_from_xpm_data(tip);
+-    mappings[PIX_TABLET]        = Gdk::Pixbuf::create_from_xpm_data(tablet);
+-    mappings[PIX_ERASER]        = Gdk::Pixbuf::create_from_xpm_data(eraser);
+-    mappings[PIX_SIDEBUTTONS]   = Gdk::Pixbuf::create_from_xpm_data(sidebuttons);
+-
+-    mappings[PIX_BUTTONS_NONE]  = Gdk::Pixbuf::create_from_xpm_data(button_none);
+-    mappings[PIX_BUTTONS_ON]    = Gdk::Pixbuf::create_from_xpm_data(button_on);
+-    mappings[PIX_BUTTONS_OFF]   = Gdk::Pixbuf::create_from_xpm_data(button_off);
+-
+-    mappings[PIX_AXIS_NONE]     = Gdk::Pixbuf::create_from_xpm_data(axis_none_xpm);
+-    mappings[PIX_AXIS_ON]       = Gdk::Pixbuf::create_from_xpm_data(axis_on_xpm);
+-    mappings[PIX_AXIS_OFF]      = Gdk::Pixbuf::create_from_xpm_data(axis_off_xpm);
+-
+-    Glib::RefPtr<Gdk::Pixbuf> pix;
+-    if (mappings.find(id) != mappings.end()) {
+-        pix = mappings[id];
+-    }
+-
+-    return pix;
+-}
+-
+-std::unique_ptr<InputDialog> InputDialog::create()
+-{
+-    return std::make_unique<InputDialogImpl>();
+-}
+-
+-InputDialogImpl::InputDialogImpl() :
+-    InputDialog(),
+-    lastSourceSeen(static_cast<Gdk::InputSource>(-1)),
+-    lastDevnameSeen(""),
+-    deviceStore(Gtk::TreeStore::create(getCols())),
+-    deviceIter(),
+-    deviceTree(deviceStore),
+-    testFrame(_("Test Area")),
+-    axisFrame(_("Axis")),
+-    treeScroller(),
+-    detailScroller(),
+-    splitter(),
+-    split2(Gtk::ORIENTATION_VERTICAL),
+-    axisTable(),
+-    linkCombo(),
+-    topHolder(),
+-    imageTable(),
+-    testDetector(),
+-    cfgPanel()
+-{
+-    treeScroller.set_policy(Gtk::POLICY_AUTOMATIC, Gtk::POLICY_AUTOMATIC);
+-    treeScroller.set_shadow_type(Gtk::SHADOW_IN);
+-    treeScroller.add(deviceTree);
+-    treeScroller.set_size_request(50, 0);
+-
+-    split2.pack1(axisFrame, false, false);
+-    split2.pack2(testFrame, true, true);
+-
+-    splitter.pack1(treeScroller);
+-    splitter.pack2(split2);
+-
+-    testDetector.add(imageTable);
+-    testFrame.add(testDetector);
+-    testThumb.set(getPix(PIX_TABLET));
+-    testThumb.set_margin_top(24);
+-    testThumb.set_margin_bottom(24);
+-    testThumb.set_margin_start(24);
+-    testThumb.set_margin_end(24);
+-    testThumb.set_hexpand();
+-    testThumb.set_vexpand();
+-    imageTable.attach(testThumb, 0, 0, 8, 1);
+-
+-    {
+-        guint col = 0;
+-        guint row = 1;
+-        for (auto & testButton : testButtons) {
+-            testButton.set(getPix(PIX_BUTTONS_NONE));
+-            imageTable.attach(testButton, col, row, 1, 1);
+-            col++;
+-            if (col > 7) {
+-                col = 0;
+-                row++;
+-            }
+-        }
+-
+-        col = 0;
+-        for (auto & testAxe : testAxes) {
+-            testAxe.set(getPix(PIX_AXIS_NONE));
+-            imageTable.attach(testAxe, col * 2, row, 2, 1);
+-            col++;
+-            if (col > 3) {
+-                col = 0;
+-                row++;
+-            }
+-        }
+-    }
+-
+-
+-    // This is a hidden preference to enable the "hardware" details in a separate tab
+-    // By default this is not available to users
+-    if (Preferences::get()->getBool("/dialogs/inputdevices/test")) {
+-        topHolder.append_page(cfgPanel, _("Configuration"));
+-        topHolder.append_page(splitter, _("Hardware"));
+-        topHolder.show_all();
+-        topHolder.set_current_page(0);
+-        pack_start(topHolder);
+-    } else {
+-        pack_start(cfgPanel);
+-    }
+-
+-
+-    int rowNum = 0;
+-
+-    axisFrame.add(axisTable);
+-
+-    Gtk::Label *lbl = Gtk::manage(new Gtk::Label(_("Link:")));
+-    axisTable.attach(*lbl, 0, rowNum, 1, 1);
+-    linkCombo.append(_("None"));
+-    linkCombo.set_active_text(_("None"));
+-    linkCombo.set_sensitive(false);
+-    linkConnection = linkCombo.signal_changed().connect(sigc::mem_fun(*this, &InputDialogImpl::linkComboChanged));
+-    axisTable.attach(linkCombo, 1, rowNum, 1, 1);
+-    rowNum++;
+-
+-    lbl = Gtk::manage(new Gtk::Label(_("Axes count:")));
+-    axisTable.attach(*lbl, 0, rowNum, 1, 1);
+-    axisTable.attach(devAxesCount, 1, rowNum, 1, 1);
+-    rowNum++;
+-
+-    for (auto & axesValue : axesValues) {
+-        lbl = Gtk::manage(new Gtk::Label(_("axis:")));
+-        lbl->set_hexpand();
+-        axisTable.attach(*lbl, 0, rowNum, 1, 1);
+-
+-        axesValue.set_hexpand();
+-        axisTable.attach(axesValue, 1, rowNum, 1, 1);
+-        axesValue.set_sensitive(false);
+-
+-        rowNum++;
+-
+-
+-    }
+-
+-    lbl = Gtk::manage(new Gtk::Label(_("Button count:")));
+-
+-    axisTable.attach(*lbl, 0, rowNum, 1, 1);
+-    axisTable.attach(devKeyCount, 1, rowNum, 1, 1);
+-
+-    rowNum++;
+-
+-    axisTable.attach(keyVal, 0, rowNum, 2, 1);
+-
+-    rowNum++;
+-
+-    testDetector.signal_event().connect(sigc::mem_fun(*this, &InputDialogImpl::eventSnoop));
+-
+-    // TODO: Extension event stuff has been removed from public API in GTK+ 3
+-    // Need to check that this hasn't broken anything
+-    testDetector.add_events(Gdk::POINTER_MOTION_MASK|Gdk::KEY_PRESS_MASK|Gdk::KEY_RELEASE_MASK |Gdk::PROXIMITY_IN_MASK|Gdk::PROXIMITY_OUT_MASK|Gdk::SCROLL_MASK);
+-
+-    axisTable.attach(keyEntry, 0, rowNum, 2, 1);
+-
+-    rowNum++;
+-
+-
+-    axisTable.set_sensitive(false);
+-
+-//- 16x16/devices
+-// gnome-dev-mouse-optical
+-// input-mouse
+-// input-tablet
+-// mouse
+-
+-    //Add the TreeView's view columns:
+-    deviceTree.append_column("I", getCols().thumbnail);
+-    deviceTree.append_column("Bar", getCols().description);
+-
+-    deviceTree.set_enable_tree_lines();
+-    deviceTree.set_headers_visible(false);
+-    deviceTree.get_selection()->signal_changed().connect(sigc::mem_fun(*this, &InputDialogImpl::resyncToSelection));
+-
+-
+-    setupTree( deviceStore, deviceIter );
+-
+-    Inkscape::DeviceManager::getManager().signalDeviceChanged().connect(sigc::mem_fun(*this, &InputDialogImpl::handleDeviceChange));
+-    Inkscape::DeviceManager::getManager().signalAxesChanged().connect(sigc::mem_fun(*this, &InputDialogImpl::updateDeviceAxes));
+-    Inkscape::DeviceManager::getManager().signalButtonsChanged().connect(sigc::mem_fun(*this, &InputDialogImpl::updateDeviceButtons));
+-    Inkscape::DeviceManager::getManager().signalLinkChanged().connect(sigc::bind(sigc::ptr_fun(&InputDialogImpl::updateDeviceLinks), deviceIter, &deviceTree));
+-
+-    deviceTree.expand_all();
+-    show_all_children();
+-}
+-
+-class TabletTmp {
+-public:
+-    TabletTmp() = default;
+-
+-    Glib::ustring name;
+-    std::list<Glib::RefPtr<InputDevice const> > devices;
+-};
+-
+-static Glib::ustring getCommon( std::list<Glib::ustring> const &names )
+-{
+-    Glib::ustring result;
+-
+-    if ( !names.empty() ) {
+-        size_t pos = 0;
+-        bool match = true;
+-        while ( match ) {
+-            if ( names.begin()->length() > pos ) {
+-                gunichar ch = (*names.begin())[pos];
+-                for (const auto & name : names) {
+-                    if ( (pos >= name.length())
+-                         || (name[pos] != ch) ) {
+-                        match = false;
+-                        break;
+-                    }
+-                }
+-                if (match) {
+-                    result += ch;
+-                    pos++;
+-                }
+-            } else {
+-                match = false;
+-            }
+-        }
+-    }
+-
+-    return result;
+-}
+-
+-
+-void InputDialogImpl::ConfPanel::onModeChange()
+-{
+-    Glib::ustring newText = modeCombo.get_active_text();
+-
+-    Glib::RefPtr<Gtk::TreeSelection> sel = confDeviceTree.get_selection();
+-    Gtk::TreeModel::iterator iter = sel->get_selected();
+-    if (iter) {
+-        Glib::RefPtr<InputDevice const> dev = (*iter)[getCols().device];
+-        if (dev && (getStringToMode().find(newText) != getStringToMode().end())) {
+-            Gdk::InputMode mode = getStringToMode()[newText];
+-            Inkscape::DeviceManager::getManager().setMode( dev->getId(), mode );
+-        }
+-    }
+-
+-}
+-
+-
+-void InputDialogImpl::setupTree( Glib::RefPtr<Gtk::TreeStore> store, Gtk::TreeIter &tablet )
+-{
+-    std::list<Glib::RefPtr<InputDevice const> > devList = Inkscape::DeviceManager::getManager().getDevices();
+-    if ( !devList.empty() ) {
+-        //Gtk::TreeModel::Row row = *(store->append());
+-        //row[getCols().description] = _("Hardware");
+-
+-        // Let's make some tablets!!!
+-        std::list<TabletTmp> tablets;
+-        std::set<Glib::ustring> consumed;
+-
+-        // Phase 1 - figure out which tablets are present
+-        for (auto dev : devList) {
+-            if ( dev ) {
+-                if ( dev->getSource() != Gdk::SOURCE_MOUSE ) {
+-                    consumed.insert( dev->getId() );
+-                    if ( tablets.empty() ) {
+-                        TabletTmp tmp;
+-                        tablets.push_back(tmp);
+-                    }
+-                    tablets.back().devices.push_back(dev);
+-                }
+-            } else {
+-                g_warning("Null device in list");
+-            }
+-        }
+-
+-        // Phase 2 - build a UI for the present devices
+-        for (auto & it : tablets) {
+-            tablet = store->prepend(/*row.children()*/);
+-            Gtk::TreeModel::Row childrow = *tablet;
+-            if ( it.name.empty() ) {
+-                // Check to see if we can derive one
+-                std::list<Glib::ustring> names;
+-                for (auto & device : it.devices) {
+-                    names.push_back( device->getName() );
+-                }
+-                Glib::ustring common = getCommon(names);
+-                if ( !common.empty() ) {
+-                    it.name = common;
+-                }
+-            }
+-            childrow[getCols().description] = it.name.empty() ? _("Tablet") : it.name ;
+-            childrow[getCols().thumbnail] = getPix(PIX_TABLET);
+-
+-            // Check if there is an eraser we can link to a pen
+-            for ( std::list<Glib::RefPtr<InputDevice const> >::iterator it2 = it.devices.begin(); it2 != it.devices.end(); ++it2 ) {
+-                Glib::RefPtr<InputDevice const> dev = *it2;
+-                if ( dev->getSource() == Gdk::SOURCE_PEN ) {
+-                    for (auto dev2 : it.devices) {
+-                        if ( dev2->getSource() == Gdk::SOURCE_ERASER ) {
+-                            DeviceManager::getManager().setLinkedTo(dev->getId(), dev2->getId());
+-                            break; // only check the first eraser... for now
+-                        }
+-                        break; // only check the first pen... for now
+-                    }
+-                }
+-            }
+-
+-            for (auto dev : it.devices) {
+-                Gtk::TreeModel::Row deviceRow = *(store->append(childrow.children()));
+-                deviceRow[getCols().description] = dev->getName();
+-                deviceRow[getCols().device] = dev;
+-                deviceRow[getCols().mode] = dev->getMode();
+-                switch ( dev->getSource() ) {
+-                    case Gdk::SOURCE_MOUSE:
+-                        deviceRow[getCols().thumbnail] = getPix(PIX_CORE);
+-                        break;
+-                    case Gdk::SOURCE_PEN:
+-                        if (deviceRow[getCols().description] == _("pad")) {
+-                            deviceRow[getCols().thumbnail] = getPix(PIX_SIDEBUTTONS);
+-                        } else {
+-                            deviceRow[getCols().thumbnail] = getPix(PIX_TIP);
+-                        }
+-                        break;
+-                    case Gdk::SOURCE_CURSOR:
+-                        deviceRow[getCols().thumbnail] = getPix(PIX_MOUSE);
+-                        break;
+-                    case Gdk::SOURCE_ERASER:
+-                        deviceRow[getCols().thumbnail] = getPix(PIX_ERASER);
+-                        break;
+-                    default:
+-                        ; // nothing
+-                }
+-            }
+-        }
+-
+-        for (auto dev : devList) {
+-            if ( dev && (consumed.find( dev->getId() ) == consumed.end()) ) {
+-                Gtk::TreeModel::Row deviceRow = *(store->prepend(/*row.children()*/));
+-                deviceRow[getCols().description] = dev->getName();
+-                deviceRow[getCols().device] = dev;
+-                deviceRow[getCols().mode] = dev->getMode();
+-                deviceRow[getCols().thumbnail] = getPix(PIX_CORE);
+-            }
+-        }
+-
+-    } else {
+-        g_warning("No devices found");
+-    }
+-}
+-
+-
+-InputDialogImpl::ConfPanel::ConfPanel() :
+-    Gtk::Box(Gtk::ORIENTATION_VERTICAL),
+-    confDeviceStore(Gtk::TreeStore::create(getCols())),
+-    confDeviceIter(),
+-    confDeviceTree(confDeviceStore),
+-    confDeviceScroller(),
+-    watcher(*this),
+-    useExt(_("_Use pressure-sensitive tablet (requires restart)"), true),
+-    save(_("_Save"), true),
+-    detailsBox(Gtk::ORIENTATION_VERTICAL, 4),
+-    titleFrame(Gtk::ORIENTATION_HORIZONTAL, 4),
+-    titleLabel(""),
+-    axisFrame(_("Axes")),
+-    keysFrame(_("Keys")),
+-    modeLabel(_("Mode:")),
+-    modeBox(Gtk::ORIENTATION_HORIZONTAL, 4),
+-    axisVBox(Gtk::ORIENTATION_VERTICAL)
+-
+-{
+-
+-
+-    confDeviceScroller.set_policy(Gtk::POLICY_AUTOMATIC, Gtk::POLICY_AUTOMATIC);
+-    confDeviceScroller.set_shadow_type(Gtk::SHADOW_IN);
+-    confDeviceScroller.add(confDeviceTree);
+-    confDeviceScroller.set_size_request(120, 0);
+-
+-    /*    class Foo : public Gtk::TreeModel::ColumnRecord {
+-    public :
+-        Gtk::TreeModelColumn<Glib::ustring> one;
+-        Foo() {add(one);}
+-    };
+-    static Foo foo;
+-
+-    //Add the TreeView's view columns:
+-    {
+-        Gtk::CellRendererToggle *rendr = new Gtk::CellRendererToggle();
+-        Gtk::TreeViewColumn *col = new Gtk::TreeViewColumn("xx", *rendr);
+-        if (col) {
+-            confDeviceTree.append_column(*col);
+-            col->set_cell_data_func(*rendr, sigc::ptr_fun(setCellStateToggle));
+-            rendr->signal_toggled().connect(sigc::bind(sigc::ptr_fun(commitCellStateChange), confDeviceStore));
+-        }
+-    }*/
+-
+-    //int expPos = confDeviceTree.append_column("", getCols().expander);
+-
+-    confDeviceTree.append_column("I", getCols().thumbnail);
+-    confDeviceTree.append_column("Bar", getCols().description);
+-
+-    //confDeviceTree.get_column(0)->set_fixed_width(100);
+-    //confDeviceTree.get_column(1)->set_expand();
+-
+-/*    {
+-        Gtk::TreeViewColumn *col = new Gtk::TreeViewColumn("X", *rendr);
+-        if (col) {
+-            confDeviceTree.append_column(*col);
+-            col->set_cell_data_func(*rendr, sigc::ptr_fun(setModeCellString));
+-            rendr->signal_edited().connect(sigc::bind(sigc::ptr_fun(commitCellModeChange), confDeviceStore));
+-            rendr->property_editable() = true;
+-        }
+-    }*/
+-
+-    //confDeviceTree.set_enable_tree_lines();
+-    confDeviceTree.property_enable_tree_lines() = false;
+-    confDeviceTree.property_enable_grid_lines() = false;
+-    confDeviceTree.set_headers_visible(false);
+-    //confDeviceTree.set_expander_column( *confDeviceTree.get_column(expPos - 1) );
+-
+-    confDeviceTree.get_selection()->signal_changed().connect(sigc::mem_fun(*this, &InputDialogImpl::ConfPanel::onTreeSelect));
+-
+-    setupTree( confDeviceStore, confDeviceIter );
+-
+-    Inkscape::DeviceManager::getManager().signalLinkChanged().connect(sigc::bind(sigc::ptr_fun(&InputDialogImpl::updateDeviceLinks), confDeviceIter, &confDeviceTree));
+-
+-    confDeviceTree.expand_all();
+-
+-    useExt.set_active(Preferences::get()->getBool("/options/useextinput/value"));
+-    useExt.signal_toggled().connect(sigc::mem_fun(*this, &InputDialogImpl::ConfPanel::useExtToggled));
+-
+-    auto buttonBox = Gtk::manage(new Gtk::ButtonBox);
+-    buttonBox->set_layout (Gtk::BUTTONBOX_END);
+-    //Gtk::Alignment *align = new Gtk::Alignment(Gtk::ALIGN_END, Gtk::ALIGN_START, 0, 0);
+-    buttonBox->add(save);
+-    save.signal_clicked().connect(sigc::mem_fun(*this, &InputDialogImpl::ConfPanel::saveSettings));
+-
+-    titleFrame.pack_start(titleLabel, true, true);
+-    //titleFrame.set_shadow_type(Gtk::SHADOW_IN);
+-
+-    modeCombo.append(getModeToString()[Gdk::MODE_DISABLED]);
+-    modeCombo.append(getModeToString()[Gdk::MODE_SCREEN]);
+-    modeCombo.append(getModeToString()[Gdk::MODE_WINDOW]);
+-    modeCombo.set_tooltip_text(_("A device can be 'Disabled', its coordinates mapped to the whole 'Screen', or to a single (usually focused) 'Window'"));
+-    modeCombo.signal_changed().connect(sigc::mem_fun(*this, &InputDialogImpl::ConfPanel::onModeChange));
+-
+-    modeBox.pack_start(modeLabel, false, false);
+-    modeBox.pack_start(modeCombo, true, true);
+-
+-    axisVBox.add(axisScroll);
+-    axisFrame.add(axisVBox);
+-
+-    keysFrame.add(keysScroll);
+-
+-    /**
+-     * Scrolled Window
+-     */
+-    keysScroll.add(keysTree);
+-    keysScroll.set_policy(Gtk::POLICY_AUTOMATIC, Gtk::POLICY_AUTOMATIC);
+-    keysScroll.set_shadow_type(Gtk::SHADOW_IN);
+-    keysScroll.set_size_request(120, 80);
+-
+-    keysStore = Gtk::ListStore::create(keysColumns);
+-
+-    _kb_shortcut_renderer.property_editable() = true;
+-
+-    keysTree.set_model(keysStore);
+-    keysTree.set_headers_visible(false);
+-    keysTree.append_column("Name", keysColumns.name);
+-    keysTree.append_column("Value", keysColumns.value);
+-
+-    //keysTree.append_column("Value", _kb_shortcut_renderer);
+-    //keysTree.get_column(1)->add_attribute(_kb_shortcut_renderer.property_text(), keysColumns.value);
+-    //_kb_shortcut_renderer.signal_accel_edited().connect( sigc::mem_fun(*this, &InputDialogImpl::onKBTreeEdited) );
+-    //_kb_shortcut_renderer.signal_accel_cleared().connect( sigc::mem_fun(*this, &InputDialogImpl::onKBTreeCleared) );
+-
+-    axisStore = Gtk::ListStore::create(axisColumns);
+-
+-    axisTree.set_model(axisStore);
+-    axisTree.set_headers_visible(false);
+-    axisTree.append_column("Name", axisColumns.name);
+-    axisTree.append_column("Value", axisColumns.value);
+-
+-    /**
+-     * Scrolled Window
+-     */
+-    axisScroll.add(axisTree);
+-    axisScroll.set_policy(Gtk::POLICY_AUTOMATIC, Gtk::POLICY_AUTOMATIC);
+-    axisScroll.set_shadow_type(Gtk::SHADOW_IN);
+-    axisScroll.set_size_request(0, 150);
+-
+-    pane.pack1(confDeviceScroller);
+-    pane.pack2(detailsBox);
+-
+-    detailsBox.pack_start(titleFrame, false, false, 6);
+-    detailsBox.pack_start(modeBox, false, false, 6);
+-    detailsBox.pack_start(axisFrame, false, false);
+-    detailsBox.pack_start(keysFrame, false, false);
+-    detailsBox.set_border_width(4);
+-
+-    pack_start(pane, true, true);
+-    pack_start(useExt, Gtk::PACK_SHRINK);
+-    pack_start(*buttonBox, false, false);
+-
+-    // Select the first device
+-    confDeviceTree.get_selection()->select(confDeviceStore->get_iter("0"));
+-
+-}
+-
+-InputDialogImpl::ConfPanel::~ConfPanel()
+-= default;
+-
+-void InputDialogImpl::ConfPanel::setModeCellString(Gtk::CellRenderer *rndr, Gtk::TreeIter const &iter)
+-{
+-    if (iter) {
+-        Gtk::CellRendererCombo *combo = dynamic_cast<Gtk::CellRendererCombo *>(rndr);
+-        if (combo) {
+-            Glib::RefPtr<InputDevice const> dev = (*iter)[getCols().device];
+-            Gdk::InputMode mode = (*iter)[getCols().mode];
+-            if (dev && (getModeToString().find(mode) != getModeToString().end())) {
+-                combo->property_text() = getModeToString()[mode];
+-            } else {
+-                combo->property_text() = "";
+-            }
+-        }
+-    }
+-}
+-
+-void InputDialogImpl::ConfPanel::commitCellModeChange(Glib::ustring const &path, Glib::ustring const &newText, Glib::RefPtr<Gtk::TreeStore> store)
+-{
+-    Gtk::TreeIter iter = store->get_iter(path);
+-    if (iter) {
+-        Glib::RefPtr<InputDevice const> dev = (*iter)[getCols().device];
+-        if (dev && (getStringToMode().find(newText) != getStringToMode().end())) {
+-            Gdk::InputMode mode = getStringToMode()[newText];
+-            Inkscape::DeviceManager::getManager().setMode( dev->getId(), mode );
+-        }
+-    }
+-
+-
+-}
+-
+-void InputDialogImpl::ConfPanel::setCellStateToggle(Gtk::CellRenderer *rndr, Gtk::TreeIter const &iter)
+-{
+-    if (iter) {
+-        Gtk::CellRendererToggle *toggle = dynamic_cast<Gtk::CellRendererToggle *>(rndr);
+-        if (toggle) {
+-            Glib::RefPtr<InputDevice const> dev = (*iter)[getCols().device];
+-            if (dev) {
+-                Gdk::InputMode mode = (*iter)[getCols().mode];
+-                toggle->set_active(mode != Gdk::MODE_DISABLED);
+-            } else {
+-                toggle->set_active(false);
+-            }
+-        }
+-    }
+-}
+-
+-void InputDialogImpl::ConfPanel::commitCellStateChange(Glib::ustring const &path, Glib::RefPtr<Gtk::TreeStore> store)
+-{
+-    Gtk::TreeIter iter = store->get_iter(path);
+-    if (iter) {
+-        Glib::RefPtr<InputDevice const> dev = (*iter)[getCols().device];
+-        if (dev) {
+-            Gdk::InputMode mode = (*iter)[getCols().mode];
+-            if (mode == Gdk::MODE_DISABLED) {
+-                Inkscape::DeviceManager::getManager().setMode( dev->getId(), Gdk::MODE_SCREEN );
+-            } else {
+-                Inkscape::DeviceManager::getManager().setMode( dev->getId(), Gdk::MODE_DISABLED );
+-            }
+-        }
+-    }
+-}
+-
+-void InputDialogImpl::ConfPanel::onTreeSelect()
+-{
+-    Glib::RefPtr<Gtk::TreeSelection> treeSel = confDeviceTree.get_selection();
+-    Gtk::TreeModel::iterator iter = treeSel->get_selected();
+-    if (iter) {
+-        Gtk::TreeModel::Row row = *iter;
+-        Glib::ustring val = row[getCols().description];
+-        Glib::RefPtr<InputDevice const> dev = row[getCols().device];
+-        Gdk::InputMode mode = (*iter)[getCols().mode];
+-        modeCombo.set_active(getModeId(mode));
+-
+-        titleLabel.set_markup("<b>" + row[getCols().description] + "</b>");
+-
+-        if (dev) {
+-            setKeys(dev->getNumKeys());
+-            setAxis(dev->getNumAxes());
+-        }
+-    }
+-}
+-void InputDialogImpl::ConfPanel::saveSettings()
+-{
+-    Inkscape::DeviceManager::getManager().saveConfig();
+-}
+-
+-void InputDialogImpl::ConfPanel::useExtToggled()
+-{
+-    bool active = useExt.get_active();
+-    if (active != Preferences::get()->getBool("/options/useextinput/value")) {
+-        Preferences::get()->setBool("/options/useextinput/value", active);
+-        if (active) {
+-            // As a work-around for a common problem, enable tablet toggles on the calligraphic tool.
+-            // Covered in Launchpad bug #196195.
+-            Preferences::get()->setBool("/tools/tweak/usepressure", true);
+-            Preferences::get()->setBool("/tools/calligraphic/usepressure", true);
+-            Preferences::get()->setBool("/tools/calligraphic/usetilt", true);
+-        }
+-    }
+-}
+-
+-InputDialogImpl::ConfPanel::Blink::Blink(ConfPanel &parent) :
+-    Preferences::Observer("/options/useextinput/value"),
+-    parent(parent)
+-{
+-    Preferences::get()->addObserver(*this);
+-}
+-
+-InputDialogImpl::ConfPanel::Blink::~Blink()
+-{
+-    Preferences::get()->removeObserver(*this);
+-}
+-
+-void InputDialogImpl::ConfPanel::Blink::notify(Preferences::Entry const &new_val)
+-{
+-    parent.useExt.set_active(new_val.getBool());
+-}
+-
+-void InputDialogImpl::handleDeviceChange(Glib::RefPtr<InputDevice const> device)
+-{
+-//     g_message("OUCH!!!! for %p  hits %s", &device, device->getId().c_str());
+-    std::vector<Glib::RefPtr<Gtk::TreeStore> > stores;
+-    stores.push_back(deviceStore);
+-    stores.push_back(cfgPanel.confDeviceStore);
+-
+-    for (auto & store : stores) {
+-        Gtk::TreeModel::iterator deviceIter;
+-        store->foreach_iter( sigc::bind<Glib::ustring, Gtk::TreeModel::iterator*>(
+-                                 sigc::ptr_fun(&InputDialogImpl::findDevice),
+-                                 device->getId(),
+-                                 &deviceIter) );
+-        if ( deviceIter ) {
+-            Gdk::InputMode mode = device->getMode();
+-            Gtk::TreeModel::Row row = *deviceIter;
+-            if (row[getCols().mode] != mode) {
+-                row[getCols().mode] = mode;
+-            }
+-        }
+-    }
+-}
+-
+-void InputDialogImpl::updateDeviceAxes(Glib::RefPtr<InputDevice const> device)
+-{
+-    gint live = device->getLiveAxes();
+-
+-    std::map<guint, std::pair<guint, gdouble> > existing = axesMap[device->getId()];
+-    gint mask = 0x1;
+-    for ( gint num = 0; num < 32; num++, mask <<= 1) {
+-        if ( (mask & live) != 0 ) {
+-            if ( (existing.find(num) == existing.end()) || (existing[num].first < 2) ) {
+-                axesMap[device->getId()][num].first = 2;
+-                axesMap[device->getId()][num].second = 0.0;
+-            }
+-        }
+-    }
+-    updateTestAxes( device->getId(), nullptr );
+-}
+-
+-void InputDialogImpl::updateDeviceButtons(Glib::RefPtr<InputDevice const> device)
+-{
+-    gint live = device->getLiveButtons();
+-    std::set<guint> existing = buttonMap[device->getId()];
+-    gint mask = 0x1;
+-    for ( gint num = 0; num < 32; num++, mask <<= 1) {
+-        if ( (mask & live) != 0 ) {
+-            if ( existing.find(num) == existing.end() ) {
+-                buttonMap[device->getId()].insert(num);
+-            }
+-        }
+-    }
+-    updateTestButtons(device->getId(), -1);
+-}
+-
+-
+-bool InputDialogImpl::findDevice(const Gtk::TreeModel::iterator& iter,
+-                                 Glib::ustring id,
+-                                 Gtk::TreeModel::iterator* result)
+-{
+-    bool stop = false;
+-    Glib::RefPtr<InputDevice const> dev = (*iter)[getCols().device];
+-    if ( dev && (dev->getId() == id) ) {
+-        if ( result ) {
+-            *result = iter;
+-        }
+-        stop = true;
+-    }
+-    return stop;
+-}
+-
+-bool InputDialogImpl::findDeviceByLink(const Gtk::TreeModel::iterator& iter,
+-                                       Glib::ustring link,
+-                                       Gtk::TreeModel::iterator* result)
+-{
+-    bool stop = false;
+-    Glib::RefPtr<InputDevice const> dev = (*iter)[getCols().device];
+-    if ( dev && (dev->getLink() == link) ) {
+-        if ( result ) {
+-            *result = iter;
+-        }
+-        stop = true;
+-    }
+-    return stop;
+-}
+-
+-void InputDialogImpl::updateDeviceLinks(Glib::RefPtr<InputDevice const> device, Gtk::TreeIter tabletIter, Gtk::TreeView *tree)
+-{
+-    Glib::RefPtr<Gtk::TreeStore> deviceStore = Glib::RefPtr<Gtk::TreeStore>::cast_dynamic(tree->get_model());
+-
+-//     g_message("Links!!!! for %p  hits [%s]  with link of [%s]", &device, device->getId().c_str(), device->getLink().c_str());
+-    Gtk::TreeModel::iterator deviceIter;
+-    deviceStore->foreach_iter( sigc::bind<Glib::ustring, Gtk::TreeModel::iterator*>(
+-                             sigc::ptr_fun(&InputDialogImpl::findDevice),
+-                             device->getId(),
+-                             &deviceIter) );
+-
+-    if ( deviceIter ) {
+-        // Found the device concerned. Can proceed.
+-
+-        if ( device->getLink().empty() ) {
+-            // is now unlinked
+-//             g_message("Item %s is unlinked", device->getId().c_str());
+-            if ( deviceIter->parent() != tabletIter ) {
+-                // Not the child of the tablet. move on up
+-
+-                Glib::RefPtr<InputDevice const> dev = (*deviceIter)[getCols().device];
+-                Glib::ustring descr = (*deviceIter)[getCols().description];
+-                Glib::RefPtr<Gdk::Pixbuf> thumb = (*deviceIter)[getCols().thumbnail];
+-
+-                Gtk::TreeModel::Row deviceRow = *deviceStore->append(tabletIter->children());
+-                deviceRow[getCols().description] = descr;
+-                deviceRow[getCols().thumbnail] = thumb;
+-                deviceRow[getCols().device] = dev;
+-                deviceRow[getCols().mode] = dev->getMode();
+-
+-                Gtk::TreeModel::iterator oldParent = deviceIter->parent();
+-                deviceStore->erase(deviceIter);
+-                if ( oldParent->children().empty() ) {
+-                    deviceStore->erase(oldParent);
+-                }
+-            }
+-        } else {
+-            // is linking
+-            if ( deviceIter->parent() == tabletIter ) {
+-                // Simple case. Not already linked
+-
+-                Gtk::TreeIter newGroup = deviceStore->append(tabletIter->children());
+-                (*newGroup)[getCols().description] = _("Pen");
+-                (*newGroup)[getCols().thumbnail] = getPix(PIX_PEN);
+-
+-                Glib::RefPtr<InputDevice const> dev = (*deviceIter)[getCols().device];
+-                Glib::ustring descr = (*deviceIter)[getCols().description];
+-                Glib::RefPtr<Gdk::Pixbuf> thumb = (*deviceIter)[getCols().thumbnail];
+-
+-                Gtk::TreeModel::Row deviceRow = *deviceStore->append(newGroup->children());
+-                deviceRow[getCols().description] = descr;
+-                deviceRow[getCols().thumbnail] = thumb;
+-                deviceRow[getCols().device] = dev;
+-                deviceRow[getCols().mode] = dev->getMode();
+-
+-
+-                Gtk::TreeModel::iterator linkIter;
+-                deviceStore->foreach_iter( sigc::bind<Glib::ustring, Gtk::TreeModel::iterator*>(
+-                                         sigc::ptr_fun(&InputDialogImpl::findDeviceByLink),
+-                                         device->getId(),
+-                                         &linkIter) );
+-                if ( linkIter ) {
+-                    dev = (*linkIter)[getCols().device];
+-                    descr = (*linkIter)[getCols().description];
+-                    thumb = (*linkIter)[getCols().thumbnail];
+-
+-                    deviceRow = *deviceStore->append(newGroup->children());
+-                    deviceRow[getCols().description] = descr;
+-                    deviceRow[getCols().thumbnail] = thumb;
+-                    deviceRow[getCols().device] = dev;
+-                    deviceRow[getCols().mode] = dev->getMode();
+-                    Gtk::TreeModel::iterator oldParent = linkIter->parent();
+-                    deviceStore->erase(linkIter);
+-                    if ( oldParent->children().empty() ) {
+-                        deviceStore->erase(oldParent);
+-                    }
+-                }
+-
+-                Gtk::TreeModel::iterator oldParent = deviceIter->parent();
+-                deviceStore->erase(deviceIter);
+-                if ( oldParent->children().empty() ) {
+-                    deviceStore->erase(oldParent);
+-                }
+-                tree->expand_row(Gtk::TreePath(newGroup), true);
+-            }
+-        }
+-    }
+-}
+-
+-void InputDialogImpl::linkComboChanged() {
+-    Glib::RefPtr<Gtk::TreeSelection> treeSel = deviceTree.get_selection();
+-    Gtk::TreeModel::iterator iter = treeSel->get_selected();
+-    if (iter) {
+-        Gtk::TreeModel::Row row = *iter;
+-        Glib::ustring val = row[getCols().description];
+-        Glib::RefPtr<InputDevice const> dev = row[getCols().device];
+-        if ( dev ) {
+-            if ( linkCombo.get_active_row_number() == 0 ) {
+-                // It is the "None" entry
+-                DeviceManager::getManager().setLinkedTo(dev->getId(), "");
+-            } else {
+-                Glib::ustring linkName = linkCombo.get_active_text();
+-                std::list<Glib::RefPtr<InputDevice const> > devList = Inkscape::DeviceManager::getManager().getDevices();
+-                for ( std::list<Glib::RefPtr<InputDevice const> >::const_iterator it = devList.begin(); it != devList.end(); ++it ) {
+-                    if ( linkName == (*it)->getName() ) {
+-                        DeviceManager::getManager().setLinkedTo(dev->getId(), (*it)->getId());
+-                        break;
+-                    }
+-                }
+-            }
+-        }
+-    }
+-}
+-
+-void InputDialogImpl::resyncToSelection() {
+-    bool clear = true;
+-    Glib::RefPtr<Gtk::TreeSelection> treeSel = deviceTree.get_selection();
+-    Gtk::TreeModel::iterator iter = treeSel->get_selected();
+-    if (iter) {
+-        Gtk::TreeModel::Row row = *iter;
+-        Glib::ustring val = row[getCols().description];
+-        Glib::RefPtr<InputDevice const> dev = row[getCols().device];
+-
+-        if ( dev ) {
+-            axisTable.set_sensitive(true);
+-
+-            linkConnection.block();
+-            linkCombo.remove_all();
+-            linkCombo.append(_("None"));
+-            linkCombo.set_active(0);
+-            if ( dev->getSource() != Gdk::SOURCE_MOUSE ) {
+-                Glib::ustring linked = dev->getLink();
+-                std::list<Glib::RefPtr<InputDevice const> > devList = Inkscape::DeviceManager::getManager().getDevices();
+-                for ( std::list<Glib::RefPtr<InputDevice const> >::const_iterator it = devList.begin(); it != devList.end(); ++it ) {
+-                    if ( ((*it)->getSource() != Gdk::SOURCE_MOUSE) && ((*it) != dev) ) {
+-                        linkCombo.append((*it)->getName().c_str());
+-                        if ( (linked.length() > 0) && (linked == (*it)->getId()) ) {
+-                            linkCombo.set_active_text((*it)->getName().c_str());
+-                        }
+-                    }
+-                }
+-                linkCombo.set_sensitive(true);
+-            } else {
+-                linkCombo.set_sensitive(false);
+-            }
+-            linkConnection.unblock();
+-
+-            clear = false;
+-            devName.set_label(row[getCols().description]);
+-            axisFrame.set_label(row[getCols().description]);
+-            setupValueAndCombo( dev->getNumAxes(), dev->getNumAxes(), devAxesCount, axesCombo);
+-            setupValueAndCombo( dev->getNumKeys(), dev->getNumKeys(), devKeyCount, buttonCombo);
+-
+-
+-        }
+-    }
+-
+-    axisTable.set_sensitive(!clear);
+-    if (clear) {
+-        axisFrame.set_label("");
+-        devName.set_label("");
+-        devAxesCount.set_label("");
+-        devKeyCount.set_label("");
+-    }
+-}
+-
+-void InputDialogImpl::ConfPanel::setAxis(gint count)
+-{
+-    /*
+-     * TODO - Make each axis editable
+-     */
+-    axisStore->clear();
+-
+-    static Glib::ustring axesLabels[6] = {_("X"), _("Y"), _("Pressure"), _("X tilt"), _("Y tilt"), _("Wheel")};
+-
+-    for ( gint barNum = 0; barNum < static_cast<gint>(G_N_ELEMENTS(axesLabels)); barNum++ ) {
+-
+-            Gtk::TreeModel::Row row = *(axisStore->append());
+-            row[axisColumns.name] = axesLabels[barNum];
+-            if (barNum < count) {
+-                row[axisColumns.value] = Glib::ustring::format(barNum+1);
+-            } else {
+-                row[axisColumns.value] = C_("Input device axe", "None");
+-            }
+-    }
+-
+-}
+-void InputDialogImpl::ConfPanel::setKeys(gint count)
+-{
+-    /*
+-     * TODO - Make each key assignable
+-     */
+-
+-    keysStore->clear();
+-
+-    for (gint i = 0; i < count; i++) {
+-        Gtk::TreeModel::Row row = *(keysStore->append());
+-        row[keysColumns.name] = Glib::ustring::format(i+1);
+-        row[keysColumns.value] = _("Disabled");
+-    }
+-
+-
+-}
+-void InputDialogImpl::setupValueAndCombo( gint reported, gint actual, Gtk::Label& label, Gtk::ComboBoxText& combo )
+-{
+-    gchar *tmp = g_strdup_printf("%d", reported);
+-    label.set_label(tmp);
+-    g_free(tmp);
+-
+-    combo.remove_all();
+-    for ( gint i = 1; i <= reported; ++i ) {
+-        tmp = g_strdup_printf("%d", i);
+-        combo.append(tmp);
+-        g_free(tmp);
+-    }
+-
+-    if ( (1 <= actual) && (actual <= reported) ) {
+-        combo.set_active(actual - 1);
+-    }
+-}
+-
+-void InputDialogImpl::updateTestButtons( Glib::ustring const& key, gint hotButton )
+-{
+-    for ( gint i = 0; i < static_cast<gint>(G_N_ELEMENTS(testButtons)); i++ ) {
+-        if ( buttonMap[key].find(i) != buttonMap[key].end() ) {
+-            if ( i == hotButton ) {
+-                testButtons[i].set(getPix(PIX_BUTTONS_ON));
+-            } else {
+-                testButtons[i].set(getPix(PIX_BUTTONS_OFF));
+-            }
+-        } else {
+-            testButtons[i].set(getPix(PIX_BUTTONS_NONE));
+-        }
+-    }
+-}
+-
+-void InputDialogImpl::updateTestAxes( Glib::ustring const& key, GdkDevice* dev )
+-{
+-    //static gdouble epsilon = 0.0001;
+-    {
+-        Glib::RefPtr<Gtk::TreeSelection> treeSel = deviceTree.get_selection();
+-        Gtk::TreeModel::iterator iter = treeSel->get_selected();
+-        if (iter) {
+-            Gtk::TreeModel::Row row = *iter;
+-            Glib::ustring val = row[getCols().description];
+-            Glib::RefPtr<InputDevice const> idev = row[getCols().device];
+-            if ( !idev || (idev->getId() != key) ) {
+-                dev = nullptr;
+-            }
+-        }
+-    }
+-
+-    for ( gint i = 0; i < static_cast<gint>(G_N_ELEMENTS(testAxes)); i++ ) {
+-        if ( axesMap[key].find(i) != axesMap[key].end() ) {
+-            switch ( axesMap[key][i].first ) {
+-                case 0:
+-                case 1:
+-                    testAxes[i].set(getPix(PIX_AXIS_NONE));
+-                    if ( dev && (i < static_cast<gint>(G_N_ELEMENTS(axesValues)) ) ) {
+-                        axesValues[i].set_sensitive(false);
+-                    }
+-                    break;
+-                case 2:
+-                    testAxes[i].set(getPix(PIX_AXIS_OFF));
+-                    axesValues[i].set_sensitive(true);
+-                    if ( dev && (i < static_cast<gint>(G_N_ELEMENTS(axesValues)) ) ) {
+-                       // FIXME: Device axis ranges are inaccessible in GTK+ 3 and
+-               // are deprecated in GTK+ 2. Progress-bar ranges are disabled
+-               // until we find an alternative solution
+-
+-                       //   if ( (dev->axes[i].max - dev->axes[i].min) > epsilon ) {
+-                            axesValues[i].set_sensitive(true);
+-                       //       axesValues[i].set_fraction( (axesMap[key][i].second- dev->axes[i].min) / (dev->axes[i].max - dev->axes[i].min) );
+-                       //   }
+-
+-                        gchar* str = g_strdup_printf("%f", axesMap[key][i].second);
+-                        axesValues[i].set_text(str);
+-                        g_free(str);
+-                    }
+-                    break;
+-                case 3:
+-                    testAxes[i].set(getPix(PIX_AXIS_ON));
+-                    axesValues[i].set_sensitive(true);
+-                    if ( dev && (i < static_cast<gint>(G_N_ELEMENTS(axesValues)) ) ) {
+-
+-                       // FIXME: Device axis ranges are inaccessible in GTK+ 3 and
+-               // are deprecated in GTK+ 2. Progress-bar ranges are disabled
+-               // until we find an alternative solution
+-
+-               // if ( (dev->axes[i].max - dev->axes[i].min) > epsilon ) {
+-                            axesValues[i].set_sensitive(true);
+-                       //     axesValues[i].set_fraction( (axesMap[key][i].second- dev->axes[i].min) / (dev->axes[i].max - dev->axes[i].min) );
+-                       // }
+-
+-                        gchar* str = g_strdup_printf("%f", axesMap[key][i].second);
+-                        axesValues[i].set_text(str);
+-                        g_free(str);
+-                    }
+-            }
+-
+-        } else {
+-            testAxes[i].set(getPix(PIX_AXIS_NONE));
+-        }
+-    }
+-    if ( !dev ) {
+-        for (auto & axesValue : axesValues) {
+-            axesValue.set_fraction(0.0);
+-            axesValue.set_text("");
+-            axesValue.set_sensitive(false);
+-        }
+-    }
+-}
+-
+-void InputDialogImpl::mapAxesValues( Glib::ustring const& key, gdouble const * axes, GdkDevice* dev )
+-{
+-    auto device = Glib::wrap(dev);
+-    auto numAxes = device->get_n_axes();
+-
+-    static gdouble epsilon = 0.0001;
+-    if ( (numAxes > 0) && axes) {
+-        for ( guint axisNum = 0; axisNum < numAxes; axisNum++ ) {
+-            // 0 == new, 1 == set value, 2 == changed value, 3 == active
+-            gdouble diff = axesMap[key][axisNum].second - axes[axisNum];
+-            switch(axesMap[key][axisNum].first) {
+-                case 0:
+-                {
+-                    axesMap[key][axisNum].first = 1;
+-                    axesMap[key][axisNum].second = axes[axisNum];
+-                }
+-                break;
+-                case 1:
+-                {
+-                    if ( (diff > epsilon) || (diff < -epsilon) ) {
+-//                         g_message("Axis %d changed on %s]", axisNum, key.c_str());
+-                        axesMap[key][axisNum].first = 3;
+-                        axesMap[key][axisNum].second = axes[axisNum];
+-                        updateTestAxes(key, dev);
+-                        DeviceManager::getManager().addAxis(key, axisNum);
+-                    }
+-                }
+-                break;
+-                case 2:
+-                {
+-                    if ( (diff > epsilon) || (diff < -epsilon) ) {
+-                        axesMap[key][axisNum].first = 3;
+-                        axesMap[key][axisNum].second = axes[axisNum];
+-                        updateTestAxes(key, dev);
+-                    }
+-                }
+-                break;
+-                case 3:
+-                {
+-                    if ( (diff > epsilon) || (diff < -epsilon) ) {
+-                        axesMap[key][axisNum].second = axes[axisNum];
+-                    } else {
+-                        axesMap[key][axisNum].first = 2;
+-                        updateTestAxes(key, dev);
+-                    }
+-                }
+-            }
+-        }
+-    }
+-    // std::map<Glib::ustring, std::map<guint, std::pair<guint, gdouble> > > axesMap;
+-}
+-
+-Glib::ustring InputDialogImpl::getKeyFor( GdkDevice* device )
+-{
+-    Glib::ustring key;
+-    auto devicemm = Glib::wrap(device);
+-
+-    auto source = devicemm->get_source();
+-    const auto name = devicemm->get_name();
+-
+-    switch ( source ) {
+-        case Gdk::SOURCE_MOUSE:
+-            key = "M:";
+-            break;
+-        case Gdk::SOURCE_CURSOR:
+-            key = "C:";
+-            break;
+-        case Gdk::SOURCE_PEN:
+-            key = "P:";
+-            break;
+-        case Gdk::SOURCE_ERASER:
+-            key = "E:";
+-            break;
+-        default:
+-            key = "?:";
+-    }
+-    key += name;
+-
+-    return key;
+-}
+-
+-bool InputDialogImpl::eventSnoop(GdkEvent* event)
+-{
+-    int modmod = 0;
+-
+-    auto source = lastSourceSeen;
+-    Glib::ustring devName = lastDevnameSeen;
+-    Glib::ustring key;
+-    gint hotButton = -1;
+-
+-    /* Code for determining which input device caused the event fails with GTK3
+-    * because event->device gives a "generic" input device, not the one that
+-    * actually caused the event. See snoop_extended in desktop-events.cpp
+-    */
+-
+-    switch ( event->type ) {
+-        case GDK_KEY_PRESS:
+-        case GDK_KEY_RELEASE:
+-        {
+-            auto keyEvt = reinterpret_cast<GdkEventKey*>(event);
+-            auto name = Gtk::AccelGroup::name(keyEvt->keyval, static_cast<Gdk::ModifierType>(keyEvt->state));
+-            keyVal.set_label(name);
+-//             g_message("%d KEY    state:0x%08x  0x%04x [%s]", keyEvt->type, keyEvt->state, keyEvt->keyval, name);
+-        }
+-        break;
+-        case GDK_BUTTON_PRESS:
+-            modmod = 1;
+-            // fallthrough
+-        case GDK_BUTTON_RELEASE:
+-        {
+-            auto btnEvt = reinterpret_cast<GdkEventButton*>(event);
+-            auto device = Glib::wrap(btnEvt->device);
+-            if (device) {
+-                key = getKeyFor(btnEvt->device);
+-                source = device->get_source();
+-                devName = device->get_name();
+-                mapAxesValues(key, btnEvt->axes, btnEvt->device);
+-
+-                if ( buttonMap[key].find(btnEvt->button) == buttonMap[key].end() ) {
+-//                     g_message("New button found for %s = %d", key.c_str(), btnEvt->button);
+-                    buttonMap[key].insert(btnEvt->button);
+-                    DeviceManager::getManager().addButton(key, btnEvt->button);
+-                }
+-                hotButton = modmod ? btnEvt->button : -1;
+-                updateTestButtons(key, hotButton);
+-            }
+-            auto name = Gtk::AccelGroup::name(0, static_cast<Gdk::ModifierType>(btnEvt->state));
+-            keyVal.set_label(name);
+-//             g_message("%d BTN    state:0x%08x %c  %4d [%s] dev:%p [%s]  ",
+-//                       btnEvt->type, btnEvt->state,
+-//                       (modmod ? '+':'-'),
+-//                       btnEvt->button, name, btnEvt->device,
+-//                       (btnEvt->device ? btnEvt->device->name : "null")
+-
+-//                 );
+-        }
+-        break;
+-        case GDK_MOTION_NOTIFY:
+-        {
+-            GdkEventMotion* btnMtn = reinterpret_cast<GdkEventMotion*>(event);
+-            auto device = Glib::wrap(btnMtn->device);
+-            if (device) {
+-                key = getKeyFor(btnMtn->device);
+-                source = device->get_source();
+-                devName = device->get_name();
+-                mapAxesValues(key, btnMtn->axes, btnMtn->device);
+-            }
+-            auto name = Gtk::AccelGroup::name(0, static_cast<Gdk::ModifierType>(btnMtn->state));
+-            keyVal.set_label(name);
+-//             g_message("%d MOV    state:0x%08x         [%s] dev:%p [%s] %3.2f %3.2f %3.2f %3.2f %3.2f %3.2f", btnMtn->type, btnMtn->state,
+-//                       name, btnMtn->device,
+-//                       (btnMtn->device ? btnMtn->device->name : "null"),
+-//                       ((btnMtn->device && btnMtn->axes && (btnMtn->device->num_axes > 0)) ? btnMtn->axes[0]:0),
+-//                       ((btnMtn->device && btnMtn->axes && (btnMtn->device->num_axes > 1)) ? btnMtn->axes[1]:0),
+-//                       ((btnMtn->device && btnMtn->axes && (btnMtn->device->num_axes > 2)) ? btnMtn->axes[2]:0),
+-//                       ((btnMtn->device && btnMtn->axes && (btnMtn->device->num_axes > 3)) ? btnMtn->axes[3]:0),
+-//                       ((btnMtn->device && btnMtn->axes && (btnMtn->device->num_axes > 4)) ? btnMtn->axes[4]:0),
+-//                       ((btnMtn->device && btnMtn->axes && (btnMtn->device->num_axes > 5)) ? btnMtn->axes[5]:0)
+-//                 );
+-        }
+-        break;
+-        default:
+-            ;// nothing
+-    }
+-
+-
+-    if ( (lastSourceSeen != source) || (lastDevnameSeen != devName) ) {
+-        switch (source) {
+-            case Gdk::SOURCE_MOUSE: {
+-                testThumb.set(getPix(PIX_CORE));
+-                break;
+-            }
+-            case Gdk::SOURCE_CURSOR: {
+-//                g_message("flip to cursor");
+-                testThumb.set(getPix(PIX_MOUSE));
+-                break;
+-            }
+-            case Gdk::SOURCE_PEN: {
+-                if (devName == _("pad")) {
+-//                     g_message("flip to pad");
+-                    testThumb.set(getPix(PIX_SIDEBUTTONS));
+-                } else {
+-//                     g_message("flip to pen");
+-                    testThumb.set(getPix(PIX_TIP));
+-                }
+-                break;
+-            }
+-            case Gdk::SOURCE_ERASER: {
+-//                 g_message("flip to eraser");
+-                testThumb.set(getPix(PIX_ERASER));
+-                break;
+-            }
+-            /// \fixme GTK3 added new GDK_SOURCEs that should be handled here!
+-            case Gdk::SOURCE_KEYBOARD:
+-            case Gdk::SOURCE_TOUCHSCREEN:
+-            case Gdk::SOURCE_TOUCHPAD:
+-            case Gdk::SOURCE_TRACKPOINT:
+-            case Gdk::SOURCE_TABLET_PAD:
+-                 g_warning("InputDialogImpl::eventSnoop : unhandled GDK_SOURCE type!");
+-                 break;
+-        }
+-
+-        updateTestButtons(key, hotButton);
+-        lastSourceSeen = source;
+-        lastDevnameSeen = devName;
+-    }
+-
+-    return false;
+-}
+-
+-} // end namespace Inkscape
+-} // end namespace UI
+-} // end namespace Dialog
+-
+-/*
+-  Local Variables:
+-  mode:c++
+-  c-file-style:"stroustrup"
+-  c-file-offsets:((innamespace . 0)(inline-open . 0)(case-label . +))
+-  indent-tabs-mode:nil
+-  fill-column:99
+-  End:
+-*/
+-// vim: filetype=cpp:expandtab:shiftwidth=4:tabstop=8:softtabstop=4:fileencoding=utf-8:textwidth=99 :
+diff --git a/src/ui/dialog/input.h b/src/ui/dialog/input.h
+deleted file mode 100644
+index d4e74774fc..0000000000
+--- a/src/ui/dialog/input.h
++++ /dev/null
+@@ -1,46 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0-or-later
+-/** @file
+- * @brief Input devices dialog (new)
+- */
+-/* Author:
+- *   Jon A. Cruz
+- *
+- * Copyright (C) 2008 Author
+- * Released under GNU GPL v2+, read the file 'COPYING' for more information.
+- */
+-
+-#ifndef INKSCAPE_UI_DIALOG_INPUT_H
+-#define INKSCAPE_UI_DIALOG_INPUT_H
+-
+-#include <memory>
+-#include "ui/dialog/dialog-base.h"
+-
+-namespace Inkscape {
+-namespace UI {
+-namespace Dialog {
+-
+-class InputDialog : public DialogBase
+-{
+-public:
+-    static std::unique_ptr<InputDialog> create();
+-
+-protected:
+-    InputDialog() : DialogBase("/dialogs/inputdevices", "Input") {}
+-};
+-
+-} // namespace Dialog
+-} // namesapce UI
+-} // namespace Inkscape
+-
+-#endif // INKSCAPE_UI_DIALOG_INPUT_H
+-
+-/*
+-  Local Variables:
+-  mode:c++
+-  c-file-style:"stroustrup"
+-  c-file-offsets:((innamespace . 0)(inline-open . 0)(case-label . +))
+-  indent-tabs-mode:nil
+-  fill-column:99
+-  End:
+-*/
+-// vim: filetype=cpp:expandtab:shiftwidth=4:tabstop=8:softtabstop=4:fileencoding=utf-8:textwidth=99 :
+-- 
+2.45.2
+
