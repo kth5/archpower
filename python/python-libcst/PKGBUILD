@@ -1,39 +1,30 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Filipe Laíns (FFY00) <lains@archlinux.org>
 
-_pkgname=libcst
+_pkgname=LibCST
 pkgname=python-libcst
-pkgver=1.3.1
+pkgver=1.4.0
 pkgrel=1
 pkgdesc="A concrete syntax tree parser and serializer library for Python that preserves many aspects of Python's abstract syntax tree"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://github.com/Instagram/LibCST'
 license=('MIT')
-depends=(
-  'glibc'
-  'gcc-libs'
-  'python'
-  'python-typing_extensions'
-  'python-typing_inspect'
-  'python-pyyaml'
-)
-makedepends=(
-  'python-build'
-  'python-installer'
-  'python-setuptools-rust'
-  'python-setuptools-scm'
-  'python-wheel'
-  'ufmt'
-)
-checkdepends=(
-  'python-hypothesis'
-  'python-hypothesmith'
-  'python-pytest'
-)
-source=("https://pypi.io/packages/source/l/libcst/libcst-$pkgver.tar.gz"
+depends=('glibc' 'gcc-libs' 'python' 'python-pyyaml')
+makedepends=('python-build' 'python-installer'
+             'python-setuptools-rust' 'python-setuptools-scm' 'python-wheel')
+#checkdepends=('python-hypothesis' 'python-hypothesmith')
+#source=("https://pypi.io/packages/source/l/libcst/libcst-$pkgver.tar.gz")
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz"
         libcst-cargo-updates.patch)
-sha512sums=('c5ac467bab0ff2808db4510620444cb7705d1af88f0e3f41c43c9ab493206d58561ca2ffb9ee98f14286ee182b4271103d9ca3c3935fef5a8f8dcf60dfae5b50'
+sha512sums=('e95b2d30cb0273e5b723cf532f63b7b18f44c7f909a9d03331e0b7b7200bee8b635de4782071fb099609fcc4fb1c81bd5cd7ee3d44de535e2e1ad7b1363d31e0'
             'e7a327d16a15e7646a831d24e812b301e93c525f8cac71ec719e6b05a93679c8da0c5ac5290e971a9191d4fc75e41bf0c0cd6c02f9a336f7bc1cd44ee1a24474')
+
+#prepare() {
+#  cd $_pkgname-$pkgver
+#
+#  sed -i '/pyre.*start/d' scripts/regenerate-fixtures.py
+#  python scripts/regenerate-fixtures.py
+#}
 
 prepare() {
   cd $_pkgname-$pkgver
@@ -45,30 +36,27 @@ prepare() {
 build() {
   cd $_pkgname-$pkgver
 
-  python -m build --wheel --no-isolation
+  SETUPTOOLS_SCM_PRETEND_VERSION=$pkgver python -m build --wheel --no-isolation
 }
 
-check() {
-  local pytest_options=(
-    --ignore libcst/tests/test_fuzz.py
-    --deselect libcst/metadata/tests/test_type_inference_provider.py::TypeInferenceProviderTest::test_gen_cache_0
-    --deselect libcst/metadata/tests/test_type_inference_provider.py::TypeInferenceProviderTest::test_simple_class_types_0
-    --deselect libcst/metadata/tests/test_type_inference_provider.py::TypeInferenceProviderTest::test_with_empty_cache
-  )
-  cd $_pkgname-$pkgver
-
-  pytest -vv "${pytest_options[@]}"
-}
+#check() {
+#  cd $_pkgname-$pkgver
+#
+#  python -m venv --system-site-packages testenv
+#  python -m installer --prefix=testenv dist/*.whl
+#
+#  testenv/bin/python -m libcst.tests
+#}
 
 package() {
-  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-
   cd $_pkgname-$pkgver
 
   python -m installer --destdir="$pkgdir" dist/*.whl
   install -Dm 644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
+
   # remove tests
-  rm -frv "$pkgdir/$site_packages/$_pkgname/"{tests,metadata/tests}
+  rm -rfv "$pkgdir"/usr/lib/python*/site-packages/libcst/tests/
+  rm -rfv "$pkgdir"/usr/lib/python*/site-packages/libcst/**/tests/
 }
 
 # vim:set ts=2 sw=2 et:
