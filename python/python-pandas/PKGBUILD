@@ -5,14 +5,14 @@
 # Contributor: Keith Hughitt <khughitt@umd.edu>
 
 pkgname=python-pandas
-pkgver=1.5.3
-pkgrel=4
+pkgver=2.2.2
+pkgrel=3
 pkgdesc='High-performance, easy-to-use data structures and data analysis tools for Python'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://pandas.pydata.org/"
 license=(BSD)
 depends=('python-numpy' 'python-dateutil' 'python-pytz')
-makedepends=('cython0' 'python-setuptools')
+makedepends=('git' 'cython' 'python-build' 'python-installer' 'meson-python' 'python-versioneer')
 optdepends=(
     'python-pandas-datareader: pandas.io.data replacement (recommended)'
     'python-numexpr: accelerating certain numerical operations (recommended)'
@@ -106,33 +106,29 @@ checkdepends=(
     'python-botocore'
     'python-numba'
 )
-# No test data in upstream crafted tarball
+# No test data in upstream tarballs
 #source=(https://github.com/pandas-dev/pandas/releases/download/v${pkgver}/pandas-${pkgver}.tar.gz)
-source=(https://github.com/pandas-dev/pandas/archive/refs/tags/v${pkgver}/${pkgname}-${pkgver}.tar.gz
-        fix-pyarrow-10.patch)
-sha256sums=('d8abf9c2bf33cac75b28f32c174c29778414eb249e5e2ccb69b1079b97a8fc66'
-            '65008439d0eeef47ef4dca98ef7469b548f3d2f3b1666809cb846b84b07c05f4')
-
-prepare() {
-  cd pandas-${pkgver}
-  # https://github.com/pandas-dev/pandas/commit/4878dfe551da2fa8e2bc33e774b595f099bfa74e
-  patch -p1 < ../fix-pyarrow-10.patch
-}
+source=(git+https://github.com/pandas-dev/pandas#tag=v${pkgver})
+sha256sums=('9ccd5a7d6adabae35b554eff2965848730cd18fd8c8393d2a449aa9ce5616208')
 
 build() {
-  cd pandas-${pkgver}
-  python setup.py build_ext --inplace
-  python setup.py build
+  cd pandas
+  python -m build --wheel --no-isolation --skip-dependency-check
 }
 
 check() {
-  cd pandas-${pkgver}
-  # TODO: Revisit after new release with better python3.11 support
-  # pytest pandas --skip-slow --skip-network --skip-db -m "not clipboard and not single_cpu" -n 4 -r sxX || true
+  cd pandas
+  mkdir -p test-install
+  python -m installer --destdir="$PWD"/test-install dist/*.whl
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  mv pandas{,.backup} # Prevent pytest from picking up uncompiled pandas from $PWD
+  PYTHONPATH="$srcdir"/test-install/${site_packages} \
+  pytest -v pandas.backup -m "not network and not db and not slow and not clipboard and not single_cpu" -n 4 -r sxX --no-strict-data-files || true
+  mv pandas{.backup,.}
 }
 
 package() {
-  cd pandas-${pkgver}
-  python setup.py install --skip-build --root="$pkgdir" --optimize=1
+  cd pandas
+  python -m installer --destdir="$pkgdir" dist/*.whl
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
