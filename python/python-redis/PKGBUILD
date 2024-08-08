@@ -1,12 +1,13 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: George Rawlinson <grawlinson@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 # Contributor: Felix Yan <felixonmars@archlinux.org>
 # Contributor: Karol 'Kenji Takahashi' Woźniak <kenji.sx>
 # Contributor: Pierre Gueth <pierre.gueth@gmail.com>
 
 pkgname=python-redis
-pkgver=5.0.1
-pkgrel=2
+pkgver=5.0.7
+pkgrel=1
 pkgdesc='The Python interface to the Redis key-value store'
 arch=(any)
 url='https://github.com/redis/redis-py'
@@ -19,34 +20,26 @@ makedepends=(
   'git'
   'python-build'
   'python-installer'
-  'python-wheel'
   'python-setuptools'
+  'python-wheel'
 )
 optdepends=(
-  'python-hiredis: faster performance via hiredis'
   'python-cryptography: OCSP certificate validation'
+  'python-hiredis: faster performance via hiredis'
   'python-pyopenssl: OCSP certificate validation'
   'python-requests: OCSP certificate validation'
 )
 checkdepends=(
-  'pifpaf'
-  'redis'
+  'python-cryptography'
+  'python-hiredis'
+  'python-pyopenssl'
   'python-pytest'
   'python-pytest-asyncio'
-  'python-hiredis'
-  'python-cryptography'
-  'python-pyopenssl'
   'python-requests'
+  'redis'
 )
-_commit='cc4bc1a544d1030aec1696baef2861064fa8dd1c'
-source=("$pkgname::git+$url#commit=$_commit")
-b2sums=('SKIP')
-
-pkgver() {
-  cd "$pkgname"
-
-  git describe --tags | sed 's/^v//'
-}
+source=("$pkgname::git+$url#tag=v$pkgver")
+b2sums=('666f2bf21ea10b368da57b4e6740a00eeaa8646ad89b332214f0638b22130aa62a06f50aefdb6fa0de0318fd32b4cb891ea9b574802e150e55d474517edfc369')
 
 build() {
   cd "$pkgname"
@@ -57,20 +50,90 @@ build() {
 check() {
   cd "$pkgname"
 
-  # tests/test_ssl.py requires SSL keys
-  pifpaf run redis -- pytest --ignore tests/test_ssl.py || echo "Tests failed"
+  # shellcheck disable=SC2317
+  _teardown() {
+    redis-cli -p 6379 shutdown
+    redis-cli -p 6380 shutdown
+    for port in $(seq 16379 16384); do
+      redis-cli -p "$port" shutdown;
+    done
+    rm -rf cluster
+  }
+  trap '_teardown' EXIT
+
+  # Setup single instance and replica.
+  redis-server \
+    --enable-debug-command yes \
+    --enable-module-command yes \
+    --daemonize yes \
+    --port 6379
+  redis-server \
+    --replicaof 127.0.0.1 6379 \
+    --daemonize yes \
+    --port 6380
+
+  # Setup cluster.
+  for port in $(seq 16379 16384); do
+    mkdir -p "cluster/$port"
+    pushd "cluster/$port"
+    redis-server \
+      --cluster-enabled yes \
+      --enable-debug-command yes \
+      --dir "$PWD" \
+      --logfile "$PWD/redis.log" \
+      --daemonize yes \
+      --port "$port"
+    popd
+  done
+  yes yes | redis-cli --cluster create \
+    127.0.0.1:16379 \
+    127.0.0.1:16380 \
+    127.0.0.1:16381 \
+    127.0.0.1:16382 \
+    127.0.0.1:16383 \
+    127.0.0.1:16384 \
+    --cluster-replicas 1
+
+  local pytest_deselect_args=(
+    # Tests that are testing, and as such depend on, modules that are part of
+    # Redis Stack. These are not packaged since they are not OSS, only source
+    # available.
+    --deselect=tests/test_asyncio/test_bloom.py
+    --deselect=tests/test_asyncio/test_json.py
+    --deselect=tests/test_asyncio/test_search.py
+    --deselect=tests/test_asyncio/test_timeseries.py
+    --deselect=tests/test_bloom.py
+    --deselect=tests/test_cluster.py::TestClusterRedisCommands::test_tfcall
+    --deselect=tests/test_cluster.py::TestClusterRedisCommands::test_tfunction_list
+    --deselect=tests/test_cluster.py::TestClusterRedisCommands::test_tfunction_load_delete
+    --deselect=tests/test_commands.py::TestRedisCommands::test_tfcall
+    --deselect=tests/test_commands.py::TestRedisCommands::test_tfunction_list
+    --deselect=tests/test_commands.py::TestRedisCommands::test_tfunction_load_delete
+    --deselect=tests/test_json.py
+    --deselect=tests/test_search.py
+    --deselect=tests/test_timeseries.py
+
+    # Tests that freezes, unsure of why.
+    --deselect tests/test_asyncio/test_cluster.py::TestRedisClusterObj::test_address_remap
+  )
+
+  # Run standalone test suite - targets the Redis server running :6379 and the
+  # replica on :6380.
+  pytest \
+    -m "not onlycluster and not ssl" \
+    "${pytest_deselect_args[@]}"
+
+  # Run cluster tests suite - targets the Redis cluster running on
+  # :16379-:16384.
+  pytest \
+    --redis-url="redis://localhost:16379/0" \
+    -m "not onlynoncluster and not redismod and not ssl" \
+    "${pytest_deselect_args[@]}"
 }
 
 package() {
   cd "$pkgname"
 
   python -m installer --destdir="$pkgdir" dist/*.whl
-
-  # symlink license file
-  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-  install -d "$pkgdir/usr/share/licenses/$pkgname"
-  ln -s "$site_packages/${pkgname#python-}-$pkgver.dist-info/LICENSE" \
-    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
 }
-
-# vim:set ts=2 sw=2 et:
