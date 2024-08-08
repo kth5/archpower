@@ -1,18 +1,45 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jelle van der Waa <jelle@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 # Maintainer: Sébastien Luttringer
 
 pkgname=python-psutil
-pkgver=5.9.8
-pkgrel=4
+pkgver=6.0.0
+pkgrel=1
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 pkgdesc='A cross-platform process and system utilities module for Python'
 url='https://github.com/giampaolo/psutil'
 license=('BSD-3-Clause')
-depends=('python')
-makedepends=('python-setuptools' 'python-build' 'python-installer' 'python-wheel')
-checkdepends=('net-tools' 'procps-ng' 'python-pytest')
-source=("https://github.com/giampaolo/psutil/archive/release-$pkgver.tar.gz")
-sha512sums=('9943adcf4cdb333c729765fef9e3cc7623ef90cfdf8c91fcb8093c45a6978efa9f749b1f1818dde99a772b89e9dd86c3d7cc5f8f1047bf8782d00a30d9284c7f')
+depends=(
+  'glibc'
+  'python'
+)
+makedepends=(
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+)
+checkdepends=(
+  'net-tools'
+  'procps-ng'
+  'python-pytest'
+)
+source=(
+  "$pkgname-$pkgver.tar.gz::$url/archive/release-$pkgver.tar.gz"
+  "remove-failing-tests.patch"
+)
+sha512sums=(
+  '9db50d4c10cd6c0a73099f7262c218fd6e8e38fb443d22b42a45765527fe6f982455a7ca23d6d679ccc5df130c4257bb7fb5ee539ac5991d92358a072ab290a7'
+  '5194ff360af46fcda1201fe3217e4590ea6086b16e594ac7c5bbf8c7ef42c1e4bbe00cb16e6f53ba2509678006313a339cde68f052f8444c2bfa3bbf31052a8f'
+)
+
+prepare() {
+  cd psutil-release-$pkgver
+
+  # Some tests are failing in a chroot - remove them.
+  patch -Np1 -i "$srcdir/remove-failing-tests.patch"
+}
 
 build() {
   cd psutil-release-$pkgver
@@ -23,16 +50,16 @@ build() {
 check() {
   cd psutil-release-$pkgver
 
-  # Required for testing
-#cp setup.py build/python
-#cp -r scripts build/python/
-
-# 4 non-working tests in build chroot, requires fixes. Test framework does not allow exclusion.
-#  PYTHONPATH="$PWD/build/python" python psutil/tests/__main__.py
+  python -m installer --destdir=tmp_install dist/*.whl
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  export PYTHONPATH="$PWD/tmp_install/$site_packages"
+  export GITHUB_ACTIONS=1 # Skips some failing tests.
+  python psutil/tests/runner.py
 }
 
 package() {
   cd psutil-release-$pkgver
+
   python -m installer --destdir="$pkgdir" dist/*.whl
   install -D -m 644 LICENSE "$pkgdir/"usr/share/licenses/$pkgname/LICENSE
 }
