@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Jan Alexander Steffens (heftig)" <heftig@archlinux.org>
+Date: Mon, 10 Jun 2024 19:55:38 +0200
+Subject: [PATCH] Fix data installation when building wheel
+
+---
+ setup.py | 21 +--------------------
+ 1 file changed, 1 insertion(+), 20 deletions(-)
+
+diff --git a/setup.py b/setup.py
+index ef70f20b0aa7..c779b4debd0e 100755
+--- a/setup.py
++++ b/setup.py
+@@ -14,7 +14,6 @@
+ import sys
+ from distutils.command.build import build as _build
+ from distutils.command.clean import clean as _clean
+-from distutils.command.install_data import install_data as _install_data
+ from shutil import rmtree, which
+ 
+ from setuptools import Command, find_packages, setup
+@@ -394,22 +393,6 @@ def run(self):
+             print('Warning: libtorrent (libtorrent-rasterbar) not found: %s' % ex)
+ 
+ 
+-class InstallData(_install_data):
+-    """Custom class to fix `setup install` copying data files to incorrect location. (Bug #1389)"""
+-
+-    def finalize_options(self):
+-        self.install_dir = None
+-        self.set_undefined_options(
+-            'install',
+-            ('install_data', 'install_dir'),
+-            ('root', 'root'),
+-            ('force', 'force'),
+-        )
+-
+-    def run(self):
+-        _install_data.run(self)
+-
+-
+ class Clean(_clean):
+     sub_commands = _clean.sub_commands + [
+         ('clean_plugins', None),
+@@ -439,7 +422,6 @@ def run(self):
+     'build_plugins': BuildPlugins,
+     'build_docs': BuildDoc,
+     'spellcheck_docs': BuildDoc,
+-    'install_data': InstallData,
+     'clean_plugins': CleanPlugins,
+     'clean_trans': CleanTranslations,
+     'clean_docs': CleanDocs,
+@@ -474,9 +456,8 @@ def run(self):
+             ),
+         ]
+     )
+-    if os.path.isfile(desktop_data):
++    if not windows_check() and which('intltool-merge'):
+         _data_files.append(('share/applications', [desktop_data]))
+-    if os.path.isfile(metainfo_data):
+         _data_files.append(('share/metainfo', [metainfo_data]))
+ 
+ 
