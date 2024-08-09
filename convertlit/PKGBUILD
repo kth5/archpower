@@ -5,30 +5,36 @@
 
 pkgname=convertlit
 pkgver=1.8
-pkgrel=11
+pkgrel=12
 pkgdesc='An extractor/converter for .LIT eBooks'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='http://www.convertlit.com/'
-license=(GPL)
-depends=(libtommath)
-source=(http://www.convertlit.com/clit18src.zip)
-sha256sums=('d70a85f5b945104340d56f48ec17bcf544e3bb3c35b1b3d58d230be699e557ba')
+license=(GPL-2.0-or-later)
+depends=(glibc
+         libtommath)
+source=(http://www.convertlit.com/clit18src.zip
+        Wformat-security.patch)
+sha256sums=('d70a85f5b945104340d56f48ec17bcf544e3bb3c35b1b3d58d230be699e557ba'
+            '3dd79278678572ea92e3e48528e5057d8da8f6a6c6edefeb6f02cbd6ddad0340')
 
 prepare() {
+# Fix build with -Wformat-security (Gentoo)
+  patch -p0 < Wformat-security.patch
 # Link to shared libtommath and use system LDFLAGS
-  sed -i 's|../libtommath-0.30/libtommath.a|/usr/lib/libtommath.so ${LDFLAGS}|' clit18/Makefile
+  sed -e 's|../libtommath-0.30/libtommath.a|/usr/lib/libtommath.so ${LDFLAGS}|' -i clit18/Makefile
+# Use system CFLAGS
+  sed -e 's|CFLAGS=-O3 -Wall|CFLAGS+=|' -i lib/Makefile
+  sed -e 's|CFLAGS=-funsigned-char -Wall -O2|CFLAGS+=|' -i clit18/Makefile
 }
 
 build() {
-  cd lib
-  make 
+  export CFLAGS+=" -Wno-implicit-function-declaration"
 
-  cd ../clit18
-  make
+  cd lib && make
+  cd ../clit18 && make
 }
 
 package() {
   cd clit18
-
-  install -Dm755 clit "$pkgdir/usr/bin/clit"
+  install -Dm755 clit -t "$pkgdir"/usr/bin
 }
