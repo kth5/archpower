@@ -3,7 +3,7 @@
 
 pkgname=mailcap
 pkgver=2.1.54
-pkgrel=1
+pkgrel=2
 pkgdesc="Helper application and MIME type associations for file types"
 url="https://pagure.io/mailcap"
 arch=(any)
