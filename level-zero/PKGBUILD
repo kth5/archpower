@@ -4,18 +4,22 @@
 
 pkgbase=level-zero
 pkgname=(level-zero-headers level-zero-loader)
-pkgver=1.16.15
+pkgver=1.17.6
 pkgrel=1
 pkgdesc="API for accessing low level interfaces in oneAPI platform devices"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://spec.oneapi.com/versions/latest/elements/l0/source/index.html"
 license=(MIT)
-makedepends=(git cmake opencl-headers)
-source=(https://github.com/oneapi-src/level-zero/archive/v${pkgver}/${pkgbase}-${pkgver}.tar.gz)
-sha256sums=('dba50f512c7da81c8d2c487f04c0fcf0ffff79a41f88a90658c96680e7c97be6')
+makedepends=(git cmake fmt opencl-headers spdlog)
+source=(https://github.com/oneapi-src/level-zero/archive/v${pkgver}/${pkgbase}-${pkgver}.tar.gz
+        010-level-zero-use-system-spdlog.patch::https://github.com/oneapi-src/level-zero/commit/a65b33209544312e7f64cb49c5ea268dc0f10d47.patch)
+sha256sums=('a018923fa0732c4fb9228ff668124363de18f376a314113aa6aaf0a6b5d1ab3b'
+            'b03f7dd2b9fafb94655bde3627b602d53b52aa289041120562402bc36858a2f8')
 
 prepare() {
   printf '%s\n' ${pkgver##*.} > ${pkgbase}-${pkgver}/VERSION_PATCH
+  
+  patch -d ${pkgbase}-${pkgver} -Np1 -i "${srcdir}"/010-level-zero-use-system-spdlog.patch
 }
 
 build() {
@@ -23,6 +27,7 @@ build() {
     -G 'Unix Makefiles' \
     -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_INSTALL_PREFIX=/usr \
+    -DSYSTEM_SPDLOG:BOOL=ON \
     -Wno-dev
   cmake --build build
 }
@@ -42,7 +47,7 @@ package_level-zero-headers() {
 
 package_level-zero-loader() {
   pkgdesc+=" (loader)"
-  depends=(gcc-libs)
+  depends=(fmt spdlog)
   
   mv loader "${pkgdir}"/usr
   install -Dm644 ${pkgbase}-${pkgver}/LICENSE -t "${pkgdir}"/usr/share/licenses/${pkgname}
