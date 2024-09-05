@@ -4,32 +4,48 @@
 _gemname='rbs'
 pkgname="ruby-${_gemname}"
 pkgver=3.4.4
-pkgrel=1
+pkgrel=2
 pkgdesc='RBS is the language for type signatures for Ruby and standard library definitions'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://github.com/ruby/${_gemname}"
 license=('custom:BSDL')
-depends=(ruby)
+depends=(
+  ruby
+)
+makedepends=(
+  git
+  ruby-rdoc
+)
 checkdepends=(
+  ruby-ast
   ruby-bundler
+  ruby-json-schema
+  ruby-minitest
+  ruby-net-smtp
   ruby-rake
   ruby-rake-compiler
-  ruby-rdoc
   ruby-test-unit
 )
 options=('!emptydirs')
-source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('c6be887af1c89e7b9d8f01e248a24f571c189fc81f55d1625957434a3d1e74c5d23f9ba2089750cb742a82560165d9bab309cff8cdb6c9e455076051301c7dd4')
-b2sums=('19b95e7b162714738c37d9d8f740d11e5e4694f6e2c7e9ba9f01c74d8d318d0b848251276e421a80d8a5680ed60fa510d04d4a57ac72d0c376f1e9cfef2fe773')
+source=("git+${url}#tag=v$pkgver")
+sha512sums=('6477ae1443278e981561937a764f00f25e09fc7ecfed25486777b1e9575e270d894fc10e91b681594a7392a1fb672709ec2fcb70829c5deb642f293487ea4402')
+b2sums=('052990cd353bc42b65d43ee37e9f630a5a37987b74a3c9f18ee2a70f6fdea174727a67c963f806c71e1c114462fb23304f713c00bd08fb827e2b3b6a1fc28b27')
 
 prepare() {
+  ln -s "${_gemname}" "${_gemname}-${pkgver}"
+
   cd "${_gemname}-${pkgver}"
+
+  git cherry-pick -n f9e1c01df11ef32539d477132b75a6dd08558988
 
   # update gemspec/Gemfile to allow newer version of the dependencies
   sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
 
   # we don't build from a git checkout
-  sed --in-place --regexp-extended 's|`git ls-files -z`\.split\("\\x0"\)|`find . -type f -not -path "*/\.git*" -printf "%P\n"`\.split\("\n"\)|' "${_gemname}.gemspec"
+  sed --in-place --regexp-extended 's|git ls-files -z|find . -type f -not -path "*/\.git*" -print0|' "${_gemname}.gemspec"
+
+  sed --in-place '6,22d' Gemfile
+  rm Gemfile.lock
 }
 
 build() {

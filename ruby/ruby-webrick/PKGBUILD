@@ -4,7 +4,7 @@
 _gemname=webrick
 pkgname=ruby-$_gemname
 pkgver=1.8.1
-pkgrel=3
+pkgrel=3.1
 pkgdesc='An HTTP server toolkit that can be configured as an HTTPS server'
 arch=(any)
 url='https://github.com/ruby/webrick'

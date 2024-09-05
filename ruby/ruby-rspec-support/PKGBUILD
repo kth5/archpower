@@ -5,7 +5,7 @@
 _gemname=rspec-support
 pkgname=ruby-${_gemname}
 pkgver=3.12.1
-pkgrel=2
+pkgrel=2.1
 pkgdesc='Common code needed by the other RSpec gems. Not intended for direct use'
 url='https://github.com/rspec/rspec-support'
 arch=('any')
