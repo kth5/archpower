@@ -1,0 +1,107 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Andreas 'Segaja' Schleifer <segaja at archlinux dot org>
+
+_gemname='rubyzip'
+pkgname="ruby-${_gemname}"
+pkgver=2.3.2
+pkgrel=1
+pkgdesc='a ruby module for reading and writing zip files'
+arch=('any')
+url="https://github.com/rubyzip/${_gemname}"
+license=('BSD-2-Clause')
+depends=(
+  ruby
+)
+checkdepends=(
+  ruby-bundler
+  ruby-minitest
+  ruby-rake
+  ruby-rubocop
+  unzip
+  zip
+)
+options=('!emptydirs')
+source=(
+  "${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz"
+  # https://github.com/rubyzip/rubyzip/commit/34731b18850b553f8aa42cb891941394a7cb0b77
+  "${pkgname}_fix_tests.patch"
+)
+sha512sums=('6c64e53c1f5ca530abfa22baf388f87c8cf098d81cc9c639f20903e5193cf26243fbf861ac12002ae954f026e04168d8a55beeaf3ac5542bd0618ca85a5c90de'
+            'af5230ee0a31c1424eda1bc17c14dbd984b36cd376120f8a8d4050a2d51ce82fecdb4146a2115233ea169f3eb379d4c7dcedf46474fd3bbe2822106a7b340217')
+b2sums=('ed901326cd0f79c8be004d9c14b32d7e67e90ab4d2d5b67dc64559fd4691dfb63cfa1ee18363a7cf864bd62559f1bc2fae71fc25ad1c727d7cc01f94d1ec62ee'
+        '1e0229b108c6a2cd74de1c4d25996e1d6558133886f0cc6732006b879f4094b172a9e38435ea07e0753052a8a5e9295fa6fd6b2949760dd4e25ac1466522aa2b')
+
+prepare() {
+  cd "${_gemname}-${pkgver}"
+
+  patch --verbose --strip=1 --input="../${pkgname}_fix_tests.patch"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
+
+  # remove simplecov
+  rm --verbose .simplecov
+  sed --in-place '/simplecov/d' test/test_helper.rb "${_gemname}.gemspec"
+}
+
+build() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rake test
+}
+
+package() {
+  cd "${_gemname}-${pkgver}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 README.md --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
+
+# vim: tabstop=2 shiftwidth=2 expandtab:
