@@ -1,42 +1,79 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
-# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+# Contributor: Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
+# Contributor: Felix Yan <felixonmars@archlinux.org>
 # Contributor: Ralf Schmitt <ralf@systemexit.de>
 
 pkgname=python-gevent
 pkgver=24.2.1
-pkgrel=2
+pkgrel=3
+pkgdesc='Python network library that uses greenlet and libenv for easy and scalable concurrency'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-pkgdesc="Python network library that uses greenlet and libev for easy and scalable concurrency"
-license=("MIT")
-url="http://www.gevent.org/"
-depends=('c-ares' 'libev' 'python-greenlet' 'python-setuptools' 'python-zope-event' 'python-zope-interface')
-makedepends=('cython')
-checkdepends=('lsof' 'python-perf' 'python-objgraph' 'python-dnspython' 'python-requests')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/gevent/gevent/archive/$pkgver.tar.gz")
-sha512sums=('bfcaf437ba4d6565bd5904dc0d45df035fe9b4bd572f8bf509d1ec9994ae812317bdea9e948b57f47435752bffebb7cc925dbf060db5d56c5c05b29cbd061639')
+url='http://www.gevent.org'
+license=('MIT')
+depends=(
+  'c-ares'
+  'libev'
+  'python-greenlet'
+  'python-setuptools'
+  'python-zope-event'
+  'python-zope-interface'
+)
+makedepends=(
+  'git'
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+  'cython'
+  'python-cffi'
+  'libuv'
+)
+checkdepends=(
+  'lsof'
+  'python-perf'
+  'python-objgraph'
+  'python-dnspython'
+  'python-requests'
+)
+source=(
+  "$pkgname::git+https://github.com/gevent/gevent#tag=$pkgver"
+  'workaround-cython-bug.patch'
+)
+sha512sums=('07fd87c2f642ab15bc32600366e6c84b1f12b17cd8adf972b631aa5fe8b66acc3052fb76fa181ba9d69047719046cdfd317939038158c49fe20332637f0ed6e0'
+            '66224a311fe69170854dc8876ff54621ee51ea258397afb2520e3844cbd91e70dc3571f74a7e7b9dc0b40826c196a785383f9a71e6b97a69b45d7ebe68863931')
+b2sums=('00444ba2eb222f1d694800b816731fdf263b168559c3310323f62371c4699d4ad4081b1fdfbfcb21e7d5eb6e13d14673c2b7d92bce0352a6a3e864d10439de5c'
+        '78d74d4c1e6324166e680e80e56d2b15fc0c43b69879713dcf2a7cd99b72d5dbe2e0b00be4c2c5a39887ee69f4cc553144f58ea13d7e5341af8ac6829d485517')
 
-export GEVENTSETUP_EMBED=0
+prepare() {
+  cd "$pkgname"
+
+  # https://github.com/gevent/gevent/issues/2031
+  patch -p1 -i "$srcdir/workaround-cython-bug.patch"
+}
 
 build() {
-  cd gevent-$pkgver
-  python setup.py build
+  cd "$pkgname"
+
+  # http://www.gevent.org/development/installing_from_source.html#embedding-libraries
+  export GEVENTSETUP_EMBED=0
+
+  python -m build --wheel --no-isolation
 }
 
 check() {
-  (
-    cd gevent-$pkgver
-    python -m venv "$srcdir/pyvenv" --system-site-packages
-    . "$srcdir/pyvenv/bin/activate"
-    local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-    export PYTHONPATH="$PYTHONPATH:/$site_packages"
-    python setup.py install
-    python -m gevent.tests
-  ) || echo "Tests failed"
+  cd "$pkgname"
+
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer dist/*.whl
+  test-env/bin/python -m gevent.tests || echo "Tests failed"
 }
 
 package() {
-  cd gevent-$pkgver
-  python setup.py install -O1 --root="$pkgdir"
-  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
+  cd "$pkgname"
+
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # license
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
 }
