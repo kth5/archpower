@@ -8,7 +8,7 @@
 pkgbase=brltty
 pkgname=(brltty brltty-udev-generic)
 pkgver=6.6
-pkgrel=8
+pkgrel=11
 pkgdesc="Braille display driver for Linux/Unix"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://brltty.app"
@@ -19,7 +19,7 @@ makedepends=(
   at-spi2-core
   atk
   bluez-libs
-  cython0
+  cython
   dbus
   dracut
   espeak-ng
@@ -52,27 +52,30 @@ makedepends_riscv64=('java-environment=11')
 makedepends_x86_64=(java-environment)
 options=(!emptydirs)
 source=(
-  https://brltty.app/archive/$pkgname-$pkgver.tar.bz2
+  https://github.com/brltty/brltty/archive/refs/tags/${pkgbase^^}-$pkgver.tar.gz
   $pkgname-6.2-systemd_sysusers_groups.patch
   $pkgname-6.4-x11_autostart.patch
+  https://github.com/brltty/brltty/commit/e6707d5e.patch
 )
-sha512sums=('a253efe9b53c97e670bb6dc5041a007944b220d88393a6df825ac95f3e0857ce3ba940b67b9723a03e18cdc962092ce937f38bdbf28816eceda168242c3682fd'
+sha512sums=('a2cdcebd1f527aefa6dbfebcb6ec86e74bc42faa3b50130efd151a37b4e508b0da5dd1283800bead06b4f5f1f1f5a606cb1a7385fad812e02c6431e0e2943c69'
             '32ba91271e2247b4a330cd213ed75b591268cb99a79c2efd9ae675804faee027c6b2f782768cb2329a65fc914ca2400b2901f35ce1fc2522c6691b343799eb02'
-            '4871512affefbc178f4204a1b285fc2b5a05ea2d181163195d695b760e9729b3d2d00b5f052abd71379df609c3859d7cbd64128bdefd16e898bbc4368500a9a0')
-b2sums=('28e2593aac014f67f09d4e77c0e63f591c5bc1537ecc292370ac9f51689b722f6f4064cc8e185ba9bf0bbfbd28d3097be15e587ca35ea2018eab9538fdf8da7a'
+            '4871512affefbc178f4204a1b285fc2b5a05ea2d181163195d695b760e9729b3d2d00b5f052abd71379df609c3859d7cbd64128bdefd16e898bbc4368500a9a0'
+            'a7419af607daf70dac2192cae5a3efa3af275024ec6b371f2d108c2c7a29b1df6864e9668b86e69e2a172eeb0e27acb3f4c3c0d56574d54f990694cadfe89252')
+b2sums=('04db7239ee9b2e6318eb235bc7c6a6407fc9519042d37a95dbb9661bd4cb4c4c6e6261230d963402ffcb22189ee00777a62067fe5b2677b0724a7f06cd3a774d'
         '036e36d558594bb06af1eb41ff5fc9ae52ccf4bad54556c3f4f81a5e2f31f574039835e5e756455527c327a73d563a3db54a9f32e3478545a2a22c2725aaeee2'
-        '4ebc07a725ef8362233a83118e93901e78943e8dae08f9358b668ff13ab88a65eb9e87c49d106a8c3d87eb62007b230e199107eacb01f92dc683335076c01309')
+        '4ebc07a725ef8362233a83118e93901e78943e8dae08f9358b668ff13ab88a65eb9e87c49d106a8c3d87eb62007b230e199107eacb01f92dc683335076c01309'
+        'ad794586a149587511a3e1fb47ecbb2b881a3c078ed10a37cf25007459773a2bafc4c3bb500d4db8ee62e9c5c908e82f5bce593b8cfd2563fcc553e0defb6980')
 
 prepare() {
-  cd $pkgbase-$pkgver
+  cd $pkgbase-${pkgbase^^}-$pkgver
   patch -Np1 -i ../$pkgbase-6.2-systemd_sysusers_groups.patch
   patch -Np1 -i ../$pkgbase-6.4-x11_autostart.patch
+  patch -p1 -i ../e6707d5e.patch # Fix crash when compiled with cython 3
   ./autogen
 }
 
 build() {
   local configure_options=(
-    --build=${CHOST}
     --prefix=/usr
     --sysconfdir=/etc
     --libexecdir=/usr/lib
@@ -87,7 +90,7 @@ build() {
   # fat-lto-objects is required for non-mangled static libs
   CFLAGS+=" -ffat-lto-objects"
 
-  cd $pkgbase-$pkgver
+  cd $pkgbase-${pkgbase^^}-$pkgver
   ./configure "${configure_options[@]}"
   make -j1
   # make brlapi.jar deterministic
@@ -135,7 +138,7 @@ package_brltty() {
   )
   install=brltty.install
 
-  cd $pkgbase-$pkgver
+  cd $pkgbase-${pkgbase^^}-$pkgver
   # installation does not work reliably with many cores, so set jobs to 1
   make -j1 INSTALL_ROOT="$pkgdir" install
   make -j1 INSTALL_ROOT="$pkgdir" install-systemd
