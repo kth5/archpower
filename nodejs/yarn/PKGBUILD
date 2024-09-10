@@ -5,13 +5,18 @@
 
 pkgname=yarn
 pkgver=1.22.22
-pkgrel=1
+pkgrel=2
 pkgdesc='Fast, reliable, and secure dependency management'
 arch=(any)
 url=https://classic.yarnpkg.com/
-license=('BSD-2-Clause')
-depends=('nodejs')
-makedepends=('git' 'jq' 'yarn')
+license=(BSD-2-Clause)
+depends=(nodejs)
+makedepends=(
+  git
+  jq
+  ripgrep
+  yarn
+)
 source=("git+https://github.com/${pkgname}pkg/$pkgname.git#tag=v$pkgver")
 b2sums=('7099c5c6b409b10717a5d4811e62f79fb3b9cb4a9610d4081032ba2e27d6595a518a72070af3a32389dce44d555c68fc691cbb080b8b58bf8184e347828bde89')
 
@@ -33,6 +38,10 @@ package() {
   read -ra devDependencies < <(jq -r '.devDependencies | keys | join(" ")' package.json)
   yarn remove --frozen-lockfile "${devDependencies[@]}"
   mv package.json{.bak,}
+
+  # Import userland punycode
+  readarray -t punycode_importers < <(rg -t js -l "require\('punycode'\)" node_modules)
+  sed -i "s,require('punycode'),require('punycode/')," "${punycode_importers[@]}"
 
   cp -r lib node_modules package.json "$pkgdir"/$mod_dir
   install -t "$pkgdir"/$mod_dir/bin bin/$pkgname.js
