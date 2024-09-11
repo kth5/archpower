@@ -1,14 +1,28 @@
-#!/bin/sh
+#!/bin/bash
 
-# user-defined pre-exec hook
-test -r "${XDG_CONFIG_HOME:-$HOME/.config}"/pinentry/preexec &&
-    . "${XDG_CONFIG_HOME:-$HOME/.config}"/pinentry/preexec
+# Run user-defined and site-defined pre-exec hooks.
+[[ -r "${XDG_CONFIG_HOME:-$HOME/.config}"/pinentry/preexec ]] && \
+	. "${XDG_CONFIG_HOME:-$HOME/.config}"/pinentry/preexec
+[[ -r /etc/pinentry/preexec ]] && . /etc/pinentry/preexec
 
-# site-defined pre-exec hook
-test -r /etc/pinentry/preexec &&
-    . /etc/pinentry/preexec
+# Guess preferred backend based on environment.
+backends=(curses tty)
+if [[ -n "$DISPLAY" || -n "$WAYLAND_DISPLAY" ]]; then
+	case "$XDG_CURRENT_DESKTOP" in
+	KDE|LXQT|LXQt)
+		backends=(qt qt5 gnome3 gtk curses tty)
+		;;
+	*)
+		backends=(gnome3 gtk qt qt5 curses tty)
+		;;
+	esac
+fi
 
-test -e /usr/lib/libgtk-x11-2.0.so.0 &&
-    exec /usr/bin/pinentry-gtk-2 "$@"
+for backend in "${backends[@]}"
+do
+	lddout=$(ldd "/usr/bin/pinentry-$backend" 2>/dev/null) || continue
+	[[ "$lddout" == *'not found'* ]] && continue
+	exec "/usr/bin/pinentry-$backend" "$@"
+done
 
-exec /usr/bin/pinentry-curses "$@"
+exit 1
