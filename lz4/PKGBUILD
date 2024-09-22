@@ -3,37 +3,35 @@
 
 pkgname=lz4
 epoch=1
-pkgver=1.9.4
-pkgrel=3
+pkgver=1.10.0
+pkgrel=2
 pkgdesc='Extremely fast compression algorithm'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://lz4.github.io/lz4/'
-license=('GPL2')
-makedepends=('git' 'cmake' 'ninja')
+license=('GPL-2.0-or-later')
+makedepends=('git' 'meson' 'ninja')
 checkdepends=('diffutils')
 depends=('glibc')
+provides=('liblz4.so')
 source=("git+https://github.com/lz4/lz4.git#tag=v$pkgver")
-sha256sums=('SKIP')
+sha256sums=('487f9bc24fdaf589e2f4bb23dd98b1f21a71b643db09251145616587c9468555')
 
 build() {
-  cmake -B build -S "$pkgname"/build/cmake \
-    -G Ninja \
-    -DCMAKE_BUILD_TYPE='None' \
-    -DCMAKE_INSTALL_PREFIX='/usr' \
-    -Wno-dev
-  cmake --build build
+  meson setup --prefix=/usr --buildtype=plain lz4/build/meson build
+  meson configure build -Dcontrib=true -Dexamples=true -Dprograms=true
+  meson compile -C build
 }
 
 check() {
   rm -f passwd.lz4
-  build/lz4 /etc/passwd passwd.lz4
-  build/lz4 -d passwd.lz4 passwd
+  build/meson/programs/lz4 /etc/passwd passwd.lz4
+  build/meson/programs/lz4 -d passwd.lz4 passwd
   diff -q /etc/passwd passwd
   rm passwd
 }
 
 package() {
-  DESTDIR="$pkgdir" cmake --install build
+  meson install -C build --destdir "$pkgdir"
 }
 
 # vim:set ts=2 sw=2 et:
