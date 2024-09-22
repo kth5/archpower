@@ -2,40 +2,39 @@
 # Maintainer: Dave Reisner <dreisner@archlinux.org>
 
 pkgname=kmod
-pkgver=32
-pkgrel=1
+pkgver=33
+pkgrel=3
 pkgdesc="Linux kernel module management tools and library"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://git.kernel.org/pub/scm/utils/kernel/kmod/kmod.git'
-license=('GPL2')
+license=('LGPL-2.1-or-later' 'GPL-2.0-or-later')
 depends=('glibc' 'zlib' 'openssl' 'xz' 'zstd')
+makedepends=('git' 'scdoc')
 checkdepends=('linux-headers' 'libelf')
 options=('strip')
-provides=('module-init-tools=3.16' 'libkmod.so')
-conflicts=('module-init-tools')
-replaces=('module-init-tools')
+provides=('libkmod.so')
 validpgpkeys=('EAB33C9690013C733916AC839BA2A5A630CBEA53')  # Lucas DeMarchi
-source=("https://www.kernel.org/pub/linux/utils/kernel/$pkgname/$pkgname-$pkgver.tar."{xz,sign}
+source=("git+https://git.kernel.org/pub/scm/utils/kernel/kmod/kmod.git#tag=v${pkgver}?signed"
         'depmod-search.conf'
         'depmod.hook'
         'depmod.script')
-md5sums=('1046fda48766fae905f83150d12eec78'
-         'SKIP'
-         'dd62cbf62bd8f212f51ef8c43bec9a77'
-         'e179ace75721e92b04b2e145b69dab29'
-         'b00253ca0d4ebfb2414e4596597bdebd')
-sha256sums=('630ed0d92275a88cb9a7bf68f5700e911fdadaf02e051cf2e4680ff8480bd492'
-            'SKIP'
+sha256sums=('f5795fe50a747609d70f764244e645cd946074e70a7e51de0f82bd2e4d0612c8'
             '1a92bfeae870f61ce814577e69d2a147a9c0caf6aed1131243e4179241fcc4a8'
             'c11c2a0f66ea405493e8617689ca10818dc81dd1dddc19bdb220c8b2917119c1'
-            'd2cd04a09feba30e1376144a8110ec7521892acb0940c3c4ba459aeecf0452ed')
+            '18661aa40c25580f04d2ac3f32e54c2997c0994d1c829905537b413a9d291ac6')
+
+prepare() {
+  cd "${pkgname}"
+
+  touch libkmod/docs/gtk-doc.make
+  autoreconf --force --install --symlink
+}
 
 build() {
-  cd "$pkgname-$pkgver"
+  cd "${pkgname}"
 
   ./configure \
-    --sysconfdir=/etc \
-    --with-module-directory=/usr/lib/modules \
+    --sysconfdir='/etc' \
     --with-xz \
     --with-zlib \
     --with-zstd \
@@ -52,29 +51,29 @@ check() {
   # modules will never be loaded by tests.
 
   local kdirs=(/usr/lib/modules/*/build/Makefile)
-  if [[ ! -f ${kdirs[0]} ]]; then
+  if [[ ! -f "${kdirs[0]}" ]]; then
     printf '==> Unable to find kernel headers to build modules for tests\n' >&2
     return 1
   fi
 
-  local kver kdir=${kdirs[0]%/Makefile}
-  IFS=/ read _ _ _ kver _ <<<"$kdir"
+  local kver kdir="${kdirs[0]%/Makefile}"
+  IFS=/ read _ _ _ kver _ <<<"${kdir}"
 
-  make -C "$pkgname-$pkgver" check KDIR="$kdir" KVER="$kver"
+  make -C "${pkgname}" check KDIR="${kdir}" KVER="${kver}"
 }
 
 package() {
-  make -C "$pkgname-$pkgver" DESTDIR="$pkgdir" install
+  make -C "${pkgname}" DESTDIR="${pkgdir}" install
 
   # extra directories
-  install -dm755 "$pkgdir"/{etc,usr/lib}/{depmod,modprobe}.d
+  install -dm0755 "${pkgdir}"/{etc,usr/lib}/{depmod,modprobe}.d
 
   # install depmod.d file for search/ dir
-  install -Dm644 "$srcdir/depmod-search.conf" "$pkgdir/usr/lib/depmod.d/search.conf"
+  install -Dm0644 "${srcdir}/depmod-search.conf" "${pkgdir}/usr/lib/depmod.d/search.conf"
 
   # hook
-  install -Dm644 "$srcdir/depmod.hook" "$pkgdir/usr/share/libalpm/hooks/60-depmod.hook"
-  install -Dm755 "$srcdir/depmod.script" "$pkgdir/usr/share/libalpm/scripts/depmod"
+  install -Dm0644 "${srcdir}/depmod.hook" "${pkgdir}/usr/share/libalpm/hooks/60-depmod.hook"
+  install -Dm0755 "${srcdir}/depmod.script" "${pkgdir}/usr/share/libalpm/scripts/depmod"
 }
 
 # vim: ft=sh syn=sh et
