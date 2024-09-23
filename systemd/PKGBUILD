@@ -9,7 +9,7 @@ pkgname=('systemd'
 case "${CARCH}" in
   x86_64) pkgname+=('systemd-ukify') ;;
 esac
-_tag='256.2'
+_tag='256.6'
 # Upstream versioning is incompatible with pacman's version comparisons, one
 # way or another. So we replace dashes and tildes with the empty string to
 # make sure pacman's version comparing does the right thing for rc versions:
@@ -19,7 +19,7 @@ arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=('LGPL-2.1-or-later')
 url='https://www.github.com/systemd/systemd'
 makedepends=('acl' 'cryptsetup' 'docbook-xsl' 'gperf' 'lz4' 'xz' 'pam' 'libelf'
-             'intltool' 'iptables' 'kmod' 'libcap' 'libidn2' 'libgcrypt'
+             'intltool' 'iptables' 'kmod' 'libarchive' 'libcap' 'libidn2' 'libgcrypt'
              'libmicrohttpd' 'libxcrypt' 'libxslt' 'util-linux' 'linux-api-headers'
              'python-jinja' 'python-lxml' 'quota-tools' 'shadow' 'git'
              'meson' 'libseccomp' 'pcre2' 'audit' 'kexec-tools' 'libxkbcommon'
@@ -52,7 +52,7 @@ source=("git+https://github.com/systemd/systemd#tag=v${_tag}?signed"
         '30-systemd-tmpfiles.hook'
         '30-systemd-udev-reload.hook'
         '30-systemd-update.hook')
-sha512sums=('7440e619af100458ccd54ab1aafdaa339f473c226b6f7d9ceca35716ad30e9ed112ae8e2230116b2104e88171d92309ad78780f4f02d5f9f59c0e7fce15606c9'
+sha512sums=('e9fc19946f329aa89c1014a735d4d7828cebaa32ece8244b79e101c41d1c0cb0207b4109ce55d14204b0915f6cac57ace6286c6abaebd809031949693131de16'
             '3ccf783c28f7a1c857120abac4002ca91ae1f92205dcd5a84aff515d57e706a3f9240d75a0a67cff5085716885e06e62597baa86897f298662ec36a940cf410e'
             '76e58855f9025feffb21108f8714f7d8fa7cb163919b54128fb614c74af503f3ac651df7d6fefcee1dbc7753a63fb9edd342ea23f2106a1221c013af0078b89b'
             'c416e2121df83067376bcaacb58c05b01990f4614ad9de657d74b6da3efa441af251d13bf21e3f0f71ddcb4c9ea658b81da3d915667dc5c309c87ec32a1cb5a5'
@@ -81,8 +81,6 @@ if ((_systemd_UPSTREAM)); then
   _meson_vcs_tag='true'
   _meson_mode='developer'
   pkgname+=('systemd-tests')
-  makedepends+=('libarchive')
-  optdepends_upstream=('libarchive: convert DDIs to tarballs')
   if ((_systemd_QUIET)); then
     _meson_install=('--quiet')
   else
@@ -173,10 +171,10 @@ build() {
   )
 
   case "${CARCH}" in
-    x86_64) _meson_options+=(-Dbootloader=true) ;;
-    riscv64) _meson_options+=(-Dbootloader=true -Dukify=false -Dseccomp=false) ;; #FIXME: seccomp breaks systemd on riscv64
-    powerpc) _meson_options+=(-Dbootloader=false -Dukify=false -Dseccomp=false) ;; #FIXME: seccomp breaks systemd on powerpc
-    *) _meson_options+=(-Dbootloader=false -Dukify=false) ;;
+    x86_64) _meson_options+=(-Dbootloader=enabled) ;;
+    riscv64) _meson_options+=(-Dbootloader=enabled -Dukify=false -Dseccomp=false) ;; #FIXME: seccomp breaks systemd on riscv64
+    powerpc) _meson_options+=(-Dbootloader=disabled -Dukify=false -Dseccomp=false) ;; #FIXME: seccomp breaks systemd on powerpc
+    *) _meson_options+=(-Dbootloader=disabled -Dukify=false) ;;
   esac
 
   arch-meson "${pkgbase}" build "${_meson_options[@]}" $MESON_EXTRA_CONFIGURE_OPTIONS
@@ -213,6 +211,7 @@ package_systemd() {
               'gnutls: systemd-journal-gatewayd and systemd-journal-remote'
               'qrencode: show QR codes'
               'iptables: firewall features'
+              'libarchive: convert DDIs to tarballs'
               'libbpf: support BPF programs'
               'libpwquality: check password quality'
               'libfido2: unlocking LUKS2 volumes with FIDO2 token'
@@ -221,7 +220,6 @@ package_systemd() {
   optdepends_x86_64=(
               'systemd-ukify: combine kernel and initrd into a signed Unified Kernel Image'
   )
-  optdepends+=("${_optdepends_upstream[@]}")
   backup=(etc/pam.d/systemd-user
           etc/systemd/coredump.conf
           etc/systemd/homed.conf
@@ -252,7 +250,6 @@ package_systemd() {
   mv "$pkgdir"/usr/lib/pkgconfig systemd-libs/lib/pkgconfig
   mv "$pkgdir"/usr/include systemd-libs/include
   mv "$pkgdir"/usr/share/man/man3 systemd-libs/man3
-
 
   case "${CARCH}" in
     x86_64)
@@ -304,6 +301,13 @@ package_systemd() {
 
   # overwrite the systemd-user PAM configuration with our own
   install -D -m0644 systemd-user.pam "$pkgdir"/etc/pam.d/systemd-user
+
+  # create a directory for cryptsetup keys
+  install -d -m0700 "$pkgdir"/etc/cryptsetup-keys.d
+
+  # handle uncommon license
+  install -d -m0755 "$pkgdir/usr/share/licenses/$pkgbase"
+  ln -s -t "$_" /usr/share/doc/systemd/LICENSES/MIT-0.txt
 }
 
 package_systemd-libs() {
