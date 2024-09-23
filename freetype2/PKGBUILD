@@ -8,18 +8,13 @@ pkgname=(
   freetype2-demos
   freetype2-docs
 )
-pkgver=2.13.2
-pkgrel=2
+pkgver=2.13.3
+pkgrel=1
 epoch=
 pkgdesc="Font rasterization library"
 url="https://www.freetype.org/"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=('FTL OR GPL-2.0-or-later'
-         BSD-3-Clause
-         MIT
-         MIT-Modern-Variant
-         LicenseRef-Public-Domain
-         Zlib)
+license=('FTL OR GPL-2.0-or-later')
 depends=(
   brotli
   bzip2
@@ -27,8 +22,7 @@ depends=(
   sh
   zlib
 
-  # adding harfbuzz for improved OpenType features auto-hinting
-  # introduces a cycle dep to harfbuzz depending on freetype wanted by upstream
+  # creates a dependency cycle harfbuzz <-> freetype, wanted by upstream
   harfbuzz
 )
 makedepends=(
@@ -46,23 +40,23 @@ source=(
   0003-Enable-long-PCF-family-names.patch
   freetype2.sh
 )
-b2sums=('cebc82180d9afaeb112a65ba78903d7bf7a9295a803166a033585ad2325add6023f05066852240c4665e56285345ba503b01ecd461d48f0478a8f3f56136988e'
+b2sums=('f9591c6998df02b072adaf38a968e91deae8ed4d53ea0cb74d08982c4f0e48b1a98c1378a698164e4f730f07a3b0bea308a94fcc2e2b8ce9967dbf9478b599bd'
         'SKIP'
-        '273ab405b6c7097ace9c7882fddb22d2a0cf8cc1594e9d141ca18d13a3745ee2e481bd2ee214cba6d99224ef0d67fdcba1b08aa06e3556a80cda29f3b6026f97'
+        '84244e28ace43929387052954b92089f570300dc8a9cb77e0ceb53001f081f6d6e5785ad081448ceb58254f8102e3ccf64d1fd323b02fb0a8232a0ba3eb9f3a8'
         'SKIP'
-        '5e2c3eb2fccb359d03e154b94d349baab27aa465e40274ea99be1e19c8519ec9c434749c78a41743540bd38064a7c68e5389ff99443b8e320e617c4fe7f4558b'
+        '5f5a48e0ad839ece97ea2bd451bd819ccbf9347425dc323a368e5fed91cfddeffd61b1dfea2e7cc7d65e30e6ebb932dd142430998039eb4a8f91758a3690ddef'
         'SKIP'
-        '2c148694e150b3faae9dc46ead824ae6d94cfe34f2918bc9066f45bab7e6b6f77b4d4b2fee00c3d466d866e1985132cea4a774dcf1bab95409b7cf55efff01e1'
-        '9598d13eae0411878c1af8e5d875c3b1fc09f4e6649edfbbf3b0a819c4c585648521f0b30ffd1318f5106cfde9c899d3db70c8ffe36dac59f3f98b5fd7dab115'
-        '66deb179d1f1f4e2e35f6d50acfbacce80595d5128f5fed8c1871838c210dbf1a7173a87dd937d64997844c8f478c8f81120f71e33b9d59d980e179d103ff31c'
+        'b7e3b72e2d6aed548c1762a16ee08ac47a05caf29c5d37ef03c6791e6dbd109fdfef0b246540c35e968d54f2103b70e80eccff72ac54d34224c6d064aa53d720'
+        'd2b507830adf1bb9db619cd2e0bbb0dfe5b16ba7d4467ad503e954cf91715c5aa5b52b1d3865abc9841990cda56f223eb6f282d4baf7f31fd525cc90aa96b884'
+        'b83a599da8eef1c39a268482db8e82f03a2c9b68850a0ec782e9839e7b45a3b0f989d997647eb55e5b18f2fe0c988e73f0ec6c4eb4c0787689f9e0213faa4320'
         'a964f46886b5017a5c180f29408f72ae8aba29f37404c48b4681ff12ca0a2cfa2a8e219480e98d63d45fb5c266a6e5826df170c9a0d701cd866e395c5ac6e87d')
 validpgpkeys=(
-  E30674707856409FF1948010BE6C3AAC63AD8E3F  # Werner Lemberg <wl@gnu.org>
+  E30674707856409FF1948010BE6C3AAC63AD8E3F # Werner Lemberg <wl@gnu.org>
 )
 
 prepare() {
   # Build FreeType as part of the demos
-  ln -sr freetype-$pkgver ft2demos-$pkgver/subprojects/freetype2
+  ln -sr freetype-$pkgver freetype2
 
   cd freetype-$pkgver
   patch -Np1 -i ../0001-Enable-table-validation-modules.patch
@@ -74,6 +68,9 @@ build() {
   local meson_options=(
     -D freetype2:default_library=shared
   )
+
+  # Build FreeType as part of the demos
+  export MESON_PACKAGE_CACHE_DIR="$srcdir"
 
   arch-meson ft2demos-$pkgver build "${meson_options[@]}"
   meson compile -C build
@@ -94,22 +91,19 @@ _pick() {
 }
 
 package_freetype2() {
-  provides=(
-    libfreetype.so
-  )
-  conflicts=()
+  provides=(libfreetype.so)
   install=freetype2.install
   backup=(etc/profile.d/freetype2.sh)
 
   meson install -C build --destdir="$pkgdir"
-  install -Dt "$pkgdir/etc/profile.d" -m644 freetype2.sh
-  install -Dt "$pkgdir/usr/share/aclocal" -m644 \
-    freetype-$pkgver/builds/unix/freetype2.m4
 
   _pick demos "$pkgdir"/usr/bin
   _pick demos "$pkgdir"/usr/share/man/man1
 
-  install -D -m644 freetype-$pkgver/{LICENSE.TXT,docs/FTL.TXT,docs/GPLv2.TXT} -t "${pkgdir}/usr/share/licenses/${pkgname}/"
+  install -Dm644 freetype2.sh -t "$pkgdir/etc/profile.d"
+
+  install -Dm644 freetype-$pkgver/docs/FTL.TXT \
+    -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 package_freetype2-demos() {
@@ -119,13 +113,12 @@ package_freetype2-demos() {
     librsvg
     libx11
   )
-  optdepends=(
-    'qt5-base: ftinspect'
-  )
-  provides=()
-  conflicts=()
+  optdepends=('qt5-base: ftinspect')
 
   mv demos/* "$pkgdir"
+
+  install -Dm644 freetype-$pkgver/docs/FTL.TXT \
+    -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 package_freetype2-docs() {
@@ -134,6 +127,9 @@ package_freetype2-docs() {
 
   mkdir -p "${pkgdir}/usr/share/doc"
   cp -r freetype-$pkgver/docs "$pkgdir/usr/share/doc/$pkgbase"
+
+  install -Dm644 freetype-$pkgver/docs/FTL.TXT \
+    -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 # vim:set sw=2 sts=-1 et:
