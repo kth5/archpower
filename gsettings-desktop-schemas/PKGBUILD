@@ -5,34 +5,35 @@
 # Contributor: Jaroslav Lichtblau <dragonlord@aur.archlinux.org>
 # Contributor: Adam Hani Schakaki (krzd) <krzd@krzd.net>
 
-pkgname=gsettings-desktop-schemas
-pkgver=46.1
+pkgbase=gsettings-desktop-schemas
+pkgname=(
+  gsettings-desktop-schemas
+  gsettings-system-schemas
+)
+pkgver=47.1
 pkgrel=1
-pkgdesc="Shared GSettings schemas for the desktop"
+pkgdesc="GSettings schemas for GNOME"
 url="https://gitlab.gnome.org/GNOME/gsettings-desktop-schemas"
 arch=(any)
 license=(LGPL-2.1-or-later)
-depends=(
+makedepends=(
   adobe-source-code-pro-fonts
   cantarell-fonts
   dconf
-  glib2
-)
-makedepends=(
   git
   glib2-devel
   gobject-introspection
   meson
 )
 source=("git+$url.git#tag=${pkgver/[a-z]/.&}")
-b2sums=('285fcf7651ac8066964a3ce5c050b91c88a893760133dfe578da2489a221ce80e2caea804ff3aaeec801655a0be7e7ebb079805c15523a45c468c5797c14216a')
+b2sums=('ff80d8cee04d1a498993632195242d24d3869225bdcc315fb680b7dce9f9fc9761cdf6f64d35af29707dbe29a3ce0f5c57c814a93d4cc95fc3586de260e83802')
 
 prepare() {
-  cd $pkgname
+  cd $pkgbase
 }
 
 build() {
-  arch-meson $pkgname build
+  arch-meson $pkgbase build
   meson compile -C build
 }
 
@@ -40,8 +41,37 @@ check() {
   meson test -C build --print-errorlogs
 }
 
-package() {
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_gsettings-desktop-schemas() {
+  pkgdesc+=" desktop components"
+  depends=(
+    "gsettings-system-schemas=$pkgver-$pkgrel"
+    adobe-source-code-pro-fonts
+    cantarell-fonts
+    dconf
+  )
+
   meson install -C build --destdir "$pkgdir"
+
+  cd "$pkgdir"
+  _pick system usr/share/glib-2.0/schemas/org.gnome.desktop.enums.xml
+  _pick system usr/share/glib-2.0/schemas/org.gnome.system.*.gschema.xml
+}
+
+package_gsettings-system-schemas() {
+  pkgdesc+=" system components"
+  depends=(dconf)
+
+  mv system/* "$pkgdir"
 }
 
 # vim:set sw=2 sts=-1 et:
