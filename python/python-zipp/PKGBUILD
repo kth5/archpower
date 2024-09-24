@@ -2,18 +2,42 @@
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=python-zipp
-pkgver=3.18.1
-pkgrel=2
+pkgver=3.19.2
+pkgrel=1
 pkgdesc="Pathlib-compatible object wrapper for zip files"
 url="https://github.com/jaraco/zipp"
 license=('MIT')
 arch=(any)
 depends=('python')
-makedepends=('git' 'python-build' 'python-installer' 'python-setuptools-scm' 'python-wheel')
-checkdepends=('python-pytest' 'python-pytest-enabler' 'python-pytest-mypy' 'python-jaraco.itertools'
-              'python-more-itertools' 'python-big-o' 'python-pytest-ignore-flaky')
-source=("git+https://github.com/jaraco/zipp.git#tag=v$pkgver")
-sha512sums=('7a192eedd85e5aab7d9d2329d65b1f8638b50b1718c8924102d16d1aee888bf67692ba6f82fb23f2347a738de93b640934217c62f757102394f9e87b2b70db83')
+makedepends=(
+  'git'
+  'python-build'
+  'python-installer'
+  'python-setuptools-scm'
+  'python-wheel'
+)
+checkdepends=(
+  'python-big-o'
+  'python-jaraco.functools'
+  'python-jaraco.itertools'
+  'python-jaraco.test'
+  'python-more-itertools'
+  'python-pytest'
+  'python-pytest-enabler'
+  'python-pytest-ignore-flaky'
+  'python-tests'
+)
+source=(
+  "git+$url.git#tag=v$pkgver"
+  'do-not-use-compat.patch'
+)
+sha512sums=('0540b9b2fefc10b5c6720e9e8d2fedacd0c4c0e4b14745f5680f46b2e624718eac9cfc881c7dc8ce55df5a208357940b7af2e82cf8a50369f5d9f129fc22ee2a'
+            '1dc5e9ce426a24474a06b64dab2f6c40d515116bc9fb3c3b19a0da2a481bc4ded904eff08b04bee00f39e84d80ad09f452ac278b533bb5c3948b4d06ff05d23a')
+
+prepare() {
+  cd zipp
+  patch --forward --strip=1 --input=../do-not-use-compat.patch
+}
 
 build() {
   cd zipp
@@ -22,11 +46,18 @@ build() {
 
 check() {
   cd zipp
-  pytest
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer dist/*.whl
+  test-env/bin/python -m pytest
 }
 
 package() {
   cd zipp
   python -m installer --destdir="$pkgdir" dist/*.whl
-  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
+
+  # Symlink license file
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "$pkgdir"/usr/share/licenses/$pkgname
+  ln -s "$site_packages"/zipp-$pkgver.dist-info/LICENSE \
+    "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
