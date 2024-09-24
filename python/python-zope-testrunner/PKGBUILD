@@ -1,36 +1,59 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 
 pkgname=python-zope-testrunner
-pkgver=6.4
-pkgrel=3
+_pkgname=zope.testrunner
+pkgver=6.5
+pkgrel=1
 pkgdesc="Zope testrunner script"
 arch=(any)
 url="https://github.com/zopefoundation/zope.testrunner"
 license=('ZPL-2.1')
-depends=('python-setuptools' 'python-zope-interface' 'python-zope-exceptions')
-makedepends=('python-build' 'python-installer' 'python-wheel')
+depends=(
+  'python'
+  'python-setuptools'
+  'python-zope-exceptions'
+  'python-zope-interface'
+)
+makedepends=(
+  'python-build'
+  'python-installer'
+  'python-wheel'
+)
 checkdepends=('python-zope-testing')
-source=("https://github.com/zopefoundation/zope.testrunner/archive/$pkgver/$pkgname-$pkgver.tar.gz")
-sha512sums=('de8198bfbb7e33fd53c8069f6eac38e562c384a49f546fd65afbc56af9c6c59b287776bd94f7978f513d018efb3d11ff3cb5eff92aeee683ba03340732c7a5b1')
+source=(
+  "$url/archive/$pkgver/$pkgname-$pkgver.tar.gz"
+  "0001-Modernize-setuptools-usage-to-fix-warnings.patch"
+  "0002-Exclude-tests-from-wheel.patch"
+)
+sha512sums=('22ec9df7db48f919d90fd68390925b4ad82a5e5e15582e3903f0e7e76dbd70df72316362bc4773e1c1d5fbcf6d556cabc41067d172acd9d80eb62ecfedef5f26'
+            'a518c76ab9954d26e22b51b9c9c29c46a379a3f626234080d198234b22f7d6b99803d8318b8420cb5bf130ca0b20eb1adcba91e56e09d9898267d4eeed3bd7fb'
+            '68f5dc9fd453648619a188ff835cfd62fd4b0b5d8d1cc07fb8ac2bb4cf4ca132bdbad4fde5fce7c1043dcff3075e3ead340ddfe0d9aeb8a0da989f0c9e621fc3')
+
+prepare() {
+  cd $_pkgname-$pkgver
+  patch -Np1 -i "$srcdir/0001-Modernize-setuptools-usage-to-fix-warnings.patch"
+  patch -Np1 -i "$srcdir/0002-Exclude-tests-from-wheel.patch"
+}
 
 build() {
-  cd zope.testrunner-$pkgver
-  python -m build --wheel --skip-dependency-check --no-isolation
+  cd $_pkgname-$pkgver
+  python -m build --wheel --no-isolation
 }
 
 check() {
-  cd zope.testrunner-$pkgver
-  python -m venv "$srcdir/pyvenv" --system-site-packages
-  (
-    . "$srcdir/pyvenv/bin/activate"
-    python setup.py develop
-    python setup.py test
-  )
+  cd $_pkgname-$pkgver
+  python -m installer --destdir=tmp_install dist/*.whl
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  cp -r src/zope/testrunner/tests "$PWD/tmp_install/$site_packages/zope/testrunner"
+  export PYTHONPATH="$PWD/tmp_install/$site_packages"
+  ./tmp_install/usr/bin/zope-testrunner \
+    --test-path="$PWD/tmp_install/$site_packages" -vc
 }
 
 package() {
-  cd zope.testrunner-$pkgver
+  cd $_pkgname-$pkgver
   python -m installer --destdir="$pkgdir" dist/*.whl
 }
 
