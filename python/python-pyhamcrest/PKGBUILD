@@ -1,19 +1,36 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Daniel M. Capella <polyzen@archlinux.org>
 
 pkgname=python-pyhamcrest
-pkgver=2.0.4
-_commit=89658b01ae5e6e6be4ebd7d77c80eed1de46bd5c
-pkgrel=4
+pkgver=2.1.0
+pkgrel=2
 pkgdesc="Hamcrest framework for matcher objects"
 arch=(any)
-license=('BSD')
+license=('BSD-2-Clause')
 url="https://github.com/hamcrest/PyHamcrest"
 depends=('python')
-makedepends=('git' 'python-build' 'python-installer' 'python-hatchling' 'python-hatch-vcs')
+makedepends=(
+  'git'
+  'openssh'
+  'python-build'
+  'python-installer'
+  'python-hatchling'
+  'python-hatch-vcs'
+)
 checkdepends=('python-pytest')
-source=("git+https://github.com/hamcrest/PyHamcrest.git#commit=$_commit")
-sha512sums=('d1b48b4e20c8bc434e6673bba2955b77bbed76d24392f7cb553bcb3a71f37673088cac3bc8af23fae53fc22ccca31b885b6f7e2626fff6a458669ee87b0eb250')
+source=(
+  "git+https://github.com/hamcrest/PyHamcrest.git#tag=V$pkgver"
+  'ssh_allowed_signers'
+)
+b2sums=('8a6c3251cb5e3803668b0068bf2143171f8e56594ec287d584dd1ecc0c941d95a742ed7891f18d593ed75e053d05f9bc3aa0f098f28ee05deffabbdcd302fb6d'
+        '972dd9382ae1fea4e41114bdc42d0691fff4d5002857acbd56e1a2b2bd7a1797a7b4366f15a92a1aaae042159a13d4cb55ad0dacf3bdc19cad306eb2f789d340')
+
+# XXX: move to verify() when devtools supports it
+# https://gitlab.archlinux.org/archlinux/devtools/-/issues/224
+prepare() {
+  git -C PyHamcrest -c gpg.ssh.allowedSignersFile="$srcdir/ssh_allowed_signers" verify-commit V$pkgver
+}
 
 build() {
   cd PyHamcrest
@@ -28,5 +45,10 @@ check() {
 package() {
   cd PyHamcrest
   python -m installer -d "$pkgdir" dist/*.whl
-  install -Dm644 LICENSE.txt -t "$pkgdir"/usr/share/licenses/$pkgname/
+
+  # Symlink license file
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "$pkgdir"/usr/share/licenses/$pkgname
+  ln -s "$site_packages"/${pkgname#python-}-$pkgver.dist-info/licenses/LICENSE.txt \
+    "$pkgdir"/usr/share/licenses/$pkgname/LICENSE.txt
 }
