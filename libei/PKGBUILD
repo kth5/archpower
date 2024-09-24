@@ -2,19 +2,25 @@
 # Maintainer: Fabian Bornschein <fabiscafe@archlinux.org>
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
-pkgname=libei
-pkgver=1.2.1
+pkgbase=libei
+pkgname=(
+  libei
+  libei-docs
+)
+pkgver=1.3.0
 pkgrel=1
 pkgdesc="Library for Emulated Input"
 url="https://libinput.pages.freedesktop.org/libei/"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=(MIT)
 depends=(
+  gcc-libs
+  glibc
   libevdev
-  systemd
+  systemd-libs
 )
 makedepends=(
-  dbus-python
+  doxygen
   git
   libxkbcommon
   meson
@@ -24,43 +30,66 @@ makedepends=(
   python-pytest
   python-structlog
   python-yaml
+  systemd
 )
 checkdepends=(
   python-pytest-xdist
   valgrind
 )
-provides=(
-  lib{ei,eis,oeffis}.so
-)
-_commit=08f1d41085a6ae4bac7bc52abe2955d3354342cb  # tags/1.2.1^0
 source=(
-  "git+https://gitlab.freedesktop.org/libinput/libei.git#commit=$_commit"
-  "git+https://github.com/nemequ/munit.git"
+  "git+https://gitlab.freedesktop.org/libinput/libei.git?signed#tag=$pkgver"
+  "nemequ-munit::git+https://github.com/nemequ/munit#commit=fbbdf1467eb0d04a6ee465def2e529e4c87f2118"
 )
-b2sums=('SKIP'
-        'SKIP')
-
-pkgver() {
-  cd libei
-  git describe --tags | sed 's/[^-]*-g/r&/;s/-/+/g'
-}
+b2sums=('4f2e70d3dfdd5a89e1f82662bb929018e7cb0970757b9a4537f640c237f19cd1dd2fa71e8bb24d212f37f3a63f510605fd4a45f7388e67087ac72d4e253f5ccd'
+        'f9ffee024bf38c09736da3a4fe5aff85e95422d5be131ff5c6e392c1bd4f6c5f6a9cfff16ea044096e033fb24f1840520ef3a1ff2157b0e002c45597e45c2207')
+validpgpkeys=(
+  3C2C43D9447D5938EF4551EBE23B7E70B467F0BF # Peter Hutterer <peter.hutterer@who-t.net>
+)
 
 prepare() {
+  # Inject munit
+  ln -s nemequ-munit munit
+
   cd libei
-  ln -sr ../munit subprojects/munit
 }
 
 build() {
-  arch-meson libei build
+  local meson_options=(
+    -D documentation=api
+  )
+
+  # Inject munit
+  export MESON_PACKAGE_CACHE_DIR="$srcdir"
+
+  arch-meson libei build "${meson_options[@]}"
   meson compile -C build
+  meson compile -C build doxygen
 }
 
 check() {
-  meson test -C build --print-errorlogs
+  # protocol tests are flaky
+  meson test -C build --print-errorlogs --no-suite python
+  meson test -C build --print-errorlogs --suite python || :
+
+  # Extra valgrind tests
+  meson test -C build --print-errorlogs --setup valgrind
 }
 
-package() {
+package_libei() {
+  provides=(lib{ei,eis,oeffis}.so)
+
   meson install -C build --destdir "$pkgdir" --skip-subprojects
+
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 libei/COPYING
+}
+
+package_libei-docs() {
+  pkgdesc+=" (API documentation)"
+  depends=()
+
+  mkdir -p "$pkgdir/usr/share/doc/$pkgname"
+  cp -a build/doc/html "$pkgdir/usr/share/doc/$pkgname/api"
+
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 libei/COPYING
 }
 
