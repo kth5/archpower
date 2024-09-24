@@ -6,8 +6,8 @@
 
 _name=pyyaml
 pkgname=python-yaml
-pkgver=6.0.1
-pkgrel=4
+pkgver=6.0.2
+pkgrel=1
 pkgdesc='Python bindings for YAML, using fast libYAML library'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://github.com/yaml/pyyaml'
@@ -24,18 +24,13 @@ makedepends=(
   python-setuptools
   python-wheel
 )
+checkdepends=(
+  python-pytest
+)
 provides=(python-pyyaml)
-source=($_name-$pkgver.tar.gz::$url/archive/refs/tags/$pkgver.tar.gz
-        a2d19c02.patch)
-sha512sums=('1c74a92a4ad7d47854dc7bcb2e89b3c8e0b14fa815c7dbfbc22b24480dbba6c81e971c77ee384c494a960914b95f06edf943d7431925a5ed674a0ba830d258e0'
-            '85ff120f0cf3bee9b316f4b417fb88e8fa44ea3a9a968c66bd43044fa40a0fe3ea33fd1b462cf1bef4380a6a9b0486fba73d5f1316701995f804818f1cc63951')
-b2sums=('c34f2169f6eb6aa718aeb53dbfaf02590e11e504d16cc85a802e1a1191f296ef9aa2501db683e1a48173ce6adeaeca09f2ab989581dcf1c1ba4004831bb4cf47'
-        '32655ef2535ff37905de05e0de9284cdeb4344cc191fd4690d5b6292b562f80bd9da5e5b99a0d4e782ed6ddddb217ecee0ba62c474907fb5ba8b953d5ebb9d71')
-
-prepare() {
-  cd $_name-$pkgver
-  patch -p1 -i ../a2d19c02.patch # Fix build with cython 3
-}
+source=($_name-$pkgver.tar.gz::$url/archive/refs/tags/$pkgver.tar.gz)
+sha512sums=('c72665131296762521d9ae4fc1c8619946f46ea16ad98b6b8e995828f2cdbd1ed61741fc2d646753f71d95a352b36562a1302f0cb646d5705652cd24b2f10b16')
+b2sums=('16ea7f376e45caccb461a18d4347fb06ffaf0dfd65b18e5bd7e74a14ffdce05c9c016c54bd6a501b444bd813f1bfc78999f212ca72cfabf3b125f5ab2f37167e')
 
 build() {
   cd $_name-$pkgver
@@ -43,11 +38,12 @@ build() {
 }
 
 check() {
-  local _py_ver="$(python3 -c "import sys; print(str(sys.version_info.major)+str(sys.version_info.minor))")"
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
 
   cd $_name-$pkgver
-  export PYTHONPATH="tests/lib:build/lib.linux-$CARCH-cpython-$_py_ver:$PYTHONPATH"
-  python -m tests.lib.test_all
+  # install to temporary location, as importlib is used
+  python -m installer --destdir=test_dir dist/*.whl
+  PYTHONPATH="$PWD/test_dir/$site_packages:$PYTHONPATH" pytest "${pytest_options[@]}"
 }
 
 package() {
