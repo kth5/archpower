@@ -3,9 +3,14 @@
 # Contributor: Ionut Biru <ibiru@archlinux.org>
 
 pkgbase=udisks2
-pkgname=(udisks2 udisks2-{btrfs,lvm2})
+pkgname=(
+  udisks2
+  udisks2-btrfs
+  udisks2-lvm2
+  udisks2-docs
+)
 pkgver=2.10.1
-pkgrel=4
+pkgrel=5
 pkgdesc="Daemon, tools and libraries to access and manipulate disks, storage devices and technologies"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://www.freedesktop.org/wiki/Software/udisks/"
@@ -15,8 +20,11 @@ license=(
 )
 makedepends=(
   'acl'
+  'autoconf-archive'
   'gcc-libs'
+  'git'
   'glib2'
+  'glib2-devel'
   'glibc'
   'gobject-introspection'
   'gtk-doc'
@@ -25,22 +33,20 @@ makedepends=(
   'libblockdev-btrfs'
   'libblockdev-crypto'
   'libblockdev-fs'
-  'libblockdev-mdraid'
   'libblockdev-loop'
   'libblockdev-lvm'
+  'libblockdev-mdraid'
   'libblockdev-nvme'
   'libblockdev-part'
   'libblockdev-swap'
   'libgudev'
   'lvm2'
   'polkit'
-  'python-packaging'
   'systemd-libs'
   'util-linux-libs'
 )
-source=("https://github.com/storaged-project/udisks/releases/download/udisks-$pkgver/udisks-$pkgver.tar.bz2")
-sha512sums=('9cdaeca4306a970c85f88d406dbe5d2dad23d72f47d9ab1c021b8c2888d4c790f680eb94388d86f9255024283b4a36e98b8aee4408d193a7d4aad1e74463356a')
-b2sums=('41282e4dbbd93e6bda2a10a6ff2f2fb82bfc83b3ccbed9450cca7888c634cde9300fcd0b7d055e0d8e4c8fc0b431a75d5612a24132ea9b2677d194529732178d')
+source=("git+https://github.com/storaged-project/udisks#tag=udisks-$pkgver")
+b2sums=('a27d8b416dbfb24ce8ad2cfbdfc4b8fca37794167b56d88272c3c0761b3e65380f888a7fc3cabd64ca2d3911ea0e9348081f57c0390ec90982056f4da8e51c07')
 
 _pick() {
   local p="$1" f d; shift
@@ -50,6 +56,11 @@ _pick() {
     mv "$f" "$d"
     rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
   done
+}
+
+prepare() {
+  cd udisks
+  NOCONFIGURE=1 ./autogen.sh
 }
 
 build() {
@@ -67,7 +78,7 @@ build() {
     --with-systemdsystemunitdir=/usr/lib/systemd/system
   )
 
-  cd udisks-$pkgver
+  cd udisks
   ./configure "${configure_options[@]}"
   # prevent libtool from overlinking everything
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
@@ -75,7 +86,7 @@ build() {
 }
 
 check() {
-  cd udisks-$pkgver
+  cd udisks
   make check
 }
 
@@ -103,6 +114,7 @@ package_udisks2() {
   optdepends=(
     'udisks2-btrfs: for BTRFS module'
     'udisks2-lvm2: for LVM2 module'
+    'udisks2-docs: API documentation'
     'btrfs-progs: for BTRFS support in libblockdev-fs'
     'dosfstools: for FAT support in libblockdev-fs'
     'exfatprogs: for exFAT support in libblockdev-fs'
@@ -115,20 +127,20 @@ package_udisks2() {
   provides=(libudisks2.so)
   backup=('etc/udisks2/udisks2.conf')
 
-  cd udisks-$pkgver
+  cd udisks
   make DESTDIR="$pkgdir" install
 
   # interface declaration
   install -vDm 644 data/org.freedesktop.UDisks2.xml -t "$pkgdir/usr/share/dbus-1/interfaces/"
 
   cd "$pkgdir"
-  _pick $pkgbase-btrfs usr/lib/$pkgbase/modules/lib${pkgbase}_btrfs.so
-  _pick $pkgbase-btrfs usr/lib/pkgconfig/$pkgbase-btrfs.pc
-  _pick $pkgbase-btrfs usr/share/polkit-1/actions/org.freedesktop.UDisks2.btrfs.policy
+  for _mod in btrfs lvm2; do
+    _pick udisks2-${_mod} usr/lib/udisks2/modules/libudisks2_${_mod}.so
+    _pick udisks2-${_mod} usr/lib/pkgconfig/udisks2-${_mod}.pc
+    _pick udisks2-${_mod} usr/share/polkit-1/actions/org.freedesktop.UDisks2.${_mod}.policy
+  done
 
-  _pick $pkgbase-lvm2 usr/lib/$pkgbase/modules/lib${pkgbase}_lvm2.so
-  _pick $pkgbase-lvm2 usr/lib/pkgconfig/$pkgbase-lvm2.pc
-  _pick $pkgbase-lvm2 usr/share/polkit-1/actions/org.freedesktop.UDisks2.lvm2.policy
+  _pick udisks2-docs usr/share/gtk-doc
 }
 
 package_udisks2-btrfs() {
@@ -169,6 +181,12 @@ package_udisks2-lvm2() {
     udisks2 libudisks2.so
     util-linux-libs libblkid.so libmount.so libuuid.so
   )
+
+  mv -v $pkgname/* "$pkgdir/"
+}
+
+package_udisks2-docs() {
+  pkgdesc+=" - documentation"
 
   mv -v $pkgname/* "$pkgdir/"
 }
