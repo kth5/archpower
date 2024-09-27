@@ -4,44 +4,76 @@
 # Contributor: dorphell <dorphell@archlinux.org>
 
 pkgname=enchant
-pkgver=2.8.0
+pkgver=2.8.2
 pkgrel=1
 pkgdesc="A wrapper library for generic spell checking"
+url="https://rrthomas.github.io/enchant/"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url="https://abiword.github.io/enchant/"
-license=('LGPL')
-depends=('glib2')
-makedepends=('aspell' 'hunspell' 'hspell' 'nuspell' 'libvoikko')
+license=('LGPL-2.1-or-later')
+depends=(
+  'gcc-libs'
+  'glib2'
+  'glibc'
+)
+makedepends=(
+  'aspell'
+  'git'
+  'hspell'
+  'hunspell'
+  'libvoikko'
+  'nuspell'
+  'vala'
+)
 checkdepends=('unittestpp')
-optdepends=('aspell: for aspell based spell checking support'
-            'hunspell: for hunspell based spell checking support'
-            'libvoikko: for libvoikko based spell checking support'
-            'hspell: for hspell based spell checking support'
-            'nuspell: for nuspell based spell checking support')
-provides=('libenchant-2.so') # enchant_voikko.so enchant_nuspell.so enchant_hunspell.so enchant_hspell.so enchant_aspell.so)
-source=("https://github.com/AbiWord/enchant/releases/download/v$pkgver/enchant-$pkgver.tar.gz")
-sha512sums=('0b2b5c93f39343b2fd29ea6a4f62b73c6276ff113a947e50db9e6dbc1b27b561c7a2cfbae1e4463958616e1fcbcaebd8720d26ad8049c3e3af75aed39a90d6f9')
+optdepends=(
+  'aspell: for aspell based spell checking support'
+  'hspell: for hspell based spell checking support'
+  'hunspell: for hunspell based spell checking support'
+  'libvoikko: for libvoikko based spell checking support'
+  'nuspell: for nuspell based spell checking support'
+)
+provides=('libenchant-2.so')
+source=(
+  "git+https://github.com/rrthomas/enchant#tag=v$pkgver"
+  "git+https://git.savannah.gnu.org/git/gnulib.git"
+  "git+https://github.com/gnulib-modules/bootstrap.git"
+)
+b2sums=('6434cda96ee3a1582428dd7328016504cbfc8e4d18ca5b3ee89cfd57cfd2791f25d5f0da8eafe610544051f5b67759f5051ab1751b7cb84719244548661aa66d'
+        'SKIP'
+        'SKIP')
 
 prepare() {
-  cd $pkgname-$pkgver
-  autoreconf -vfi
+  cd enchant
+
+  git submodule init
+  git submodule set-url gnulib "$srcdir/gnulib"
+  git submodule set-url gl-mod/bootstrap "$srcdir/bootstrap"
+  git -c protocol.file.allow=always -c protocol.allow=never submodule update
+
+  ./bootstrap
 }
 
 build() {
-  cd $pkgname-$pkgver
-  ./configure --prefix=/usr \
-    --disable-static \
+  local configure_options=(
+    --prefix=/usr
+    --sysconfdir=/etc
+    --localstatedir=/var
+    --disable-static
     --enable-relocatable
+  )
+
+  cd enchant
+  ./configure "${configure_options[@]}"
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
 }
 
 check() {
-  cd $pkgname-$pkgver
+  cd enchant
   make check
 }
 
 package() {
-  cd $pkgname-$pkgver
+  cd enchant
   make DESTDIR="$pkgdir" install
 }
