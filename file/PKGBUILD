@@ -5,7 +5,7 @@
 
 pkgname=file
 pkgver=5.45
-pkgrel=1
+pkgrel=1.2
 pkgdesc='File type identification utility'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=('custom')
@@ -13,10 +13,18 @@ url='https://www.darwinsys.com/file/'
 depends=('glibc' 'zlib' 'xz' 'bzip2' 'libseccomp' 'libseccomp.so' 'zstd' 'libzstd.so')
 provides=('libmagic.so')
 options=('!emptydirs')
-source=("https://astron.com/pub/$pkgname/$pkgname-$pkgver.tar.gz"{,.asc})
+source=("https://astron.com/pub/$pkgname/$pkgname-$pkgver.tar.gz"{,.asc}
+        file-5.45-32-bit-time_t-deux.patch
+        file-5.45-32-bit-time_t.patch
+        file-5.45-seccomp-sandbox.patch
+        file-5.45-weak-magic-shell.patch)
 validpgpkeys=('BE04995BA8F90ED0C0C176C471112AB16CB33B3A') # Christos Zoulas
 sha256sums=('fc97f51029bb0e2c9f4e3bffefdaf678f0e039ee872b9de5c002a6d09c784d82'
-            'SKIP')
+            'SKIP'
+            'c6fd7ce3d90dad6378169b4f6ee09db637148b2f92651aaca59953d5140a104f'
+            'bacf14d3aa5c2cd160ab1fcf9e2d25ca2bb6d0643a793176e93031bbbc646335'
+            'a6b67702ab2e0ed9d518849abfc8b73b6f5835b3f9fb5be6e52bf049f6c6780d'
+            '1447ff7f9cdd5005c63f78266f3fa9be9b02279c01ae05a2cffe994efd00c6ac')
 
 prepare() {
   cd $pkgname-$pkgver
@@ -29,6 +37,8 @@ prepare() {
     echo "Applying patch $src..."
     patch -Np1 < "../$src"
   done
+
+  autoreconf -fiv
 }
 
 build() {
@@ -37,12 +47,16 @@ build() {
   # Fix linking libmagic (vfork needs libpthread)
   CFLAGS+=" -pthread"
 
+  case "${CARCH}" in
+    powerpc) _configure_flags=(--disable-libseccomp) ;;
+    *) _configure_flags=(--enable-libseccomp) ;;
+  esac
+
   ./configure \
     --prefix=/usr \
     --datadir=/usr/share/file \
-    --enable-fsect-man5 \
-    --enable-libseccomp
-  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+    --enable-fsect-man5 ${_configure_flags[@]}
+    sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
 }
 
