@@ -3,40 +3,91 @@
 
 _gemname=rake-compiler
 pkgname=ruby-${_gemname}
-pkgver=1.2.5
-pkgrel=2.1
+pkgver=1.2.7
+pkgrel=1
 pkgdesc='Rake-based Ruby Extension (C, Java) task generator'
 url='https://github.com/rake-compiler/rake-compiler'
 arch=(any)
 license=('MIT')
-depends=('ruby' 'rubygems' 'ruby-rake')
-makedepends=('ruby-rdoc')
+depends=(
+  ruby
+  ruby-rake
+)
+checkdepends=(
+  ruby-bundler
+  ruby-cucumber
+  ruby-rspec
+)
 options=('!emptydirs')
-source=(https://github.com/rake-compiler/rake-compiler/archive/v${pkgver}/${pkgname}-v${pkgver}.tar.gz)
-sha512sums=('843b9286f874b487f23a3558b0a7565eea5e2a22144a8ece944b4b69d40945eee16cca8341e2ea3678418df7f36637574c6832899215676ca3294ae61b24ff5a')
-b2sums=('9f619026574467e6abd31a449f1825c49e0df691b1f139c7a8829a9361df3401bab65312303ab7a566eaf73f4a3a6b78674c73abe6f1cc72d1f1bbb6f619e51a')
+source=("https://github.com/rake-compiler/rake-compiler/archive/v${pkgver}/${pkgname}-v${pkgver}.tar.gz")
+sha512sums=('7405037092446e245028f73494acbeeb9b67cdcbc4e90832180d3c53d36df008b05a83e88e1919b884754e39365ca5685aa22cf8caf9e7f96786c11ac7208ead')
+b2sums=('457359489e5c3c2155d0b2118b146bdf0ed0249b642859d34950640f472e4ed1d166ff3491ba5f739612f4a32e537b8319ee0eca2cd85cd5bfb61aec7a7daecc')
 
 prepare() {
-  cd ${_gemname}-${pkgver}
-  sed -r 's|~>|>=|g' -i ${_gemname}.gemspec
+  cd "${_gemname}-${pkgver}"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
 }
 
 build() {
-  cd ${_gemname}-${pkgver}
-  gem build ${_gemname}.gemspec
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rake spec
 }
 
 package() {
-  cd ${_gemname}-${pkgver}
-  local _gemdir="$(gem env gemdir)"
-  gem install --ignore-dependencies --no-user-install -i "${pkgdir}${_gemdir}" \
-    -n "${pkgdir}/usr/bin" ${_gemname}-${pkgver}.gem
-  install -Dm 644 LICENSE.txt -t "${pkgdir}/usr/share/licenses/${pkgname}"
-  install -Dm 644 README.md History.md -t "${pkgdir}/usr/share/doc/${pkgname}"
+  cd "${_gemname}-${pkgver}"
 
-  cd "${pkgdir}/${_gemdir}"
-  rm -rf cache gems/${_gemname}-${pkgver}/{ext,lib/*/*.so} \
-    extensions/*/*/${_gemname}-${pkgver}/{mkmf.log,gem_make.out}
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 LICENSE* --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
 }
 
-# vim: ts=2 sw=2 et:
+# vim: tabstop=2 shiftwidth=2 expandtab:
