@@ -4,19 +4,90 @@
 _gemname=webrick
 pkgname=ruby-$_gemname
 pkgver=1.8.1
-pkgrel=3.1
+pkgrel=4
 pkgdesc='An HTTP server toolkit that can be configured as an HTTPS server'
 arch=(any)
 url='https://github.com/ruby/webrick'
-license=(BSD-2)
-depends=(ruby)
+license=(BSD-2-Clause)
+depends=(
+  ruby
+  ruby-erb
+)
+checkdepends=(
+  ruby-bundler
+  ruby-rake
+  ruby-test-unit
+)
 options=(!emptydirs)
-source=(https://rubygems.org/downloads/$_gemname-$pkgver.gem)
-noextract=($_gemname-$pkgver.gem)
-sha256sums=('19411ec6912911fd3df13559110127ea2badd0c035f7762873f58afc803e158f')
+source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('21cb396887025f85cfe04868e7fa7ef039809ca42a3acadfe1decb4dcd02eeeb3c9163e970324b56a9e0eb6202d971370af56e200c69de2d224c1941f866400c')
+b2sums=('eff3f2dff64d017fa0ef5370b07d97bfcd39f1df426a3b04ffdd0b5b0ea43cdd5d267420ea64bd0c3e4de3f1ee88df2f09959fd17b2b158b5ce0ddc16995b2bb')
+
+prepare() {
+  cd "${_gemname}-${pkgver}"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
+}
+
+build() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rake test
+}
 
 package() {
-  local _gemdir="$(ruby -e'puts Gem.default_dir')"
-  gem install --no-document --ignore-dependencies --no-user-install -i "$pkgdir/$_gemdir" -n "$pkgdir/usr/bin" $_gemname-$pkgver.gem
-  rm "$pkgdir/$_gemdir/cache/$_gemname-$pkgver.gem"
+  cd "${_gemname}-${pkgver}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 LICENSE* --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
 }
+
+# vim: tabstop=2 shiftwidth=2 expandtab:
