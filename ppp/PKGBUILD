@@ -3,19 +3,16 @@
 # Contributor: Thomas Baechler <thomas@archlinux.org>
 
 pkgname=ppp
-pkgver=2.5.0
-pkgrel=3
+pkgver=2.5.1
+pkgrel=1
 pkgdesc="A daemon which implements the Point-to-Point Protocol for dial-up networking"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://www.samba.org/ppp/"
 license=('GPL' 'BSD')
 depends=('glibc' 'libpcap' 'libxcrypt' 'openssl')
+makedepends=('git')
 backup=(etc/ppp/{chap-secrets,ip-down,ip-down.d/00-dns.sh,ip-up,ip-up.d/00-dns.sh,ipv6-down,ipv6-up,ipv6-up.d/00-iface-config.sh,options,pap-secrets})
-source=(https://download.samba.org/pub/ppp/ppp-$pkgver.tar.gz{,.asc}
-        ppp-revert-var-lock.patch::https://github.com/ppp-project/ppp/commit/99cbf5e269994482edaf64624be8b1c806f9587c.patch
-        ppp-utils-mkdir.patch::https://github.com/ppp-project/ppp/commit/b0e7307b3569a5dad0f2606d2736cc8317851598.patch
-        ppp-create-rundir.patch::https://github.com/ppp-project/ppp/commit/3a4fec968174fd6f387d5ec872a56343f256f645.patch
-        ppp-device-name-too-long.patch::https://github.com/ppp-project/ppp/commit/9d6d326b2530cffb1414e4c401675117c42d43ce.patch
+source=(git+https://github.com/ppp-project/ppp.git?signed#tag=ppp-$pkgver
         options
         ip-up
         ip-down
@@ -26,12 +23,7 @@ source=(https://download.samba.org/pub/ppp/ppp-$pkgver.tar.gz{,.asc}
         ipv6-up.d.iface-config.sh
         ppp.systemd
         LICENSE)
-sha512sums=('094368ea2aa6c6e8dfba4443509857a7c1c7ff839bb6d6657743802477208c01e87db31593cef0932d3725c640e9c103179da6b742825034cda82bd31ddcc2ed'
-            'SKIP'
-            'eaf83b5d1204032f95dce12383a45ddc8050b4f85ba45bcc77f332fcbf8b73bf5f6fcf06f97e0606d37610249a013da8b36109f42a4901a477741970711ce73b'
-            '444eb247f1d3d8a83a8180b0593f2b79005fbcddfe38d33845d76324f8aa584e17fce36906b9a03b9be9092b9afbe5ebce3365d64887c08b6b4e19069a70d1fa'
-            '1bff91daaa61d4e3dcce82095be35f63c7025f22b956bf8b9ee48307a2ca437b61b55fd9f0172c514f3f6bee16aa9c615e6a11aeca663032d6a6d6f9166d4341'
-            '201b0a5006d62c40952ac662e3d6990f53dae379d290f27d804c71f84cb3f0ac346a5da783fc90461b5a853cad27e78e3f61896794e676c740541d780cac6ce8'
+sha512sums=('2303287dfb6a887f0c61b2a5db2943d2abb74b5116bb6ab123d7d58af4dc2fc7d1dd4dd23fa3fd2443617637bf293ed560142f4cd81ab29c79952618960050ef'
             '4324a9abe79b20735b87de2158bb73b6449415a4760f06a06b648dfb53517f8d9907b094a88d1b492b24c8720cfd9b17d491fbe236fbd51ba9042af60483b231'
             'bdaaac792dd448ff31da6da2749d8c2f9c4e0311b1d4639de7c68038fcaa333cc28e25f5a6308de0ecb24b60b2e7284a811482df990da5f54d5581a746964f3c'
             '92f3a5e383f2c888938e891ba831042e7f8c026b0ddf5ce8c3523d06ac32fa81742e638a4c665975cbc79868b98806d92574ee2ee8e034e33b065a90ee3ab28b'
@@ -46,24 +38,19 @@ validpgpkeys=('631E179E370CD727A7F2A33A9E4295D605F66CE9'  # Paul Mackerras (Sign
               'DE8E01561D8276A4DBFAEFCC040F1D49EC9DBB8C') # Paul Mackerras <paulus@ozlabs.org>
 
 prepare() {
-  cd $pkgname-$pkgver
-
-  patch -Np1 -i ../ppp-revert-var-lock.patch
-  patch -Np1 -i ../ppp-utils-mkdir.patch
-  patch -Np1 -i ../ppp-create-rundir.patch
-  patch -Np1 -i ../ppp-device-name-too-long.patch
+  cd ppp
+  autoreconf -i
 }
 
 build() {
-  cd $pkgname-$pkgver
-
+  cd ppp
   ./configure --prefix=/usr --sbindir=/usr/bin --sysconfdir=/etc --runstatedir=/run \
               --enable-systemd --enable-cbcp --enable-multilink 
   make
 }
 
 package() {
-  cd $pkgname-$pkgver
+  cd ppp
   make DESTDIR="$pkgdir" install
 
   install -D -m644 ../options "$pkgdir"/etc/ppp/options
@@ -83,8 +70,6 @@ package() {
   install -D -m755 scripts/poff "$pkgdir"/usr/bin/poff
   install -D -m755 scripts/plog "$pkgdir"/usr/bin/plog
   install -D -m644 scripts/pon.1 "$pkgdir"/usr/share/man/man1/pon.1
-  install -D -m600 etc.ppp/pap-secrets  "$pkgdir"/etc/ppp/pap-secrets
-  install -D -m600 etc.ppp/chap-secrets "$pkgdir"/etc/ppp/chap-secrets
   install -d -m755 "$pkgdir"/etc/ppp/peers
   chmod 0755 "$pkgdir"/usr/lib/pppd/$pkgver/*.so
 
