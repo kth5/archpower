@@ -3,7 +3,7 @@
 
 pkgname=spglib
 pkgver=2.5.0
-pkgrel=1
+pkgrel=2
 pkgdesc='C library for finding and handling crystal symmetries'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://spglib.readthedocs.io/en/latest/'
@@ -13,12 +13,15 @@ makedepends=(cmake
              gcc-fortran
              git
              gtest
-             python
-             python-numpy)
+             python-build
+             python-installer
+             python-numpy
+             python-scikit-build-core
+             python-setuptools-scm)
 optdepends=('gcc-libs: Fortran interface'
             'python-numpy: Python interface')
 source=(git+https://github.com/spglib/spglib#tag=v$pkgver)
-sha256sums=('570b46d69e46d17dc0e8bc35c358df36334a8b08977791ee00cb9e48b31932b0')
+sha256sums=('da4a4e8a82836b8fc1569680e981daa945d30eb02543e07843ddca976ab6257e')
 
 prepare() {
   sed -e 's|TARGET Spglib_symspg|0|' -i $pkgname/python/CMakeLists.txt # Don't duplicate shared libs in python tree
@@ -27,12 +30,15 @@ prepare() {
 build() {
   cmake -B build -S $pkgname \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DSPGLIB_WITH_Fortran=ON \
-    -DSPGLIB_WITH_Python=ON
+    -DSPGLIB_WITH_Fortran=ON
   cmake --build build
+  cd $pkgname
+  python -m build --wheel --no-isolation
 }
 
 package() {
   DESTDIR="$pkgdir" cmake --install build
-  install -Dm644 $pkgname/COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  cd $pkgname
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
