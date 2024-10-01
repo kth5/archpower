@@ -9,13 +9,13 @@
 # Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
 
 pkgbase='protobuf'
-pkgname=('protobuf' 'python-protobuf')
-pkgver=27.2
+pkgname=('protobuf' 'python-protobuf' 'ruby-google-protobuf')
+pkgver=28.1
 pkgrel=1
 pkgdesc="Protocol Buffers - Google's data interchange format"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://developers.google.com/protocol-buffers/'
-license=('BSD')
+license=('BSD-3-Clause')
 depends=(
   'gcc-libs'
   'glibc'
@@ -29,18 +29,28 @@ makedepends=(
   'python-installer'
   'python-setuptools'
   'python-wheel'
+  'ruby'
+  'ruby-rake'
+  'ruby-rake-compiler'
 )
 checkdepends=(
   python-pytest
   python-numpy
 )
 source=(https://github.com/protocolbuffers/protobuf/archive/v$pkgver/$pkgname-$pkgver.tar.gz
-        https://github.com/protocolbuffers/protobuf/commit/2e62ef1e.patch)
-sha512sums=('664c66b62cf1ed0c65d9b910d8e67d4d5d471113697f1b8edf1573cd5c0fc8e850ac53ce984e48e6c6b9cbbefa12f8530058384e7388e65a59c1e46d03772397'
-            '18bc71031bbcbc3810a9985fa670465040f06a6c104ab8079b56bdfc499bb6cec40805a0cefd455031142490a576dc60aa8000523877ac0353b93558e9beabbd')
+        protobuf-fix-build-type-none.patch
+        $pkgbase-25.3-ruby-disable-LTO.patch) # https://github.com/protocolbuffers/protobuf/issues/11935
+sha512sums=('769ef61206e39336d93df786a25c08cdf1acb12f2f5818ae31afb268aad8b02076eeba15c41c68aadbf140c6e1653c0aaefc2a637278c7695ded1b5d72888d81'
+            '18bc71031bbcbc3810a9985fa670465040f06a6c104ab8079b56bdfc499bb6cec40805a0cefd455031142490a576dc60aa8000523877ac0353b93558e9beabbd'
+            '1ebdea4e533ee0f71baf1b3fe2623ca723b36a08c6b97475ea5996b10aeb6873cf94d9120596ddd1216bd2f6feb991f8c33078e8104008a5078ace5be5431efd')
+
+options=(!lto)
+
+_gemname=google-protobuf
 
 prepare() {
-  patch -d $pkgname-$pkgver -p1 < 2e62ef1e.patch # Fix cmake config compatibility mode
+  patch -d $pkgname-$pkgver -p1 < protobuf-fix-build-type-none.patch # Fix cmake config compatibility mode
+  patch -d $pkgbase-$pkgver -p1 < $pkgbase-25.3-ruby-disable-LTO.patch
 }
 
 build() {
@@ -64,10 +74,56 @@ build() {
   cmake "${cmake_options[@]}"
   cmake --build build --verbose
 
+
   cd $pkgbase-$pkgver/python
   LDFLAGS+=" -L${srcdir}/build" \
   PROTOC="$srcdir"/build/protoc \
   python dist/setup.py build
+
+  cd $srcdir/$pkgbase-$pkgver/ruby
+  local _gemdir="$(gem env gemdir)"
+  local _gemver=4.$pkgver
+
+  PROTOC="$srcdir"/build/protoc \
+  rake genproto
+  rake copy_third_party
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${_gemver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${_gemver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
 }
 
 check() {
@@ -98,4 +154,16 @@ package_python-protobuf() {
   cd $pkgbase-$pkgver/python
   python dist/setup.py install --root=$pkgdir
   install -vDm 644 $srcdir/$pkgbase-$pkgver/LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+}
+
+package_ruby-google-protobuf() {
+  pkgdesc='Ruby bindings for Google Protocol Buffers'
+  depends=(
+    'ruby'
+  )
+
+  cp -a $pkgbase-$pkgver/ruby/tmp_install/* "$pkgdir"
+
+  install -vDm 644 $pkgbase-$pkgver/LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -Dm 0644 $pkgbase-$pkgver/ruby/*.md -t "$pkgdir/usr/share/doc/${pkgname}"
 }
