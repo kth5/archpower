@@ -7,12 +7,38 @@ pkgname=(
   webkit2gtk
   webkit2gtk-docs
 )
-pkgver=2.44.1
-pkgrel=1
+pkgver=2.46.0
+pkgrel=2
 pkgdesc="Web content engine for GTK"
 url="https://webkitgtk.org"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=(custom)
+license=(
+  # :sort ui /\v^\s*['"]?/
+  'AFL-2.0 OR GPL-2.0-or-later'
+  Apache-2.0
+  'Apache-2.0 WITH LLVM-exception'
+  BSD-2-Clause
+  BSD-2-Clause-Views
+  BSD-3-Clause
+  BSD-Source-Code
+  BSL-1.0
+  bzip2-1.0.6
+  GPL-2.0-only
+  'GPL-3.0-only WITH Autoconf-exception-3.0'
+  'GPL-3.0-or-later WITH Bison-exception-2.2'
+  ICU
+  ISC
+  LGPL-2.1-only
+  LGPL-2.1-or-later
+  MIT
+  MPL-1.1
+  MPL-2.0
+  NCSA
+  'NCSA OR MIT'
+  OFL-1.1
+  SunPro
+  Unicode-TOU
+)
 depends=(
   at-spi2-core
   atk
@@ -21,7 +47,10 @@ depends=(
   enchant
   fontconfig
   freetype2
+  gcc-libs
+  gdk-pixbuf2
   glib2
+  glibc
   gst-plugins-bad-libs
   gst-plugins-base-libs
   gstreamer
@@ -30,6 +59,7 @@ depends=(
   harfbuzz-icu
   hyphen
   icu
+  lcms2
   libavif
   libdrm
   libegl
@@ -47,61 +77,61 @@ depends=(
   libsystemd
   libtasn1
   libwebp
-  libwpe
   libx11
-  libxcomposite
   libxml2
   libxslt
-  libxt
   mesa
   openjpeg2
+  pango
   sqlite
   wayland
   woff2
-  wpebackend-fdo
   xdg-dbus-proxy
   zlib
 )
 makedepends=(
-  clang
   cmake
   gi-docgen
+  glib2-devel
   gobject-introspection
   gperf
   gst-plugins-bad
-  lld
   ninja
   python
   ruby
+  ruby-stdlib
   systemd
   unifdef
   wayland-protocols
 )
+options=(
+  # https://gitlab.archlinux.org/archlinux/packaging/packages/webkit2gtk-4.1/-/issues/1
+  # https://bugs.webkit.org/show_bug.cgi?id=278090
+  !lto
+)
 source=(
   $url/releases/webkitgtk-$pkgver.tar.xz{,.asc}
   reduce-memory-overheads.patch
-  webkit-b3jit-regression.patch
+  fix-ftbfs-riscv64.patch
 )
-options=(!lto)
-sha256sums=('425b1459b0f04d0600c78d1abb5e7edfa3c060a420f8b231e9a6a2d5d29c5561'
+sha256sums=('d4d433040f190151560c50bde840850089f87bad4fefa9ebdb4aae856a3df43a'
             'SKIP'
             '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864'
-            '35e71f03b8909bfb017d2ffb4132f9893cc40d8d57720cd8153ce41a13caec93')
-b2sums=('a5fff4c4fe90bcd0ea098930e51a36ea60152da47fd06e78abbc10f146437838aa19fed15cf58732b538046e1f42d8461cd5c0e0859096506932c9fae150cc16'
+            'b42d36c275e5fbd6da8e0761381d9eac13b2d103a366a61d9d450421948385a3')
+b2sums=('a91ff4e00f64bfad8b0493f84a1f3745c167b1db7854b758296a5eb7f966383d540aef91ee14b84d6b4b0710cb2f2281e4bb766968f97dfe3393187b9a7a2b87'
         'SKIP'
         'cc16462ce22df999b47ef477d4272ef3df2fbbfe5cdc585f3ce47e56cde65a1d7dd1105e6e7bbff41695f79b6394bc3e403e53a669bb7f456c733ed216372c9b'
-        'd6c2b589bdf8cf3f75f698bcfa98247dd1fc260859cfefa8842ba11d32e7d2089f97c9b930427ccb6fa37cd58493c6e4c699e3e44327327da0ef1781c32bb7d9')
+        'cd80efecf12982e9e9335032a433e094614c8b95edce7114d37c6d651ee1f5bb3e331c3911d7901055cd59ca3ed5de38d14e15fab5488d3248bf5899623b2f8c')
 validpgpkeys=(
-  D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3 # Carlos Garcia Campos <cgarcia@igalia.com>
+  # https://www.webkitgtk.org/verifying.html
   5AA3BC334FD7E3369E7C77B291C559DBE4C9123B # Adrián Pérez de Castro <aperez@igalia.com>
+  013A0127AC9C65B34FFA62526C1009B693975393 # Carlos Garcia Campos <cgarcia@igalia.com>
 )
 
 prepare() {
   cd webkitgtk-$pkgver
-
-  patch -Np1 -i ${srcdir}/reduce-memory-overheads.patch
-
-  patch -Np1 -i ${srcdir}/webkit-b3jit-regression.patch
+  patch -Np1 -i ../reduce-memory-overheads.patch
+  patch -Np1 -i ../fix-ftbfs-riscv64.patch
 }
 
 build() {
@@ -112,9 +142,8 @@ build() {
     -DCMAKE_INSTALL_LIBDIR=lib
     -DCMAKE_INSTALL_LIBEXECDIR=lib
     -DCMAKE_SKIP_RPATH=ON
-    -DUSE_AVIF=ON
-    -DUSE_LIBBACKTRACE=OFF
     -DUSE_GTK4=OFF
+    -DUSE_LIBBACKTRACE=OFF
     -DUSE_SOUP2=ON
     -DENABLE_DOCUMENTATION=ON
     -DENABLE_MINIBROWSER=ON
@@ -125,7 +154,7 @@ build() {
       CFLAGS+=' -mminimal-toc'
       CXXFLAGS+=' -mminimal-toc'
     ;;
-    powerpc) 
+    powerpc)
       cmake_options+=(
         -DENABLE_WEBGL=OFF
         -DFORCE_32BIT=ON
@@ -161,10 +190,6 @@ build() {
 }
 
 package_webkit2gtk() {
-  depends+=(
-    libWPEBackend-fdo-1.0.so
-    libwpe-1.0.so
-  )
   provides+=(
     libjavascriptcoregtk-4.0.so
     libwebkit2gtk-4.0.so
