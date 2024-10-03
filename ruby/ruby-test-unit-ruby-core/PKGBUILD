@@ -3,8 +3,8 @@
 
 _name=test-unit-ruby-core
 pkgname=ruby-test-unit-ruby-core
-pkgver=1.0.5
-pkgrel=2.1
+pkgver=1.0.6
+pkgrel=1
 pkgdesc="Additional test assertions for Ruby standard libraries"
 arch=(any)
 url="https://github.com/ruby/test-unit-ruby-core"
@@ -15,8 +15,8 @@ makedepends=(
   ruby-rdoc
 )
 source=($_name-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz)
-sha512sums=('5f107cc054abfa422c5a82c58b4a67de4c6c6cf60a0c3e18cc8408162cff5dd1689e1c61cff4900635f09b8ba908ec4394c2b5ef7e072c3eb4759463dc4b4f90')
-b2sums=('964e56fa67da961a827849481c77f91db019336844076818a9587b4dc6f7e26effa6eb8384aa7cfc6dbb4bac1681d3a6f10897c9de91dc9bd5d05f73c21ccc69')
+sha512sums=('7b71546112e19ad453d76098c47bc1e471d1c9fda4962a3217c06cad405a773ff080b94aa650ffed94df0067ac1842ed22b438c43b143e717de64392337be446')
+b2sums=('ad1fbab21cf4972451d44c6e31cdae5b6c7209b8f4b8f54cfbfdb3d04d456c551e7f038a18e6d465a0cc9f1b965d913138a23d6e0c6e00551b655682340d1c44')
 
 prepare() {
   cd $_name-$pkgver
@@ -78,6 +78,6 @@ package() {
 
   mv -v tmp_install/* "$pkgdir/"
 
-  install -vDm 644 LICENSE.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -vDm 644 BSDL COPYING -t "$pkgdir/usr/share/licenses/$pkgname/"
   install -vDm 644 README.md -t "$pkgdir/usr/share/doc/$pkgname/"
 }
