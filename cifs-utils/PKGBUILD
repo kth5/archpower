@@ -2,45 +2,40 @@
 # Maintainer: Tobias Powalowski <tpowa@archlinux.org>
 pkgname=cifs-utils
 pkgver=7.0
-pkgrel=4
+pkgrel=5
 pkgdesc="CIFS filesystem user-space tools"
 arch=(powerpc64le powerpc64 powerpc riscv64)
 url="https://wiki.samba.org/index.php/LinuxCIFS_utils"
 license=('GPL-3.0-or-later')
 depends=('libcap-ng' 'keyutils' 'krb5' 'talloc' 'pam' 'libwbclient')
-makedepends=('python-docutils')
+makedepends=('git' 'python-docutils')
 optdepends=('python: for smb2-quota and smbinfo script')
-source=("https://download.samba.org/pub/linux-cifs/$pkgname/$pkgname-$pkgver.tar.bz2"{,.asc})
-
+source=("git+https://git.samba.org/cifs-utils.git?signed#tag=${pkgname}-${pkgver}")
 validpgpkeys=('C699981A31F338706C817650DF5BA9D30642D5A0') #cifs-utils Distribution Verification Key <cifs-utils@samba.org>
-sha256sums=('0defaab85bd3ea46ffc45ab41fb0d0ad54d05ae2cfaa7e503de86d4f12bc8161'
-            'SKIP')
+b2sums=('962d5e129d9f0bf352667bd7709e77520f3c178ac07f36233ac71cf8017532a924acf79946035707265c0d5becb9c725f1b8e227efcaa9a951d22d761b96d183')
 
 prepare() {
+  cd "${srcdir}/${pkgname}"
   # Fix install to honor DESTDIR
-  sed -e 's|cd \$(ROOTSBINDIR)|cd $(DESTDIR)$(ROOTSBINDIR)|g' -i $pkgname-$pkgver/Makefile.am
+  sed -e 's|cd \$(ROOTSBINDIR)|cd $(DESTDIR)$(ROOTSBINDIR)|g' -i Makefile.am
+  autoreconf -i
 }
 
 build() {
-  cd "$srcdir/$pkgname-$pkgver"
-  # systemd support is broken in mount.cifs
-  # https://bugs.archlinux.org/task/30958
-  autoreconf -i
-  # https://www.spinics.net/lists/linux-cifs/msg21550.html
-  # change back to libcap-ng depend when upstream is fixed
-  ./configure --prefix=/usr --sbindir=/usr/bin --disable-systemd --build=${CHOST}
+  cd "${srcdir}/${pkgname}"
+  ./configure --prefix=/usr --sbindir=/usr/bin --enable-systemd
   make
 }
 
 package() {
-  cd "$srcdir/$pkgname-$pkgver"
-  make DESTDIR="$pkgdir" ROOTSBINDIR=/usr/bin install
-  mkdir -p "$pkgdir"/etc/request-key.d
-  install -m 644 contrib/request-key.d/cifs.idmap.conf "$pkgdir"/etc/request-key.d
-  install -m 644 contrib/request-key.d/cifs.spnego.conf "$pkgdir"/etc/request-key.d
+  cd "${srcdir}/${pkgname}"
+  make DESTDIR="${pkgdir}" ROOTSBINDIR=/usr/bin install
+  mkdir -p "${pkgdir}"/etc/request-key.d
+  install -m 644 contrib/request-key.d/cifs.idmap.conf "${pkgdir}"/etc/request-key.d
+  install -m 644 contrib/request-key.d/cifs.spnego.conf "${pkgdir}"/etc/request-key.d
   # set mount.cifs uid, to enable none root mounting form fstab
-  chmod +s "$pkgdir"/usr/bin/mount.cifs
+  chmod +s "${pkgdir}"/usr/bin/mount.cifs
   # fix idmap-plugin #42052
-  mkdir -p "$pkgdir"/etc/cifs-utils
+  mkdir -p "${pkgdir}"/etc/cifs-utils
   ln -s /usr/lib/cifs-utils/idmapwb.so "${pkgdir}"/etc/cifs-utils/idmap-plugin
 }
