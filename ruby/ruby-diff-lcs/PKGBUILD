@@ -7,30 +7,93 @@
 
 _gemname=diff-lcs
 pkgname=ruby-${_gemname}
-pkgver=1.5.0
-pkgrel=2.1
+pkgver=1.5.1
+pkgrel=1
 pkgdesc='Diff::LCS computes the difference between two Enumerable sequences using the McIlroy-Hunt longest common subsequence (LCS) algorithm'
 url='https://github.com/halostatue/diff-lcs'
 arch=(any)
 license=('MIT' 'PerlArtistic' 'GPL2')
-depends=('ruby')
-makedepends=('ruby-rdoc')
+depends=(
+  ruby
+)
+makedepends=(
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-hoe
+  ruby-rake
+  ruby-rspec
+)
 options=('!emptydirs')
-source=(${pkgname}-${pkgver}.tar.gz::https://github.com/halostatue/diff-lcs/archive/v${pkgver}.tar.gz)
-sha512sums=('56605522c137aa8ea505d659782ddd57d50ca8dae27d52dece5420f5b007521a15a884d81116813214f98871e5e271554f68feb8494ba261d78e59f7e25f42ea')
+source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('9ada148db75f8c06b0168b17f950dfed71f8d1c64a8b696b1843bc97ab68279f26bb97a10db0e5bf0d8277fcad447a6733161a50aa04829a6d115d27f031f5f5')
+b2sums=('e4d5f1c5a24baa6e9de9fbb266453ae121ce63c1bfba4d75d07ea48301be943c663381960e66ee28b16fb7e210be9e75569393deb4ec123813f1685cad44b111')
+
+prepare() {
+  cd "${_gemname}-${pkgver}"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
+}
 
 build() {
-  cd ${_gemname}-${pkgver}
-  gem build ${_gemname}.gemspec
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rake test
 }
 
 package() {
-  cd ${_gemname}-${pkgver}
-  local _gemdir="$(gem env gemdir)"
-  gem install --ignore-dependencies --no-user-install -i "${pkgdir}/${_gemdir}" -n "${pkgdir}/usr/bin" ${_gemname}-${pkgver}.gem
-  install -Dm 644 README.rdoc -t "${pkgdir}/usr/share/doc/${pkgname}"
-  install -Dm 644 License.md -t "${pkgdir}/usr/share/licenses/${pkgname}"
-  rm "${pkgdir}/${_gemdir}/cache/${_gemname}-${pkgver}.gem"
+  cd "${_gemname}-${pkgver}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 License.md --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
 }
 
-# vim: ts=2 sw=2 et:
+# vim: tabstop=2 shiftwidth=2 expandtab:
