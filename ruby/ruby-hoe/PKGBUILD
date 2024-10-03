@@ -5,42 +5,90 @@
 
 _gemname=hoe
 pkgname=ruby-${_gemname}
-pkgver=4.2.1
-pkgrel=2.1
+pkgver=4.2.2
+pkgrel=1
 pkgdesc='Hoe is a rake/rubygems helper for project Rakefiles'
 url='https://www.zenspider.com/projects/hoe.html'
 arch=(any)
 license=('MIT')
-depends=('ruby')
-makedepends=('git' 'ruby-rdoc' 'ruby-rake' 'ruby-minitest')
+depends=(
+  ruby
+  ruby-rake
+)
+makedepends=(
+  git
+  ruby-minitest
+  ruby-rdoc
+)
 options=('!emptydirs')
 source=("git+https://github.com/seattlerb/hoe#tag=v${pkgver}")
-sha512sums=('bc036703f4d0c564c9da520e2d97c166c01f27216cab88c487c2ecdaae28951da1b600589e77cef73a8e68db3bd1f570343591c7f38ca111c32df23cc8368ac4')
+sha512sums=('c1181f2d82a24412ace199fff0fabb2e73e1c6dada8c2a6fe4cd18fd1dddbb2809b187f15c6eb2c24eb4df8701a4e6ffb5fe888dca2c46a1e7b2991dbac32eac')
+b2sums=('642ffb4248cfeed6261b45f43ce40f4c2052b871a8ea4250b3527504303bf9b41c02e62fefdeb523ca18440ac63dbe9ddfc525166073aeb00d9e3924a5b58518')
 
 pkgver() {
   cd ${_gemname}
-  grep 'VERSION = "' lib/hoe.rb|sed -E 's|.*"(.+)"|\1|'
+
+  grep 'VERSION = "' lib/hoe.rb | sed --regexp-extended 's|.*"(.+)"|\1|'
 }
 
 build() {
   cd ${_gemname}
+
+  local _gemdir="$(gem env gemdir)"
+
   rake gem
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "pkg/${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
 }
 
 check() {
   cd ${_gemname}
-  rake test
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rake test
 }
 
 package() {
   cd ${_gemname}
-  local _gemdir="$(gem env gemdir)"
-  gem install --ignore-dependencies --no-user-install -i "${pkgdir}${_gemdir}" \
-    -n "${pkgdir}/usr/bin" pkg/${_gemname}-${pkgver}.gem
-  install -Dm 644 README.rdoc -t "${pkgdir}/usr/share/doc/${pkgname}"
-  install -Dm 644 README.rdoc -t "${pkgdir}/usr/share/licenses/${pkgname}"
-  rm -rf cache gems/${_gemname}-${pkgver}/{ext,lib/*/*.so} \
-    extensions/*/*/${_gemname}-${pkgver}/{mkmf.log,gem_make.out}
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 README.rdoc --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.rdoc --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
 }
 
-# vim: ts=2 sw=2 et:
+# vim: tabstop=2 shiftwidth=2 expandtab:
