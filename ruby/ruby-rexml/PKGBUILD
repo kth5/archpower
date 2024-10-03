@@ -1,22 +1,96 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Anatol Pomozov <anatol.pomozov@gmail.com>
 
 _gemname=rexml
 pkgname=ruby-$_gemname
-pkgver=3.2.6
-pkgrel=2.1
+pkgver=3.3.2
+pkgrel=1
 pkgdesc='An XML toolkit for Ruby'
 arch=(any)
 url='https://github.com/ruby/rexml'
 license=(BSD-2)
-depends=(ruby)
-#makedepends=('ruby-rdoc')
+depends=(
+  ruby
+)
+makedepends=(
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-bundler
+  ruby-rake
+  ruby-test-unit
+  ruby-test-unit-ruby-core
+)
 options=(!emptydirs)
-source=(https://rubygems.org/downloads/$_gemname-$pkgver.gem)
-noextract=($_gemname-$pkgver.gem)
-sha256sums=('e0669a2d4e9f109951cb1fde723d8acd285425d81594a2ea929304af50282816')
+source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('fd374b2a2b1751f3762ca95d5d2355e64f8fa0de7fa8c4106f36f700e26dfcb8dad8b239399859fef5268195a3d07a19367afea5f01014ab3122e316d4f2168a')
+b2sums=('44fc74d6fbdbe213c1bdcb97cb54a5cc74bbc1a74ef2531bb5c3c10c94e5fe061e18c096974e2a94c03918ff5e8d40f5d191d473ae3c49ae0a94a58fd8f641b6')
+
+prepare() {
+  cd "${_gemname}-${pkgver}"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
+}
+
+build() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rake test
+}
 
 package() {
-  local _gemdir="$(ruby -e'puts Gem.default_dir')"
-  gem install --no-document --ignore-dependencies --no-user-install -i "$pkgdir/$_gemdir" -n "$pkgdir/usr/bin" $_gemname-$pkgver.gem
-  rm "$pkgdir/$_gemdir/cache/$_gemname-$pkgver.gem"
+  cd "${_gemname}-${pkgver}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 LICENSE* --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
 }
+
+# vim: tabstop=2 shiftwidth=2 expandtab:
