@@ -5,7 +5,7 @@
 _gemname=ronn-ng
 pkgname=ruby-$_gemname
 pkgver=0.10.1
-pkgrel=1.1
+pkgrel=3
 pkgdesc='Manual page formatter that generates man pages from markdown'
 arch=(any)
 url='https://github.com/apjanke/ronn-ng'
@@ -15,29 +15,97 @@ depends=(
   ruby-rdiscount
   ruby-mustache
   ruby-kramdown
+  ruby-kramdown-parser-gfm
   ruby-nokogiri
+  ruby-erb
 )
 makedepends=(
   ruby-rdoc
+)
+checkdepends=(
+  ruby-bundler
+  ruby-rack
+  ruby-rake
+  ruby-sinatra
+  ruby-test-unit
 )
 conflicts=('ruby-ronn')
 provides=('ruby-ronn')
 replaces=('ruby-ronn')
 options=(!emptydirs)
-source=("https://rubygems.org/downloads/$_gemname-$pkgver.gem")
-noextract=($_gemname-$pkgver.gem)
-sha512sums=('cda3689bbd5e997fcc49fe0c7b1732f1af13bc27245e1e008f5305339964273128f7cb6a12422c5e46cfe718ac8853bafc2796cd4740e4b03911a748807092c6')
-b2sums=('075a0954264dafc60cc6f402402ed318576fc776ab1d085b86994663891c6d38cb69071d46f3a057b5d85703bff9e83cc9e55eb421cc1cd37289a9291d996283')
+source=($url/archive/v$pkgver/$pkgname-$pkgver.tar.gz)
+sha512sums=('3f6ee5355c7a19d5cb04c1b677028dd13ad2ff620acdb2e83d9b6f154a7b1e7b5a77ea0bcfbcef4bbb46a60b1c0fbc52fda079ff860c83a71f89b8fed0b83665')
+b2sums=('1e56b90c5919e0a1af317da78161b34124268521fbc379fbba09ff9cb344073665460abc53fd961e4773ee444f33fba7e72ae3f6af84f8a170cfb1e89e557922')
+
+prepare() {
+  cd "${_gemname}-${pkgver}"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
+}
+
+build() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rake
+}
 
 package() {
-  local _gemdir="$(ruby -e'puts Gem.default_dir')"
-  gem install --ignore-dependencies --no-user-install -i "$pkgdir/$_gemdir" -n "$pkgdir/usr/bin" $_gemname-$pkgver.gem
-  rm "$pkgdir/$_gemdir/cache/$_gemname-$pkgver.gem"
-  install -D -m644 "$pkgdir/$_gemdir/gems/$_gemname-$pkgver/LICENSE.txt" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.txt"
+  cd "${_gemname}-${pkgver}"
 
-  install -D -m644 "$pkgdir/$_gemdir/gems/$_gemname-$pkgver/man/ronn.1" "$pkgdir/usr/share/man/man1/ronn.1"
-  install -D -m644 "$pkgdir/$_gemdir/gems/$_gemname-$pkgver/man/ronn-format.7" "$pkgdir/usr/share/man/man7/ronn-format.7"
+  cp --archive --verbose tmp_install/* "${pkgdir}"
 
-  install -D -m644 "$pkgdir/$_gemdir/gems/$_gemname-$pkgver/completion/bash/ronn" "$pkgdir/usr/share/bash-completion/completions/ronn"
-  install -D -m644 "$pkgdir/$_gemdir/gems/$_gemname-$pkgver/completion/zsh/_ronn" "$pkgdir/usr/share/zsh/site-functions/_ronn"
+  install --verbose -D --mode=0644 LICENSE.txt --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+
+  install --verbose -D --mode=0644 man/ronn.1 --target-directory "$pkgdir/usr/share/man/man1"
+  install --verbose -D --mode=0644 man/ronn-format.7 --target-directory "$pkgdir/usr/share/man/man7"
+
+  install --verbose -D --mode=0644 completion/bash/ronn --target-directory "$pkgdir/usr/share/bash-completion/completions"
+  install --verbose -D --mode=0644 completion/zsh/_ronn --target-directory "$pkgdir/usr/share/zsh/site-functions"
 }
