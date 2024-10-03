@@ -4,24 +4,122 @@
 
 _gemname=rspec-support
 pkgname=ruby-${_gemname}
-pkgver=3.12.1
-pkgrel=2.1
+pkgver=3.13.1
+pkgrel=4
 pkgdesc='Common code needed by the other RSpec gems. Not intended for direct use'
 url='https://github.com/rspec/rspec-support'
-arch=('any')
+arch=(any)
 license=('MIT')
-depends=('ruby' 'ruby-rdoc')
+depends=(
+  git
+  ruby
+)
+makedepends=(
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-bundler
+  ruby-childprocess
+  ruby-ffi
+  ruby-rake
+  ruby-rspec
+  ruby-rspec-core
+  ruby-rspec-expectations
+  ruby-rspec-mocks
+  ruby-thread_order
+)
 options=('!emptydirs')
-source=(https://rubygems.org/downloads/${_gemname}-${pkgver}.gem)
-noextract=(${_gemname}-${pkgver}.gem)
-sha512sums=('4fe1428d898d5eda81c91276fc05cc3d21320f104a593c8285a051bd7c61c0ded16a9f4da3c75d9e14190169d49d28fc6ad901b525d3b69bb8c6483035d6f83b')
+source=(
+  "git+${url}#tag=v${pkgver}"
+  "git+https://github.com/rspec/rspec-core#tag=v3.13.1"
+  "git+https://github.com/rspec/rspec-expectations#tag=v3.13.3"
+  "git+https://github.com/rspec/rspec-mocks#tag=v3.13.1"
+  "${pkgname}_no_version_constraints.patch"
+)
+sha512sums=('ab6889db445a4f9c9e01b285e766fd34c62967accbf769715d36e1eb1861c17264017a3d1bc4a6b176e0a450b6855733427d4806d8c476eb88daafb3ca39ffed'
+            'e4499e73f866839be9555b1c5581c5102c1f04469733db02a5a253f543d3481530332c2fcc0e62645c061efd07033b77827d2ff85a25702d51a24c34c5b6e114'
+            '17048eae589ad64d7365b124358612b7d3eb243eaba4f62d51a2f4f581d68c057755139b00d36372d27104e028fd9ebf3629f7108917f563cf52db50e0b57ec6'
+            '777521810f61cffa7d8085f3cf12f667129f4f743789388c75390a0764b6969c911cf89320568d84eb1964ea35f6be7e4a42c143a1ec4d9139cd5ebcbda052a8'
+            'ad1d4f200533810ed09d30914c539958a2d11c40fb7e120ac9fff3938ad0c594a15802d3afbeafe75be73d98c203f1c96be85b347a4cfe18373996c9aa63f292')
+b2sums=('4489f8af10b565e032f56ff5cc514fa4a52d9e53c4158a6021db73f7d06a571906e85880c308d7b7a9fa35cff55f489a90fd52edb3ce42b1966b1ed4b780870f'
+        '8eda18f4aca196d6ab896a680456efd4b53df0dbd1ff98e95026e95fbba490da00cf7acda0aab54031cca665d37cd8d3cabbab92d3b0b48b6082e9d29dff44b3'
+        'f7763eaa372e6186ee37373fbc72db57b52e242082df6b4290dcdfd13ee927e9e922232ad4349927b4f1439e1f9956556e6e623e3e73eefa8145d6576779971c'
+        '1ef6b73100e810ca88a071a8f7610f4bfcb22c9724aa3c138d1dff1f7f7bd52787bd20ae5023f401869c8b8e1dcf27d1f6efb1eb03c6d5305ce231ced5e8bb7b'
+        '797d0691625857574a01248cfd0abc65e07c9960a56e7b5c4ee1d6c2fdbce6f803ab6d23928c4698af899899ef34e5e2fce0310f4156b3debc4d1e47e84abd66')
 
-package() {
-  local _gemdir="$(gem env gemdir)"
-  gem install --ignore-dependencies --no-user-install -i "${pkgdir}${_gemdir}" -n "${pkgdir}/usr/bin" ${_gemname}-${pkgver}.gem
-  install -Dm 644 "${pkgdir}${_gemdir}/gems/${_gemname}-${pkgver}/LICENSE.md" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
-  install -Dm 644 "${pkgdir}${_gemdir}/gems/${_gemname}-${pkgver}/README.md" "${pkgdir}/usr/share/doc/${pkgname}/README"
-  rm "${pkgdir}/${_gemdir}/cache/${_gemname}-${pkgver}.gem"
+prepare() {
+  cd "${_gemname}"
+
+  patch --verbose --strip=1 --input="../${pkgname}_no_version_constraints.patch"
 }
 
-# vim: ts=2 sw=2 et:
+build() {
+  cd "${_gemname}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  for c in core mocks expectations; do
+    if [[ "$(git -C rspec-${c} describe)" != "v$(gem list rspec-${c} | sed 's/.*(\(.*\)).*/\1/')" ]] then
+      echo rspec-${c} "$(git -C rspec-${c} describe)" does not match expected version "v$(gem list rspec-${c} | sed 's/.*(\(.*\)).*/\1/')"
+      false
+    fi
+
+    ln -s "../rspec-${c}" "${_gemname}/rspec-${c}"
+  done
+
+  cd "${_gemname}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" NO_COVERAGE=true rake spec
+}
+
+package() {
+  cd "${_gemname}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 LICENSE* --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
+
+# vim: tabstop=2 shiftwidth=2 expandtab:
