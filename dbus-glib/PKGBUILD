@@ -4,42 +4,62 @@
 
 pkgname=dbus-glib
 pkgver=0.112
-pkgrel=3
+pkgrel=4
 pkgdesc='GLib bindings for D-Bus (deprecated)'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://www.freedesktop.org/wiki/Software/dbus/'
-license=('GPL')
-depends=('dbus' 'expat' 'glib2' 'glibc')
-makedepends=('python')
-source=("https://dbus.freedesktop.org/releases/$pkgname/$pkgname-$pkgver.tar.gz"{,.asc}
-        'dbus-glib-bash-completion.patch::https://gitlab.freedesktop.org/dbus/dbus-glib/-/merge_requests/5.patch')
-sha256sums=('7d550dccdfcd286e33895501829ed971eeb65c614e73aadb4a08aeef719b143a'
-            'SKIP'
-            'edbdd4fb5fce358b427da1a1c68347ce09ca444da6ac67ff1fcd6cc67fc92f99')
-validpgpkeys=('DA98F25C0871C49A59EAFF2C4DE8FF2A63C7CC90')
+license=('AFL-2.1 OR GPL-2.0-or-later')
+depends=(
+  dbus
+  expat
+  glib2
+  glibc
+)
+makedepends=(
+  git
+  glib2-devel
+  gtk-doc
+)
+source=(
+  "git+https://gitlab.freedesktop.org/dbus/dbus-glib.git?signed#tag=$pkgname-$pkgver"
+  dbus-glib-bash-completion.patch
+)
+sha256sums=(
+  00d56564489516f1cb4a9d0cbaff88e38321fae6c08ecc8858cefe012e312d41
+  edbdd4fb5fce358b427da1a1c68347ce09ca444da6ac67ff1fcd6cc67fc92f99
+)
+validpgpkeys=(DA98F25C0871C49A59EAFF2C4DE8FF2A63C7CC90) # Simon McVittie
 
 prepare() {
-  patch -d $pkgname-$pkgver -Np1 -i ../dbus-glib-bash-completion.patch # Fix bash completion
+  cd $pkgname
+
+  # Fix bash completion
+  # https://gitlab.freedesktop.org/dbus/dbus-glib/-/merge_requests/5
+  git apply -3 ../dbus-glib-bash-completion.patch
+
+  autoreconf -fi
 }
 
 build() {
-  cd $pkgname-$pkgver
+  cd $pkgname
   ./configure \
     --prefix=/usr \
     --sysconfdir=/etc \
     --localstatedir=/var \
     --libexecdir=/usr/lib \
+    --enable-gtk-doc \
     --enable-tests
   make
 }
 
 check() {
-  cd $pkgname-$pkgver
+  cd $pkgname
   make check
 }
 
 package() {
-  cd $pkgname-$pkgver
+  cd $pkgname
   make DESTDIR="$pkgdir" install completiondir='$(datadir)/bash-completion/completions'
   mv "$pkgdir/usr/share/bash-completion/completions/"{dbus-bash-completion.sh,dbus-send}
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname/" COPYING
 }
