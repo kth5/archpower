@@ -1,79 +1,104 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Sébastien "Seblu" Luttringer <seblu@archlinux.org>
+# Maintainer: Tobias Powalowski <tpowa@archlinux.org>
 # Contributor: Tom Gundersen <teg@jklm.no>
-# Contributor: Tobias Powalowski <tpowa@archlinux.org>
 
 pkgname=btrfs-progs
-pkgver=6.9.2
+pkgver=6.11
 pkgrel=1
 pkgdesc='Btrfs filesystem utilities'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-makedepends=('git' 'asciidoc' 'xmlto' 'systemd' 'python' 'python-setuptools' 'e2fsprogs' 
-             'reiserfsprogs' 'python-sphinx' 'python-sphinx_rtd_theme')
-depends=('glibc' 'util-linux-libs' 'lzo' 'zlib' 'zstd' 'libgcrypt' 'systemd-libs')
-optdepends=('python: libbtrfsutil python bindings'
-            'e2fsprogs: btrfs-convert'
-            'reiserfsprogs: btrfs-convert')
+makedepends=(
+  asciidoc
+  e2fsprogs
+  git
+  python
+  python-setuptools
+  python-sphinx
+  python-sphinx_rtd_theme
+  systemd
+  xmlto
+)
+depends=(
+  glibc
+  libgcrypt
+  lzo
+  systemd-libs
+  util-linux-libs
+  zlib
+  zstd
+)
+checkdepends=(
+  libaio
+  liburing
+  ripgrep
+)
+optdepends=(
+  'python: libbtrfsutil python bindings'
+  'e2fsprogs: btrfs-convert'
+)
 url='https://btrfs.readthedocs.io'
 replaces=('btrfs-progs-unstable')
 conflicts=('btrfs-progs-unstable')
 provides=('btrfs-progs-unstable')
 license=('GPL-2.0-only')
-validpgpkeys=('F2B41200C54EFB30380C1756C565D5F9D76D583B')
-source=("https://www.kernel.org/pub/linux/kernel/people/kdave/btrfs-progs/btrfs-progs-v$pkgver.tar."{sign,xz}
-        'initcpio-install-btrfs'
-        'initcpio-hook-btrfs'
-        'btrfs-scrub@.service'
-        'btrfs-scrub@.timer'
-      )
+validpgpkeys=('F2B41200C54EFB30380C1756C565D5F9D76D583B') # David Sterba <kdave@kernel.org>
+source=(
+  git+https://git.kernel.org/pub/scm/linux/kernel/git/kdave/btrfs-progs.git?signed#tag=v${pkgver}
+  initcpio-install-btrfs
+  initcpio-hook-btrfs
+  btrfs-scrub@.service
+  btrfs-scrub@.timer
+)
 install=btrfs-progs.install
-options=(!staticlibs)
-sha256sums=('SKIP'
-            '43865bb272dc0ab2585de3605434d81ba217578f0897bf700cd36c14ac40652a'
-            'bbe60b35d1b1e2efc1308a8f54f1fdc6808240a81c5f5b4d75321b7ee86e41f4'
-            '35efeee8590d6d60c711ae9cdc918e4841ab61d10cb02359e65e36ebff95ffc5'
-            'eaa7af92d28bfa8940bb551560fd7be777f9f175292eaa72b5f6ef00fb240252'
-            '9a0b6cc23f7bd97b83b6c38dd2b4e4373fead8bd3ccfb82a47c72971e9d6f8ad')
+b2sums=('d4088c8d55f642cae584b7c83e9c6e5d7358795844c2ccb66f7453c5fd93bd43812f4c80e3cbd0851080685a9dcff3c35f8a42c63aa1903042cd56f9d6aaba9c'
+        '75659665a24f92bba1175a2fcae942d9851495c9cff88570b88a98dced4eb98fcc9879de044bfc7d560dbe1c71a20d7ae51ca4b7c2649f90d646b414e0864b6e'
+        '0d3c25d0cb6fdb8e8777723b5e199835fac25573bc8f7fcb248ccfeea7268752b7100dd2c8284529812f0b1d3943eceb5785f119959f89bffedcf30472a915db'
+        '4408d0f81634c99f874a2dde8fc289f61d9e00d5c2d2efd465bcc90db69112604ec987a46858f48c0c2ce1cb4499de1355ad4baf847a74b40c148f8d7a516d22'
+        '9601b31936e1c4b69e6be517f545c6520302fa946eb3203e2d50bd85e918c87a9512e3b40d4e8cee6b9ae4a3fe9fbde26052305beec10fa2c49732a08d1f6753')
 
 prepare() {
-  cd $pkgname-v$pkgver
+  cd "${pkgname}"
   # apply patch from the source array (should be a pacman feature)
   local src
   for src in "${source[@]}"; do
     src="${src%%::*}"
     src="${src##*/}"
     [[ $src = *.patch ]] || continue
-    echo "Applying patch $src..."
-    patch -Np1 < "../$src"
+    echo "Applying patch ${src}..."
+    patch -Np1 < "../${src}"
   done
 }
 
 build() {
-  cd $pkgname-v$pkgver
+  cd "${pkgname}"
+  ./autogen.sh
   ./configure --prefix=/usr --with-crypto=libgcrypt
   make
 }
 
 check() {
-  cd $pkgname-v$pkgver
- ./btrfs filesystem show
+  cd "${pkgname}"
+  # remove all tests, which requires real root 
+  rm -r $(dirname $(rg -t sh -l -e SUDO_HELPER -e mount -e prepare_test) | rg 'tests/')
+  # -j1 for running tests chronological
+  make -j1 -C tests test
 }
 
 package() {
-  cd $pkgname-v$pkgver
+  cd "${pkgname}"
   make DESTDIR="$pkgdir" install install_python
 
   # install bash completion (FS#44618)
-  install -Dm644 btrfs-completion "$pkgdir/usr/share/bash-completion/completions/btrfs"
+  install -Dm644 btrfs-completion "${pkgdir}/usr/share/bash-completion/completions/btrfs"
 
   # install mkinitcpio hooks
-  cd "$srcdir"
-  install -Dm644 initcpio-install-btrfs "$pkgdir/usr/lib/initcpio/install/btrfs"
-  install -Dm644 initcpio-hook-btrfs "$pkgdir/usr/lib/initcpio/hooks/btrfs"
+  cd "${srcdir}"
+  install -Dm644 initcpio-install-btrfs "${pkgdir}/usr/lib/initcpio/install/btrfs"
+  install -Dm644 initcpio-hook-btrfs "${pkgdir}/usr/lib/initcpio/hooks/btrfs"
 
   # install scrub service/timer
-  install -Dm644 btrfs-scrub@.service "$pkgdir/usr/lib/systemd/system/btrfs-scrub@.service"
-  install -Dm644 btrfs-scrub@.timer "$pkgdir/usr/lib/systemd/system/btrfs-scrub@.timer"
+  install -Dm644 btrfs-scrub@.service "${pkgdir}/usr/lib/systemd/system/btrfs-scrub@.service"
+  install -Dm644 btrfs-scrub@.timer "${pkgdir}/usr/lib/systemd/system/btrfs-scrub@.timer"
 }
 
-# vim:set ts=2 sw=2 ft=sh et:
