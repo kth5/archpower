@@ -1,0 +1,94 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Alexander F. Rødseth <xyproto@archlinux.org>
+# Contributor: Emil Renner Berthing <aur@esmil.dk>
+
+_target=powerpc-espresso-linux-gnu
+pkgname=$_target-binutils
+pkgver=2.43.1
+_commit=beb2cdbcda911764b2bed5e57921fe90493260bd
+pkgrel=1
+pkgdesc='Assemble and manipulate binary and object files for riscv64'
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+url='https://gnu.org/software/binutils/'
+license=(GPL)
+depends=(glibc zlib libelf jansson)
+makedepends=(git setconf)
+options=(!lto)
+source=(git+https://sourceware.org/git/binutils-gdb.git#commit=${_commit}
+	gold-warn-unsupported.patch)
+sha256sums=('47cedf324f140726c948191c0e8ca697ba76df9cf7f0007f5e3bd044f3af5f42'
+            '2d430b66f84a19c154725ec535280c493be1d34f1a90f95208dce02fecd0e4e4')
+
+pkgver() {
+  cd binutils-gdb
+  git describe --tags | sed 's/[^-]*-//;s/[^-]*-/&r/;s/-/+/g;s/_/./g'
+}
+
+prepare() {
+  cd ${srcdir}
+  [[ ! -d binutils-gdb ]] && ln -s binutils-$pkgver binutils-gdb
+
+  cd "binutils-gdb"
+  # Creds @Fedora
+  # Change the gold configuration script to only warn about
+  # unsupported targets.  This allows the binutils to be built with
+  # BPF support enabled.
+  patch -Np1 -i "${srcdir}"/gold-warn-unsupported.patch
+
+  setconf libiberty/configure ac_cpp "'\$CPP \$CPPFLAGS -O2'"
+}
+
+build() {
+  cd "binutils-gdb"
+
+  unset CPPFLAGS
+  ./configure \
+    --disable-nls \
+    --enable-deterministic-archives \
+    --enable-gold \
+    --enable-ld=default \
+    --enable-multilib \
+    --enable-plugins \
+    --prefix=/usr \
+    --target=$_target \
+    --with-gnu-as \
+    --with-gnu-ld \
+    --with-sysroot=/usr/$_target/usr \
+    --with-system-zlib \
+    --disable-werror \
+    --disable-sim \
+    --enable-colored-disassembly \
+    --enable-targets=no
+  make
+
+  # Extract the FSF All Permissive License
+  # <https://www.gnu.org/prep/maintain/html_node/License-Notices-for-Other-Files.html>
+  # used for some linker scripts.
+  tail -n 5 "${srcdir}"/binutils-gdb/ld/scripttempl/README > FSFAP
+}
+
+check() {
+  # * Unset LDFLAGS as testsuite makes assumptions about which ones are active.
+  # * Do not abort on errors - manually check log files.
+  make -C "binutils-gdb" LDFLAGS="" -k check
+}
+
+package() {
+  make -C "binutils-gdb" DESTDIR="$pkgdir" install
+
+  install -d -m755 "$pkgdir/usr/$_target/usr"
+  mv $pkgdir/usr/$_target/{bin,lib} "$pkgdir/usr/$_target/usr/"
+
+  # Remove info documents that conflict with host version
+  rm -r "$pkgdir/usr/share/info"
+  rm -r "$pkgdir/usr/share/gdb"
+  rm "$pkgdir/usr/include/gdb/jit-reader.h"
+
+  rm "$pkgdir"/usr/lib/bfd-plugins/libdep.so
+
+  # install FSF All Permissive License
+  install -Dm644 -t "${pkgdir}"/usr/share/licenses/${pkgname}/ binutils-gdb/FSFAP
+}
+
+# getver: gnu.org/software/binutils
