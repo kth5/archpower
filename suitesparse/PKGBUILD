@@ -2,8 +2,10 @@
 # Maintainer: Antonio Rojas <arojas@archlinux.org>
 # Contributor: Ronald van Haren <ronald.archlinux.org>
 
-pkgname=suitesparse
-pkgver=7.7.0
+pkgbase=suitesparse
+pkgname=(suitesparse
+         suitesparse-graphblas)
+pkgver=7.8.2
 pkgrel=1
 pkgdesc='A collection of sparse matrix libraries'
 url='http://faculty.cse.tamu.edu/davis/suitesparse.html'
@@ -15,22 +17,27 @@ depends=(blas
          lapack
          mpfr)
 makedepends=(cmake
-             gcc-fortran)
+             gcc-fortran
+             git)
 replaces=('suitesparse64<7.1.0')
 license=(GPL)
-source=(https://github.com/DrTimothyAldenDavis/SuiteSparse/archive/v$pkgver/$pkgname-$pkgver.tar.gz
+source=(git+https://github.com/DrTimothyAldenDavis/SuiteSparse#tag=v$pkgver
         ppc32.patch)
-sha256sums=('529b067f5d80981f45ddf6766627b8fc5af619822f068f342aab776e683df4f3'
+sha256sums=('92645255bcfeaab9ad32c7de8b3d8804808484f18ff9f3e6c432e1132147b579'
             'fe530b269842452aae6a76f3930b5355464a56ca1747b1bb8861f9751915557b')
 
+case "${CARCH}" in
+  powerpc64) options=(!lto) ;;
+esac
+
 prepare() {
-  cd SuiteSparse-$pkgver
-# Fix 32bit powerpc
+  cd SuiteSparse
+  # Fix 32bit powerpc
   patch -Np1 -i ${srcdir}/ppc32.patch
 }
 
 build() {
-  cd SuiteSparse-$pkgver
+  cd SuiteSparse
   CMAKE_OPTIONS="-DBLA_VENDOR=Generic \
                  -DCMAKE_INSTALL_PREFIX=/usr \
                  -DCMAKE_BUILD_TYPE=None \
@@ -38,7 +45,22 @@ build() {
   make
 }
 
-package() {
-  cd SuiteSparse-$pkgver
+package_suitesparse() {
+  cd SuiteSparse
   DESTDIR="$pkgdir" make install
+
+  rm -r "$pkgdir"/usr/lib/lib{graphblas,lagraph,lagraphx}.so* \
+        "$pkgdir"/usr/include/suitesparse/{GraphBLAS,LAGraph,LAGraphX}.h \
+        "$pkgdir"/usr/lib/cmake/{GraphBLAS,LAGraph} \
+        "$pkgdir"/usr/lib/pkgconfig/{GraphBLAS,LAGraph}.pc
+}
+
+package_suitesparse-graphblas() {
+  pkgdesc='Graph algorithms in the language of linear algebra'
+  depends=(gcc-libs
+           glibc)
+
+  cd SuiteSparse
+  DESTDIR="$pkgdir" make install -C GraphBLAS
+  DESTDIR="$pkgdir" make install -C LAGraph
 }
