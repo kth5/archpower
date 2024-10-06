@@ -1,4 +1,3 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Maintainer: Fabian Bornschein <fabiscafe@archlinux.org>
 # Contributor: Jan de Groot <jgc@archlinux.org>
@@ -8,7 +7,7 @@ pkgname=(
   librsvg
   librsvg-docs
 )
-pkgver=2.58.2
+pkgver=2.59.1
 pkgrel=1
 epoch=2
 pkgdesc="SVG rendering library"
@@ -17,6 +16,7 @@ arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=(LGPL-2.1-or-later)
 depends=(
   cairo
+  dav1d
   freetype2
   gcc-libs
   gdk-pixbuf2
@@ -27,24 +27,22 @@ depends=(
   pango
 )
 makedepends=(
+  cargo-c
   gi-docgen
   git
   gobject-introspection
+  llvm
+  meson
   python-docutils
   rust
   vala
 )
 checkdepends=(ttf-dejavu)
-source=("git+https://gitlab.gnome.org/GNOME/librsvg.git?signed#tag=$pkgver")
-b2sums=('a77ade3efef46dff529b2dcaffffaa49292b1af2f8154ff5f6caec66ccb2e32425d416fd0a4cdd5c4964fdac3684bebdf22abfd5291eeec64ad37cb7967c3554')
-validpgpkeys=(
-  263F590F7E0FE1CB3EA274B0167637EB6FB8DCCE # Federico Mena Quintero <federico@gnome.org>
+source=(
+  # librsvg tags use SSH signatures which makepkg doesn't understand
+  "git+https://gitlab.gnome.org/GNOME/librsvg.git#tag=$pkgver"
 )
-
-prepare() {
-  cd librsvg
-  NOCONFIGURE=1 ./autogen.sh
-}
+b2sums=('6cf8c04102d4f9afea32999b44c31b858ef82d9f320581e9a88e39a42b51c40feeba524de914d5b6c84128d603c4f04d8aa66b57ed613f942fce1c25bc1bff91')
 
 # Use LTO
 export CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
@@ -52,31 +50,28 @@ export CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
 # Use debug
 export CARGO_PROFILE_RELEASE_DEBUG=2
 
+prepare() {
+  cd librsvg
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
 build() {
-  local configure_options=(
-    --prefix=/usr
-    --disable-static
-    --enable-gtk-doc
-    --enable-vala
+  local meson_options=(
+    -D avif=enabled
   )
 
-  cd librsvg
-  ./configure "${configure_options[@]}"
-  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0 /g' libtool
-  make
+  arch-meson librsvg build "${meson_options[@]}"
+  meson compile -C build
 }
 
 check() {
-  # Test suite is very dependent on the versions of
-  # Cairo, Pango, FreeType and HarfBuzz
-  # Tests need nightly features
-  RUSTC_BOOTSTRAP=1 make -C librsvg check || :
+  meson test -C build --print-errorlogs --no-rebuild
 }
 
 package_librsvg() {
   provides=(librsvg-${pkgver%%.*}.so)
 
-  make -C librsvg DESTDIR="$pkgdir" install
+  meson install -C build --destdir "$pkgdir" --no-rebuild
 
   mkdir -p doc/usr/share
   mv {"$pkgdir",doc}/usr/share/doc
