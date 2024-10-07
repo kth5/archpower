@@ -18,7 +18,7 @@ pkgver=14.2.1+r134+gab884fffe3fc
 _commit=ab884fffe3fc82a710bea66ad651720d71c938b8
 pkgrel=2.1
 pkgdesc='The GNU Compiler Collection'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso riscv64)
 license=(GPL-3.0-with-GCC-exception GFDL-1.3-or-later)
 url='https://gcc.gnu.org'
 makedepends=(
@@ -56,6 +56,7 @@ source=(git+https://sourceware.org/git/gcc.git#commit=${_commit}
         c89 c99
         gcc-ada-repro.patch
         unfilter-default-library-path.patch
+        gcc-14.2.1-espresso-cpu.patch
 )
 validpgpkeys=(F3691687D867B81B51CE07D9BBE43771487328A9  # bpiotrowski@archlinux.org
               86CFFCA918CF3AF47147588051E8B148A9999C34  # evangelos@foutrelis.com
@@ -65,7 +66,8 @@ sha256sums=('82b674a17bbac14acbf16b10e9d61e928e5630cd56635eb97acfeda849d4ebbf'
             'de48736f6e4153f03d0a5d38ceb6c6fdb7f054e8f47ddd6af0a3dbf14f27b931'
             '2513c6d9984dd0a2058557bf00f06d8d5181734e41dcfe07be7ed86f2959622a'
             '1773f5137f08ac1f48f0f7297e324d5d868d55201c03068670ee4602babdef2f'
-            '7183fdeea8fd148cf9dd03b0932f9d439b818a5ab3bc9a5e20d8e0b41c9e0efd')
+            '7183fdeea8fd148cf9dd03b0932f9d439b818a5ab3bc9a5e20d8e0b41c9e0efd'
+            'dde8ac0de4a07de55b94eedeeb6c64fed09fa1c8be9bdf6131078ce03b5d19dd')
 pkgver() {
   cd gcc
   echo "$(cat gcc/BASE-VER)+$(git describe --tags | sed 's/[^-]*-[^-]*-//;s/[^-]*-/r&/;s/-/+/g;s/_/./')"
@@ -86,6 +88,8 @@ prepare() {
   patch -Np0 < "$srcdir/gcc-ada-repro.patch"
 
   patch -Np1 < "$srcdir/unfilter-default-library-path.patch"
+
+  echo ${CFLAGS} | grep "mcpu=espresso" &>/dev/null && patch -Np1 < "$srcdir/gcc-14.2.1-espresso-cpu.patch"
 
   mkdir -p "$srcdir/gcc-build"
   mkdir -p "$srcdir/libgccjit-build"
@@ -169,6 +173,9 @@ build() {
   # TODO: properly deal with the build issues resulting from this
   CFLAGS=${CFLAGS/-Werror=format-security/}
   CXXFLAGS=${CXXFLAGS/-Werror=format-security/}
+
+  #CFLAGS=${CFLAGS/-mcpu=espresso/}
+  #CXXFLAGS=${CXXFLAGS/-mcpu=espresso/}
 
   "$srcdir/gcc/configure" \
     --enable-languages=c,c++,fortran,go,lto,objc,obj-c++,m2,rust${extra_lang} \
