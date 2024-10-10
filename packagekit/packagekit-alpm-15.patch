@@ -1,0 +1,165 @@
+From f3319c390b5628962611d1bba7fca6194747d8be Mon Sep 17 00:00:00 2001
+From: Christian Hesse <mail@eworm.de>
+Date: Tue, 10 Sep 2024 14:25:04 +0200
+Subject: [PATCH 1/4] alpm: drop unused variable
+
+---
+ backends/alpm/pk-alpm-update.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/backends/alpm/pk-alpm-update.c b/backends/alpm/pk-alpm-update.c
+index e898bc965..acd424135 100644
+--- a/backends/alpm/pk-alpm-update.c
++++ b/backends/alpm/pk-alpm-update.c
+@@ -373,7 +373,6 @@ static alpm_pkg_t *
+ pk_alpm_pkg_find_update (alpm_pkg_t *pkg, const alpm_list_t *dbs)
+ {
+ 	const gchar *name;
+-	const alpm_list_t *i;
+ 
+ 	g_return_val_if_fail (pkg != NULL, NULL);
+ 
+
+From a42b5afcc8ae9926050e3926f92ec269b7446b65 Mon Sep 17 00:00:00 2001
+From: Christian Hesse <mail@eworm.de>
+Date: Tue, 10 Sep 2024 14:34:07 +0200
+Subject: [PATCH 2/4] alpm: fix mixed declarations and code
+
+---
+ backends/alpm/pk-alpm-sync.c   | 3 ++-
+ backends/alpm/pk-alpm-update.c | 6 ++++--
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/backends/alpm/pk-alpm-sync.c b/backends/alpm/pk-alpm-sync.c
+index 191287325..64ab1c295 100644
+--- a/backends/alpm/pk-alpm-sync.c
++++ b/backends/alpm/pk-alpm-sync.c
+@@ -44,6 +44,7 @@ pk_alpm_transaction_sync_targets (PkBackendJob *job, const gchar **packages, gbo
+ 		g_auto(GStrv) package = pk_package_id_split (*packages);
+ 		gchar *repo = package[PK_PACKAGE_ID_DATA];
+ 		gchar *name = package[PK_PACKAGE_ID_NAME];
++		alpm_pkg_t *dep_to_remove;
+ 
+ 		const alpm_list_t *i = alpm_get_syncdbs (priv->alpm);
+ 		alpm_pkg_t *pkg;
+@@ -61,7 +62,7 @@ pk_alpm_transaction_sync_targets (PkBackendJob *job, const gchar **packages, gbo
+ 		}
+ 
+ 		pkg = alpm_db_get_pkg (i->data, name);
+-		alpm_pkg_t *dep_to_remove = pk_alpm_pkg_replaces(priv->localdb, pkg);
++		dep_to_remove = pk_alpm_pkg_replaces(priv->localdb, pkg);
+ 		if (dep_to_remove) {
+ 			g_debug("scheduling to remove %s for %s", alpm_pkg_get_name(dep_to_remove), name);
+ 			alpm_remove_pkg(priv->alpm, dep_to_remove);
+diff --git a/backends/alpm/pk-alpm-update.c b/backends/alpm/pk-alpm-update.c
+index acd424135..7976cc01e 100644
+--- a/backends/alpm/pk-alpm-update.c
++++ b/backends/alpm/pk-alpm-update.c
+@@ -285,6 +285,7 @@ pk_alpm_update_databases (PkBackendJob *job, gint force, GError **error)
+ 	PkBackend *backend = pk_backend_job_get_backend (job);
+ 	PkBackendAlpmPrivate *priv = pk_backend_get_user_data (backend);
+ 	alpm_list_t *i;
++	int ret;
+ 
+ 	if (!pk_alpm_transaction_initialize (job, 0, NULL, error))
+ 		return FALSE;
+@@ -293,7 +294,7 @@ pk_alpm_update_databases (PkBackendJob *job, gint force, GError **error)
+ 	pk_backend_job_set_status (job, PK_STATUS_ENUM_DOWNLOAD_PACKAGELIST);
+ 
+ 	i = alpm_get_syncdbs (priv->alpm);
+-	int ret = pk_alpm_refresh_databases(job, force, i, error);
++	ret = pk_alpm_refresh_databases(job, force, i, error);
+ 
+ 	if (i == NULL)
+ 		return pk_alpm_transaction_end (job, error);
+@@ -355,9 +356,10 @@ static int dep_vercmp(const char *version1, alpm_depmod_t mod,
+ alpm_pkg_t *
+ pk_alpm_pkg_replaces (alpm_db_t *db, alpm_pkg_t *pkg)
+ {
++	gboolean ret = FALSE;
++
+ 	g_return_val_if_fail (db != NULL, FALSE);
+ 	g_return_val_if_fail (pkg != NULL, FALSE);
+-	gboolean ret = FALSE;
+ 
+ 	for (alpm_list_t *list = alpm_pkg_get_replaces (pkg); list != NULL && !ret; list = list->next) {
+ 		alpm_depend_t *depend = list->data;
+
+From 57d60d60dc17f332f7b96644ce73805f2c30a6d1 Mon Sep 17 00:00:00 2001
+From: Christian Hesse <mail@eworm.de>
+Date: Tue, 10 Sep 2024 14:56:32 +0200
+Subject: [PATCH 3/4] alpm: fix function declaration prototype
+
+---
+ backends/alpm/pk-alpm-transaction.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/backends/alpm/pk-alpm-transaction.c b/backends/alpm/pk-alpm-transaction.c
+index bc1273375..2ff5d33f3 100644
+--- a/backends/alpm/pk-alpm-transaction.c
++++ b/backends/alpm/pk-alpm-transaction.c
+@@ -361,7 +361,7 @@ pk_alpm_transaction_conv_cb (void *ctx, alpm_question_t *question)
+ }
+ 
+ static void
+-pk_alpm_transaction_output_end ()
++pk_alpm_transaction_output_end (void)
+ {
+ 	tpkg = NULL;
+ 
+
+From f9f0222625e9cbfd476138374bf6c37488337a4a Mon Sep 17 00:00:00 2001
+From: Christian Hesse <mail@eworm.de>
+Date: Tue, 10 Sep 2024 14:48:07 +0200
+Subject: [PATCH 4/4] alpm: ignore new options...
+
+... instead of crashing. Also increase required libalpm version to >=15.0.0.
+---
+ backends/alpm/meson.build      |  2 +-
+ backends/alpm/pk-alpm-config.c | 16 +++++++++++-----
+ 2 files changed, 12 insertions(+), 6 deletions(-)
+
+diff --git a/backends/alpm/meson.build b/backends/alpm/meson.build
+index 50301466a..d5838c3b3 100644
+--- a/backends/alpm/meson.build
++++ b/backends/alpm/meson.build
+@@ -1,4 +1,4 @@
+-alpm_dep = dependency('libalpm', version: '>=14.0.0')
++alpm_dep = dependency('libalpm', version: '>=15.0.0')
+ 
+ shared_module(
+   'pk_backend_alpm',
+diff --git a/backends/alpm/pk-alpm-config.c b/backends/alpm/pk-alpm-config.c
+index 3954a45fb..a7997e3b6 100644
+--- a/backends/alpm/pk-alpm-config.c
++++ b/backends/alpm/pk-alpm-config.c
+@@ -605,18 +605,24 @@ pk_alpm_config_parse (PkAlpmConfig *config, const gchar *filename,
+ 			continue;
+ 		}
+ 
+-		if (g_strcmp0 (key, "Usage") == 0 && str != NULL) {
+-			/* Ignore "Usage" key instead of crashing */
++		/* ignore these instead of crashing */
++		if (g_strcmp0 (key, "CacheServer") == 0 && str != NULL) {
++			continue;
++		}
++
++		if (g_strcmp0 (key, "DisableSandbox") == 0) {
++			continue;
++		}
++
++		if (g_strcmp0 (key, "DownloadUser") == 0 && str != NULL) {
+ 			continue;
+ 		}
+ 
+ 		if (g_strcmp0 (key, "ParallelDownloads") == 0 && str != NULL) {
+-			/* Ignore "ParallelDownloads" key instead of crashing */
+ 			continue;
+ 		}
+ 
+-		if (g_strcmp0 (key, "CacheServer") == 0 && str != NULL) {
+-			/* Ignore "CacheServer" key instead of crashing */
++		if (g_strcmp0 (key, "Usage") == 0 && str != NULL) {
+ 			continue;
+ 		}
+ 
