@@ -1,0 +1,87 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Johannes Löthberg <johannes@kyriasis.com>
+# Maintainer: Justin Kromlinger <hashworks@archlinux.org>
+
+pkgname=prometheus
+pkgver=2.54.1
+pkgrel=1
+
+pkgdesc='An open-source systems monitoring and alerting toolkit'
+url='https://prometheus.io'
+arch=(x86_64 powerpc64le riscv64)
+license=('Apache-2.0')
+
+depends=('glibc')
+makedepends=('go' 'git' 'npm' 'nodejs' 'yamllint' 'typescript' 'yarn')
+
+options=(!lto)
+backup=('etc/prometheus/prometheus.yml' 'etc/conf.d/prometheus')
+
+source=("prometheus-v$pkgver.tar.gz::https://github.com/prometheus/prometheus/archive/v$pkgver.tar.gz"
+        prometheus.service
+        prometheus.sysusers
+        prometheus.conf)
+
+sha256sums=('3ee88a80f82e069073028862b3c92b1938bd932b059d25b37d093a6e221090d9'
+            'a6deb1f678960ee9b406e4458364c5082db11f93fae6286940aacd3e3933beb7'
+            '2747fabb4e56b808361eb7dd7acf9729ab8973d1ebe2f857dd56f6c71f71e45f'
+            '6d32deb125381cbebac11b6953a7d9a65eb7e50f209dc1e22c63facf678a3070')
+
+build() {
+  cd prometheus-$pkgver
+
+  LDFLAGS="-extldflags '$LDFLAGS' \
+    -X github.com/prometheus/common/version.Version=$pkgver \
+    -X github.com/prometheus/common/version.Revision=$pkgver \
+    -X github.com/prometheus/common/version.Branch=tarball \
+    -X github.com/prometheus/common/version.BuildUser=someone@builder \
+    -X github.com/prometheus/common/version.BuildDate=$(date -u '+%Y%m%d-%H:%M:%S' --date=@${SOURCE_DATE_EPOCH})"
+
+  cd $srcdir/prometheus-$pkgver/web/ui
+  GOOS= GOARCH= go generate -x -v
+
+  cd $srcdir/prometheus-$pkgver
+  # Build the react app
+  make ui-install # run install first as otherwise the makefile has a race condition......
+  make assets
+
+  go build \
+    -buildmode=pie \
+    -mod=readonly \
+    -modcacherw \
+    -ldflags "-compressdwarf=false -linkmode external $LDFLAGS" \
+    ./cmd/prometheus
+  go build \
+    -buildmode=pie \
+    -mod=readonly \
+    -modcacherw \
+    -ldflags "-compressdwarf=false -linkmode external $LDFLAGS" \
+    ./cmd/promtool
+}
+
+check() {
+  cd prometheus-$pkgver
+
+  GODEBUG=x509sha1=1 go test -short ./...
+}
+
+package() {
+  install -Dm644 prometheus.service "$pkgdir"/usr/lib/systemd/system/prometheus.service
+  install -Dm644 prometheus.sysusers "$pkgdir"/usr/lib/sysusers.d/prometheus.conf
+  install -Dm644 prometheus.conf "${pkgdir}"/etc/conf.d/prometheus
+
+  cd prometheus-$pkgver
+
+  install -Dm755 -t "$pkgdir"/usr/bin prometheus promtool
+  install -Dm640 -g210 -t "$pkgdir"/etc/prometheus documentation/examples/prometheus.yml
+  install -dm750 -o210 -g210 "$pkgdir"/var/lib/prometheus
+
+  # Web
+  install -dm755 "$pkgdir"/usr/share/prometheus/web/ui
+  cp -R web/ui/static "$pkgdir"/usr/share/prometheus/web/ui/
+
+  # Examples
+  install -Dm644 -t "$pkgdir"/usr/share/doc/prometheus/examples documentation/examples/prometheus*.yml
+  cp -R consoles console_libraries "$pkgdir"/usr/share/doc/prometheus/examples
+
+}
