@@ -2,33 +2,37 @@
 # Maintainer: Bruno Pagani <archange@archlinux.org>
 
 pkgname=nodejs-lts-dubnium
-pkgver=10.24.1
-pkgrel=2
+pkgver=10.24.2
+pkgrel=1
 pkgdesc="Evented I/O for V8 javascript (LTS release: Dubnium)"
-arch=(x86_64 powerpc64le powerpc)
+arch=(x86_64 powerpc)
 url="https://nodejs.org/"
 license=(MIT)
-depends=(openssl zlib icu http-parser c-ares libnghttp2)
-makedepends=(python2 procps-ng clang)
+depends=(glibc)
+makedepends=(python2 procps-ng git)
 provides=(npm nodejs "nodejs=$pkgver")
 conflicts=(nodejs)
-source=("${url}/dist/v${pkgver}/node-v${pkgver}.tar.xz"
+options=(!debug !lto)
+_commit=19f3e1702e9e732462fcf83939b99d3bd0587ed2
+source=("git+https://github.com/nodejs/node.git#commit=${_commit}"
 	icu68.patch
 	ppc32.patch
         atomic.patch
         fix_disable_cctest.patch
         system-brotli.patch
         use_system_node_gyp.patch
-        uv_stable.patch)
+        uv_stable.patch
+        xxx-ppc-hwcap-musl.patch)
 # https://nodejs.org/download/release/latest-dubnium/SHASUMS256.txt.asc
-sha256sums=('d72fc2c244603b4668da94081dc4d6067d467fdfa026e06a274012f16600480c'
+sha256sums=('2f296fc77af267f9f1d3e4557bc2010b27f224cb8abed4a25d0c69e63c56640d'
             'e953185d2d7de61bf8d4ca168fe034cce7a968264c1e7c24d53421fe7d24aace'
-            'c96ef869268f4404df5606f86585faf3b8e86873967ed7a85e1cfc9ba067cf8d'
+            'ce5cfc86a633ff38c5ad718454f48a55469ab8522779f3ec3387ef48ca5eb91a'
             'ddffa7cfe35d56174ee80c3b6bcad4785d21e1da9fc9ef41ae328f2242ee5d80'
             '143f0e2d73a221c86aa0fc8fea46b264b49a1026aad14ca1e4ac2c1bfc2d55e7'
             'efbd230df42ea85c1b8c5ac22d0b3bc74114b272e9da49f111b8a0ed7484c4b5'
             'be4f1f2108289274792a2d86ed0146d4649ccfb19193d7207e5490d0f5080c27'
-            '8d395c057c960b470cc4de467e70dc6d6f4b119022c852565398fb4427dc30b3')
+            '8d395c057c960b470cc4de467e70dc6d6f4b119022c852565398fb4427dc30b3'
+            'a6cb7a58111b474a2251370ad2cc01451b6e3e9c49001c0239357da97c9d4e2c')
 validpgpkeys=(C4F0DFFF4E8C1A8236409D08E73BC641CC11F4C8  # Myles Borins <mylesborins@google.com>
               77984A986EBC2AA786BC0F66B01FBB92821C587A  # Gibson Fahnestock <gibfahn@gmail.com>
               B9AE9905FFD7803F25714661B63B535A4C206CA9  # Evan Lucas <evanlucas@me.com> 
@@ -38,15 +42,16 @@ validpgpkeys=(C4F0DFFF4E8C1A8236409D08E73BC641CC11F4C8  # Myles Borins <mylesbor
               C82FA3AE1CBEDC6BE46B9360C43CEC45C17AB93C) # Richard Lau <rlau@redhat.com>
 
 prepare() {
-  cd node-v${pkgver}
+  cd node
 
   patch -Np0 -i ${srcdir}/ppc32.patch
   patch -Np0 -i ${srcdir}/icu68.patch
   patch -Np1 -i ${srcdir}/atomic.patch
   patch -Np1 -i ${srcdir}/fix_disable_cctest.patch
   patch -Np1 -i ${srcdir}/system-brotli.patch
-  #patch -Np1 -i ${srcdir}/use_system_node_gyp.patch
-  #patch -Np1 -i ${srcdir}/uv_stable.patch
+  patch -Np1 -i ${srcdir}/use_system_node_gyp.patch
+  patch -Np1 -i ${srcdir}/uv_stable.patch
+  patch -Np1 -i ${srcdir}/xxx-ppc-hwcap-musl.patch
 
   echo 'Fixing for python2 name'
   find -type f -exec sed \
@@ -60,41 +65,33 @@ prepare() {
 }
 
 build() {
-  cd node-v${pkgver}
+  cd node
 
-  case "${CARCH}" in
-    powerpc)
-      CPU=ppc
-      LDFLAGS+=" -latomic"
-      export CC=clang
-      export CXX=clang++
-    ;;
-    powerpc64le) CPU=ppc64 ;;
-    x86_64) CPU=x64 ;;
-  esac
+  CPU=ppc
+  LDFLAGS+=" -latomic"
 
   export PYTHON=python2
   ./configure \
     --dest-cpu=${CPU} \
+    --dest-os=linux \
     --prefix=/usr \
-    --with-intl=system-icu \
-    --shared-openssl \
-    --shared-zlib \
-    --shared-http-parser \
-    --shared-cares \
-    --shared-nghttp2
+    --openssl-no-asm \
+    --without-snapshot \
+    --without-intl \
+    --partly-static \
+    --cross-compiling
 
   make
 }
 
 check() {
-  cd node-v${pkgver}
+  cd node
   # One failing test due to our http-parser version
   make test-only || echo "Tests failed"
 }
 
 package() {
-  cd node-v${pkgver}
+  cd node
   make DESTDIR="${pkgdir}" install
   install -Dm644 LICENSE -t "${pkgdir}"/usr/share/licenses/${pkgname}/
 }
