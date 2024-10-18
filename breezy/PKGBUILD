@@ -1,20 +1,25 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Maxime Gauduin <alucryd@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 # Contributor: Adam Fontenot <adam.m.fontenot@gmail.com>
 
 pkgname=breezy
-pkgver=3.3.7
+pkgver=3.3.8
 pkgrel=1
 pkgdesc='A decentralized revision control system with support for Bazaar and Git file formats'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url=https://www.breezy-vcs.org/
-license=(GPL2)
+license=(GPL-2.0-or-later)
 depends=(
+  gcc-libs
+  glibc
+  python
   python-configobj
   python-dulwich
   python-fastbencode
   python-merge3
   python-patiencediff
+  python-tzlocal
   python-yaml
 )
 makedepends=(
@@ -31,6 +36,11 @@ makedepends=(
   python-setuptools-rust
   python-wheel
 )
+checkdepends=(
+  python-subunit
+  python-testscenarios
+  python-testtools
+)
 optdepends=(
   'python-fastimport: Fastimport support'
   'python-gpgme: PGP support'
@@ -39,23 +49,37 @@ optdepends=(
 provides=(bzr)
 conflicts=(bzr)
 replaces=(bzr)
-_tag=88d1ea57b5e2946f96a772572cb0364105d6b6a4
-source=(git+https://github.com/breezy-team/breezy.git#tag=${_tag})
-sha256sums=(SKIP)
-
-pkgver() {
-  cd breezy
-  git describe --tags | sed 's/brz-//; s/-/./g'
-}
+source=(
+  "https://launchpad.net/brz/${pkgver%.*}/$pkgver/+download/breezy-$pkgver.tar.gz"
+  "https://launchpad.net/brz/${pkgver%.*}/$pkgver/+download/breezy-$pkgver.tar.gz.asc"
+)
+sha256sums=(
+  '14d59bbdf86b66c17327eb79a5883b4c70cc7794ed34f3e8a0adfce64edc58bf'
+  'SKIP'
+)
+validpgpkeys=('DC837EE14A7E37347E87061700806F2BD729A457') # Jelmer Vernooĳ <jelmer@jelmer.uk>
 
 build() {
-  cd breezy
+  cd $pkgname-$pkgver
   python -m build --wheel --no-isolation
 }
 
+check() {
+  cd $pkgname-$pkgver
+  python -m installer -d tmp_install dist/*.whl
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  export PYTHONPATH="$PWD/tmp_install/$site_packages"
+  export BRZ_PLUGIN_PATH=-site:-user
+  "$PWD/tmp_install/usr/bin/brz" selftest \
+    --parallel=fork \
+    --verbose \
+    -Oselftest.timeout=120
+}
+
 package() {
-  python -m installer --destdir="${pkgdir}" breezy/dist/*.whl
-  ln -s brz "${pkgdir}"/usr/bin/bzr # backwards compatibility
+  cd $pkgname-$pkgver
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  ln -s /usr/bin/brz "$pkgdir/usr/bin/bzr" # backwards compatibility
 }
 
 # vim: ts=2 sw=2 et:

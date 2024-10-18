@@ -1,22 +1,23 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 
-_tag="VF2_6.1_v3.8.2"
+_tag="JH7110_VF2_6.6_v5.13.1"
 pkgbase=linux-visionfive2
-pkgver="6.1.${_tag/VF2.*_v/}"
+pkgver="6.6.20.${_tag/JH7110_VF2_6.6_v/}"
 pkgrel=1
 _srcname=starfive-linux
 url="https://github.com/starfive-tech/linux.git/log/?h=$_srctag"
-arch=(any)
+arch=(riscv64)
 license=(GPL2)
 makedepends=(
   bc kmod libelf pahole git
-  riscv64-unknown-linux-gnu-gcc
 )
 options=('!strip')
 source=(
   "$_srcname::git+https://github.com/starfive-tech/linux.git?#tag=${_tag}"
   config
-  starfive-no-debug-fs.patch
+  starfive-linux-gcc14.patch # https://forum.rvspace.org/t/experimental-gentoo-image/1807/99
+  starfive-snd-soc-wm8960-gpl2-license.patch
+  starfive-visionfive2-8gb-ram-dtb.patch
 )
 validpgpkeys=(
   'ABAF11C65A2970B130ABE3C479BE3E4300411886'  # Linus Torvalds
@@ -24,21 +25,19 @@ validpgpkeys=(
   'A2FF3A36AAA56654109064AB19802F8B0D70FC30'  # Jan Alexander Steffens (heftig)
   'C7E7849466FE2358343588377258734B41C31549'  # David Runge <dvzrv@archlinux.org>
 )
-sha256sums=('SKIP'
-            '4321896c3bdc2914c8773f67c4c23eecf5c159b97990f9fb8630cf62b6dc7f43'
-            '387259986573fdd87fac1edfc041de380b7612e6a4c519d085c048a3a5cae1f4')
+sha256sums=('d01a8c3084d5039d2a3a3d05cf3212d996aa188bfd17213c86335b190a0401a3'
+            'c8d2bc7b482ad8c59dd4148721b3ccfef034b59b5d712ee5a2c6c82e7fa04a90'
+            '8834dd4708e740c4818234289c3170cab0102b0a673246d18f4ccb7ece2c0cf9'
+            '417eb916e4c9f5f87cd38f30b31c6d57cf6c2b5ddaef2b4b470d1be1eb74ea42')
 
 export KBUILD_BUILD_HOST=archpower
 export KBUILD_BUILD_USER=$pkgbase
 export KBUILD_BUILD_TIMESTAMP="$(date -Ru${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH})"
 
-export MYARCH="riscv"
-
 prepare() {
   cd ${_srcname}
   echo "Setting version..."
-  scripts/setlocalversion --save-scmversion
-  echo "-$pkgrel" > localversion.10-pkgrel
+  #echo "-$pkgrel" > localversion.10-pkgrel
   echo "${pkgbase#linux}" > localversion.20-pkgname
 
   # fix mkinitcpio that can't cope with githashes in LOCALVERSION
@@ -55,16 +54,16 @@ prepare() {
 
   echo "Setting config..."
   cp ../config .config
-  ARCH=${MYARCH} CROSS_COMPILE=riscv64-unknown-linux-gnu- make oldconfig
+  make oldconfig
   echo "make done"
 
-  ARCH=${MYARCH} CROSS_COMPILE=riscv64-unknown-linux-gnu- make -s kernelrelease > version
+  make -s kernelrelease > version
   echo "Prepared $pkgbase version $(<version)"
 }
 
 build() {
   cd ${_srcname}
-  ARCH=${MYARCH} CROSS_COMPILE=riscv64-unknown-linux-gnu- make all
+  make all
 }
 
 _package() {
@@ -88,10 +87,10 @@ _package() {
   echo "$pkgbase" | install -Dm644 /dev/stdin "$modulesdir/pkgbase"
 
   echo "Installing modules..."
-  ARCH=${MYARCH} CROSS_COMPILE=riscv64-unknown-linux-gnu- make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 modules_install
+  make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 DEPMOD=/doesnt/exist modules_install
 
   echo "Installing dtbs..."
-  ARCH=${MYARCH} CROSS_COMPILE=riscv64-unknown-linux-gnu- make INSTALL_DTBS_PATH="$pkgdir/usr/share/dtbs/$kernver" dtbs_install
+  make INSTALL_DTBS_PATH="$pkgdir/usr/share/dtbs/$kernver" dtbs_install
 
   # remove build and source links
   rm -f "$modulesdir"/{source,build}
@@ -109,7 +108,7 @@ _package-headers() {
   install -Dt "$builddir" -m644 .config Makefile Module.symvers System.map \
     localversion.* version vmlinux
   install -Dt "$builddir/kernel" -m644 kernel/Makefile
-  install -Dt "$builddir/arch/${MYARCH}" -m644 arch/${MYARCH}/Makefile
+  install -Dt "$builddir/arch/riscv" -m644 arch/riscv/Makefile
   cp -t "$builddir" -a scripts
 
   # add xfs and shmem for aufs building
@@ -117,8 +116,8 @@ _package-headers() {
 
   echo "Installing headers..."
   cp -t "$builddir" -a include
-  cp -t "$builddir/arch/${MYARCH}" -a arch/${MYARCH}/include
-  install -Dt "$builddir/arch/${MYARCH}/kernel" -m644 arch/${MYARCH}/kernel/asm-offsets.s
+  cp -t "$builddir/arch/riscv" -a arch/riscv/include
+  install -Dt "$builddir/arch/riscv/kernel" -m644 arch/riscv/kernel/asm-offsets.s
 
   install -Dt "$builddir/drivers/md" -m644 drivers/md/*.h
   install -Dt "$builddir/net/mac80211" -m644 net/mac80211/*.h
@@ -137,7 +136,7 @@ _package-headers() {
   echo "Removing unneeded architectures..."
   local arch
   for arch in "$builddir"/arch/*/; do
-    [[ $arch = */${MYARCH}/ ]] && continue
+    [[ $arch = */riscv/ ]] && continue
     echo "Removing $(basename "$arch")"
     rm -r "$arch"
   done

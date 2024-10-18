@@ -2,32 +2,48 @@
 # Maintainer: nightuser <nightuser.android@gmail.com>
 
 pkgname=glib2-static
-pkgver=2.68.3
-pkgrel=1
+pkgver=2.82.1
+pkgrel=2
 pkgdesc="Low level core library: Static library"
 url="https://wiki.gnome.org/Projects/GLib"
 license=(LGPL2.1)
-arch=(x86_64 aarch64 powerpc64le powerpc)
+arch=(x86_64 aarch64 powerpc64le powerpc64 powerpc riscv64)
 depends=()
-makedepends=(gettext zlib libffi shared-mime-info python libelf git util-linux meson dbus)
+makedepends=(gettext zlib libffi shared-mime-info python libelf git util-linux meson dbus git
+             pcre-static gobject-introspection)
 checkdepends=(desktop-file-utils)
 options=('!docs' '!libtool' '!emptydirs' '!strip' 'staticlibs')
-source=("https://download.gnome.org/sources/glib/${pkgver%.*}/glib-$pkgver.tar.xz")
-sha256sums=('e7e1a3c20c026109c45c9ec4a31d8dcebc22e86c69486993e565817d64be3138')
+source=("git+https://gitlab.gnome.org/GNOME/glib.git?#tag=$pkgver"
+        "git+https://gitlab.gnome.org/GNOME/gvdb.git")
+sha256sums=('7a2ef4780d89d1525e942efd0c7ec19c00a4c430db1e3589c817c4e37f36d4be'
+            'SKIP')
 
 prepare() {
-  cd "glib-$pkgver"
+  cd glib
+
+  # Drop dep on libatomic
+  # https://gitlab.archlinux.org/archlinux/packaging/packages/qemu/-/issues/6
+  git revert -n 4e6dc4dee0e1c6407113597180d9616b4f275f94
+
+  git submodule init
+  git submodule set-url subprojects/gvdb "$srcdir/gvdb"
+  git -c protocol.file.allow=always -c protocol.allow=never submodule update
 }
 
 build() {
   CFLAGS+=' -Wno-unused-result -Wno-stringop-overflow'
-  arch-meson "glib-$pkgver" _build \
+  arch-meson "glib" _build \
     --default-library static \
     --buildtype release \
-    -Dselinux=disabled \
-    -Dman=false \
-    -Dgtk_doc=false \
-    -Dinternal_pcre=false
+    -D man-pages=disabled \
+    -D documentation=false \
+    -D dtrace=disabled \
+    -D glib_debug=disabled \
+    -D introspection=enabled \
+    -D selinux=disabled \
+    -D sysprof=disabled \
+    -D systemtap=disabled
+
   ninja -C _build
 }
 

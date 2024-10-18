@@ -1,42 +1,44 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: scarlettekk <scarlett AT enby DOT site>
 # Maintainer: willemw <willemw12@gmail.com>
-# Contributor: Philipp Klein <philipptheklein@gmail.com>
 
 pkgname=gdrive
-pkgver=2.1.0
+pkgver=3.9.1
 pkgrel=3
-pkgdesc="Google Drive CLI Client"
-arch=(x86_64 powerpc64le)
-url="https://github.com/gdrive-org/gdrive"
+pkgdesc="Google Drive CLI Client (Rust rewrite)"
+arch=(x86_64 aarch64 powerpc64le riscv64)
+url="https://github.com/glotlabs/gdrive"
 license=('MIT')
-makedepends=('git' 'go' 'godep')
-options=('!strip' '!emptydirs')
-#source=(https://github.com/prasmussen/$pkgname/archive/$pkgver.tar.gz)
-source=($pkgname-$pkgver::git+https://github.com/prasmussen/gdrive.git#commit=97981f7fd205353907135eacfc0e0ade24b88269)
-sha256sums=('SKIP')
-
-_gourl=github.com/prasmussen/gdrive
-_gobuild=build/src/$_gourl
+options=('!lto')
+makedepends=('git' 'cargo' 'clang')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/$pkgver.tar.gz")
+sha256sums=('9aadb1b9a23d83f5aaa785960973bef1c63b85346de6be01a36e0630f2ddec1c')
 
 prepare() {
-  mkdir -p "$(dirname $_gobuild)"
-  cp -a "$srcdir/$pkgname-$pkgver" $_gobuild
-
-  cd $_gobuild
-  GOPATH="$srcdir/build" godep restore
-}
-
-build() {
-  #GOPATH="$srcdir/build" go install -fix -v -x $_gourl
-  GOPATH="$srcdir/build" go install -v -x $_gourl
+    cd $pkgname-$pkgver
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target="$CARCH-unknown-linux-gnu"
 }
 
 #check() {
-#  GOPATH="$srcdir/build" go test -fix -v -x $_gourl
+#    cd $pkgname-$pkgver
+#    export RUSTUP_TOOLCHAIN=stable
+#    export CARGO_TARGET_DIR=target
+#    cargo test --frozen --all-features
 #}
 
+build() {
+    cd $pkgname-$pkgver
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    export CC=clang
+    export CXX=clang++
+    cargo build --frozen --release --all-features
+}
+
 package() {
-  cd build
-  install -Dm755 bin/gdrive "$pkgdir/usr/bin/gdrive"
+    cd $pkgname-$pkgver
+    install -Dm755 target/release/$pkgname -t "$pkgdir/usr/bin/"
+    install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
