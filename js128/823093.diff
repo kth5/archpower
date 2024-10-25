@@ -1,0 +1,248 @@
+# HG changeset patch
+# User Cameron Kaiser <spectre@floodgap.com>
+# Date 1723334556 25200
+#      Sat Aug 10 17:02:36 2024 -0700
+# Node ID 1cc1170fa6261938764d45e94de640edf8c6ca81
+# Parent  81fc811c3c396e6aab9225812a0faffc64a9a7d6
+sanity, PGO-LTO patches, disable Ion/Wasm in prefs (not for upstream)
+
+diff -r 81fc811c3c39 -r 1cc1170fa626 build/moz.configure/lto-pgo.configure
+--- a/build/moz.configure/lto-pgo.configure	Thu Aug 08 21:26:29 2024 -0700
++++ b/build/moz.configure/lto-pgo.configure	Sat Aug 10 17:02:36 2024 -0700
+@@ -2,17 +2,17 @@
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ # PGO
+ # ==============================================================
+ llvm_profdata = check_prog(
+-    "LLVM_PROFDATA", ["llvm-profdata"], allow_missing=True, paths=clang_search_path
++    "LLVM_PROFDATA", ["llvm-profdata-dont-even-think-about-it"], allow_missing=True, paths=clang_search_path
+ )
+ 
+ 
+ @depends_if(llvm_profdata)
+ @checking("whether llvm-profdata supports 'order' subcommand")
+ def llvm_profdata_order(profdata):
+     retcode, _, _ = get_cmd_output(profdata, "order", "--help")
+     return retcode == 0
+@@ -128,17 +128,17 @@
+ @imports("multiprocessing")
+ def pgo_flags(
+     compiler, linker, target, profdata, orderfile, target_is_windows, pgo_temporal
+ ):
+     if compiler.type == "gcc":
+         return namespace(
+             gen_cflags=["-fprofile-generate"],
+             gen_ldflags=["-fprofile-generate"],
+-            use_cflags=["-fprofile-use", "-fprofile-correction", "-Wcoverage-mismatch"],
++            use_cflags=["-fprofile-use", "-fprofile-correction", "-Wno-coverage-mismatch"],
+             use_ldflags=["-fprofile-use"],
+         )
+ 
+     if compiler.type in ("clang-cl", "clang"):
+         prefix = ""
+         if compiler.type == "clang-cl":
+             prefix = "/clang:"
+             gen_ldflags = None
+diff -r 81fc811c3c39 -r 1cc1170fa626 build/pgo/profileserver.py
+--- a/build/pgo/profileserver.py	Thu Aug 08 21:26:29 2024 -0700
++++ b/build/pgo/profileserver.py	Sat Aug 10 17:02:36 2024 -0700
+@@ -92,19 +92,32 @@
+         ),
+         path_mappings=path_mappings,
+     )
+     sp3_httpd.start(block=False)
+     print("started SP3 server on port 8000")
+     locations = ServerLocations()
+     locations.add_host(host="127.0.0.1", port=PORT, options="primary,privileged")
+ 
+-    old_profraw_files = glob.glob("*.profraw")
+-    for f in old_profraw_files:
+-        os.remove(f)
++    using_gcc = False
++    try:
++        if build.config_environment.substs.get('CC_TYPE') == 'gcc':
++            using_gcc = True
++    except BuildEnvironmentNotFoundException:
++        pass
++
++    if using_gcc:
++        for dirpath, _, filenames in os.walk('.'):
++            for f in filenames:
++                if f.endswith('.gcda'):
++                    os.remove(os.path.join(dirpath, f))
++    else:
++        old_profraw_files = glob.glob('*.profraw')
++        for f in old_profraw_files:
++            os.remove(f)
+ 
+     with TemporaryDirectory() as profilePath:
+         # TODO: refactor this into mozprofile
+         profile_data_dir = os.path.join(build.topsrcdir, "testing", "profiles")
+         with open(os.path.join(profile_data_dir, "profiles.json"), "r") as fh:
+             base_profiles = json.load(fh)["profileserver"]
+ 
+         prefpaths = [
+@@ -215,16 +228,20 @@
+ 
+         # Try to move the crash reports to the artifacts even if Firefox appears
+         # to exit successfully, in case there's a crash that doesn't set the
+         # return code to non-zero for some reason.
+         if get_crashreports(profilePath, name="Firefox exited successfully?") != 0:
+             print("Firefox exited successfully, but produced a crashreport")
+             sys.exit(1)
+ 
++        print('Copying profile data....')
++        os.system('pwd');
++        os.system('tar cf profdata.tar.gz `find . -name "*.gcda"`; cd ..; tar xf instrumented/profdata.tar.gz;');
++
+         llvm_profdata = env.get("LLVM_PROFDATA")
+         if llvm_profdata:
+             profraw_files = glob.glob("*.profraw")
+             if not profraw_files:
+                 print(
+                     "Could not find profraw files in the current directory: %s"
+                     % os.getcwd()
+                 )
+diff -r 81fc811c3c39 -r 1cc1170fa626 js/src/jit/shared/CodeGenerator-shared.cpp
+--- a/js/src/jit/shared/CodeGenerator-shared.cpp	Thu Aug 08 21:26:29 2024 -0700
++++ b/js/src/jit/shared/CodeGenerator-shared.cpp	Sat Aug 10 17:02:36 2024 -0700
+@@ -145,16 +145,18 @@
+     MOZ_ASSERT((frameDepth_ % JitStackAlignment) == 0);
+   }
+ }
+ 
+ bool CodeGeneratorShared::generatePrologue() {
+   MOZ_ASSERT(masm.framePushed() == 0);
+   MOZ_ASSERT(!gen->compilingWasm());
+ 
++masm.breakpoint(); // XXX make damn sure Ion can't start
++
+ #ifdef JS_USE_LINK_REGISTER
+   masm.pushReturnAddress();
+ #endif
+ 
+   // Frame prologue.
+   masm.push(FramePointer);
+   masm.moveStackPtrTo(FramePointer);
+ 
+diff -r 81fc811c3c39 -r 1cc1170fa626 js/src/tests/jstests.py
+--- a/js/src/tests/jstests.py	Thu Aug 08 21:26:29 2024 -0700
++++ b/js/src/tests/jstests.py	Sat Aug 10 17:02:36 2024 -0700
+@@ -666,17 +666,17 @@
+ 
+     # WPT tests are already run in the browser in their own harness.
+     wpt_enabled = options.wpt == "enabled" or (
+         options.wpt == "if-running-everything"
+         and len(requested_paths) == 0
+         and not options.make_manifests
+     )
+     if wpt_enabled:
+-        wpt_tests = load_wpt_tests(xul_tester, requested_paths, excluded_paths)
++        wpt_tests = load_wpt_tests(xul_tester, requested_paths, excluded_paths, False)
+         test_count += len(wpt_tests)
+         test_gen = chain(test_gen, wpt_tests)
+ 
+     if options.test_reflect_stringify is not None:
+ 
+         def trs_gen(tests):
+             for test in tests:
+                 test.test_reflect_stringify = options.test_reflect_stringify
+diff -r 81fc811c3c39 -r 1cc1170fa626 modules/libpref/init/StaticPrefList.yaml
+--- a/modules/libpref/init/StaticPrefList.yaml	Thu Aug 08 21:26:29 2024 -0700
++++ b/modules/libpref/init/StaticPrefList.yaml	Sat Aug 10 17:02:36 2024 -0700
+@@ -7525,17 +7525,17 @@
+ - name: javascript.options.baselinejit
+   type: bool
+   value: true
+   mirror: always  # LoadStartupJSPrefs
+   do_not_use_directly: true
+ 
+ - name: javascript.options.ion
+   type: bool
+-  value: true
++  value: false
+   mirror: always  # LoadStartupJSPrefs
+   do_not_use_directly: true
+ 
+ # The irregexp JIT for regex evaluation.
+ - name: javascript.options.native_regexp
+   type: bool
+   value: true
+   mirror: always  # LoadStartupJSPrefs
+diff -r 81fc811c3c39 -r 1cc1170fa626 modules/libpref/init/all.js
+--- a/modules/libpref/init/all.js	Thu Aug 08 21:26:29 2024 -0700
++++ b/modules/libpref/init/all.js	Sat Aug 10 17:02:36 2024 -0700
+@@ -889,20 +889,20 @@
+ // that are associated with other domains which have
+ // user interaction (even if they don't have user
+ // interaction directly).
+ pref("privacy.purge_trackers.consider_entity_list", false);
+ 
+ pref("dom.event.contextmenu.enabled",       true);
+ 
+ pref("javascript.enabled",                  true);
+-pref("javascript.options.wasm",                   true);
+-pref("javascript.options.wasm_trustedprincipals", true);
++pref("javascript.options.wasm",                   false);
++pref("javascript.options.wasm_trustedprincipals", false);
+ pref("javascript.options.wasm_verbose",           false);
+-pref("javascript.options.wasm_baselinejit",       true);
++pref("javascript.options.wasm_baselinejit",       false);
+ 
+ pref("javascript.options.asyncstack", true);
+ // Broadly capturing async stack data adds overhead that is only advisable for
+ // developers, so we only enable it when the devtools are open, by default.
+ pref("javascript.options.asyncstack_capture_debuggee_only", true);
+ 
+ // This preference instructs the JS engine to discard the
+ // source of any privileged JS after compilation. This saves
+diff -r 81fc811c3c39 -r 1cc1170fa626 third_party/python/urllib3/urllib3/util/connection.py
+--- a/third_party/python/urllib3/urllib3/util/connection.py	Thu Aug 08 21:26:29 2024 -0700
++++ b/third_party/python/urllib3/urllib3/util/connection.py	Sat Aug 10 17:02:36 2024 -0700
+@@ -35,16 +35,17 @@
+ # One additional modification is that we avoid binding to IPv6 servers
+ # discovered in DNS if the system doesn't have IPv6 functionality.
+ def create_connection(
+     address,
+     timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
+     source_address=None,
+     socket_options=None,
+ ):
++    raise socket.error("getaddrinfo returns an empty list")
+     """Connect to *address* and return the socket object.
+ 
+     Convenience function.  Connect to *address* (a 2-tuple ``(host,
+     port)``) and return the socket object.  Passing the optional
+     *timeout* parameter will set the timeout on the socket instance
+     before attempting to connect.  If no *timeout* is supplied, the
+     global default timeout setting returned by :func:`socket.getdefaulttimeout`
+     is used.  If *source_address* is set it must be a tuple of (host, port)
+diff -r 81fc811c3c39 -r 1cc1170fa626 toolkit/components/terminator/nsTerminator.cpp
+--- a/toolkit/components/terminator/nsTerminator.cpp	Thu Aug 08 21:26:29 2024 -0700
++++ b/toolkit/components/terminator/nsTerminator.cpp	Sat Aug 10 17:02:36 2024 -0700
+@@ -327,16 +327,21 @@
+       // Defend against overflow
+       crashAfterMS = INT32_MAX;
+     } else {
+       crashAfterMS *= scaleUp;
+     }
+   }
+ #endif
+ 
++  // Disable watchdog for PGO train builds - writting profile information at
++  // exit may take time and it is better to make build hang rather than
++  // silently produce poorly performing binary.
++  crashAfterMS = INT32_MAX;
++
+   UniquePtr<Options> options(new Options());
+   // crashAfterTicks is guaranteed to be > 0 as
+   // crashAfterMS >= ADDITIONAL_WAIT_BEFORE_CRASH_MS >> HEARTBEAT_INTERVAL_MS
+   options->crashAfterTicks = crashAfterMS / HEARTBEAT_INTERVAL_MS;
+ 
+   DebugOnly<PRThread*> watchdogThread =
+       CreateSystemThread(RunWatchdog, options.release());
+   MOZ_ASSERT(watchdogThread);

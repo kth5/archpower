@@ -1,0 +1,199 @@
+# HG changeset patch
+# User Cameron Kaiser <spectre@floodgap.com>
+# Date 1723177589 25200
+#      Thu Aug 08 21:26:29 2024 -0700
+# Node ID 81fc811c3c396e6aab9225812a0faffc64a9a7d6
+# Parent  b47f3d563dbde57f7908c66551b74b4a87a29fb0
+everything else for ppc64
+
+diff -r b47f3d563dbd -r 81fc811c3c39 js/src/builtin/TestingFunctions.cpp
+--- a/js/src/builtin/TestingFunctions.cpp	Thu Aug 08 21:26:07 2024 -0700
++++ b/js/src/builtin/TestingFunctions.cpp	Thu Aug 08 21:26:29 2024 -0700
+@@ -486,16 +486,25 @@
+   value = BooleanValue(true);
+ #else
+   value = BooleanValue(false);
+ #endif
+   if (!JS_SetProperty(cx, info, "riscv64", value)) {
+     return false;
+   }
+ 
++#ifdef JS_CODEGEN_PPC64
++  value = BooleanValue(true);
++#else
++  value = BooleanValue(false);
++#endif
++  if (!JS_SetProperty(cx, info, "ppc64", value)) {
++    return false;
++  }
++
+ #ifdef JS_SIMULATOR_RISCV64
+   value = BooleanValue(true);
+ #else
+   value = BooleanValue(false);
+ #endif
+   if (!JS_SetProperty(cx, info, "riscv64-simulator", value)) {
+     return false;
+   }
+diff -r b47f3d563dbd -r 81fc811c3c39 js/src/irregexp/RegExpNativeMacroAssembler.cpp
+--- a/js/src/irregexp/RegExpNativeMacroAssembler.cpp	Thu Aug 08 21:26:07 2024 -0700
++++ b/js/src/irregexp/RegExpNativeMacroAssembler.cpp	Thu Aug 08 21:26:29 2024 -0700
+@@ -947,18 +947,33 @@
+ // If the test fails, call an OOL handler to try growing the stack.
+ void SMRegExpMacroAssembler::CheckBacktrackStackLimit() {
+   js::jit::Label no_stack_overflow;
+   masm_.branchPtr(
+       Assembler::BelowOrEqual,
+       AbsoluteAddress(isolate()->regexp_stack()->limit_address_address()),
+       backtrack_stack_pointer_, &no_stack_overflow);
+ 
++#ifdef JS_CODEGEN_PPC64
++  // LR on PowerPC isn't a GPR, so we have to explicitly save it here before
++  // we call or we will end up erroneously returning after the call to the
++  // stack overflow handler when we |blr| out and inevitably underflow the
++  // irregexp stack on the next backtrack.
++  masm_.xs_mflr(temp1_);
++  masm_.as_stdu(temp1_, masm_.getStackPointer(), -8);
++#endif
++
+   masm_.call(&stack_overflow_label_);
+ 
++#ifdef JS_CODEGEN_PPC64
++  masm_.as_ld(temp1_, masm_.getStackPointer(), 0);
++  masm_.xs_mtlr(temp1_);
++  masm_.as_addi(masm_.getStackPointer(), masm_.getStackPointer(), 8);
++#endif
++
+   // Exit with an exception if the call failed
+   masm_.branchTest32(Assembler::Zero, temp0_, temp0_,
+                      &exit_with_exception_label_);
+ 
+   masm_.bind(&no_stack_overflow);
+ }
+ 
+ // This is used to sneak an OOM through the V8 layer.
+@@ -1281,16 +1296,20 @@
+   LiveGeneralRegisterSet volatileRegs(GeneralRegisterSet::Volatile());
+ 
+ #ifdef JS_USE_LINK_REGISTER
+   masm_.pushReturnAddress();
+ #endif
+ 
+   // Adjust for the return address on the stack.
+   size_t frameOffset = sizeof(void*);
++#ifdef JS_CODEGEN_PPC64
++  // We have a double return address.
++  frameOffset += sizeof(void*);
++#endif
+ 
+   volatileRegs.takeUnchecked(temp0_);
+   volatileRegs.takeUnchecked(temp1_);
+   masm_.PushRegsInMask(volatileRegs);
+ 
+   using Fn = bool (*)(RegExpStack* regexp_stack);
+   masm_.setupUnalignedABICall(temp0_);
+   masm_.passABIArg(temp1_);
+diff -r b47f3d563dbd -r 81fc811c3c39 js/src/jsapi-tests/testJitABIcalls.cpp
+--- a/js/src/jsapi-tests/testJitABIcalls.cpp	Thu Aug 08 21:26:07 2024 -0700
++++ b/js/src/jsapi-tests/testJitABIcalls.cpp	Thu Aug 08 21:26:29 2024 -0700
+@@ -662,16 +662,19 @@
+     Register base = t1;
+     regs.take(base);
+ #elif defined(JS_CODEGEN_LOONG64)
+     Register base = t0;
+     regs.take(base);
+ #elif defined(JS_CODEGEN_RISCV64)
+     Register base = t0;
+     regs.take(base);
++#elif defined(JS_CODEGEN_PPC64)
++    Register base = r0;
++    regs.take(base);
+ #else
+ #  error "Unknown architecture!"
+ #endif
+ 
+     Register setup = regs.takeAny();
+ 
+     this->generateCalls(masm, base, setup);
+ 
+diff -r b47f3d563dbd -r 81fc811c3c39 js/src/jsapi-tests/testsJit.cpp
+--- a/js/src/jsapi-tests/testsJit.cpp	Thu Aug 08 21:26:07 2024 -0700
++++ b/js/src/jsapi-tests/testsJit.cpp	Thu Aug 08 21:26:29 2024 -0700
+@@ -21,16 +21,20 @@
+   AllocatableRegisterSet regs(RegisterSet::All());
+   LiveRegisterSet save(regs.asLiveSet());
+ #if defined(JS_CODEGEN_ARM)
+   save.add(js::jit::d15);
+ #endif
+ #if defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64) || \
+     defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64)
+   save.add(js::jit::ra);
++#elif defined(JS_CODEGEN_PPC64)
++  // Push the link register separately, since it's not a GPR.
++  masm.xs_mflr(ScratchRegister);
++  masm.as_stdu(ScratchRegister, StackPointer, -8);
+ #elif defined(JS_USE_LINK_REGISTER)
+   save.add(js::jit::lr);
+ #endif
+   masm.PushRegsInMask(save);
+ }
+ 
+ // Generate the exit path of the JIT code, which restores every register. Then,
+ // make it executable and run it.
+@@ -39,26 +43,34 @@
+   AllocatableRegisterSet regs(RegisterSet::All());
+   LiveRegisterSet save(regs.asLiveSet());
+ #if defined(JS_CODEGEN_ARM)
+   save.add(js::jit::d15);
+ #endif
+ #if defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64) || \
+     defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64)
+   save.add(js::jit::ra);
++#elif defined(JS_CODEGEN_PPC64)
++  // We pop after loading the regs.
+ #elif defined(JS_USE_LINK_REGISTER)
+   save.add(js::jit::lr);
+ #endif
+   masm.PopRegsInMask(save);
+ #if defined(JS_CODEGEN_ARM64)
+   // Return using the value popped into x30.
+   masm.abiret();
+ 
+   // Reset stack pointer.
+   masm.SetStackPointer64(PseudoStackPointer64);
++#elif defined(JS_CODEGEN_PPC64)
++  // Pop LR and exit.
++  masm.as_ld(ScratchRegister, StackPointer, 0);
++  masm.xs_mtlr(ScratchRegister);
++  masm.as_addi(StackPointer, StackPointer, 8);
++  masm.as_blr();
+ #else
+   // Exit the JIT-ed code using the ABI return style.
+   masm.abiret();
+ #endif
+ 
+   if (masm.oom()) {
+     return false;
+   }
+diff -r b47f3d563dbd -r 81fc811c3c39 js/src/util/Poison.h
+--- a/js/src/util/Poison.h	Thu Aug 08 21:26:07 2024 -0700
++++ b/js/src/util/Poison.h	Thu Aug 08 21:26:29 2024 -0700
+@@ -87,16 +87,18 @@
+ #  define JS_SWEPT_CODE_PATTERN 0xA3  // undefined instruction
+ #elif defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
+ #  define JS_SWEPT_CODE_PATTERN 0x01  // undefined instruction
+ #elif defined(JS_CODEGEN_LOONG64)
+ #  define JS_SWEPT_CODE_PATTERN 0x01  // undefined instruction
+ #elif defined(JS_CODEGEN_RISCV64)
+ #  define JS_SWEPT_CODE_PATTERN \
+     0x29  // illegal sb instruction, crashes in user mode.
++#elif defined(JS_CODEGEN_PPC64)
++#  define JS_SWEPT_CODE_PATTERN 0x00  // architecturally defined as illegal
+ #else
+ #  error "JS_SWEPT_CODE_PATTERN not defined for this platform"
+ #endif
+ 
+ enum class MemCheckKind : uint8_t {
+   // Marks a region as poisoned. Memory sanitizers like ASan will crash when
+   // accessing it (both reads and writes).
+   MakeNoAccess,

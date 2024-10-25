@@ -1,0 +1,1060 @@
+# HG changeset patch
+# User Cameron Kaiser <spectre@floodgap.com>
+# Date 1723177468 25200
+#      Thu Aug 08 21:24:28 2024 -0700
+# Node ID 553c3f1c48b455ac22aa3f907676616e99e41c67
+# Parent  9c245f4665be241b51f2b8b02ba90a054f55252f
+wasm ppc64 patches
+
+diff -r 9c245f4665be -r 553c3f1c48b4 js/src/wasm/WasmAnyRef.h
+--- a/js/src/wasm/WasmAnyRef.h	Thu Aug 08 21:23:52 2024 -0700
++++ b/js/src/wasm/WasmAnyRef.h	Thu Aug 08 21:24:28 2024 -0700
+@@ -208,17 +208,17 @@
+   // losslessly represent all i31 values.
+   static AnyRef fromUint32Truncate(uint32_t value) {
+     // See 64-bit GPRs carrying 32-bit values invariants in MacroAssember.h
+ #if defined(JS_CODEGEN_NONE) || defined(JS_CODEGEN_X64) || \
+     defined(JS_CODEGEN_ARM64)
+     // Truncate the value to the 31-bit value size.
+     uintptr_t wideValue = uintptr_t(value & 0x7FFFFFFF);
+ #elif defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_MIPS64) || \
+-    defined(JS_CODEGEN_RISCV64)
++    defined(JS_CODEGEN_RISCV64) || defined(JS_CODEGEN_PPC64)
+     // Sign extend the value to the native pointer size.
+     uintptr_t wideValue = uintptr_t(int64_t((uint64_t(value) << 33)) >> 33);
+ #elif !defined(JS_64BIT)
+     // Transfer 32-bit value as is.
+     uintptr_t wideValue = (uintptr_t)value;
+ #else
+ #  error "unknown architecture"
+ #endif
+diff -r 9c245f4665be -r 553c3f1c48b4 js/src/wasm/WasmBCDefs.h
+--- a/js/src/wasm/WasmBCDefs.h	Thu Aug 08 21:23:52 2024 -0700
++++ b/js/src/wasm/WasmBCDefs.h	Thu Aug 08 21:24:28 2024 -0700
+@@ -48,16 +48,19 @@
+ #  include "jit/mips64/Assembler-mips64.h"
+ #endif
+ #if defined(JS_CODEGEN_LOONG64)
+ #  include "jit/loong64/Assembler-loong64.h"
+ #endif
+ #if defined(JS_CODEGEN_RISCV64)
+ #  include "jit/riscv64/Assembler-riscv64.h"
+ #endif
++#if defined(JS_CODEGEN_PPC64)
++#  include "jit/ppc64/Assembler-ppc64.h"
++#endif
+ #include "js/ScalarType.h"
+ #include "util/Memory.h"
+ #include "wasm/WasmCodegenTypes.h"
+ #include "wasm/WasmDebugFrame.h"
+ #include "wasm/WasmGC.h"
+ #include "wasm/WasmGcObject.h"
+ #include "wasm/WasmGenerator.h"
+ #include "wasm/WasmInstance.h"
+@@ -168,16 +171,20 @@
+ #endif
+ 
+ #ifdef JS_CODEGEN_ARM
+ #  define RABALDR_INT_DIV_I64_CALLOUT
+ #  define RABALDR_I64_TO_FLOAT_CALLOUT
+ #  define RABALDR_FLOAT_TO_I64_CALLOUT
+ #endif
+ 
++#ifdef JS_CODEGEN_PPC64
++#  define RABALDR_HAS_HEAPREG
++#endif
++
+ #ifdef JS_CODEGEN_MIPS64
+ #  define RABALDR_PIN_INSTANCE
+ #endif
+ 
+ #ifdef JS_CODEGEN_LOONG64
+ #  define RABALDR_PIN_INSTANCE
+ #endif
+ 
+diff -r 9c245f4665be -r 553c3f1c48b4 js/src/wasm/WasmBCMemory.cpp
+--- a/js/src/wasm/WasmBCMemory.cpp	Thu Aug 08 21:23:52 2024 -0700
++++ b/js/src/wasm/WasmBCMemory.cpp	Thu Aug 08 21:24:28 2024 -0700
+@@ -604,16 +604,23 @@
+   }
+ #elif defined(JS_CODEGEN_RISCV64)
+   MOZ_ASSERT(temp.isInvalid());
+   if (dest.tag == AnyReg::I64) {
+     masm.wasmLoadI64(*access, memoryBase, ptr, ptr, dest.i64());
+   } else {
+     masm.wasmLoad(*access, memoryBase, ptr, ptr, dest.any());
+   }
++#elif defined(JS_CODEGEN_PPC64)
++  MOZ_ASSERT(temp.isInvalid());
++  if (dest.tag == AnyReg::I64) {
++    masm.wasmLoadI64(*access, memoryBase, ptr, ptr, dest.i64());
++  } else {
++    masm.wasmLoad(*access, memoryBase, ptr, ptr, dest.any());
++  }
+ #else
+   MOZ_CRASH("BaseCompiler platform hook: load");
+ #endif
+ }
+ 
+ // ptr and dest may be the same iff dest is I32.
+ // This may destroy ptr even if ptr and dest are not the same.
+ void BaseCompiler::load(MemoryAccessDesc* access, AccessCheck* check,
+@@ -635,20 +642,22 @@
+   return executeLoad(access, check, instance, memoryBase, RegI32(ptr.low), dest,
+                      maybeFromI64(temp));
+ #  elif defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64)
+   // On x64 and arm64 the 32-bit code simply assumes that the high bits of the
+   // 64-bit pointer register are zero and performs a 64-bit add.  Thus the code
+   // generated is the same for the 64-bit and the 32-bit case.
+   return executeLoad(access, check, instance, memoryBase, RegI32(ptr.reg), dest,
+                      maybeFromI64(temp));
+-#  elif defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64)
++#  elif defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || \
++        defined(JS_CODEGEN_PPC64)
+   // On mips64 and loongarch64, the 'prepareMemoryAccess' function will make
+   // sure that ptr holds a valid 64-bit index value. Thus the code generated in
+   // 'executeLoad' is the same for the 64-bit and the 32-bit case.
++  // This is also true for ppc64.
+   return executeLoad(access, check, instance, memoryBase, RegI32(ptr.reg), dest,
+                      maybeFromI64(temp));
+ #  elif defined(JS_CODEGEN_RISCV64)
+   // RISCV the 'prepareMemoryAccess' function will make
+   // sure that ptr holds a valid 64-bit index value. Thus the code generated in
+   // 'executeLoad' is the same for the 64-bit and the 32-bit case.
+   return executeLoad(access, check, instance, memoryBase, RegI32(ptr.reg), dest,
+                      maybeFromI64(temp));
+@@ -748,16 +757,23 @@
+   }
+ #elif defined(JS_CODEGEN_RISCV64)
+   MOZ_ASSERT(temp.isInvalid());
+   if (access->type() == Scalar::Int64) {
+     masm.wasmStoreI64(*access, src.i64(), memoryBase, ptr, ptr);
+   } else {
+     masm.wasmStore(*access, src.any(), memoryBase, ptr, ptr);
+   }
++#elif defined(JS_CODEGEN_PPC64)
++  MOZ_ASSERT(temp.isInvalid());
++  if (access->type() == Scalar::Int64) {
++    masm.wasmStoreI64(*access, src.i64(), memoryBase, ptr, ptr);
++  } else {
++    masm.wasmStore(*access, src.any(), memoryBase, ptr, ptr);
++  }
+ #else
+   MOZ_CRASH("BaseCompiler platform hook: store");
+ #endif
+ }
+ 
+ // ptr and src must not be the same register.
+ // This may destroy ptr and src.
+ void BaseCompiler::store(MemoryAccessDesc* access, AccessCheck* check,
+@@ -773,17 +789,17 @@
+                          AnyReg src, RegI64 temp) {
+   prepareMemoryAccess(access, check, instance, ptr);
+   // See comments in load()
+ #  if !defined(JS_64BIT)
+   return executeStore(access, check, instance, memoryBase, RegI32(ptr.low), src,
+                       maybeFromI64(temp));
+ #  elif defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64) ||    \
+       defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || \
+-      defined(JS_CODEGEN_RISCV64)
++      defined(JS_CODEGEN_RISCV64) || defined(JS_CODEGEN_PPC64)
+   return executeStore(access, check, instance, memoryBase, RegI32(ptr.reg), src,
+                       maybeFromI64(temp));
+ #  else
+   MOZ_CRASH("Missing platform hook");
+ #  endif
+ }
+ #endif
+ 
+@@ -1282,17 +1298,17 @@
+   bc->masm.wasmAtomicFetchOp(access, op, rv, srcAddr, temps.t0, rd);
+ }
+ 
+ static void Deallocate(BaseCompiler* bc, RegI32 rv, const Temps& temps) {
+   bc->freeI32(rv);
+   bc->freeI32(temps.t0);
+ }
+ 
+-#elif defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64)
++#elif defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_PPC64)
+ 
+ struct Temps {
+   RegI32 t0, t1, t2;
+ };
+ 
+ static void PopAndAllocate(BaseCompiler* bc, ValType type,
+                            Scalar::Type viewType, AtomicOp op, RegI32* rd,
+                            RegI32* rv, Temps* temps) {
+@@ -1487,17 +1503,17 @@
+ }
+ 
+ static void Deallocate(BaseCompiler* bc, AtomicOp op, RegI64 rv, RegI64 temp) {
+   bc->freeI64(rv);
+   bc->freeI64(temp);
+ }
+ 
+ #elif defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_MIPS64) || \
+-    defined(JS_CODEGEN_LOONG64)
++    defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_PPC64)
+ 
+ static void PopAndAllocate(BaseCompiler* bc, AtomicOp op, RegI64* rd,
+                            RegI64* rv, RegI64* temp) {
+   *rv = bc->popI64();
+   *temp = bc->needI64();
+   *rd = bc->needI64();
+ }
+ 
+@@ -1669,17 +1685,17 @@
+                     Address srcAddr, RegI32 rv, RegI32 rd, const Temps&) {
+   bc->masm.wasmAtomicExchange(access, srcAddr, rv, rd);
+ }
+ 
+ static void Deallocate(BaseCompiler* bc, RegI32 rv, const Temps&) {
+   bc->freeI32(rv);
+ }
+ 
+-#elif defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64)
++#elif defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_PPC64)
+ 
+ struct Temps {
+   RegI32 t0, t1, t2;
+ };
+ 
+ static void PopAndAllocate(BaseCompiler* bc, ValType type,
+                            Scalar::Type viewType, RegI32* rd, RegI32* rv,
+                            Temps* temps) {
+@@ -1831,17 +1847,17 @@
+ 
+ static void Deallocate(BaseCompiler* bc, RegI64 rd, RegI64 rv) {
+   MOZ_ASSERT(rd == bc->specific_.edx_eax || rd == RegI64::Invalid());
+   bc->maybeFree(rd);
+   bc->freeI32(bc->specific_.ecx);
+ }
+ 
+ #elif defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_MIPS64) || \
+-    defined(JS_CODEGEN_LOONG64)
++    defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_PPC64)
+ 
+ static void PopAndAllocate(BaseCompiler* bc, RegI64* rd, RegI64* rv) {
+   *rv = bc->popI64();
+   *rd = bc->needI64();
+ }
+ 
+ static void Deallocate(BaseCompiler* bc, RegI64 rd, RegI64 rv) {
+   bc->freeI64(rv);
+@@ -2012,17 +2028,17 @@
+ }
+ 
+ static void Deallocate(BaseCompiler* bc, RegI32 rexpect, RegI32 rnew,
+                        const Temps&) {
+   bc->freeI32(rnew);
+   bc->freeI32(rexpect);
+ }
+ 
+-#elif defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64)
++#elif defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_PPC64)
+ 
+ struct Temps {
+   RegI32 t0, t1, t2;
+ };
+ 
+ static void PopAndAllocate(BaseCompiler* bc, ValType type,
+                            Scalar::Type viewType, RegI32* rexpect, RegI32* rnew,
+                            RegI32* rd, Temps* temps) {
+@@ -2282,17 +2298,17 @@
+ 
+ template <typename RegIndexType>
+ static void Deallocate(BaseCompiler* bc, RegI64 rexpect, RegI64 rnew) {
+   bc->freeI64(rexpect);
+   bc->freeI64(rnew);
+ }
+ 
+ #elif defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_MIPS64) || \
+-    defined(JS_CODEGEN_LOONG64)
++    defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_PPC64)
+ 
+ template <typename RegIndexType>
+ static void PopAndAllocate(BaseCompiler* bc, RegI64* rexpect, RegI64* rnew,
+                            RegI64* rd) {
+   *rnew = bc->popI64();
+   *rexpect = bc->popI64();
+   *rd = bc->needI64();
+ }
+diff -r 9c245f4665be -r 553c3f1c48b4 js/src/wasm/WasmBCRegDefs.h
+--- a/js/src/wasm/WasmBCRegDefs.h	Thu Aug 08 21:23:52 2024 -0700
++++ b/js/src/wasm/WasmBCRegDefs.h	Thu Aug 08 21:24:28 2024 -0700
+@@ -115,16 +115,23 @@
+ static constexpr Register RabaldrScratchI32 = CallTempReg2;
+ #endif
+ 
+ #ifdef JS_CODEGEN_RISCV64
+ #  define RABALDR_SCRATCH_I32
+ static constexpr Register RabaldrScratchI32 = CallTempReg2;
+ #endif
+ 
++#ifdef JS_CODEGEN_PPC64
++#  define RABALDR_SCRATCH_I32
++// We can use all the argregs up, and we don't want the JIT using our own
++// private scratch registers, so this is the best option of what's left.
++static constexpr Register RabaldrScratchI32 = r19;
++#endif
++
+ #ifdef RABALDR_SCRATCH_F32_ALIASES_F64
+ #  if !defined(RABALDR_SCRATCH_F32) || !defined(RABALDR_SCRATCH_F64)
+ #    error "Bad configuration"
+ #  endif
+ #endif
+ 
+ //////////////////////////////////////////////////////////////////////////////
+ //
+@@ -384,17 +391,18 @@
+ };
+ #elif defined(JS_CODEGEN_ARM)
+ struct SpecificRegs {
+   RegI64 abiReturnRegI64;
+ 
+   SpecificRegs() : abiReturnRegI64(ReturnReg64) {}
+ };
+ #elif defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_MIPS64) || \
+-    defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64)
++    defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64) || \
++    defined(JS_CODEGEN_PPC64)
+ struct SpecificRegs {
+   // Required by gcc.
+   SpecificRegs() {}
+ };
+ #else
+ struct SpecificRegs {
+ #  ifndef JS_64BIT
+   RegI64 abiReturnRegI64;
+diff -r 9c245f4665be -r 553c3f1c48b4 js/src/wasm/WasmBaselineCompile.cpp
+--- a/js/src/wasm/WasmBaselineCompile.cpp	Thu Aug 08 21:23:52 2024 -0700
++++ b/js/src/wasm/WasmBaselineCompile.cpp	Thu Aug 08 21:24:28 2024 -0700
+@@ -272,17 +272,17 @@
+   // Compute the absolute table base pointer into `scratch`, offset by 8
+   // to account for the fact that ma_mov read PC+8.
+   masm.ma_sub(Imm32(offset + 8), scratch, arm_scratch);
+ 
+   // Jump indirect via table element.
+   masm.ma_ldr(DTRAddr(scratch, DtrRegImmShift(switchValue, LSL, 2)), pc, Offset,
+               Assembler::Always);
+ #elif defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || \
+-    defined(JS_CODEGEN_RISCV64)
++    defined(JS_CODEGEN_RISCV64) || defined(JS_CODEGEN_PPC64)
+   ScratchI32 scratch(*this);
+   CodeLabel tableCl;
+ 
+   masm.ma_li(scratch, &tableCl);
+ 
+   tableCl.target()->bind(theTable->offset());
+   masm.addCodeLabel(tableCl);
+ 
+@@ -710,17 +710,17 @@
+   ScratchPtr scratch(*this);
+   masm.loadPtr(Address(InstanceReg, Instance::offsetOfDebugTrapHandler()),
+                scratch);
+   masm.ma_orr(scratch, scratch, SetCC);
+   masm.ma_bl(&debugTrapStub_, Assembler::NonZero);
+   masm.append(CallSiteDesc(iter_.lastOpcodeOffset(), kind),
+               CodeOffset(masm.currentOffset()));
+ #elif defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_MIPS64) || \
+-    defined(JS_CODEGEN_RISCV64)
++    defined(JS_CODEGEN_RISCV64) || defined(JS_CODEGEN_PPC64)
+   ScratchPtr scratch(*this);
+   Label L;
+   masm.loadPtr(Address(InstanceReg, Instance::offsetOfDebugTrapHandler()),
+                scratch);
+   masm.branchPtr(Assembler::Equal, scratch, ImmWord(0), &L);
+   masm.call(&debugTrapStub_);
+   masm.append(CallSiteDesc(iter_.lastOpcodeOffset(), kind),
+               CodeOffset(masm.currentOffset()));
+@@ -786,17 +786,17 @@
+     masm.ma_ldr(
+         DTRAddr(InstanceReg, DtrOffImm(Instance::offsetOfDebugFilter())), tmp1);
+     masm.ma_mov(Imm32(func_.index / 32), tmp2);
+     masm.ma_ldr(DTRAddr(tmp1, DtrRegImmShift(tmp2, LSL, 0)), tmp2);
+     masm.ma_tst(tmp2, Imm32(1 << func_.index % 32), tmp1, Assembler::Always);
+     masm.ma_bx(lr, Assembler::Zero);
+   }
+ #elif defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_MIPS64) || \
+-    defined(JS_CODEGEN_RISCV64)
++    defined(JS_CODEGEN_RISCV64) || defined(JS_CODEGEN_PPC64)
+   {
+     ScratchPtr scratch(*this);
+ 
+     // Logic same as ARM64.
+     masm.loadPtr(Address(InstanceReg, Instance::offsetOfDebugFilter()),
+                  scratch);
+     masm.branchTest32(Assembler::NonZero, Address(scratch, func_.index / 32),
+                       Imm32(1 << (func_.index % 32)), &L);
+@@ -1436,16 +1436,25 @@
+       ABIArg argLoc = call->abi.next(MIRType::Int32);
+       if (argLoc.kind() == ABIArg::Stack) {
+         ScratchI32 scratch(*this);
+         loadI32(arg, scratch);
+         masm.store32(scratch, Address(masm.getStackPointer(),
+                                       argLoc.offsetFromArgBase()));
+       } else {
+         loadI32(arg, RegI32(argLoc.gpr()));
++#if JS_CODEGEN_PPC64
++        // If this is a call to compiled C++, we must ensure that the
++        // upper 32 bits are clear: addi can sign-extend, which yields
++        // difficult-to-diagnose bugs when the function expects a uint32_t
++        // but the register it gets has a residual 64-bit value.
++        if (call->usesSystemAbi) {
++          masm.as_rldicl(argLoc.gpr(), argLoc.gpr(), 0, 32);
++        }
++#endif
+       }
+       break;
+     }
+     case ValType::I64: {
+       ABIArg argLoc = call->abi.next(MIRType::Int64);
+       if (argLoc.kind() == ABIArg::Stack) {
+         ScratchI32 scratch(*this);
+ #ifdef JS_PUNBOX64
+@@ -1828,17 +1837,18 @@
+ // popXForY where X says something about types and Y something about the
+ // operation being targeted.
+ 
+ RegI32 BaseCompiler::needRotate64Temp() {
+ #if defined(JS_CODEGEN_X86)
+   return needI32();
+ #elif defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM) ||    \
+     defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_MIPS64) || \
+-    defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64)
++    defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64) || \
++    defined(JS_CODEGEN_PPC64)
+   return RegI32::Invalid();
+ #else
+   MOZ_CRASH("BaseCompiler platform hook: needRotate64Temp");
+ #endif
+ }
+ 
+ void BaseCompiler::popAndAllocateForDivAndRemI32(RegI32* r0, RegI32* r1,
+                                                  RegI32* reserved) {
+@@ -1887,16 +1897,18 @@
+   pop2xI64(r0, r1);
+   *temp = needI32();
+ #elif defined(JS_CODEGEN_ARM64)
+   pop2xI64(r0, r1);
+ #elif defined(JS_CODEGEN_LOONG64)
+   pop2xI64(r0, r1);
+ #elif defined(JS_CODEGEN_RISCV64)
+   pop2xI64(r0, r1);
++#elif defined(JS_CODEGEN_PPC64)
++  pop2xI64(r0, r1);
+ #else
+   MOZ_CRASH("BaseCompiler porting interface: popAndAllocateForMulI64");
+ #endif
+ }
+ 
+ #ifndef RABALDR_INT_DIV_I64_CALLOUT
+ 
+ void BaseCompiler::popAndAllocateForDivAndRemI64(RegI64* r0, RegI64* r1,
+@@ -1908,16 +1920,22 @@
+   *r1 = popI64();
+   *r0 = popI64ToSpecific(specific_.rax);
+   *reserved = specific_.rdx;
+ #  elif defined(JS_CODEGEN_ARM64)
+   pop2xI64(r0, r1);
+   if (isRemainder) {
+     *reserved = needI64();
+   }
++#  elif defined(JS_CODEGEN_PPC64)
++  pop2xI64(r0, r1);
++  if (isRemainder && !js::jit::HasPPCISA3()) {
++    // Need temp register for CPUs that don't have mod* instructions.
++    *reserved = needI64();
++  }
+ #  else
+   pop2xI64(r0, r1);
+ #  endif
+ }
+ 
+ static void QuotientI64(MacroAssembler& masm, RegI64 rhs, RegI64 srcDest,
+                         RegI64 reserved, IsUnsigned isUnsigned) {
+ #  if defined(JS_CODEGEN_X64)
+@@ -1955,16 +1973,23 @@
+     masm.as_div_d(srcDest.reg, srcDest.reg, rhs.reg);
+   }
+ #  elif defined(JS_CODEGEN_RISCV64)
+   if (isUnsigned) {
+     masm.divu(srcDest.reg, srcDest.reg, rhs.reg);
+   } else {
+     masm.div(srcDest.reg, srcDest.reg, rhs.reg);
+   }
++#  elif defined(JS_CODEGEN_PPC64)
++  MOZ_ASSERT(reserved.isInvalid());
++  if (isUnsigned) {
++    masm.as_divdu(srcDest.reg, srcDest.reg, rhs.reg);
++  } else {
++    masm.as_divd(srcDest.reg, srcDest.reg, rhs.reg);
++  }
+ #  else
+   MOZ_CRASH("BaseCompiler platform hook: quotientI64");
+ #  endif
+ }
+ 
+ static void RemainderI64(MacroAssembler& masm, RegI64 rhs, RegI64 srcDest,
+                          RegI64 reserved, IsUnsigned isUnsigned) {
+ #  if defined(JS_CODEGEN_X64)
+@@ -2006,16 +2031,34 @@
+     masm.as_mod_d(srcDest.reg, srcDest.reg, rhs.reg);
+   }
+ #  elif defined(JS_CODEGEN_RISCV64)
+   if (isUnsigned) {
+     masm.remu(srcDest.reg, srcDest.reg, rhs.reg);
+   } else {
+     masm.rem(srcDest.reg, srcDest.reg, rhs.reg);
+   }
++#  elif defined(JS_CODEGEN_PPC64)
++  if (js::jit::HasPPCISA3()) {
++    MOZ_ASSERT(reserved.isInvalid());
++    if (isUnsigned) {
++      masm.as_modud(srcDest.reg, srcDest.reg, rhs.reg);
++    } else {
++      masm.as_modsd(srcDest.reg, srcDest.reg, rhs.reg);
++    }
++  } else {
++    MOZ_ASSERT(!reserved.isInvalid());
++    if (isUnsigned) {
++      masm.as_divdu(reserved.reg, srcDest.reg, rhs.reg);
++    } else {
++      masm.as_divd(reserved.reg, srcDest.reg, rhs.reg);
++    }
++    masm.as_mulld(reserved.reg, reserved.reg, rhs.reg);
++    masm.as_subf(srcDest.reg, reserved.reg, srcDest.reg); // T = B - A
++  }
+ #  else
+   MOZ_CRASH("BaseCompiler platform hook: remainderI64");
+ #  endif
+ }
+ 
+ #endif  // RABALDR_INT_DIV_I64_CALLOUT
+ 
+ RegI32 BaseCompiler::popI32RhsForShift() {
+@@ -2374,16 +2417,18 @@
+ // Currently common to PopcntI32 and PopcntI64
+ static RegI32 PopcntTemp(BaseCompiler& bc) {
+ #if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+   return AssemblerX86Shared::HasPOPCNT() ? RegI32::Invalid() : bc.needI32();
+ #elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) ||    \
+     defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || \
+     defined(JS_CODEGEN_RISCV64)
+   return bc.needI32();
++#elif defined(JS_CODEGEN_PPC64)
++  return RegI32::Invalid();
+ #else
+   MOZ_CRASH("BaseCompiler platform hook: PopcntTemp");
+ #endif
+ }
+ 
+ static void PopcntI32(BaseCompiler& bc, RegI32 rsd, RegI32 temp) {
+   bc.masm.popcnt32(rsd, rsd, temp);
+ }
+@@ -11857,17 +11902,18 @@
+   // and on all ARMv8 systems.
+   if (!HasIDIV()) {
+     return false;
+   }
+ #endif
+ #if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86) ||        \
+     defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) ||      \
+     defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || \
+-    defined(JS_CODEGEN_RISCV64)
++    defined(JS_CODEGEN_PPC64)
++  // PPC64 gates on other prerequisites internal to its code generator.
+   return true;
+ #else
+   return false;
+ #endif
+ }
+ 
+ bool js::wasm::BaselineCompileFunctions(const ModuleEnvironment& moduleEnv,
+                                         const CompilerEnvironment& compilerEnv,
+diff -r 9c245f4665be -r 553c3f1c48b4 js/src/wasm/WasmCompile.cpp
+--- a/js/src/wasm/WasmCompile.cpp	Thu Aug 08 21:23:52 2024 -0700
++++ b/js/src/wasm/WasmCompile.cpp	Thu Aug 08 21:24:28 2024 -0700
+@@ -54,16 +54,17 @@
+     X86 = 0x1,
+     X64 = 0x2,
+     ARM = 0x3,
+     MIPS = 0x4,
+     MIPS64 = 0x5,
+     ARM64 = 0x6,
+     LOONG64 = 0x7,
+     RISCV64 = 0x8,
++    PPC64 = 0x9,
+     ARCH_BITS = 3
+   };
+ 
+ #if defined(JS_CODEGEN_X86)
+   MOZ_ASSERT(uint32_t(jit::CPUInfo::GetFingerprint()) <=
+              (UINT32_MAX >> ARCH_BITS));
+   return X86 | (uint32_t(jit::CPUInfo::GetFingerprint()) << ARCH_BITS);
+ #elif defined(JS_CODEGEN_X64)
+@@ -80,16 +81,19 @@
+   MOZ_ASSERT(jit::GetMIPSFlags() <= (UINT32_MAX >> ARCH_BITS));
+   return MIPS64 | (jit::GetMIPSFlags() << ARCH_BITS);
+ #elif defined(JS_CODEGEN_LOONG64)
+   MOZ_ASSERT(jit::GetLOONG64Flags() <= (UINT32_MAX >> ARCH_BITS));
+   return LOONG64 | (jit::GetLOONG64Flags() << ARCH_BITS);
+ #elif defined(JS_CODEGEN_RISCV64)
+   MOZ_ASSERT(jit::GetRISCV64Flags() <= (UINT32_MAX >> ARCH_BITS));
+   return RISCV64 | (jit::GetRISCV64Flags() << ARCH_BITS);
++#elif defined(JS_CODEGEN_PPC64)
++  MOZ_ASSERT(jit::GetPPC64Flags() <= (UINT32_MAX >> ARCH_BITS));
++  return PPC64 | (jit::GetPPC64Flags() << ARCH_BITS);
+ #elif defined(JS_CODEGEN_NONE) || defined(JS_CODEGEN_WASM32)
+   return 0;
+ #else
+ #  error "unknown architecture"
+ #endif
+ }
+ 
+ bool FeatureOptions::init(JSContext* cx, HandleValue val) {
+diff -r 9c245f4665be -r 553c3f1c48b4 js/src/wasm/WasmFrameIter.cpp
+--- a/js/src/wasm/WasmFrameIter.cpp	Thu Aug 08 21:23:52 2024 -0700
++++ b/js/src/wasm/WasmFrameIter.cpp	Thu Aug 08 21:24:28 2024 -0700
+@@ -476,16 +476,22 @@
+ static const unsigned PoppedFP = 4;
+ static const unsigned PoppedFPJitEntry = 0;
+ #elif defined(JS_CODEGEN_RISCV64)
+ static const unsigned PushedRetAddr = 8;
+ static const unsigned PushedFP = 16;
+ static const unsigned SetFP = 20;
+ static const unsigned PoppedFP = 4;
+ static const unsigned PoppedFPJitEntry = 0;
++#elif defined(JS_CODEGEN_PPC64)
++static const unsigned PushedRetAddr = 12;
++static const unsigned PushedFP = 16;
++static const unsigned SetFP = 20;
++static const unsigned PoppedFP = 8;
++static const unsigned PoppedFPJitEntry = 0;
+ #elif defined(JS_CODEGEN_NONE) || defined(JS_CODEGEN_WASM32)
+ // Synthetic values to satisfy asserts and avoid compiler warnings.
+ static const unsigned PushedRetAddr = 0;
+ static const unsigned PushedFP = 1;
+ static const unsigned SetFP = 2;
+ static const unsigned PoppedFP = 3;
+ static const unsigned PoppedFPJitEntry = 4;
+ #else
+@@ -588,16 +594,37 @@
+              MemOperand(sp, Frame::callerFPOffset()));
+     MOZ_ASSERT_IF(!masm.oom(), PushedFP == masm.currentOffset() - *entry);
+     masm.Mov(ARMRegister(FramePointer, 64), sp);
+     MOZ_ASSERT_IF(!masm.oom(), SetFP == masm.currentOffset() - *entry);
+ 
+     // And restore the SP-reg setting, per comment above.
+     masm.SetStackPointer64(stashedSPreg);
+   }
++#elif defined(JS_CODEGEN_PPC64)
++  {
++    *entry = masm.currentOffset();
++
++    // These must be in this precise order. Fortunately we can subsume the
++    // SPR load into the initial "verse" since it is treated atomically.
++    masm.xs_mflr(ScratchRegister);
++    masm.as_addi(StackPointer, StackPointer, -(sizeof(Frame)));
++    masm.as_std(ScratchRegister, StackPointer, Frame::returnAddressOffset());
++    MOZ_ASSERT_IF(!masm.oom(), PushedRetAddr == masm.currentOffset() - *entry);
++    masm.as_std(FramePointer, StackPointer, Frame::callerFPOffset());
++    MOZ_ASSERT_IF(!masm.oom(), PushedFP == masm.currentOffset() - *entry);
++    masm.xs_mr(FramePointer, StackPointer);
++    MOZ_ASSERT_IF(!masm.oom(), SetFP == masm.currentOffset() - *entry);
++
++    // Burn nops because we have to make this a multiple of 16 and the mfspr
++    // just screwed us.
++    masm.as_nop(); // 24
++    masm.as_nop(); // 28
++    masm.as_nop(); // 32 // trap point
++  }
+ #else
+   {
+ #  if defined(JS_CODEGEN_ARM)
+     AutoForbidPoolsAndNops afp(&masm,
+                                /* number of instructions in scope = */ 3);
+ 
+     *entry = masm.currentOffset();
+ 
+@@ -686,16 +713,28 @@
+   // use it.  Hence we have to do it "by hand".
+   masm.Mov(PseudoStackPointer64, vixl::sp);
+ 
+   masm.Ret(ARMRegister(lr, 64));
+ 
+   // See comment at equivalent place in |GenerateCallablePrologue| above.
+   masm.SetStackPointer64(stashedSPreg);
+ 
++#elif defined(JS_CODEGEN_PPC64)
++
++  masm.as_ld(FramePointer, StackPointer, Frame::callerFPOffset());
++  poppedFP = masm.currentOffset();
++  // This is suboptimal since we get serialized, but has to be in this order.
++  masm.as_ld(ScratchRegister, StackPointer, Frame::returnAddressOffset());
++  masm.xs_mtlr(ScratchRegister);
++  *ret = masm.currentOffset();
++
++  masm.as_addi(StackPointer, StackPointer, sizeof(Frame));
++  masm.as_blr();
++
+ #else
+   // Forbid pools for the same reason as described in GenerateCallablePrologue.
+ #  if defined(JS_CODEGEN_ARM)
+   AutoForbidPoolsAndNops afp(&masm, /* number of instructions in scope = */ 6);
+ #  endif
+ 
+   // There is an important ordering constraint here: fp must be repointed to
+   // the caller's frame before any field of the frame currently pointed to by
+@@ -971,16 +1010,23 @@
+                                  /* number of instructions in scope = */ 4);
+       offsets->begin = masm.currentOffset();
+       static_assert(BeforePushRetAddr == 0);
+       // Subtract from SP first as SP must be aligned before offsetting.
+       masm.Sub(sp, sp, 16);
+       static_assert(JitFrameLayout::offsetOfReturnAddress() == 8);
+       masm.Str(ARMRegister(lr, 64), MemOperand(sp, 8));
+     }
++#elif defined(JS_CODEGEN_PPC64)
++    offsets->begin = masm.currentOffset();
++
++    // We have to burn a nop here to match the other prologue length.
++    masm.xs_mflr(ScratchRegister);
++    masm.as_nop(); // might as well explicitly wait for the mfspr to complete
++    masm.as_stdu(ScratchRegister, StackPointer, -8);
+ #else
+     // The x86/x64 call instruction pushes the return address.
+     offsets->begin = masm.currentOffset();
+ #endif
+     MOZ_ASSERT_IF(!masm.oom(),
+                   PushedRetAddr == masm.currentOffset() - offsets->begin);
+     // Save jit frame pointer, so unwinding from wasm to jit frames is trivial.
+ #if defined(JS_CODEGEN_ARM64)
+@@ -1373,16 +1419,34 @@
+       } else
+ #elif defined(JS_CODEGEN_ARM)
+       if (offsetFromEntry == BeforePushRetAddr || codeRange->isThunk()) {
+         // The return address is still in lr and fp holds the caller's fp.
+         fixedPC = (uint8_t*)registers.lr;
+         fixedFP = fp;
+         AssertMatchesCallSite(fixedPC, fixedFP);
+       } else
++#elif defined(JS_CODEGEN_PPC64)
++      if (codeRange->isThunk()) {
++        // The FarJumpIsland sequence temporarily scrambles LR.
++        // Don't unwind to the caller.
++        fixedPC = pc;
++        fixedFP = fp;
++        *unwoundCaller = false;
++        AssertMatchesCallSite(
++            Frame::fromUntaggedWasmExitFP(fp)->returnAddress(),
++            Frame::fromUntaggedWasmExitFP(fp)->rawCaller());
++      } else if (offsetFromEntry < PushedFP) {
++        // On ppc64 we rely on register state instead of state saved on
++        // stack until the wasm::Frame is completely built.
++        // On entry the return address is in LR and fp holds the caller's fp.
++        fixedPC = (uint8_t*)registers.lr;
++        fixedFP = fp;
++        AssertMatchesCallSite(fixedPC, fixedFP);
++      } else
+ #endif
+           if (offsetFromEntry == PushedRetAddr || codeRange->isThunk()) {
+         // The return address has been pushed on the stack but fp still
+         // points to the caller's fp.
+         fixedPC = sp[0];
+         fixedFP = fp;
+         AssertMatchesCallSite(fixedPC, fixedFP);
+       } else if (offsetFromEntry == PushedFP) {
+@@ -1425,16 +1489,26 @@
+ #elif defined(JS_CODEGEN_ARM64)
+         // The stack pointer does not move until all values have
+         // been restored so several cases can be coalesced here.
+       } else if (offsetInCode >= codeRange->ret() - PoppedFP &&
+                  offsetInCode <= codeRange->ret()) {
+         fixedPC = Frame::fromUntaggedWasmExitFP(sp)->returnAddress();
+         fixedFP = fp;
+         AssertMatchesCallSite(fixedPC, fixedFP);
++#elif defined(JS_CODEGEN_PPC64)
++      } else if (offsetInCode >= codeRange->ret() - PoppedFP &&
++                 offsetInCode <= codeRange->ret()) {
++        // The fixedFP field of the Frame has been loaded into fp.
++        // LR might also be loaded, but the Frame structure is still on
++        // stack, so we can access LR from there.
++        MOZ_ASSERT(*sp == fp);
++        fixedPC = Frame::fromUntaggedWasmExitFP(sp)->returnAddress();
++        fixedFP = fp;
++        AssertMatchesCallSite(fixedPC, fixedFP);
+ #else
+       } else if (offsetInCode >= codeRange->ret() - PoppedFP &&
+                  offsetInCode < codeRange->ret()) {
+         // The fixedFP field of the Frame has been popped into fp.
+         fixedPC = sp[1];
+         fixedFP = fp;
+         AssertMatchesCallSite(fixedPC, fixedFP);
+       } else if (offsetInCode == codeRange->ret()) {
+diff -r 9c245f4665be -r 553c3f1c48b4 js/src/wasm/WasmGC.cpp
+--- a/js/src/wasm/WasmGC.cpp	Thu Aug 08 21:23:52 2024 -0700
++++ b/js/src/wasm/WasmGC.cpp	Thu Aug 08 21:24:28 2024 -0700
+@@ -306,13 +306,20 @@
+ #  elif defined(JS_CODEGEN_RISCV64)
+   const uint32_t* insn = (const uint32_t*)nextPC;
+   return (((uintptr_t(insn) & 3) == 0) &&
+           ((insn[-1] == 0x00006037 && insn[-2] == 0x00100073) ||  // break;
+            ((insn[-1] & kBaseOpcodeMask) == JALR) ||
+            ((insn[-1] & kBaseOpcodeMask) == JAL) ||
+            (insn[-1] == 0x00100073 &&
+             (insn[-2] & kITypeMask) == RO_CSRRWI)));  // wasm trap
++#  elif defined(JS_CODEGEN_PPC64)
++  js::jit::Instruction* inst = (js::jit::Instruction*)nextPC;
++  //fprintf(stderr, "IsValidStackMapKey: 0x%lx 0x%08x 0x%08x -> 0x%08x 0x%08x\n", (uint64_t)nextPC, inst[0].encode(), inst[0].extractOpcode(), inst[-1].encode(), inst[-1].extractOpcode());
++  return (((uintptr_t(nextPC) & 3) == 0) && (
++           inst[-1].extractOpcode() == js::jit::PPC_b ||    // branch
++           (inst[-1].encode() & 0xfffffffe) == js::jit::PPC_bctr || // branch
++           inst[-1].encode() == js::jit::PPC_stop)); // designated throw
+ #  else
+   MOZ_CRASH("IsValidStackMapKey: requires implementation on this platform");
+ #  endif
+ }
+ #endif
+diff -r 9c245f4665be -r 553c3f1c48b4 js/src/wasm/WasmSignalHandlers.cpp
+--- a/js/src/wasm/WasmSignalHandlers.cpp	Thu Aug 08 21:23:52 2024 -0700
++++ b/js/src/wasm/WasmSignalHandlers.cpp	Thu Aug 08 21:24:28 2024 -0700
+@@ -104,17 +104,19 @@
+ #    endif
+ #    if defined(__mips__)
+ #      define EPC_sig(p) ((p)->sc_pc)
+ #      define RFP_sig(p) ((p)->sc_regs[30])
+ #    endif
+ #    if defined(__ppc64__) || defined(__PPC64__) || defined(__ppc64le__) || \
+         defined(__PPC64LE__)
+ #      define R01_sig(p) ((p)->sc_frame.fixreg[1])
++#      define R31_sig(p) ((p)->sc_frame.fixreg[31])
+ #      define R32_sig(p) ((p)->sc_frame.srr0)
++#      define R36_sig(p) ((p)->sc_frame.lr)
+ #    endif
+ #  elif defined(__linux__) || defined(__sun)
+ #    if defined(__linux__)
+ #      define EIP_sig(p) ((p)->uc_mcontext.gregs[REG_EIP])
+ #      define EBP_sig(p) ((p)->uc_mcontext.gregs[REG_EBP])
+ #      define ESP_sig(p) ((p)->uc_mcontext.gregs[REG_ESP])
+ #    else
+ #      define EIP_sig(p) ((p)->uc_mcontext.gregs[REG_PC])
+@@ -150,17 +152,19 @@
+ #    if defined(__linux__) && (defined(__sparc__) && defined(__arch64__))
+ #      define PC_sig(p) ((p)->uc_mcontext.mc_gregs[MC_PC])
+ #      define FP_sig(p) ((p)->uc_mcontext.mc_fp)
+ #      define SP_sig(p) ((p)->uc_mcontext.mc_i7)
+ #    endif
+ #    if defined(__linux__) && (defined(__ppc64__) || defined(__PPC64__) || \
+                                defined(__ppc64le__) || defined(__PPC64LE__))
+ #      define R01_sig(p) ((p)->uc_mcontext.gp_regs[1])
++#      define R31_sig(p) ((p)->uc_mcontext.gp_regs[31])
+ #      define R32_sig(p) ((p)->uc_mcontext.gp_regs[32])
++#      define R36_sig(p) ((p)->uc_mcontext.gp_regs[36])
+ #    endif
+ #    if defined(__linux__) && defined(__loongarch__)
+ #      define EPC_sig(p) ((p)->uc_mcontext.__pc)
+ #      define RRA_sig(p) ((p)->uc_mcontext.__gregs[1])
+ #      define R03_sig(p) ((p)->uc_mcontext.__gregs[3])
+ #      define RFP_sig(p) ((p)->uc_mcontext.__gregs[22])
+ #    endif
+ #    if defined(__linux__) && defined(__riscv)
+@@ -193,17 +197,19 @@
+ #    endif
+ #    if defined(__mips__)
+ #      define EPC_sig(p) ((p)->uc_mcontext.__gregs[_REG_EPC])
+ #      define RFP_sig(p) ((p)->uc_mcontext.__gregs[_REG_S8])
+ #    endif
+ #    if defined(__ppc64__) || defined(__PPC64__) || defined(__ppc64le__) || \
+         defined(__PPC64LE__)
+ #      define R01_sig(p) ((p)->uc_mcontext.__gregs[_REG_R1])
++#      define R31_sig(p) ((p)->uc_mcontext.__gregs[_REG_R31])
+ #      define R32_sig(p) ((p)->uc_mcontext.__gregs[_REG_PC])
++#      define R36_sig(p) ((p)->uc_mcontext.__gregs[_REG_LR])
+ #    endif
+ #  elif defined(__DragonFly__) || defined(__FreeBSD__) || \
+       defined(__FreeBSD_kernel__)
+ #    define EIP_sig(p) ((p)->uc_mcontext.mc_eip)
+ #    define EBP_sig(p) ((p)->uc_mcontext.mc_ebp)
+ #    define ESP_sig(p) ((p)->uc_mcontext.mc_esp)
+ #    define RIP_sig(p) ((p)->uc_mcontext.mc_rip)
+ #    define RSP_sig(p) ((p)->uc_mcontext.mc_rsp)
+@@ -227,17 +233,19 @@
+ #    endif
+ #    if defined(__FreeBSD__) && defined(__mips__)
+ #      define EPC_sig(p) ((p)->uc_mcontext.mc_pc)
+ #      define RFP_sig(p) ((p)->uc_mcontext.mc_regs[30])
+ #    endif
+ #    if defined(__FreeBSD__) && (defined(__ppc64__) || defined(__PPC64__) || \
+                                  defined(__ppc64le__) || defined(__PPC64LE__))
+ #      define R01_sig(p) ((p)->uc_mcontext.mc_gpr[1])
++#      define R31_sig(p) ((p)->uc_mcontext.mc_gpr[31])
+ #      define R32_sig(p) ((p)->uc_mcontext.mc_srr0)
++#      define R36_sig(p) ((p)->uc_mcontext.mc_lr)
+ #    endif
+ #  elif defined(XP_DARWIN)
+ #    define EIP_sig(p) ((p)->thread.uts.ts32.__eip)
+ #    define EBP_sig(p) ((p)->thread.uts.ts32.__ebp)
+ #    define ESP_sig(p) ((p)->thread.uts.ts32.__esp)
+ #    define RIP_sig(p) ((p)->thread.__rip)
+ #    define RBP_sig(p) ((p)->thread.__rbp)
+ #    define RSP_sig(p) ((p)->thread.__rsp)
+@@ -405,17 +413,19 @@
+ #    define PC_sig(p) EPC_sig(p)
+ #    define FP_sig(p) RFP_sig(p)
+ #    define SP_sig(p) RSP_sig(p)
+ #    define LR_sig(p) R31_sig(p)
+ #  elif defined(__ppc64__) || defined(__PPC64__) || defined(__ppc64le__) || \
+       defined(__PPC64LE__)
+ #    define PC_sig(p) R32_sig(p)
+ #    define SP_sig(p) R01_sig(p)
+-#    define FP_sig(p) R01_sig(p)
++     // There is no official frame pointer in the ABI, so we use r31.
++#    define FP_sig(p) R31_sig(p)
++#    define LR_sig(p) R36_sig(p)
+ #  elif defined(__loongarch__)
+ #    define PC_sig(p) EPC_sig(p)
+ #    define FP_sig(p) RFP_sig(p)
+ #    define SP_sig(p) R03_sig(p)
+ #    define LR_sig(p) RRA_sig(p)
+ #  elif defined(__riscv)
+ #    define PC_sig(p) RPC_sig(p)
+ #    define FP_sig(p) RFP_sig(p)
+@@ -451,34 +461,36 @@
+ #  ifdef SP_sig
+   return reinterpret_cast<uint8_t*>(SP_sig(context));
+ #  else
+   MOZ_CRASH();
+ #  endif
+ }
+ 
+ #  if defined(__arm__) || defined(__aarch64__) || defined(__mips__) || \
+-      defined(__loongarch__) || defined(__riscv)
++      defined(__loongarch__) || defined(__riscv) || defined(__ppc64__) || \
++      defined(__PPC64__)
+ static uint8_t* ContextToLR(CONTEXT* context) {
+ #    ifdef LR_sig
+   return reinterpret_cast<uint8_t*>(LR_sig(context));
+ #    else
+   MOZ_CRASH();
+ #    endif
+ }
+ #  endif
+ 
+ static JS::ProfilingFrameIterator::RegisterState ToRegisterState(
+     CONTEXT* context) {
+   JS::ProfilingFrameIterator::RegisterState state;
+   state.fp = ContextToFP(context);
+   state.pc = ContextToPC(context);
+   state.sp = ContextToSP(context);
+ #  if defined(__arm__) || defined(__aarch64__) || defined(__mips__) || \
+-      defined(__loongarch__) || defined(__riscv)
++      defined(__loongarch__) || defined(__riscv) || defined(__ppc64__) || \
++      defined(__PPC64__)
+   state.lr = ContextToLR(context);
+ #  else
+   state.lr = (void*)UINTPTR_MAX;
+ #  endif
+   return state;
+ }
+ 
+ // =============================================================================
+diff -r 9c245f4665be -r 553c3f1c48b4 js/src/wasm/WasmStubs.cpp
+--- a/js/src/wasm/WasmStubs.cpp	Thu Aug 08 21:23:52 2024 -0700
++++ b/js/src/wasm/WasmStubs.cpp	Thu Aug 08 21:24:28 2024 -0700
+@@ -629,17 +629,18 @@
+   static_assert(CodeAlignment >= sizeof(uintptr_t));
+   MOZ_ASSERT_IF(!masm.oom(), masm.currentOffset() >= sizeof(uintptr_t));
+ 
+   offsets->begin = masm.currentOffset();
+ 
+   // Save the return address if it wasn't already saved by the call insn.
+ #ifdef JS_USE_LINK_REGISTER
+ #  if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS64) || \
+-      defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64)
++      defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64) || \
++      defined(JS_CODEGEN_PPC64)
+   masm.pushReturnAddress();
+ #  elif defined(JS_CODEGEN_ARM64)
+   // WasmPush updates framePushed() unlike pushReturnAddress(), but that's
+   // cancelled by the setFramePushed() below.
+   WasmPush(masm, lr);
+ #  else
+   MOZ_CRASH("Implement this");
+ #  endif
+@@ -2160,17 +2161,18 @@
+ 
+   GenPrintf(DebugChannel::Import, masm, "\n");
+ 
+   // The native ABI preserves the instance, heap and global registers since they
+   // are non-volatile.
+   MOZ_ASSERT(NonVolatileRegs.has(InstanceReg));
+ #if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM) ||      \
+     defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_MIPS64) || \
+-    defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64)
++    defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64) || \
++    defined(JS_CODEGEN_PPC64)
+   MOZ_ASSERT(NonVolatileRegs.has(HeapReg));
+ #endif
+ 
+   GenerateExitEpilogue(masm, framePushed, ExitReason::Fixed::ImportInterp,
+                        offsets);
+ 
+   return FinishOffsets(masm, offsets);
+ }
+@@ -2634,16 +2636,26 @@
+ #elif defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+ // It's correct to use FloatRegisters::AllMask even when SIMD is not enabled;
+ // PushRegsInMask strips out the high lanes of the XMM registers in this case,
+ // while the singles will be stripped as they are aliased by the larger doubles.
+ static const LiveRegisterSet RegsToPreserve(
+     GeneralRegisterSet(Registers::AllMask &
+                        ~(Registers::SetType(1) << Registers::StackPointer)),
+     FloatRegisterSet(FloatRegisters::AllMask));
++#elif defined(JS_CODEGEN_PPC64)
++// Note that this includes no SPRs, since the JIT is unaware of them.
++// Since we ass-U-me that traps don't occur while LR (an SPR, not a GPR) is
++// live, then we can clobber it and don't have to push it anyway.
++static const LiveRegisterSet RegsToPreserve(
++    GeneralRegisterSet(Registers::AllMask),
++    FloatRegisterSet(FloatRegisters::AllMask));
++#  ifdef ENABLE_WASM_SIMD
++#    error "high lanes of SIMD registers need to be saved too."
++#  endif
+ #else
+ static const LiveRegisterSet RegsToPreserve(
+     GeneralRegisterSet(0), FloatRegisterSet(FloatRegisters::AllDoubleMask));
+ #  ifdef ENABLE_WASM_SIMD
+ #    error "no SIMD support"
+ #  endif
+ #endif
+ 
+diff -r 9c245f4665be -r 553c3f1c48b4 js/src/wasm/WasmSummarizeInsn.cpp
+--- a/js/src/wasm/WasmSummarizeInsn.cpp	Thu Aug 08 21:23:52 2024 -0700
++++ b/js/src/wasm/WasmSummarizeInsn.cpp	Thu Aug 08 21:24:28 2024 -0700
+@@ -1438,16 +1438,24 @@
+         // will trap first.
+     }
+   }
+ 
+ #    undef INSN
+ 
+   return Nothing();
+ }
++//
++// ================================================================= ppc64 ====
++
++#  elif defined(JS_CODEGEN_PPC64)
++
++Maybe<TrapMachineInsn> SummarizeTrapInstruction(const uint8_t* insnAddr) {
++  MOZ_CRASH(); // NYI
++}
+ 
+ // ================================================================== none ====
+ 
+ #  elif defined(JS_CODEGEN_NONE)
+ 
+ Maybe<TrapMachineInsn> SummarizeTrapInstruction(const uint8_t* insnAddr) {
+   MOZ_CRASH();
+ }
