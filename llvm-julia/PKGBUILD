@@ -1,12 +1,13 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Antonio Rojas <arojas@archlinux.org>
-# Contributor: Evangelos Foutras <evangelos@foutrelis.com>
+# Contributor: Evangelos Foutras <foutrelis@archlinux.org>
 # Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
 
-pkgname=('llvm-julia' 'llvm-julia-libs')
-_pkgver=15.0.7-10
+pkgname=(llvm-julia
+         llvm-julia-libs)
+_pkgver=16.0.6-3
 pkgver=${_pkgver/-/.}
-pkgrel=2.1
+pkgrel=1
 arch=(x86_64 powerpc64le)
 url='https://julialang.org/'
 license=('custom:Apache 2.0 with LLVM Exception')
@@ -15,6 +16,7 @@ depends=(gcc-libs
          zlib
          zstd)
 makedepends=(cmake
+             git
              libedit
              libffi
              libxml2
@@ -22,10 +24,8 @@ makedepends=(cmake
              ninja
              python)
 options=(!lto) # https://github.com/llvm/llvm-project/issues/57740
-source=(https://github.com/JuliaLang/llvm-project/archive/julia-$_pkgver.tar.gz
-        llvm-ppc64-elfv2.patch)
-sha256sums=('c1ff5c68ccf8cb0deacf476bf98a88db219e41124ddb918c597457136481e6b4'
-            'd3b3d13f05b17c62108345aa4ac555c656c3f8dbdb24551004b06ef652bef94d')
+source=(git+https://github.com/JuliaLang/llvm-project#tag=julia-$_pkgver)
+sha256sums=('6591971f0e4bcff0255d99676c55f9495f3c22c078ea982d10c5211bb53b41f5')
 
 # Utilizing LLVM_DISTRIBUTION_COMPONENTS to avoid
 # installing static libraries; inspired by Gentoo
@@ -55,12 +55,6 @@ _get_distribution_components() {
   done
 }
 
-prepare() {
-  cd llvm-project-julia-$_pkgver/llvm
-  # we use elfv2 on powerpc64
-  patch -Np2 -i ${srcdir}/llvm-ppc64-elfv2.patch
-}
-
 build() {
   # Build only minimal debug info to reduce size
   CFLAGS=${CFLAGS/-g /-g1 }
@@ -87,7 +81,7 @@ build() {
     -DLLVM_SHLIB_SYMBOL_VERSION=$_symver
   )
 
-  cmake -B build -S llvm-project-julia-$_pkgver/llvm \
+  cmake -B build -S llvm-project/llvm \
      "${cmake_args[@]}"
   pushd build
     local distribution_components=$(_get_distribution_components | paste -sd\;)
@@ -95,7 +89,7 @@ build() {
     cmake_args+=(-DLLVM_DISTRIBUTION_COMPONENTS="$distribution_components")
   popd
 
-  cmake -B build -S llvm-project-julia-$_pkgver/llvm \
+  cmake -B build -S llvm-project/llvm \
     "${cmake_args[@]}"
   cmake --build build
 }
@@ -107,10 +101,10 @@ package_llvm-julia() {
   DESTDIR="$pkgdir" cmake --build build --target install-distribution
 
   # The runtime libraries go into llvm-julia-libs
-  mv -f "$pkgdir"/usr/lib/llvm-julia/lib/libLLVM-{15,${pkgver%.*}}jl.so .
+  mv -f "$pkgdir"/usr/lib/llvm-julia/lib/libLLVM-{16,${pkgver%.*}}jl.so .
   mv -f "$pkgdir"/usr/lib/llvm-julia/lib/LLVMgold.so "$srcdir/"
 
-  install -Dm644 llvm-project-julia-$_pkgver/llvm/LICENSE.TXT "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  install -Dm644 llvm-project/llvm/LICENSE.TXT "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
 
 package_llvm-julia-libs() {
@@ -121,10 +115,10 @@ package_llvm-julia-libs() {
             ncurses)
 
   install -d "$pkgdir/usr/lib/llvm-julia/lib"
-  cp -P libLLVM-{15,${pkgver%.*}}jl.so "$pkgdir"/usr/lib
-  ln -s ../../libLLVM-15jl.so "$pkgdir/usr/lib/llvm-julia/lib/libLLVM-15jl.so"
-  ln -s ../../libLLVM-15jl.so "$pkgdir/usr/lib/llvm-julia/lib/libLLVM-${pkgver}jl.so"
+  cp -P libLLVM-{16,${pkgver%.*}}jl.so "$pkgdir"/usr/lib
+  ln -s ../../libLLVM-16jl.so "$pkgdir/usr/lib/llvm-julia/lib/libLLVM-16jl.so"
+  ln -s ../../libLLVM-16jl.so "$pkgdir/usr/lib/llvm-julia/lib/libLLVM-${pkgver}jl.so"
   cp -P LLVMgold.so "$pkgdir/usr/lib/llvm-julia/lib/"
 
-  install -Dm644 llvm-project-julia-$_pkgver/llvm/LICENSE.TXT "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  install -Dm644 llvm-project/llvm/LICENSE.TXT "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
