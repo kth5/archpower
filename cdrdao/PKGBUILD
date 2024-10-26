@@ -4,45 +4,63 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 # Contributor: dorphell <dorphell@archlinux.org>
 
-pkgname=cdrdao
+pkgbase=cdrdao
+pkgname=('cdrdao' 'gcdmaster')
 pkgver=1.2.5
-pkgrel=3.1
+pkgrel=7
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=('GPL')
+license=('GPL-2.0-or-later')
 url="http://cdrdao.sourceforge.net/"
 pkgdesc='Records audio/data CD-Rs in disk-at-once (DAO) mode'
-depends=('gcc-libs' 'lame' 'libmad' 'libvorbis' 'libao')
-makedepends=('gtkmm3')
-optdepends=('gtkmm3: for gcdmaster')
-source=(https://downloads.sourceforge.net/${pkgname}/${pkgname}-${pkgver}.tar.bz2
-        https://github.com/cdrdao/cdrdao//commit/251a40ab.patch
-        cdrdao-1.2.3-autoconf-update.patch
-        cdrdao-1.2.3-k3b.patch)
+depends=('atkmm' 'cairomm' 'dconf' 'gcc-libs' 'glib2' 'glibc' 'glibmm' 'gtk3' 'gtkmm3' 'lame'
+         'libao' 'libmad' 'libsigc++' 'libvorbis' 'pangomm')
+options=('!emptydirs')
+source=(https://downloads.sourceforge.net/${pkgbase}/${pkgbase}-${pkgver}.tar.bz2
+        cdrdao-uninitialized-filename.patch
+        cdrdao-version-command.patch)
 sha256sums=('d19b67c853c5dba2406afaab6cd788e77f35eebe634cac4679528477c7be01b6'
             '970e5d18513f298b915f9d84f206d7489400e93f42b9c04ec55acf2fe9d43e5a'
-            '2f4f54ed23b4f3b22fd64a2a3d4fa67ff186b3865213cba3fbe81ed9f6c42c74'
-            '6eddd7c79f548b3ad1d8d4ce23367bcae3cd6dee74f0aeb6439758d6599090e0')
+            'cbb8ec897e390d5a4c4c113e35a88893f5be3ebc2fec3b09eb2ae84bd4275021')
 
 prepare() {
-  cd ${pkgname}-${pkgver}
-  
-  patch -Np1 -i ../cdrdao-1.2.3-autoconf-update.patch
-  patch -Np1 -i ../cdrdao-1.2.3-k3b.patch
-# Fix uninitialized variable
-  patch -p1 -i ../251a40ab.patch
+  cd ${pkgbase}-${pkgver}
+
+  # Fix uninitialized TOC data file name
+  # https://github.com/cdrdao/cdrdao/pull/21
+  patch -Np1 -i ../cdrdao-uninitialized-filename.patch
+
+  # Fix version command
+  # https://github.com/cdrdao/cdrdao/pull/25
+  patch -Np1 -i ../cdrdao-version-command.patch
+
+  # Remove gconf dependency
+  sed -i '/AM_GCONF_SOURCE_2/d' configure.ac
 }
 
 build() {
-  cd ${pkgname}-${pkgver}
+  cd ${pkgbase}-${pkgver}
   ./configure --prefix=/usr \
 	--mandir=/usr/share/man \
 	--sysconfdir=/etc \
-	--without-xdao --with-lame \
-	--with-ogg-support --with-mp3-support
+	--with-lame \
+	--with-ogg-support \
+	--with-mp3-support
   make
 }
 
-package() {
-  cd ${pkgname}-${pkgver}
+package_cdrdao() {
+  depends=('gcc-libs' 'glibc' 'lame' 'libao' 'libmad' 'libvorbis')
+
+  cd ${pkgbase}-${pkgver}
   make DESTDIR="${pkgdir}" install
+  make -C gcdmaster DESTDIR="${pkgdir}" uninstall
+}
+
+package_gcdmaster() {
+  pkgdesc='GUI frontend for creating audio CDs and burning them using cdrdao'
+  depends=('atkmm' 'cairomm' 'cdrdao' 'dconf' 'gcc-libs' 'glib2' 'glibc' 'glibmm' 'gtk3' 'gtkmm3'
+           'libao' 'libmad' 'libsigc++' 'libvorbis' 'pangomm')
+
+  cd ${pkgbase}-${pkgver}
+  make -C gcdmaster DESTDIR="${pkgdir}" install
 }
