@@ -1,5 +1,6 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Evangelos Foutras <evangelos@foutrelis.com>
+# Maintainer: Evangelos Foutras <foutrelis@archlinux.org>
+# Maintainer: Christian Heusel <gromit@archlinux.org>
 # Contributor: Levente Polyak <anthraxx[at]archlinux[dot]org>
 # Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 # Contributor: Marius Knaust <marius.knaust@gmail.com>
@@ -11,45 +12,34 @@
 # Contributor: Luca Roccia <little_rock@users.sourceforge.net>
 
 pkgname=('boost' 'boost-libs')
-pkgver=1.83.0
-pkgrel=9.1
+pkgver=1.86.0
+pkgrel=3
 _srcname=boost_${pkgver//./_}
 pkgdesc="Free peer-reviewed portable C++ source libraries"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://www.boost.org/"
 license=('BSL-1.0')
 makedepends=('icu' 'python' 'python-numpy' 'bzip2' 'zlib' 'openmpi' 'zstd')
-options=(!distcc)
-source=(https://boostorg.jfrog.io/artifactory/main/release/$pkgver/source/$_srcname.tar.bz2
-        boost-1.81.0-phoenix-multiple-definitions.patch
-        $pkgname-support-fn.contains-f-where-f-is-a-function.patch::https://github.com/boostorg/function/commit/7ca2310b15e3.patch
-        $pkgname-ublas-c++20-iterator.patch::https://github.com/boostorg/ublas/commit/a31e5cffa85f.patch
-        b2-fix-OSPLAT.patch::https://github.com/bfgroup/b2/pull/341.patch
-        boost-1.85.0-python-numpy-2.patch)
-sha256sums=('6478edfe2f3305127cffe8caf73ea0176c53769f4bf1585be237eb30798c3b8e'
-            '3ebf428ef6be090a7b56a233330375539ac429333b83708e28fe5db049cfecdb'
-            '1b5998ee8fb389dd6df55a3684d29ffa37246bc007e8e6712bf2be6c7f745036'
-            'aa38addb40d5f44b4a8472029b475e7e6aef1c460509eb7d8edf03491dc1b5ee'
-            '9d83d038227e100d4ae5d44bdf238aecfbf0c54c0999c3070a1e9b5d5a203a25'
-            '39221b050c25993d05be1419cece8524f94755b9bdff3405fe0ac89f2eba4541')
+source=(
+  https://boostorg.jfrog.io/artifactory/main/release/$pkgver/source/$_srcname.tar.bz2
+  $pkgname-numpy-2.0.patch::https://github.com/boostorg/python/commit/0474de0f6cc9.patch
+  $pkgname-1_86_0-fix-compute-header_patch_1.patch::https://github.com/boostorg/compute/commit/79452d5279831ee59a650c17b71259a821f1a554.patch
+  $pkgname-1_86_0-fix-compute-header_patch_2.patch::https://github.com/boostorg/compute/commit/f8e5e3543723379bb6a9dd9d88415a993653e70a.patch
+)
+sha256sums=('1bed88e40401b2cb7a1f76d4bab499e352fa4d0c5f31c0dbae64e24d34d7513b'
+            'ccda8ef8126c93f4c8d29ba43b5f301952e5eacdc7fecb2ae3d01115a2222c53'
+            '20e8017cd5d237157af578d4279c264418bb8f92471ba2efa1dc2e8e980addd8'
+            'a8c2b93129cb9c39c1ab30a6f3140e21f3fbfa23ededa039ab328331498293c7')
 
 prepare() {
   cd $_srcname
 
-  # https://github.com/boostorg/phoenix/issues/111
-  patch -Np1 -i ../boost-1.81.0-phoenix-multiple-definitions.patch
+  # support building against NumPy 2.0
+  patch -Np1 -d libs/python <../$pkgname-numpy-2.0.patch
 
-  # https://github.com/boostorg/signals2/issues/68
-  # https://github.com/boostorg/function/issues/46
-  patch -Np2 -i <(sed 's#test/#asd/libs/function/test/#' \
-    ../$pkgname-support-fn.contains-f-where-f-is-a-function.patch)
-
-  # https://github.com/boostorg/ublas/pull/97
-  patch -Np2 -i ../$pkgname-ublas-c++20-iterator.patch
-
-  patch -Np1 -d tools/build < ../b2-fix-OSPLAT.patch
-
-  patch -Np1 -i ${srcdir}/boost-1.85.0-python-numpy-2.patch
+  # https://gitlab.archlinux.org/archlinux/packaging/packages/boost/-/issues/3
+  patch -Np2 < ../$pkgname-1_86_0-fix-compute-header_patch_1.patch
+  patch -Np2 < ../$pkgname-1_86_0-fix-compute-header_patch_2.patch
 }
 
 build() {
@@ -81,6 +71,7 @@ build() {
     runtime-link=shared \
     link=shared,static \
     toolset=gcc \
+    cxxstd=23 \
     python=$python_version \
     cflags="$CPPFLAGS $CFLAGS -fPIC -O3 -ffat-lto-objects" \
     cxxflags="$CPPFLAGS $CXXFLAGS -fPIC -O3 -ffat-lto-objects" \
@@ -109,8 +100,6 @@ package_boost() {
   for _lib in python numpy; do
     ln -srL "$pkgdir"/usr/lib/libboost_${_lib}{${python_version/.},${python_version%.*}}.so
   done
-
-  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" $_srcname/LICENSE_1_0.txt
 }
 
 package_boost-libs() {
@@ -120,21 +109,54 @@ package_boost-libs() {
   pkgdesc+=' (runtime libraries)'
   depends=('bzip2' 'zlib' 'icu' 'zstd')
   optdepends=('openmpi: for mpi support')
-  provides=(libboost_atomic.so libboost_chrono.so libboost_container.so
-    libboost_context.so libboost_contract.so libboost_coroutine.so
-    libboost_date_time.so libboost_fiber.so libboost_filesystem.so
-    libboost_graph.so libboost_graph_parallel.so libboost_iostreams.so
-    libboost_json.so libboost_locale.so libboost_log.so libboost_log_setup.so
-    libboost_math_c99.so libboost_math_c99f.so libboost_math_c99l.so
-    libboost_math_tr1.so libboost_math_tr1f.so libboost_math_tr1l.so
-    libboost_mpi{,_python${python_version/.}}.so libboost_nowide.so
-    libboost_numpy${python_version/.}.so libboost_prg_exec_monitor.so
-    libboost_program_options.so libboost_python${python_version/.}.so
-    libboost_random.so libboost_regex.so libboost_serialization.so
-    libboost_stacktrace_addr2line.so libboost_stacktrace_basic.so
-    libboost_stacktrace_noop.so libboost_system.so libboost_thread.so
-    libboost_timer.so libboost_type_erasure.so libboost_unit_test_framework.so
-    libboost_url.so libboost_wave.so libboost_wserialization.so)
+  provides=(
+    libboost_atomic.so
+    libboost_charconv.so
+    libboost_chrono.so
+    libboost_cobalt.so
+    libboost_container.so
+    libboost_context.so
+    libboost_contract.so
+    libboost_coroutine.so
+    libboost_date_time.so
+    libboost_fiber.so
+    libboost_filesystem.so
+    libboost_graph.so
+    libboost_graph_parallel.so
+    libboost_iostreams.so
+    libboost_json.so
+    libboost_locale.so
+    libboost_log.so
+    libboost_log_setup.so
+    libboost_math_c99.so
+    libboost_math_c99f.so
+    libboost_math_c99l.so
+    libboost_math_tr1.so
+    libboost_math_tr1f.so
+    libboost_math_tr1l.so
+    libboost_mpi{,_python${python_version/.}}.so
+    libboost_nowide.so
+    libboost_numpy${python_version/.}.so
+    libboost_prg_exec_monitor.so
+    libboost_process.so
+    libboost_program_options.so
+    libboost_python${python_version/.}.so
+    libboost_random.so
+    libboost_regex.so
+    libboost_serialization.so
+    libboost_stacktrace_addr2line.so
+    libboost_stacktrace_basic.so
+    libboost_stacktrace_from_exception.so
+    libboost_stacktrace_noop.so
+    libboost_system.so
+    libboost_thread.so
+    libboost_timer.so
+    libboost_type_erasure.so
+    libboost_unit_test_framework.so
+    libboost_url.so
+    libboost_wave.so
+    libboost_wserialization.so
+  )
 
   install -dm755 "$pkgdir"/usr/lib
   cp -a fakeinstall/lib/*.so.* "$pkgdir"/usr/lib/
@@ -145,8 +167,6 @@ package_boost-libs() {
   touch "$pkgdir"$site_packages/boost/__init__.py
   python -m compileall -o 0 -o 1 -o 2 "$pkgdir"$site_packages/boost
   cp fakeinstall/lib/boost-python*/mpi.so "$pkgdir"$site_packages/boost/mpi.so
-
-  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" $_srcname/LICENSE_1_0.txt
 }
 
 # vim:set ts=2 sw=2 et:
