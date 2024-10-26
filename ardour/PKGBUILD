@@ -1,11 +1,10 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: David Runge <dvzrv@archlinux.org>
 # Contributor: Ray Rashif <schiv@archlinux.org>
 # Contributor: SpepS <dreamspepser at yahoo dot it>
 
 pkgname=ardour
-pkgver=8.6
-pkgrel=1.1
+pkgver=8.10
+pkgrel=1
 pkgdesc="Professional-grade digital audio workstation"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://ardour.org/"
@@ -90,10 +89,10 @@ source=(
   $pkgname-7.0-re-vendor_qm-dsp.patch
 )
 noextract=($pkgname-midi-$pkgver.zip)
-sha512sums=('8e7c52866a1084484e7ba6089334199d4f2c0f5e221f8b8ab4fed49ffdfbc3aef747ecbf7abd9d25355fc9ed270b7f7ee9f8250e7b5c59a6e140b7d59469bfc6'
+sha512sums=('096adfa3ad5c9beff00023646733c410a77537ad7b54ed30a76a647ca0a26c4653504d768c7164ab1e2d6d7d0804e9f8b44360d88277c1a87dbe25140ee859ec'
             '94b681f989e834f5de25ce87da9c174b11d90617063f8c96147d7eb470391b35f6d54b85de16da8d963cacb01b50d1c1fab0fddd18eb3b086fe17124ecfa4f65'
             'a3da14925bc25d8a57ba3e137c4b2b04010054667ac4ae2aec116ce6c157b03c9dd76bf4d73c313022282362d19b91683f062d6ab2ee0c73a576d3fa6272bd1d')
-b2sums=('afdc958c7a827fd6dd965900fb84aa32d570bc003d1e00213a2e26e56ca74dff522d32e1170bd113527caa5ea237898e28dc804a0da2ee47ff1b02f5f004ef2a'
+b2sums=('7ac32af3aee1cbbb7bdf4bb0653b8dbe1cec76e7d965dd54433878d07bd5468f20747d207f9c4a04d3717452634de4159af42482b86258047741e14d87b1ff3c'
         'e31be6b51a217e2f7f799aa1d6e8c3cd024d80ab2d8d4371496a2b8bf0215749979217b565909841a346d6b3128fbfd674d2fae64b9fe741a5b418cd184c23be'
         '73845adce9a48938cd7aef5fbc65f492e470de316620d278365d247c80caef44531e850fbd3d2f5de65a8562e67aabfd982c938439bd3670726a27bc003be017')
 
@@ -125,6 +124,14 @@ prepare() {
 }
 
 build() {
+  case "${CARCH}" in
+    powerpc)
+      export CFLAGS+=' -latomic'
+      export CXXFLAGS+=' -latomic'
+      export LDFLAGS+=' -latomic'
+    ;;
+  esac
+
   local waf_configure_options=(
     --prefix=/usr
     --configdir=/etc
@@ -137,17 +144,9 @@ build() {
     --with-backends="alsa,dummy,jack,pulseaudio"
   )
 
-  case "${CARCH}" in
-    powerpc)
-      export CFLAGS+=' -latomic'
-      export CXXFLAGS+=' -latomic'
-      export LDFLAGS+=' -latomic'
-    ;;
-  esac
-
   cd $pkgname
   export LINKFLAGS="$LDFLAGS"
-  ./waf configure "${waf_configure_options[@]}" #FIXME: using included waf, 2.1.1 package isn't compatible
+  ./waf configure "${waf_configure_options[@]}"
   ./waf build -v
 }
 
@@ -188,6 +187,7 @@ package() {
     ./waf i18n --destdir="$pkgdir"
     ./waf install --destdir="$pkgdir"
     install -vDm 644 $pkgname.1 -t "$pkgdir/usr/share/man/man1/"
+    mv "$pkgdir"/usr/share/{appdata,metainfo}
   )
 
   # installation of MIDI files is a bit of a horrorshow, as upstream is not flexible about tarball naming, etc.

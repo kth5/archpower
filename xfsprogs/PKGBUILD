@@ -2,21 +2,37 @@
 # Maintainer: Tobias Powalowski <tpowa@archlinux.org>
 
 pkgname=xfsprogs
-pkgver=6.8.0
-pkgrel=2
+pkgver=6.11.0
+pkgrel=1
 pkgdesc="XFS filesystem utilities"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=('GPL-2.0-only' 'LGPL-2.1-only')
+license=(
+  GPL-2.0-only
+  LGPL-2.1-only
+)
 url="https://xfs.wiki.kernel.org"
-depends=('sh' 'util-linux-libs' 'device-mapper' 'libinih' 'liburcu')
-optdepends=('icu: for xfs_scrub'
-	    'python: for xfs_scrub_all script'
-            'smtp-forwarder: for xfs_scrub_fail script')
-makedepends=('git' 'icu')
-options=('!makeflags')
+depends=(
+  device-mapper
+  libedit
+  libinih
+  liburcu
+  sh
+  util-linux-libs
+)
+optdepends=(
+  'icu: for xfs_scrub'
+  'python: for xfs_scrub_all script'
+  'smtp-forwarder: for xfs_scrub_fail script'
+)
+makedepends=(
+  git
+  icu
+)
+options=(!makeflags)
 source=("git+https://git.kernel.org/pub/scm/fs/xfs/xfsprogs-dev.git?signed#tag=v${pkgver}")
-b2sums=('0797e57b0c6a7512233d431832e966a2a03659c2ea5f80255e13f26ea2d0f61cfecaf4603fc1636b008b77ff9c946b06fbf77a1cd23e9583c7f782d098772099')
+b2sums=('64507aaad6a4f08c72d201a83daa91f464a49cf8b5596ccaa59201dca6188cceb4e96d188401b45aa6620cdb21db7586196e94fd3571a7c6e708740fb791b343')
 validpgpkeys=(
+  'AE1B2A9562721A6FC4307C1F46A7EA18AC33E108' #  Andrey Albershteyn <aalbersh@redhat.com>
   '2B8185919E8D248981869DED20AE1692E13DDEE0' # Eric Sandeen <sandeen@sandeen.net>
   '4020459E58C1A52511F5399113F703E6C11CF6F0' # Carlos Maiolino <cem@kernel.org>
 )
@@ -24,18 +40,18 @@ validpgpkeys=(
 build() {
   cd ${pkgname}-dev
   make configure
-  export OPTIMIZER="-O1"
-  export DEBUG=-DNDEBUG
-  ./configure --prefix=/usr --sbindir=/usr/bin --libexecdir=/usr/lib --with-systemd-unit-dir=/usr/lib/systemd/system
+  # Package is honoring CFLAGS; No need to use OPTIMIZER anymore.
+  # However, we have to provide an empty value to avoid default
+  # flags.
+  export OPTIMIZER=" "
+  ./configure --prefix=/usr --sbindir=/usr/bin --libexecdir=/usr/lib \
+              --with-systemd-unit-dir=/usr/lib/systemd/system \
+              --localstatedir=/var --enable-editline
   make
 }
 
 package() {
   cd ${pkgname}-dev
-  make DIST_ROOT="${pkgdir}" PKG_ROOT_SBIN_DIR="/usr/bin" install install-dev
-  chown -R root "$pkgdir"
-  chgrp -R root "$pkgdir"
-  # add hack as we cannot set rootlibdir
-  mv "${pkgdir}"/lib/libhandle.so* "${pkgdir}/usr/lib/"
-  rm -rf "${pkgdir}/lib"
+  make PKG_USER=root PKG_GROUP=root DIST_ROOT="${pkgdir}" \
+       PKG_ROOT_SBIN_DIR="/usr/bin" install install-dev
 }

@@ -10,26 +10,41 @@ arch=(x86_64 powerpc64le powerpc)
 url="https://github.com/google/leveldb"
 license=('BSD')
 depends=('snappy')
-makedepends=('cmake' 'gmock' 'benchmark')
+makedepends=('cmake')
+checkdepends=('gmock' 'benchmark')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/google/leveldb/archive/$pkgver.tar.gz"
-        leveldb-unbundle-gtest-benchmark.patch)
+        leveldb-unbundle-gtest-benchmark.patch
+        leveldb-1.23-remove-benchmark-dep.patch)
 sha256sums=('9a37f8a6174f09bd622bc723b55881dc541cd50747cbd08831c2a82d620f6d76'
-            '4183dc3b5c17a0cb5fb66ada179b9bd2b43e997d3a9c854d19cf892ea6e524b9')
+            '4183dc3b5c17a0cb5fb66ada179b9bd2b43e997d3a9c854d19cf892ea6e524b9'
+            'c718da146ae57fabb541cc85cbf46a6acbf5a9e048a04aed5f1ed4165c2add31')
 
 prepare() {
+  patch -d $pkgname-$pkgver -p1 < leveldb-1.23-remove-benchmark-dep.patch
   patch -d $pkgname-$pkgver -p1 < leveldb-unbundle-gtest-benchmark.patch # Unbundle GTest and benchmark
   sed -e '/fno-rtti/d' -i $pkgname-$pkgver/CMakeLists.txt # Don't disable RTTI, needed for ceph
 }
 
 build() {
+  case "${CARCH}" in
+    powerpc*|riscv64)
+      _cmake_options=(-DLEVELDB_BUILD_BENCHMARKS=OFF -DLEVELDB_BUILD_TESTS=OFF)
+    ;;
+  esac
+
   cmake -B build -S $pkgname-$pkgver \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DBUILD_SHARED_LIBS=1
+    -DBUILD_SHARED_LIBS=1 ${_cmake_options[@]}
   cmake --build build
 }
 
 check() {
-  cmake --build build --target test
+  case "${CARCH}" in
+    powerpc*|riscv64) ;;
+    *)
+      cmake --build build --target test
+    ;;
+  esac
 }
 
 package() {
