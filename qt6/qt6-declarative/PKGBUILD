@@ -4,42 +4,54 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=qt6-declarative
-pkgver=6.7.2
-pkgrel=1
+_pkgver=6.8.0
+pkgver=6.8.0
+pkgrel=4
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://www.qt.io'
 license=(GPL3 LGPL3 FDL custom)
 pkgdesc='Classes for QML and JavaScript languages'
 depends=(gcc-libs
          glibc
-         qt6-base)
+         qt6-base
+         qt6-svg)
 makedepends=(cmake
              git
              ninja
              python
              qt6-languageserver
-             qt6-shadertools)
-optdepends=('qt6-languageserver: for qmlls')
-conflicts=(qt6-quickcontrols2)
-provides=(qt6-quickcontrols2)
-replaces=(qt6-quickcontrols2)
+             qt6-shadertools
+             qt6-tools)
 groups=(qt6)
+options=(!debug)
 _pkgfn=${pkgname/6-/}
-source=(git+https://code.qt.io/qt/$_pkgfn#tag=v$pkgver
-        big-endian-qtquick-software.patch)
-sha256sums=('939663850c1469ffbeab7f58561f1372c7a90f00654d5514a7c730b3f506522a'
-            '6979e7e3c181474aeba1b154589bb00bad4ba8e670426033a762b844ab5d4ed6')
+source=(git+https://code.qt.io/qt/$_pkgfn#tag=v$_pkgver
+        big-endian-qtquick-software.patch
+        qtdeclarative-6.7.3-QTBUG-125053.patch
+        qtdeclarative-6.8.0-QTBUG-129797.patch)
+sha256sums=('89b497818a0e36bf08f5a42324dcde1b441b5a0ee1c9b6cfa38fb281479de3ed'
+            'd4ef5f1c361345e7ae6cf41143a1d6ae66e9f9d5c77b1c75e96c0e2164735e25'
+            '7f12ff4220f796a723562c812bf268a28a0ab64381c0d1b4905d828267856eee'
+            'e44dfbd573cfaae15e8f03683062250d5cf87663803ebb26db6bb238f38834eb')
 
 prepare() {
   cd $_pkgfn
+# Fix crashes in Plasma
+  git cherry-pick -n 0ae3697cf40bcd3ae1de20621abad17cf6c5f52d
+  git cherry-pick -n 861a7921ed7833a90f77b5fca436c789a4f9517c
+
   patch -Np1 -i ${srcdir}/big-endian-qtquick-software.patch
+  patch -Np1 -i ${srcdir}/qtdeclarative-6.7.3-QTBUG-125053.patch
+  patch -Np1 -i ${srcdir}/qtdeclarative-6.8.0-QTBUG-129797.patch
 }
 
 build() {
-  export CXXFLAGS+=" -ffat-lto-objects"
   cmake -B build -S $_pkgfn -G Ninja \
+    -DQT_ALLOW_DOWNLOAD=OFF \
     -DINSTALL_PUBLICBINDIR=usr/bin \
-    -DCMAKE_MESSAGE_LOG_LEVEL=STATUS
+    -DCMAKE_MESSAGE_LOG_LEVEL=STATUS \
+    -DQT_BUILD_EXAMPLES_BY_DEFAULT=OFF \
+    -DCMAKE_CXX_FLAGS="$CXXFLAGS -ffat-lto-objects"
   cmake --build build
 }
 
