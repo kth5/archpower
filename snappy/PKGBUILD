@@ -1,68 +1,67 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Dave Reisner <dreisner@archlinux.org>
+# Maintainer: Anatol Pomozov
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
+# Contributor: Dave Reisner <dreisner@archlinux.org>
 # Contributor: Antony Male <antony dot male at geemail dot com>>
 
 pkgname=snappy
-pkgver=1.1.10
-pkgrel=1.1
+pkgver=1.2.1
+pkgrel=2
 pkgdesc='A fast compressor/decompressor library'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url="https://google.github.io/snappy/"
-license=('BSD')
-depends=('glibc' 'gcc-libs')
+url="https://github.com/google/snappy"
+license=('BSD-3-Clause')
+depends=(
+  'gcc-libs'
+  'glibc'
+)
+makedepends=(
+  'clang'
+  'cmake'
+  'gtest'
+)
 checkdepends=('zlib')
-makedepends=('cmake' 'clang' 'gtest' 'benchmark')
-source=("https://github.com/google/snappy/archive/$pkgver/$pkgname-$pkgver.tar.gz"
-        snappy.pc.in
-        cmake_add_pkgconfig.patch
-        system_gtest.patch::https://github.com/google/snappy/commit/114df35e84ad95b6d5afbcf69aa85a14ff029000.patch
-        reenable_rtti.patch::https://github.com/google/snappy/commit/516fdcca6606502e2d562d20c01b225c8d066739.patch)
-sha256sums=('49d831bffcc5f3d01482340fe5af59852ca2fe76c3e05df0e67203ebbe0f1d90'
+provides=('libsnappy.so')
+source=(
+  "$url/archive/$pkgver/$pkgname-$pkgver.tar.gz"
+  snappy.pc.in
+  cmake_add_pkgconfig.patch
+  use_system_gtest.patch
+  reenable_rtti.patch::https://github.com/google/snappy/commit/516fdcca6606502e2d562d20c01b225c8d066739.patch
+)
+sha256sums=('736aeb64d86566d2236ddffa2865ee5d7a82d26c9016b36218fcc27ea4f09f86'
             '134f06ca0584a1026538d0fb972fc141c008390ecae1806184b721eca1abbc75'
             '2a204d7d35509ffc290d80c641fcb7e8488c67ca550aa1695493cff12c53156b'
-            '1bb8a37b377620f6c1adc2bb572ccd0570edbf825da087cd6eda3d24f7acb8eb'
-            'bae38a49c9c7c05e7655479559200c3e94d9d6f2b4d6bb46cd22985298f51019')
+            '50b31b45511e8907f1319305c102f37631b0fbe509f862b612e70073383658e4'
+            '5c9a3be0cabfc58f091a6ba51b05a1627a39693695ab91a6260cecc982e9a6b5')
 
 prepare() {
   cd "$pkgname-$pkgver"
   cp ../snappy.pc.in .
-  patch -p1 < ../cmake_add_pkgconfig.patch # https://bugs.archlinux.org/task/71246
-  patch -p1 < ../system_gtest.patch # https://github.com/google/snappy/pull/132
-  patch -p1 < ../reenable_rtti.patch # https://bugs.archlinux.org/task/72058
+  patch -Np1 < ../cmake_add_pkgconfig.patch # https://bugs.archlinux.org/task/71246
+  patch -Np1 < ../use_system_gtest.patch
+  patch -Np1 < ../reenable_rtti.patch
 }
 
 build() {
   cd "$pkgname-$pkgver"
-
-  # compile without assertions
-  CXXFLAGS+=\ -DNDEBUG
-
-  # export CXX=clang++
-
-  cmake \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_INSTALL_LIBDIR=/usr/lib \
+  cmake -S . -B build \
+    -D CMAKE_BUILD_TYPE=None \
+    -D CMAKE_INSTALL_PREFIX=/usr \
+    -W no-dev \
     -DCMAKE_CXX_STANDARD=23 \
-    -DBUILD_SHARED_LIBS=yes \
-    -DSNAPPY_USE_BUNDLED_GTEST=OFF \
-    -DSNAPPY_USE_BUNDLED_BENCHMARK_LIB=OFF \
-    .
-
-  make
+    -DBUILD_SHARED_LIBS=ON \
+    -DSNAPPY_BUILD_BENCHMARKS=OFF
+  cmake --build build
 }
 
 check() {
-  # compile without assertions
-  CXXFLAGS+=\ -DNDEBUG
-
-  make -C "$pkgname-$pkgver" test
+  cd "$pkgname-$pkgver"
+  cmake --build build --target test
 }
 
 package() {
   cd "$pkgname-$pkgver"
-
-  make DESTDIR="$pkgdir" install
-  install -m644 -D COPYING "$pkgdir/usr/share/licenses/snappy/LICENSE"
+  DESTDIR="$pkgdir" cmake --install build
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" COPYING
 }
-
-# vim:set ts=2 sw=2 et:
