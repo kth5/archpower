@@ -8,27 +8,49 @@
 # Contributor: Jan Rüegg <rggjan@gmail.com>
 
 pkgname=gperftools
-pkgver=2.15
-pkgrel=1.1
+pkgver=2.16
+pkgrel=1
 pkgdesc='Fast, multi-threaded malloc and nifty performance analysis tools'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://github.com/gperftools/gperftools'
-license=('BSD-3-Clause')
-depends=('gcc-libs' 'glibc' 'libunwind')
-optdepends=('graphviz: pprof graph generation'
-            'perl: pprof and pprof-symbolize commands')
-source=("https://github.com/gperftools/gperftools/releases/download/$pkgname-$pkgver/$pkgname-$pkgver.tar.gz")
-sha256sums=('c69fef855628c81ef56f12e3c58f2b7ce1f326c0a1fe783e5cae0b88cbbe9a80')
+license=(BSD-3-Clause)
+depends=(
+  gcc-libs
+  glibc
+  libunwind
+)
+makedepends=(git)
+optdepends=(
+  'graphviz: pprof graph generation'
+  'perl: pprof and pprof-symbolize commands'
+)
+source=("git+https://github.com/gperftools/gperftools.git#tag=$pkgname-$pkgver")
+b2sums=(e48d103d3954aea25b1dc0315cbfe080a12ca45154e25d824b4096fc735928104e4c28d98287fd44993f38ec28f56fa72be6ecee85227d03f69235c70063e5da)
+
+prepare() {
+  cd $pkgname
+  autoreconf -fi
+}
 
 build() {
-  cd $pkgname-$pkgver
-  ./configure --prefix=/usr --enable-frame-pointers --enable-libunwind
+  cd $pkgname
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --enable-frame-pointers \
+    --enable-libunwind
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
 }
 
+check() {
+  cd $pkgname
+  make check
+}
+
 package() {
-  cd $pkgname-$pkgver
+  cd $pkgname
   make DESTDIR="$pkgdir" install
-  install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname/" COPYING
 }
