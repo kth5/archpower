@@ -1,0 +1,64 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+# Contributor: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=python-josepy
+pkgver=1.14.0
+pkgrel=2
+pkgdesc='JOSE protocol implementation in Python'
+arch=('any')
+url='https://github.com/certbot/josepy'
+license=('Apache')
+depends=(
+  'python'
+  'python-cryptography'
+  'python-pyopenssl'
+)
+makedepends=(
+  'git'
+  'python-build'
+  'python-installer'
+  'python-poetry-core'
+)
+checkdepends=('python-pytest')
+_commit='a6861675bc943026e8c0d5c550e17eba23289547'
+source=(
+  "$pkgname::git+$url#commit=$_commit"
+  'no-thanks-poetry.patch'
+)
+b2sums=('SKIP'
+        'b7bf362e953247424fadea853b3c7be9977021b7d109d240ced847b9271c739e6dfcf8025efbdd9bb746dc42e21905cb1c9c93982d4e39dab60354ab06c6e76a')
+
+pkgver() {
+  cd "$pkgname"
+
+  git describe --tags | sed 's/^v//'
+}
+
+prepare() {
+  cd "$pkgname"
+
+  # poetry strikes again
+  # https://github.com/certbot/josepy/issues/172
+  patch -p1 -i "$srcdir/no-thanks-poetry.patch"
+}
+build() {
+  cd "$pkgname"
+
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "$pkgname"
+
+  # install to temporary location
+  python -m installer --destdir=test_dir dist/*.whl
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  PYTHONPATH="test_dir/$site_packages:$PYTHONPATH" pytest -v
+}
+
+package() {
+  cd "$pkgname"
+
+  python -m installer --destdir="$pkgdir" dist/*.whl
+}
