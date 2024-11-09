@@ -1,42 +1,51 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
-pkgname=wpebackend-fdo
-pkgver=1.14.2
-pkgrel=2.1
+pkgbase=wpebackend-fdo
+pkgname=(
+  wpebackend-fdo
+  wpebackend-fdo-docs
+)
+pkgver=1.14.3
+pkgrel=1
 pkgdesc="Freedesktop.org backend for WPE WebKit"
 url="https://wpewebkit.org"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=(custom)
+license=(BSD-2-Clause)
 depends=(
+  gcc-libs
   glib2
+  glibc
   libegl
   libepoxy
   libwpe
   wayland
 )
 makedepends=(
+  clang
   git
+  hotdoc
+  llvm
   mesa
   meson
   wayland-protocols
 )
-_commit=f121a8e93736b099906b7848797f89c9b689892b  # tags/1.14.2^0
-source=("git+https://github.com/Igalia/WPEBackend-fdo#commit=$_commit")
-b2sums=('SKIP')
-validpgpkeys=('5AA3BC334FD7E3369E7C77B291C559DBE4C9123B') # Adrián Pérez de Castro <aperez@igalia.com>
-
-pkgver() {
-  cd WPEBackend-fdo
-  git describe --tags | sed 's/[^-]*-g/r&/;s/-/+/g'
-}
+source=("git+https://github.com/Igalia/WPEBackend-fdo#tag=$pkgver")
+b2sums=('8c15bc39ce6ad6c378cb05f5e79b112677bea5fd405e11921eb53f1f4fa83ae75037f39c0e0b2dcea473cc98b773eeb97047192bc750bae8d057be0042220fb5')
+validpgpkeys=(
+  5AA3BC334FD7E3369E7C77B291C559DBE4C9123B # Adrián Pérez de Castro <aperez@igalia.com>
+)
 
 prepare() {
   cd WPEBackend-fdo
 }
 
 build() {
-  arch-meson WPEBackend-fdo build
+  case "${CARCH}" in
+    powerpc) meson_options=(-D build-docs=false) ;;
+    *)       meson_options=(-D build-docs=true) ;;
+  esac
+  arch-meson WPEBackend-fdo build ${meson_optins[@]}
   meson compile -C build
 }
 
@@ -44,11 +53,28 @@ check() {
   meson test -C build --print-errorlogs
 }
 
-package() {
-  depends+=(libwpe-1.0.so libg{lib,object,io}-2.0.so)
-  provides+=(libWPEBackend-fdo-1.0.so)
+package_wpebackend-fdo() {
+  depends+=(
+    libg{lib,object,io}-2.0.so
+    libwpe-1.0.so
+  )
+  provides=(libWPEBackend-fdo-1.0.so)
 
   meson install -C build --destdir "$pkgdir"
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 WPEBackend-fdo/COPYING
+
+  if [ "${CARCH}" != 'powerpc' ]; then
+    mkdir -p doc/usr/share
+    mv {"$pkgdir",doc}/usr/share/doc
+  fi
+}
+
+package_wpebackend-fdo-docs() {
+  pkgdesc+=" (documentation)"
+  depends=()
+
+  [ "${CARCH}" != 'powerpc' && \
+  mv doc/* "$pkgdir"
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 WPEBackend-fdo/COPYING
 }
 
