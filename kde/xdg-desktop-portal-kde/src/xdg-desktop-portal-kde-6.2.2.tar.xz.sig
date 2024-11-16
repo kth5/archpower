@@ -1,1 +1,0 @@
-/mnt/caches/sources/xdg-desktop-portal-kde-6.2.2.tar.xz.sig
