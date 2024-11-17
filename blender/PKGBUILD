@@ -9,8 +9,8 @@
 # fine with them.
 
 pkgname=blender
-pkgver=4.1.1
-pkgrel=9.1
+pkgver=4.2.3
+pkgrel=3
 epoch=17
 pkgdesc="A fully integrated 3D graphics creation suite"
 arch=(x86_64 powerpc64le)
@@ -73,7 +73,6 @@ depends=(
   'openvdb'
   'openxr'
   'potrace'
-  # 'ptex'
   'pugixml'
   'pystring'
   'python'
@@ -125,8 +124,6 @@ optdepends_x86_64=(
 # We're using !lto here as otherwise we get stuff such as FS#77557
 options=('!lto')
 source=("git+https://projects.blender.org/blender/blender.git#tag=v$pkgver"
-        "git+https://projects.blender.org/blender/blender-addons.git#tag=v$pkgver"
-        "git+https://projects.blender.org/blender/blender-addons-contrib#tag=v$pkgver"
         "git+https://projects.blender.org/blender/blender-assets#tag=v$pkgver"
         https://developer.download.nvidia.com/redist/optix/v8.0/OptiX-8.0-Include.zip
         force-draco1.patch
@@ -134,10 +131,8 @@ source=("git+https://projects.blender.org/blender/blender.git#tag=v$pkgver"
         blender-4.11-mantaflow-python-3.12.patch
         ffmpeg-7-1.patch
         ffmpeg-7-2.patch)
-sha512sums=('194274ee62c2a3b96e81af92520d424fb7bda24902cffcf2cd9a2e343c0627fe74cdd08d52709c8f181df72f7e36fc64f6144412c459f5a5a0b4497babd2fe07'
-            '4476c93942e5efc5a8ee7c4ef1caea2e77dc6e40eb825e35c0120f7e9f714ff8bdb873bb83d47ac27f8616eedac8e52f15804ed603c093044490f89e626baa80'
-            '877ed9ced417c5879b0bc6a7d3d87aa68a3e4015df9c08945c468dfab59a513bdd03523b7593e556fc9d0e22dbad25d980238e25583ea34a77ffcae3693cd0e7'
-            '2eaa05da22d4a304d1db310bd8c04358e70fdd927cbaadd574e179a86bf288c7b4fa1188d15f1928788ce9c5d2b15b512d47743a230e703f44c07cb7bbc39c5b'
+sha512sums=('777365523ef08862b723dcbd9ceb9716a69b7af387694209caafdb68f97fd5eb2ccb48702dc3188ea2719f3c45416337ceb829e52e267f5d8d84bb6314b0fd9e'
+            '1e47ca5a824a5d830e95f424ad1c2d066571bd038badfacbb4001632742c1777f62a81e79612a787d5ab0038d2712730b9372bcec44bcac6131734c4430e40b3'
             '5502d9df847de12badc702c0444bd4f1f7620460b2235026df2c3133da1e04c148af0f1fc7f345e9a0c009c32f905f66c8d427743445e8864d3a797cdce6a483'
             'e239da4f3906f1b54265435181cf770bae3d269c8d915df9a73861e6ee71ec70bf2339426e7c81a91e5a567273b3b3742d7a99feefd3398d821b26e1ff3a56d0'
             'c162646eba42ea7112cfb615466c2cbaddac8d254d4a9e91cf887c5bffef1325a983701163223a1fdee091310ac5574a400347aab7f52321825b5fa3d5a9036f'
@@ -147,6 +142,7 @@ sha512sums=('194274ee62c2a3b96e81af92520d424fb7bda24902cffcf2cd9a2e343c0627fe74c
 
 prepare() {
   cd "$pkgname"
+
   git submodule init
   git config submodule.release/datafiles/assets.url "$srcdir/blender-assets"
   git -c protocol.file.allow=always submodule update
@@ -157,13 +153,9 @@ prepare() {
   git -C release/datafiles/assets lfs fetch network-origin
   git -C release/datafiles/assets lfs checkout
 
-  # Copy addons to expected location
-  cp -r "$srcdir"/blender-addons scripts/addons
-  cp -r "$srcdir"/blender-addons-contrib scripts/addons_contrib
-
   # fix draco
   patch -p1 -i "$srcdir"/force-draco1.patch
-  patch -p1 -d scripts/addons -i "$srcdir"/force-draco2.patch
+  patch -p1 -d scripts/addons_core -i "$srcdir"/force-draco2.patch
 
   # fix fluid sim domain with python 3.12
   # https://gitlab.archlinux.org/archlinux/packaging/packages/blender/-/issues/18
@@ -189,8 +181,9 @@ build() {
     -D CMAKE_BUILD_TYPE=Release
     -D CMAKE_INSTALL_PREFIX=/usr
     -D WITH_LINKER_MOLD=ON
-    -D CUDA_HOST_COMPILER=/usr/bin/gcc
     -D HIP_ROOT_DIR=/opt/rocm
+    # Skip targets gfx115{0,1} as they not supported by ROCm 6.0.2
+    -D CYCLES_HIP_BINARIES_ARCH="gfx900;gfx90c;gfx902;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103"
     -D OCLOC_INSTALL_DIR=/usr
     -D OPTIX_ROOT_DIR="$srcdir"
     -D PYTHON_VERSION="$(_get_pyver)"
@@ -207,6 +200,8 @@ build() {
   case "${CARCH}" in
     x86_64)
       cmake_options+=(
+        -D CUDA_HOST_COMPILER="$NVCC_CCBIN"
+        -D SYCL_ROOT_DIR=/opt/intel/oneapi/compiler/latest
         -D WITH_CYCLES_OSL=ON
         -D WITH_CYCLES=ON
         -D WITH_CYCLES_EMBREE=ON
@@ -242,9 +237,6 @@ package() {
   python -O -m compileall "${pkgdir}/usr/share/blender"
 
   install -Dm644 release/freedesktop/org.blender.Blender.metainfo.xml "${pkgdir}/usr/share/metainfo/org.blender.Blender.metainfo.xml"
-
-  # Manually install additional scripts (See FS#69351)
-  cp -r scripts/addons_contrib/* "${pkgdir}"/usr/share/blender/4*/scripts/addons_contrib/
 
   # Manually install draco bindings (See FS#73415)
   mkdir -p "${pkgdir}/usr/lib/python$(_get_pyver)"/
