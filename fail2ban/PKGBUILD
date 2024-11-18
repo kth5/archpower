@@ -1,0 +1,97 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Daniel M. Capella <polyzen@archlinux.org>
+# Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Geoffroy Carrier <geoffroy.carrier@koon.fr>
+# Contributor: michalzxc
+# Contributor: nbags <neilbags@gmail.com>
+
+pkgname=fail2ban
+pkgver=1.1.0
+pkgrel=7
+pkgdesc='Bans IPs after too many failed authentication attempts'
+arch=('any')
+url='https://www.fail2ban.org/'
+license=('GPL-2.0-or-later')
+depends=(
+  'python-pyinotify'
+  'python-systemd'
+  'sqlite'
+  'whois'
+)
+makedepends=(
+  'git'
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+)
+optdepends=(
+  'firewalld: for a firewall backend'
+  'ipset: for a firewall backend'
+  'iptables: for a firewall backend'
+  'nftables: for a firewall backend'
+)
+backup=(
+  'etc/fail2ban/fail2ban.conf'
+  'etc/fail2ban/jail.conf'
+  'etc/logrotate.d/fail2ban'
+)
+source=(
+  "git+https://github.com/$pkgname/$pkgname.git#tag=$pkgver?signed"
+  'extend-tmpfiles.patch'
+)
+b2sums=('c2859a151abd906ceadc8549a4d337b01b037793e7d9285d44f08405695bdcb1b7dc88998cb7eed0321cacdce1d3fca29e55c63f5f60dadbb15f217f6cbe92d3'
+        '74a3385159cdcc525c0704a46406e63d3a96fbea045c6a4f56f861c3fbaeefdcf96e11b9da7f84634316c78b5a4410b956644ffba1337f91d28350d443dd69a9')
+validpgpkeys=('E6C3F631FBDA716B070C6ED94141C485A81A88CB') # Sergey G. Brester (sebres) <serg.brester@sebres.de>
+
+prepare() {
+  cd $pkgname
+  # distutils removal
+  git cherry-pick -n -m 1 ac62658c10f492911f8a0037a0bcf97c8521cd78
+
+  # openssh 9.8 compatibility
+  git cherry-pick -n 2fed408c05ac5206b490368d94599869bd6a056d
+
+  # restore directories no longer installed after switch to PEP 517
+  patch --forward --strip=1 --input=../extend-tmpfiles.patch
+
+  sed -i 's|self.install_dir|"/usr/bin"|' setup.py
+  sed -i 's/^before = paths-debian.conf/before = paths-arch.conf/' config/jail.conf
+}
+
+build() {
+  cd $pkgname
+  python -m build --wheel --skip-dependency-check --no-isolation
+}
+
+# ignore test that imports smtpd module (removed in Python 3.12)
+check() {
+  cd $pkgname
+  ./bin/fail2ban-testcases --ignore unittest.loader._FailedTest.test_smtp
+}
+
+package() {
+  cd $pkgname
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  install -Dm644 build/fail2ban.service \
+    "$pkgdir"/usr/lib/systemd/system/$pkgname.service
+  install -Dm644 files/fail2ban-tmpfiles.conf \
+    "$pkgdir"/usr/lib/tmpfiles.d/$pkgname.conf
+  install -Dm644 files/fail2ban-logrotate \
+    "$pkgdir"/etc/logrotate.d/fail2ban
+  install -Dm644 files/bash-completion \
+    "$pkgdir"/usr/share/bash-completion/completions/fail2ban
+
+  install -Dm644 -t "$pkgdir"/usr/share/man/man1 man/*.1
+  install -Dm644 -t "$pkgdir"/usr/share/man/man5 man/*.5
+
+  cd "$pkgdir"
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  cp -rl ./"$site_packages"/{etc,usr} .
+  rm -r ./"$site_packages"/{etc,usr}
+
+  # fix sendmail location
+  sed -i 's/sbin/bin/g' etc/fail2ban/action.d/sendmail*.conf
+}
