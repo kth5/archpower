@@ -1,37 +1,74 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 # Contributor: Simon Sapin <simon dot sapin at exyr dot org>
 # Contributor: Kyle Keen <keenerd@gmail.com>
 
 pkgname=python-mongoengine
-pkgver=0.28.2
+_pkgname=${pkgname#python-}
+pkgver=0.29.1
 pkgrel=1
 pkgdesc="A Python Object-Document-Mapper for working with MongoDB"
 url="https://github.com/MongoEngine/mongoengine"
 license=('MIT')
 arch=(any)
-depends=('python-pymongo')
-optdepends=('python-dateutil: for DateTimeField'
-            'python-pillow: for ImageField / ImageGridFsProxy')
-makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
-checkdepends=('python-pytest-cov' 'python-coverage' 'python-blinker' 'python-pillow' 'python-zipp'
-              'python-mongomock')
-source=("https://github.com/MongoEngine/mongoengine/archive/v$pkgver/$pkgname-$pkgver.tar.gz")
-sha512sums=('e466874fb624ff06bb5ac3bc02d9f7944e8c65e7f1a5e5645b084c1ebd37b97c9660697e23a26014aa411a58319737838cf05cb903721c6105003891e428e9b3')
+depends=(
+  'python'
+  'python-pymongo'
+)
+makedepends=(
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+)
+checkdepends=(
+  'python-mongomock'
+  'python-pillow'
+  'python-pytest'
+)
+optdepends=(
+  'python-dateutil: for DateTimeField'
+  'python-pillow: for ImageField / ImageGridFsProxy'
+)
+source=("$url/archive/v$pkgver/$pkgname-$pkgver.tar.gz")
+sha512sums=('186f999c144c9612439d69830a423ededd918430534be5c3d0e1c1684ccb22fa2cc91887e04bb547c7807447b40dc46f047aa56624f977cee237481a833f4422')
 
 build() {
-  cd mongoengine-$pkgver
+  cd "$_pkgname-$pkgver"
   python -m build -nw
 }
 
 check() {
-  cd mongoengine-$pkgver
-  # No sane way to run it without mongodb
-  # python -m pytest
+  cd "$_pkgname-$pkgver"
+  # Sub-selection of tests that don't require a running MongoDB instance.
+  local tests=(
+    tests/all_warnings/test_warnings.py
+    tests/queryset/test_field_list.py::TestQueryFieldList::test_always_include
+    tests/queryset/test_field_list.py::TestQueryFieldList::test_empty
+    tests/queryset/test_field_list.py::TestQueryFieldList::test_exclude_exclude
+    tests/queryset/test_field_list.py::TestQueryFieldList::test_exclude_include
+    tests/queryset/test_field_list.py::TestQueryFieldList::test_include_exclude
+    tests/queryset/test_field_list.py::TestQueryFieldList::test_include_include
+    tests/queryset/test_field_list.py::TestQueryFieldList::test_reset
+    tests/queryset/test_field_list.py::TestQueryFieldList::test_using_a_slice
+    tests/test_changelog_consistency.py
+    tests/test_ci.py
+    tests/test_common.py
+    tests/test_connection.py::ConnectionTest::test___get_connection_settings
+    tests/test_connection.py::ConnectionTest::test_connect
+    tests/test_connection.py::ConnectionTest::test_connect_2_databases_uses_different_client_if_different_parameters
+    tests/test_connection.py::ConnectionTest::test_connect_2_databases_uses_same_client_if_only_dbname_differs
+    tests/test_connection_mongomock.py
+    tests/test_datastructures.py
+    tests/test_replicaset_connection.py
+    tests/test_utils.py
+  )
+  pytest "${tests[@]}"
 }
 
 package() {
-  cd mongoengine-$pkgver
+  cd "$_pkgname-$pkgver"
   python -m installer --destdir="$pkgdir" dist/*.whl
   install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
 }
