@@ -1,43 +1,78 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 
 pkgname=python-cryptography
-pkgver=42.0.7
-_commit=0cc7fc384381ea09eea5f031d31b1417f9f40fdf
-pkgrel=1
+pkgver=43.0.3
+pkgrel=2
 pkgdesc="A package designed to expose cryptographic recipes and primitives to Python developers"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=('Apache')
-url="https://pypi.python.org/pypi/cryptography"
-depends=('python-cffi')
-makedepends=('git' 'python-setuptools-rust' 'llvm' 'clang' 'lld' 'python-build' 'python-installer' 'python-wheel')
-checkdepends=('python-pytest' 'python-pytest-subtests' 'python-iso8601' 'python-pretend'
-              'python-hypothesis' 'python-pytz' 'python-pytest-benchmark' 'python-certifi')
-source=("git+https://github.com/pyca/cryptography.git#commit=$_commit")
-sha512sums=('67799ba316a9ed09cc92ef2497d17d74d323514a0114a9c0eaf443766f8d176aab5ca3a349fe54b0b46c89ff8e2407499e5e1418925e0b95e5218163620c5875')
+license=('Apache-2.0 OR BSD-3-Clause')
+url="https://github.com/pyca/cryptography"
+depends=(
+  'gcc-libs'
+  'glibc'
+  'openssl'
+  'python'
+  'python-cffi'
+)
+makedepends=(
+  'clang'
+  'git'
+  'lld'
+  'llvm'
+  'python-build'
+  'python-installer'
+  'python-maturin'
+  'python-setuptools'
+  'python-wheel'
+)
+checkdepends=(
+  'python-certifi'
+  'python-hypothesis'
+  'python-pretend'
+  'python-pytest'
+)
+source=("git+https://github.com/pyca/cryptography.git#tag=$pkgver"
+        "disable-rust-lto.patch")
+sha512sums=('ed17b32ef6b2a380d637905e543538e532d65166833144bd8b4de32928a0732cb9b18408f791230b1f4ee23a1e850a626ea8edfd5c81f572cfcbf265a3cba13a'
+            'd1c2611f91fb9971ab57ebe5af5d1286132e06cfe6e346f16a6ba24d0b9bfc4c1f6351f517913dc135ba12b3603244ce38ab6ab3d974f5595f620c31f508bf5b')
+
+prepare() {
+  cd cryptography
+  # Drop all benchmark tests, this means we don't have to checkdepends on
+  # pytest-benchmark nor are benchmark tests interesting for a distribution.
+  rm -rf tests/bench
+
+  case "${CARCH}" in
+    powerpc)
+      patch -Np0 -i ${srcdir}/disable-rust-lto.patch
+      pushd src/rust
+      cargo update
+      popd
+    ;;
+  esac
+}
 
 build() {
   cd cryptography
-  case "${CARCH}" in
-    powerpc) ;;
-    *) 
-      # https://github.com/pyca/cryptography/issues/9023
-      CC=clang
-      RUSTFLAGS+="-Clinker-plugin-lto -Clinker=clang -Clink-arg=-fuse-ld=lld"
-    ;;
-  esac
-
   echo $RUSTFLAGS
-  python -m build --wheel --no-isolation
+
+  # https://github.com/pyca/cryptography/issues/9023
+  CC=clang RUSTFLAGS+="-Clinker-plugin-lto -Clinker=clang -Clink-arg=-fuse-ld=lld" \
+    python -m build --wheel --no-isolation --skip-dependency-check
 }
 
 check() {
   cd cryptography
-  local python_version=$(python -c 'import sys; print("".join(map(str, sys.version_info[:2])))')
-  PYTHONPATH="$PWD/build/lib.linux-$CARCH-cpython-$python_version:$PWD/vectors" pytest
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  python -m installer --destdir="tmp_install" dist/*.whl
+  PYTHONPATH="$PWD/tmp_install/$site_packages:$PWD/vectors" \
+    pytest --override-ini="addopts="
 }
 
 package() {
   cd cryptography
   python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE.BSD
 }
