@@ -1,0 +1,61 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Chih-Hsuan Yen <yan12125@archlinux.org>
+# Contributor: Jonathan Steel <jsteel at archlinux.org>
+# Contributor: Chris Severance aur.severach AatT spamgourmet.com
+# Contributor: Ainola
+# Contributor: Chris Fordham
+
+pkgname=python-botocore
+# https://raw.githubusercontent.com/boto/botocore/develop/CHANGELOG.rst
+pkgver=1.35.36
+pkgrel=1
+pkgdesc='A low-level interface to a growing number of Amazon Web Services'
+arch=('any')
+url="https://github.com/boto/botocore"
+license=('Apache')
+depends=('python' 'python-certifi' 'python-dateutil' 'python-jmespath' 'python-urllib3')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel' 'python-awscrt')
+# Tests need the 'ps' binary
+checkdepends=('python-pytest' 'python-pytest-xdist' 'python-jsonschema' 'procps-ng')
+optdepends=(
+  'python-awscrt'
+)
+source=($pkgname-$pkgver.tar.gz::$url/archive/$pkgver.tar.gz
+        tests-keep-env.diff)
+sha256sums=('edda097ff15cda87d2a33935bba119a1214dc5eff6cd76b6924049ba2de8537a'
+            '15c588d3f4cfcc0ef26fc4ff367eb6dc12dc2f303e299cbe397288089ee52a11')
+
+prepare() {
+  cd botocore-$pkgver
+  # https://github.com/boto/botocore/pull/2791
+  patch -Np1 -i ../tests-keep-env.diff
+}
+
+build() {
+  cd botocore-$pkgver
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd botocore-$pkgver
+
+  export AWS_SECRET_ACCESS_KEY=fake_key
+  export AWS_ACCESS_KEY_ID=fake_id
+
+  export PYTHONPATH="$PWD"
+
+  export PYTEST_XDIST_AUTO_NUM_WORKERS=$(echo "$MAKEFLAGS" | grep -oP '\-j\s*\K[0-9]+')
+  pytest_args=()
+  if [ -n "$PYTEST_XDIST_AUTO_NUM_WORKERS" ]; then
+    pytest_args+=(-n auto)
+  fi
+
+  # Many integration tests need real credentials
+  pytest tests "${pytest_args[@]}" --ignore=tests/integration
+}
+
+package() {
+  cd botocore-$pkgver
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 LICENSE.txt "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
