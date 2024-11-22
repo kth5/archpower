@@ -3,7 +3,7 @@
 # Contributor: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=npm
-pkgver=10.8.2
+pkgver=10.9.0
 pkgrel=1
 pkgdesc='JavaScript package manager'
 arch=(any)
@@ -18,24 +18,11 @@ depends=(
 makedepends=(git)
 optdepends=("git: for dependencies using Git URL's")
 source=("npm-cli::git+https://github.com/npm/cli.git#tag=v$pkgver")
-b2sums=('e1650bfb9f95c411aca6bd26002500bdee3f8f736326c9d4a10298f752ca232ba48a8088069eca99dd0120cf65db1ad53799b2470aef158dfdc360aad86699cb')
+b2sums=('c73f7cc47e85f08e775bed88c4796534b3a91fc0e5f7667d098164fd4eeed94d92df1aa280e43a63de12168d6113a04a0aabe9186d707a34306c693ce4fa2e86')
 
 build() {
   cd npm-cli
   node scripts/resetdeps.js
-  node . run build -w docs
-
-  # Workaround for https://github.com/npm/cli/issues/780
-  cd man
-  local f name sec title
-  for f in man5/folders.5 man5/install.5 man7/*.7; do
-    sec=${f##*.}
-    name=$(basename "$f" ."$sec")
-    title=$(echo "$name" | tr '[:lower:]' '[:upper:]')
-
-    sed -Ei "s/^\.TH \"$title\"/.TH \"NPM-$title\"/" "$f"
-    mv "$f" "${f%/*}/npm-$name.$sec"
-  done
 }
 
 check() {
@@ -48,6 +35,7 @@ check() {
 
 package() {
   local mod_dir=/usr/lib/node_modules/$pkgname
+
   install -d "$pkgdir"/usr/share/{bash-completion/completions,licenses/$pkgname}
   ln -s $mod_dir/LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 
@@ -56,18 +44,34 @@ package() {
   node . completion > "$pkgdir"/usr/share/bash-completion/completions/npm
   echo 'globalconfig=/etc/npmrc' > "$pkgdir"/$mod_dir/npmrc
 
-  cd "$pkgdir"
+  cd "$pkgdir"/$mod_dir
   # Remove superfluous scripts
-  rm -r ./$mod_dir/{bin/{node-gyp-bin,np{m,x}{,.{cmd,ps1}}},node_modules/.bin}
+  rm -r {bin/{node-gyp-bin,np{m,x}{,.{cmd,ps1}}},node_modules/.bin}
 
   # Experimental dedup
-  rm -r ./$mod_dir/node_modules/{node-gyp,nopt,semver}
+  rm -r node_modules/{node-gyp,nopt,semver}
+
+  if [ -d man ]; then
+  cd man
+  # Workaround for https://github.com/npm/cli/issues/780
+  local name page sec title
+  for page in man5/folders.5 man5/install.5 man7/*.7; do
+    sec=${page##*.}
+    name=$(basename "$page" ."$sec")
+    title=${name@U}
+
+    sed -Ei "s/^\.TH \"$title\"/.TH \"NPM-$title\"/" "$page"
+    mv "$page" "${page/\///npm-}"
+  done
+
+  gzip man?/*
 
   # Support both `man` and `npm help`
-  for mandir in ./"$mod_dir"/man/man?; do
-    local dst=usr/share/man/"$(basename "$mandir")"
-    gzip "$mandir"/*
-    install -d "$dst"
-    ln -r -s "$mandir"/* "$dst"
+  local dest sec_dir
+  for sec_dir in man?; do
+    dest="$pkgdir"/usr/share/man/$sec_dir
+    install -d "$dest"
+    ln -r -s "$sec_dir"/* "$dest"
   done
+  fi
 }
