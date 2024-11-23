@@ -4,7 +4,7 @@
 
 _gemname=rspec-core
 pkgname=ruby-${_gemname}
-pkgver=3.13.0
+pkgver=3.13.1
 pkgrel=1
 pkgdesc='RSpec runner and formatters'
 url='https://github.com/rspec/rspec-core'
@@ -14,10 +14,13 @@ depends=(
   ruby-erb
   ruby-rspec-support
 )
+makedepends=(
+  ruby-rdoc
+)
 options=('!emptydirs')
 source=(https://rubygems.org/downloads/${_gemname}-${pkgver}.gem)
 noextract=(${_gemname}-${pkgver}.gem)
-sha512sums=('b24746c74ba6571c04ba1d95de3c557cc208870075cf7e9f603b18ac8b8dafbf5b2c8b2c58f564e91c58002947a64b5b30eed37069910e7d5bfa175faa2a58de')
+sha512sums=('c6b906fab43ece1145480331372094eb9c02059d8aa7903b22d9bca3e6f76f34e68cfcf3b40a64ff5b00b22e564d135f03c93934bc05cba9ec5d1b1cda0e2769')
 
 package() {
   local _gemdir="$(gem environment gemdir)"
