@@ -19,4 +19,5 @@ echo "Generating ${todo_list_filename} ..."
 
   sogrep extra libruby.so
   sogrep extra "libruby.so.${ruby_version_short}"
+  echo "vim"
 } | sort -u > "${todo_list_filename}"

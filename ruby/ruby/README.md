@@ -31,7 +31,9 @@ Build the following packages in the given order:
 - ruby-rake
 - ruby-hoe
 - ruby-kpeg
+- ruby-test-unit-ruby-core
 - ruby-rdoc
+- ruby-tracer
 - ruby-irb
 - ruby-power_assert `--nocheck`
 - ruby-test-unit
@@ -59,16 +61,22 @@ Build the following packages in the given order:
 - ruby-erb
 - ruby-power_assert
 - ruby-test-unit
-- ruby-diff-lcs
-- ruby-rspec-support
+- ruby-diff-lcs `--nocheck`
+- ruby-rspec-support `--nocheck`
 - ruby-rspec-core
 - ruby-rspec-expectations
 - ruby-rspec-mocks
 - ruby-rspec
+- ruby-thread_order
+- ruby-childprocess
+- ruby-ffi
+- ruby-rspec-support
+- ruby-diff-lcs
 - ruby-rr `--nocheck`
 - ruby-test-unit-rr
 - ruby-rr
 - ruby-debug
+- ruby-tracer
 - ruby-irb
 - ruby-minitest
 - ruby-hoe
