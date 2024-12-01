@@ -5,28 +5,31 @@
 # Contributor: David Runge <dvzrv@archlinux.org>
 # Contributor: Leonidas Spyropoulos <artafinde@archlinux.org>
 # Contributor: Daniel M. Capella <polyzen@archlinux.org>
+# Contributor: Guillaume Gauvrit <guillaume@gauvr.it>
 
 pkgbase=uv
 pkgname=("$pkgbase" "python-$pkgbase")
-pkgver=0.3.1
-pkgrel=1
+pkgver=0.5.5
+pkgrel=2
 pkgdesc='An extremely fast Python package installer and resolver written in Rust'
-arch=(x86_64 powerpc64le powerpc64 riscv64)
+arch=(x86_64 powerpc64le powerpc64 riscv64) #FIXME: powerpc
 url="https://github.com/astral-sh/uv"
 license=('MIT' 'Apache-2.0')
 depends=('gcc-libs' # 'libgcc_s.so'
          'glibc' # 'libc.so' 'libm.so'
-         'zlib' 'libz.so')
+         'zlib' # 'libz.so'
+         'bzip2' # 'libbz2.so'
+         )
 makedepends=('cargo' 'maturin' 'python-installer' 'cmake' 'git')
 checkdepends=('python' 'python-zstandard' 'libxcrypt-compat' 'clang')
 options=('!lto')
 source=("git+$url.git#tag=$pkgver")
-sha256sums=('2bf791afbc8d5851bbff50095f8825ca75d4053b5d64ca310200746765e56e23')
+sha256sums=('d795b731d7eafc264286f2c5c6176e2881adde27a4f9d7cf1636b9209c87e67e')
 
 prepare() {
   cd "$pkgbase"
-  local tripple="$(rustc -vV | sed -n 's/host: //p')"
   cargo update
+  local tripple="$(rustc -vV | sed -n 's/host: //p')"
   cargo fetch --locked --target "$tripple"
   mkdir completions
 }
@@ -36,7 +39,8 @@ prepare() {
 build() {
   cd "$pkgbase"
   local tripple="$(rustc -vV | sed -n 's/host: //p')"
-  maturin build --locked --release --all-features --target "$tripple" --strip
+
+  maturin build --locked --release --all-features --target "$tripple" --strip --compatibility linux
   local compgen="target/$tripple/release/uv --generate-shell-completion"
   $compgen bash >"completions/$pkgbase"
   $compgen elvish >"completions/$pkgbase.elv"
