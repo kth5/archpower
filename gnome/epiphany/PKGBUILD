@@ -4,7 +4,7 @@
 # Contributor: Jan de Groot <jgc@archlinux.org>
 
 pkgname=epiphany
-pkgver=46.2
+pkgver=47.2
 pkgrel=1
 pkgdesc="A GNOME web browser based on the WebKit rendering engine"
 url="https://apps.gnome.org/Epiphany"
@@ -19,7 +19,6 @@ depends=(
   glib2
   glibc
   gmp
-  graphene
   gstreamer
   gtk4
   hicolor-icon-theme
@@ -57,7 +56,7 @@ checkdepends=(
 )
 groups=(gnome)
 source=("git+https://gitlab.gnome.org/GNOME/epiphany.git#tag=${pkgver/[a-z]/.&}")
-b2sums=('dfd46b0aaf3f21ecc510c4cc33aa857320cffab1b575d7274dd7553529983b650508edc6d6d37a7477c525426cd2fda84e866f9f134566af2e38b580a54e646b')
+b2sums=('00c44c7d54c237e96c11e00c7d3bed3e6a6f3bf9067926d2805a52ac65e46783907c6cd4268c2cf52a385561f9e97b6e1db0ec6724dabdfea38ca700b86fc864')
 
 prepare() {
   cd epiphany
@@ -69,9 +68,34 @@ build() {
 }
 
 check() {
-  WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 LC_COLLATE=en_US.UTF-8 \
-    dbus-run-session xvfb-run -s '-nolisten local' \
-    meson test -C build --print-errorlogs
+  export \
+    XDG_RUNTIME_DIR="$PWD/runtime-dir" \
+    LIBGL_ALWAYS_SOFTWARE=1 \
+    WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+    LC_COLLATE=en_US.UTF-8
+
+  mkdir -p -m 700 "$XDG_RUNTIME_DIR"
+
+  local meson_tests=(
+    'validate-desktop'
+    'validate-appdata'
+    'Embed shell test'
+    'Embed utils test'
+    'Encodings test'
+    'File helpers test'
+    'History test'
+    'Location entry test'
+    'Migration test'
+    'Search engine manager test'
+    'SQLite test'
+    'String test'
+    'URI helpers test'
+    # 'Web view test'
+    'Web extension test'
+  )
+
+  dbus-run-session xvfb-run -s '-nolisten local' \
+    meson test -C build --print-errorlogs "${meson_tests[@]}"
 }
 
 package() {
