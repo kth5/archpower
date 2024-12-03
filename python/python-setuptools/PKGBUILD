@@ -4,10 +4,12 @@
 # Contributor: Angel Velasquez <angvp@archlinux.org>
 # Contributor: Eli Schwartz <eschwartz@archlinux.org>
 
+_bootstrap=0
+_bootstrap_version=3.13.0
 pkgname=python-setuptools
 _name=${pkgname#python-}
 pkgver=75.2.0
-pkgrel=2
+pkgrel=4
 epoch=1
 pkgdesc="Easily download, build, install, upgrade, and uninstall Python packages"
 arch=(any)
@@ -15,18 +17,27 @@ url="https://pypi.org/project/setuptools/"
 license=('MIT')
 groups=(python-build-backend)
 depends=(
-  'python-jaraco.collections'
-  'python-jaraco.functools'
-  'python-jaraco.text'
-  'python-more-itertools'
-  'python-packaging'
-  'python-platformdirs'
-  'python-wheel'
+  'python'
 )
+if (( _bootstrap == 0 )); then
+  depends+=(
+    'python-jaraco.collections'
+    'python-jaraco.functools'
+    'python-jaraco.text'
+    'python-more-itertools'
+    'python-packaging'
+    'python-platformdirs'
+    'python-wheel'
+  )
+fi
 makedepends=(
   'git'
-  'python-setuptools'
 )
+if (( _bootstrap == 0 )); then
+  makedepends+=(
+    'python-setuptools'
+  )
+fi
 checkdepends=(
   'python-build'
   'python-ini2toml'
@@ -43,41 +54,75 @@ checkdepends=(
 )
 provides=('python-distribute')
 replaces=('python-distribute')
-source=(
-  "git+https://github.com/pypa/setuptools.git#tag=v$pkgver"
-  build-no-isolation.patch
-)
+if (( _bootstrap == 0 )); then
+  source=(
+    "git+https://github.com/pypa/setuptools.git#tag=v$pkgver"
+    build-no-isolation.patch
+  )
+else
+  source=(
+    python-bootstrap::git+https://gitlab.archlinux.org/archlinux/python-bootstrap.git#tag=$_bootstrap_version
+    python-build::git+https://github.com/pypa/build.git
+    python-flit::git+https://github.com/pypa/flit.git
+    python-installer::git+https://github.com/pypa/installer.git
+    python-wheel::git+https://github.com/pypa/wheel.git
+    python-packaging::git+https://github.com/pypa/packaging
+    python-pyproject-hooks::git+https://github.com/pypa/pyproject-hooks
+    python-setuptools::git+https://github.com/pypa/setuptools.git
+  )
+fi
 b2sums=('54e13a8fe1afb5d74fbd14688e1d01507d477f7f10c70d72a318bba2eae4bacda3a0b417a9ba60d469fe860dd7ea9d91edc934d61d12fe887dffa1f6e270e1ca'
         'ff0caf384def8ba8aa1c7fbb29077f2bc14c42935f7f81b6c4993ebe835053207b6773865158ad3143147234b311b95033b266f9b4c34a78a67f0b7e83bb5537')
 #validpgpkeys=('CE380CF3044959B8F377DA03708E6CB181B4C47E') # Jason R. Coombs <jaraco@jaraco.com>
 
 prepare() {
-  cd "$_name"
-  # Populate dependencies list for devendored deps
-  sed '/^core =/,/]/!d' pyproject.toml > ../requirements.txt
-  sed -i '1d;$d' ../requirements.txt
-  sed -i '/^dependencies =/ {
-r ../requirements.txt
-s/^core =/dependencies =/
-}' pyproject.toml
+  if (( _bootstrap == 0 )); then
+    cd "$_name"
+    # Populate dependencies list for devendored deps
+    sed '/^core =/,/]/!d' pyproject.toml > ../requirements.txt
+    sed -i '1d;$d' ../requirements.txt
+    sed -i '/^dependencies =/ {
+  r ../requirements.txt
+  s/^core =/dependencies =/
+  }' pyproject.toml
 
-  # Keep validate-pyproject as it also includes the generated validations
-  rm -r "$_name"/_vendor
+    # Keep validate-pyproject as it also includes the generated validations
+    rm -r "$_name"/_vendor
 
-  # Fix tests invoking python-build
-  patch -p1 -i ../build-no-isolation.patch
+    # Fix tests invoking python-build
+    patch -p1 -i ../build-no-isolation.patch
 
-  # Remove post-release tag since we are using stable tags
-  sed -e '/tag_build = .post/d' \
-      -e '/tag_date = 1/d' \
-      -i setup.cfg
+    # Remove post-release tag since we are using stable tags
+    sed -e '/tag_build = .post/d' \
+        -e '/tag_date = 1/d' \
+        -i setup.cfg
+  else
+    cd python-bootstrap
+    git submodule init
+
+    git config submodule."external/build".url ../python-build
+    git config submodule."external/flit".url ../python-flit
+    git config submodule."external/installer".url ../python-installer
+    git config submodule."external/wheel".url ../python-wheel
+    git config submodule."external/packaging".url ../python-packaging
+    git config submodule."external/pyproject-hooks".url ../python-pyproject-hooks
+    git config submodule."external/setuptools".url ../python-setuptools
+
+    git -c protocol.file.allow=always submodule update
+    git submodule update --init --recursive
+  fi
 }
 
 build() {
   export SETUPTOOLS_INSTALL_WINDOWS_SPECIFIC_FILES=0
 
-  cd "$_name"
-  python setup.py build
+  if (( _bootstrap == 0 )); then
+    cd "$_name"
+    python setup.py build
+  else
+    cd python-bootstrap
+    python -m bootstrap.build
+  fi
 }
 
 check() { (
@@ -107,11 +152,15 @@ check() { (
 package() {
   local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
 
-  install -d "$pkgdir"/usr/share/licenses/$pkgname
-  ln -s "$site_packages/$_name"-$pkgver.dist-info/LICENSE \
-    "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  if (( _bootstrap == 0 )); then
+    cd "$_name"
+    python setup.py install --prefix=/usr --root="$pkgdir" --optimize=1 --skip-build
+    install -vDm 644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+  else
+    cd python-bootstrap
+    python -m bootstrap.install dist/$_name-*-py3-none-any.whl -d "$pkgdir"
+    install -vDm 644 external/$_name/LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+  fi
 
-  cd "$_name"
-  python setup.py install --prefix=/usr --root="$pkgdir" --optimize=1 --skip-build
   rm "$pkgdir/$site_packages/$_name"/*.exe
 }
