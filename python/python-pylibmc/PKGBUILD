@@ -1,23 +1,67 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Johannes Löthberg <johannes@kyriasis.com>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 
 pkgname=python-pylibmc
+_pkgname=${pkgname#python-}
 pkgver=1.6.3
-pkgrel=3
-
+pkgrel=5
 pkgdesc='Quick and small memcached client for Python'
-url='https://pypi.python.org/pypi/pylibmc'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=('GPL')
+url='https://github.com/lericson/pylibmc'
+license=('BSD-3-Clause')
+depends=(
+  'glibc'
+  'libmemcached'
+  'python'
+  'zlib'
+)
+makedepends=(
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+)
+checkdepends=(
+  'memcached'
+  'python-pytest'
+)
+source=(
+  "$pkgname-$pkgver.tar.gz::$url/archive/$pkgver.tar.gz"
+  # https://github.com/lericson/pylibmc/pull/292
+  "stop-accessing-none-as-a-dictionary.patch::$url/commit/d18ad2911676b4d6b03877ffe94178ea983dc387.patch"
+)
+sha256sums=('fd69164d798c7b1ca31f3ec29c7e61b40ca8b1c56f1df5c03048abc527d6c891'
+            '8b52a7370194bf8be449c263c06f6a334de4a8d35fa685f21191fa686ab9443e')
 
-depends=('libmemcached' 'python')
-makedepends=('python' 'gcc' 'zlib' 'python-setuptools')
+prepare() {
+  cd "$_pkgname-$pkgver"
+  patch -Np1 -i ../stop-accessing-none-as-a-dictionary.patch
+}
 
-source=("https://pypi.org/packages/source/p/pylibmc/pylibmc-$pkgver.tar.gz")
+build() {
+  cd "$_pkgname-$pkgver"
+  python -m build --wheel --no-isolation
+}
 
-sha256sums=('eefa46115537abad65fbe2e032acd1b3463d9bf9e335af4b0916df4e4d3206e0')
+check() {
+  cd "$_pkgname-$pkgver"
+  # shellcheck disable=SC2317
+  _teardown() {
+    if [ -f "$PWD/memcached.pid" ]; then
+      kill "$(cat "$PWD/memcached.pid")"
+    fi
+  }
+  trap '_teardown' EXIT
+  memcached --port=11211 --pidfile="$PWD/memcached.pid" --daemon
+
+  python -m installer --destdir="tmp_install" dist/*.whl
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  PYTHONPATH="$PWD/tmp_install/$site_packages" pytest
+}
 
 package() {
-	cd pylibmc-"$pkgver"
-	python setup.py install --root="$pkgdir"
+  cd "$_pkgname-$pkgver"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
 }
