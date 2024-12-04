@@ -1,0 +1,83 @@
+From a03831c0101e44643216ce1ffde93f549cf3b35a Mon Sep 17 00:00:00 2001
+From: Karolina Surma <33810531+befeleme@users.noreply.github.com>
+Date: Mon, 10 Jun 2024 12:59:47 +0200
+Subject: [PATCH 1/3] Make tests work with Python 3.13
+
+Attribute `created` of LogRecord is `time.time_ns` since Python 3.13: https://docs.python.org/3.13/library/logging.html#logrecord-attributes
+---
+ tests/test_jsonlogger.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/test_jsonlogger.py b/tests/test_jsonlogger.py
+index af369d2..0711d49 100644
+--- a/tests/test_jsonlogger.py
++++ b/tests/test_jsonlogger.py
+@@ -175,7 +175,7 @@ def test_json_default_encoder(self):
+         self.assertEqual(log_json.get("otherdatetimeagain"),
+                          "1900-01-01T00:00:00")
+ 
+-    @unittest.mock.patch('time.time', return_value=1500000000.0)
++    @unittest.mock.patch('time.time_ns', return_value=1500000000000000000.0)
+     def test_json_default_encoder_with_timestamp(self, time_mock):
+         fr = jsonlogger.JsonFormatter(timestamp=True)
+         self.log_handler.setFormatter(fr)
+
+From 08d7344f0750237d8e4b0fdf8407402874fec1ea Mon Sep 17 00:00:00 2001
+From: Karolina Surma <33810531+befeleme@users.noreply.github.com>
+Date: Mon, 10 Jun 2024 13:35:51 +0200
+Subject: [PATCH 2/3] Add the backwards compatibility for the patched method
+
+This will work with Python < 3.13.
+---
+ tests/test_jsonlogger.py | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/tests/test_jsonlogger.py b/tests/test_jsonlogger.py
+index 0711d49..b316751 100644
+--- a/tests/test_jsonlogger.py
++++ b/tests/test_jsonlogger.py
+@@ -175,14 +175,18 @@ def test_json_default_encoder(self):
+         self.assertEqual(log_json.get("otherdatetimeagain"),
+                          "1900-01-01T00:00:00")
+ 
++    @unittest.mock.patch('time.time', return_value=1500000000.0)
+     @unittest.mock.patch('time.time_ns', return_value=1500000000000000000.0)
+-    def test_json_default_encoder_with_timestamp(self, time_mock):
++    def test_json_default_encoder_with_timestamp(self, time_ns_mock, time_mock):
+         fr = jsonlogger.JsonFormatter(timestamp=True)
+         self.log_handler.setFormatter(fr)
+ 
+         self.log.info("Hello")
+-
+-        self.assertTrue(time_mock.called)
++        
++        if sys.version_info < (3, 13):
++            self.assertTrue(time_mock.called)
++        else:
++            self.assertTrue(time_ns_mock.called)
+         log_json = json.loads(self.buffer.getvalue())
+         self.assertEqual(log_json.get("timestamp"), "2017-07-14T02:40:00+00:00")
+ 
+
+From 2f24daf7a0f4d3cb717eeaaa2dbd1b69da1a5b71 Mon Sep 17 00:00:00 2001
+From: Karolina Surma <33810531+befeleme@users.noreply.github.com>
+Date: Mon, 10 Jun 2024 13:37:14 +0200
+Subject: [PATCH 3/3] Return value of time.time_ns is int
+
+---
+ tests/test_jsonlogger.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/test_jsonlogger.py b/tests/test_jsonlogger.py
+index b316751..068e760 100644
+--- a/tests/test_jsonlogger.py
++++ b/tests/test_jsonlogger.py
+@@ -176,7 +176,7 @@ def test_json_default_encoder(self):
+                          "1900-01-01T00:00:00")
+ 
+     @unittest.mock.patch('time.time', return_value=1500000000.0)
+-    @unittest.mock.patch('time.time_ns', return_value=1500000000000000000.0)
++    @unittest.mock.patch('time.time_ns', return_value=1500000000000000000)
+     def test_json_default_encoder_with_timestamp(self, time_ns_mock, time_mock):
+         fr = jsonlogger.JsonFormatter(timestamp=True)
+         self.log_handler.setFormatter(fr)
