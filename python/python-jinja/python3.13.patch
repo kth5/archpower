@@ -1,0 +1,581 @@
+From d44af7635fa97e980673f29c6192d9fc5cbfc85a Mon Sep 17 00:00:00 2001
+From: Thomas Grainger <tagrain@gmail.com>
+Date: Thu, 23 May 2024 15:30:36 +0200
+Subject: [PATCH] Python 3.13 fixes
+
+Combined from:
+ - https://github.com/pallets/jinja/pull/1960
+ - https://github.com/pallets/jinja/pull/1977
+
+Co-Authored-By: David Lord <davidism@gmail.com>
+---
+ src/jinja2/async_utils.py   |  25 ++++++--
+ src/jinja2/compiler.py      |  46 +++++++++-----
+ src/jinja2/environment.py   |  12 +++-
+ tests/test_async.py         | 122 +++++++++++++++++++++++++++++-------
+ tests/test_async_filters.py |  67 ++++++++++++++++----
+ tests/test_loader.py        |   5 +-
+ 6 files changed, 214 insertions(+), 63 deletions(-)
+
+diff --git a/src/jinja2/async_utils.py b/src/jinja2/async_utils.py
+index e65219e..b0d277d 100644
+--- a/src/jinja2/async_utils.py
++++ b/src/jinja2/async_utils.py
+@@ -6,6 +6,9 @@ from functools import wraps
+ from .utils import _PassArg
+ from .utils import pass_eval_context
+ 
++if t.TYPE_CHECKING:
++    import typing_extensions as te
++
+ V = t.TypeVar("V")
+ 
+ 
+@@ -67,15 +70,27 @@ async def auto_await(value: t.Union[t.Awaitable["V"], "V"]) -> "V":
+     return t.cast("V", value)
+ 
+ 
+-async def auto_aiter(
++class _IteratorToAsyncIterator(t.Generic[V]):
++    def __init__(self, iterator: "t.Iterator[V]"):
++        self._iterator = iterator
++
++    def __aiter__(self) -> "te.Self":
++        return self
++
++    async def __anext__(self) -> V:
++        try:
++            return next(self._iterator)
++        except StopIteration as e:
++            raise StopAsyncIteration(e.value) from e
++
++
++def auto_aiter(
+     iterable: "t.Union[t.AsyncIterable[V], t.Iterable[V]]",
+ ) -> "t.AsyncIterator[V]":
+     if hasattr(iterable, "__aiter__"):
+-        async for item in t.cast("t.AsyncIterable[V]", iterable):
+-            yield item
++        return iterable.__aiter__()
+     else:
+-        for item in iterable:
+-            yield item
++        return _IteratorToAsyncIterator(iter(iterable))
+ 
+ 
+ async def auto_to_list(
+diff --git a/src/jinja2/compiler.py b/src/jinja2/compiler.py
+index 2740717..91720c5 100644
+--- a/src/jinja2/compiler.py
++++ b/src/jinja2/compiler.py
+@@ -55,7 +55,7 @@ def optimizeconst(f: F) -> F:
+ 
+         return f(self, node, frame, **kwargs)
+ 
+-    return update_wrapper(t.cast(F, new_func), f)
++    return update_wrapper(new_func, f)  # type: ignore[return-value]
+ 
+ 
+ def _make_binop(op: str) -> t.Callable[["CodeGenerator", nodes.BinExpr, "Frame"], None]:
+@@ -902,12 +902,15 @@ class CodeGenerator(NodeVisitor):
+             if not self.environment.is_async:
+                 self.writeline("yield from parent_template.root_render_func(context)")
+             else:
+-                self.writeline(
+-                    "async for event in parent_template.root_render_func(context):"
+-                )
++                self.writeline("agen = parent_template.root_render_func(context)")
++                self.writeline("try:")
++                self.indent()
++                self.writeline("async for event in agen:")
+                 self.indent()
+                 self.writeline("yield event")
+                 self.outdent()
++                self.outdent()
++                self.writeline("finally: await agen.aclose()")
+             self.outdent(1 + (not self.has_known_extends))
+ 
+         # at this point we now have the blocks collected and can visit them too.
+@@ -977,14 +980,20 @@ class CodeGenerator(NodeVisitor):
+                 f"yield from context.blocks[{node.name!r}][0]({context})", node
+             )
+         else:
++            self.writeline(f"gen = context.blocks[{node.name!r}][0]({context})")
++            self.writeline("try:")
++            self.indent()
+             self.writeline(
+-                f"{self.choose_async()}for event in"
+-                f" context.blocks[{node.name!r}][0]({context}):",
++                f"{self.choose_async()}for event in gen:",
+                 node,
+             )
+             self.indent()
+             self.simple_write("event", frame)
+             self.outdent()
++            self.outdent()
++            self.writeline(
++                f"finally: {self.choose_async('await gen.aclose()', 'gen.close()')}"
++            )
+ 
+         self.outdent(level)
+ 
+@@ -1057,26 +1066,33 @@ class CodeGenerator(NodeVisitor):
+             self.writeline("else:")
+             self.indent()
+ 
+-        skip_event_yield = False
++        def loop_body() -> None:
++            self.indent()
++            self.simple_write("event", frame)
++            self.outdent()
++
+         if node.with_context:
+             self.writeline(
+-                f"{self.choose_async()}for event in template.root_render_func("
++                f"gen = template.root_render_func("
+                 "template.new_context(context.get_all(), True,"
+-                f" {self.dump_local_context(frame)})):"
++                f" {self.dump_local_context(frame)}))"
++            )
++            self.writeline("try:")
++            self.indent()
++            self.writeline(f"{self.choose_async()}for event in gen:")
++            loop_body()
++            self.outdent()
++            self.writeline(
++                f"finally: {self.choose_async('await gen.aclose()', 'gen.close()')}"
+             )
+         elif self.environment.is_async:
+             self.writeline(
+                 "for event in (await template._get_default_module_async())"
+                 "._body_stream:"
+             )
++            loop_body()
+         else:
+             self.writeline("yield from template._get_default_module()._body_stream")
+-            skip_event_yield = True
+-
+-        if not skip_event_yield:
+-            self.indent()
+-            self.simple_write("event", frame)
+-            self.outdent()
+ 
+         if node.ignore_missing:
+             self.outdent()
+diff --git a/src/jinja2/environment.py b/src/jinja2/environment.py
+index 1d3be0b..bdd6a2b 100644
+--- a/src/jinja2/environment.py
++++ b/src/jinja2/environment.py
+@@ -1358,7 +1358,7 @@ class Template:
+ 
+     async def generate_async(
+         self, *args: t.Any, **kwargs: t.Any
+-    ) -> t.AsyncIterator[str]:
++    ) -> t.AsyncGenerator[str, object]:
+         """An async version of :meth:`generate`.  Works very similarly but
+         returns an async iterator instead.
+         """
+@@ -1370,8 +1370,14 @@ class Template:
+         ctx = self.new_context(dict(*args, **kwargs))
+ 
+         try:
+-            async for event in self.root_render_func(ctx):  # type: ignore
+-                yield event
++            agen = self.root_render_func(ctx)
++            try:
++                async for event in agen:  # type: ignore
++                    yield event
++            finally:
++                # we can't use async with aclosing(...) because that's only
++                # in 3.10+
++                await agen.aclose()  # type: ignore
+         except Exception:
+             yield self.environment.handle_exception()
+ 
+diff --git a/tests/test_async.py b/tests/test_async.py
+index c9ba70c..4edced9 100644
+--- a/tests/test_async.py
++++ b/tests/test_async.py
+@@ -1,6 +1,7 @@
+ import asyncio
+ 
+ import pytest
++import trio
+ 
+ from jinja2 import ChainableUndefined
+ from jinja2 import DictLoader
+@@ -13,7 +14,16 @@ from jinja2.exceptions import UndefinedError
+ from jinja2.nativetypes import NativeEnvironment
+ 
+ 
+-def test_basic_async():
++def _asyncio_run(async_fn, *args):
++    return asyncio.run(async_fn(*args))
++
++
++@pytest.fixture(params=[_asyncio_run, trio.run], ids=["asyncio", "trio"])
++def run_async_fn(request):
++    return request.param
++
++
++def test_basic_async(run_async_fn):
+     t = Template(
+         "{% for item in [1, 2, 3] %}[{{ item }}]{% endfor %}", enable_async=True
+     )
+@@ -21,11 +31,11 @@ def test_basic_async():
+     async def func():
+         return await t.render_async()
+ 
+-    rv = asyncio.run(func())
++    rv = run_async_fn(func)
+     assert rv == "[1][2][3]"
+ 
+ 
+-def test_await_on_calls():
++def test_await_on_calls(run_async_fn):
+     t = Template("{{ async_func() + normal_func() }}", enable_async=True)
+ 
+     async def async_func():
+@@ -37,7 +47,7 @@ def test_await_on_calls():
+     async def func():
+         return await t.render_async(async_func=async_func, normal_func=normal_func)
+ 
+-    rv = asyncio.run(func())
++    rv = run_async_fn(func)
+     assert rv == "65"
+ 
+ 
+@@ -54,7 +64,7 @@ def test_await_on_calls_normal_render():
+     assert rv == "65"
+ 
+ 
+-def test_await_and_macros():
++def test_await_and_macros(run_async_fn):
+     t = Template(
+         "{% macro foo(x) %}[{{ x }}][{{ async_func() }}]{% endmacro %}{{ foo(42) }}",
+         enable_async=True,
+@@ -66,11 +76,11 @@ def test_await_and_macros():
+     async def func():
+         return await t.render_async(async_func=async_func)
+ 
+-    rv = asyncio.run(func())
++    rv = run_async_fn(func)
+     assert rv == "[42][42]"
+ 
+ 
+-def test_async_blocks():
++def test_async_blocks(run_async_fn):
+     t = Template(
+         "{% block foo %}<Test>{% endblock %}{{ self.foo() }}",
+         enable_async=True,
+@@ -80,7 +90,7 @@ def test_async_blocks():
+     async def func():
+         return await t.render_async()
+ 
+-    rv = asyncio.run(func())
++    rv = run_async_fn(func)
+     assert rv == "<Test><Test>"
+ 
+ 
+@@ -156,8 +166,8 @@ class TestAsyncImports:
+         test_env_async.from_string('{% from "foo" import bar, with, context %}')
+         test_env_async.from_string('{% from "foo" import bar, with with context %}')
+ 
+-    def test_exports(self, test_env_async):
+-        coro = test_env_async.from_string(
++    def test_exports(self, test_env_async, run_async_fn):
++        coro_fn = test_env_async.from_string(
+             """
+             {% macro toplevel() %}...{% endmacro %}
+             {% macro __private() %}...{% endmacro %}
+@@ -166,9 +176,9 @@ class TestAsyncImports:
+                 {% macro notthere() %}{% endmacro %}
+             {% endfor %}
+             """
+-        )._get_default_module_async()
+-        m = asyncio.run(coro)
+-        assert asyncio.run(m.toplevel()) == "..."
++        )._get_default_module_async
++        m = run_async_fn(coro_fn)
++        assert run_async_fn(m.toplevel) == "..."
+         assert not hasattr(m, "__missing")
+         assert m.variable == 42
+         assert not hasattr(m, "notthere")
+@@ -457,17 +467,19 @@ class TestAsyncForLoop:
+         )
+         assert tmpl.render(items=reversed([3, 2, 1])) == "1,2,3"
+ 
+-    def test_loop_errors(self, test_env_async):
++    def test_loop_errors(self, test_env_async, run_async_fn):
+         tmpl = test_env_async.from_string(
+             """{% for item in [1] if loop.index
+                                       == 0 %}...{% endfor %}"""
+         )
+-        pytest.raises(UndefinedError, tmpl.render)
++        with pytest.raises(UndefinedError):
++            run_async_fn(tmpl.render_async)
++
+         tmpl = test_env_async.from_string(
+             """{% for item in [] %}...{% else
+             %}{{ loop }}{% endfor %}"""
+         )
+-        assert tmpl.render() == ""
++        assert run_async_fn(tmpl.render_async) == ""
+ 
+     def test_loop_filter(self, test_env_async):
+         tmpl = test_env_async.from_string(
+@@ -597,7 +609,7 @@ class TestAsyncForLoop:
+         assert t.render(a=dict(b=[1, 2, 3])) == "1"
+ 
+ 
+-def test_namespace_awaitable(test_env_async):
++def test_namespace_awaitable(test_env_async, run_async_fn):
+     async def _test():
+         t = test_env_async.from_string(
+             '{% set ns = namespace(foo="Bar") %}{{ ns.foo }}'
+@@ -605,10 +617,10 @@ def test_namespace_awaitable(test_env_async):
+         actual = await t.render_async()
+         assert actual == "Bar"
+ 
+-    asyncio.run(_test())
++    run_async_fn(_test)
+ 
+ 
+-def test_chainable_undefined_aiter():
++def test_chainable_undefined_aiter(run_async_fn):
+     async def _test():
+         t = Template(
+             "{% for x in a['b']['c'] %}{{ x }}{% endfor %}",
+@@ -618,7 +630,7 @@ def test_chainable_undefined_aiter():
+         rv = await t.render_async(a={})
+         assert rv == ""
+ 
+-    asyncio.run(_test())
++    run_async_fn(_test)
+ 
+ 
+ @pytest.fixture
+@@ -626,22 +638,22 @@ def async_native_env():
+     return NativeEnvironment(enable_async=True)
+ 
+ 
+-def test_native_async(async_native_env):
++def test_native_async(async_native_env, run_async_fn):
+     async def _test():
+         t = async_native_env.from_string("{{ x }}")
+         rv = await t.render_async(x=23)
+         assert rv == 23
+ 
+-    asyncio.run(_test())
++    run_async_fn(_test)
+ 
+ 
+-def test_native_list_async(async_native_env):
++def test_native_list_async(async_native_env, run_async_fn):
+     async def _test():
+         t = async_native_env.from_string("{{ x }}")
+         rv = await t.render_async(x=list(range(3)))
+         assert rv == [0, 1, 2]
+ 
+-    asyncio.run(_test())
++    run_async_fn(_test)
+ 
+ 
+ def test_getitem_after_filter():
+@@ -658,3 +670,65 @@ def test_getitem_after_call():
+     t = env.from_string("{{ add_each(a, 2)[1:] }}")
+     out = t.render(a=range(3))
+     assert out == "[3, 4]"
++
++
++def test_basic_generate_async(run_async_fn):
++    t = Template(
++        "{% for item in [1, 2, 3] %}[{{ item }}]{% endfor %}", enable_async=True
++    )
++
++    async def func():
++        agen = t.generate_async()
++        try:
++            return await agen.__anext__()
++        finally:
++            await agen.aclose()
++
++    rv = run_async_fn(func)
++    assert rv == "["
++
++
++def test_include_generate_async(run_async_fn, test_env_async):
++    t = test_env_async.from_string('{% include "header" %}')
++
++    async def func():
++        agen = t.generate_async()
++        try:
++            return await agen.__anext__()
++        finally:
++            await agen.aclose()
++
++    rv = run_async_fn(func)
++    assert rv == "["
++
++
++def test_blocks_generate_async(run_async_fn):
++    t = Template(
++        "{% block foo %}<Test>{% endblock %}{{ self.foo() }}",
++        enable_async=True,
++        autoescape=True,
++    )
++
++    async def func():
++        agen = t.generate_async()
++        try:
++            return await agen.__anext__()
++        finally:
++            await agen.aclose()
++
++    rv = run_async_fn(func)
++    assert rv == "<Test>"
++
++
++def test_async_extend(run_async_fn, test_env_async):
++    t = test_env_async.from_string('{% extends "header" %}')
++
++    async def func():
++        agen = t.generate_async()
++        try:
++            return await agen.__anext__()
++        finally:
++            await agen.aclose()
++
++    rv = run_async_fn(func)
++    assert rv == "["
+diff --git a/tests/test_async_filters.py b/tests/test_async_filters.py
+index f5b2627..e8cc350 100644
+--- a/tests/test_async_filters.py
++++ b/tests/test_async_filters.py
+@@ -1,6 +1,9 @@
++import asyncio
++import contextlib
+ from collections import namedtuple
+ 
+ import pytest
++import trio
+ from markupsafe import Markup
+ 
+ from jinja2 import Environment
+@@ -26,10 +29,39 @@ def env_async():
+     return Environment(enable_async=True)
+ 
+ 
++def _asyncio_run(async_fn, *args):
++    return asyncio.run(async_fn(*args))
++
++
++@pytest.fixture(params=[_asyncio_run, trio.run], ids=["asyncio", "trio"])
++def run_async_fn(request):
++    return request.param
++
++
++@contextlib.asynccontextmanager
++async def closing_factory():
++    async with contextlib.AsyncExitStack() as stack:
++
++        def closing(maybe_agen):
++            try:
++                aclose = maybe_agen.aclose
++            except AttributeError:
++                pass
++            else:
++                stack.push_async_callback(aclose)
++            return maybe_agen
++
++        yield closing
++
++
+ @mark_dualiter("foo", lambda: range(10))
+-def test_first(env_async, foo):
+-    tmpl = env_async.from_string("{{ foo()|first }}")
+-    out = tmpl.render(foo=foo)
++def test_first(env_async, foo, run_async_fn):
++    async def test():
++        async with closing_factory() as closing:
++            tmpl = env_async.from_string("{{ closing(foo())|first }}")
++            return await tmpl.render_async(foo=foo, closing=closing)
++
++    out = run_async_fn(test)
+     assert out == "0"
+ 
+ 
+@@ -245,18 +277,23 @@ def test_slice(env_async, items):
+     )
+ 
+ 
+-def test_custom_async_filter(env_async):
++def test_custom_async_filter(env_async, run_async_fn):
+     async def customfilter(val):
+         return str(val)
+ 
+-    env_async.filters["customfilter"] = customfilter
+-    tmpl = env_async.from_string("{{ 'static'|customfilter }} {{ arg|customfilter }}")
+-    out = tmpl.render(arg="dynamic")
++    async def test():
++        env_async.filters["customfilter"] = customfilter
++        tmpl = env_async.from_string(
++            "{{ 'static'|customfilter }} {{ arg|customfilter }}"
++        )
++        return await tmpl.render_async(arg="dynamic")
++
++    out = run_async_fn(test)
+     assert out == "static dynamic"
+ 
+ 
+ @mark_dualiter("items", lambda: range(10))
+-def test_custom_async_iteratable_filter(env_async, items):
++def test_custom_async_iteratable_filter(env_async, items, run_async_fn):
+     async def customfilter(iterable):
+         items = []
+         async for item in auto_aiter(iterable):
+@@ -265,9 +302,13 @@ def test_custom_async_iteratable_filter(env_async, items):
+                 break
+         return ",".join(items)
+ 
+-    env_async.filters["customfilter"] = customfilter
+-    tmpl = env_async.from_string(
+-        "{{ items()|customfilter }} .. {{ [3, 4, 5, 6]|customfilter }}"
+-    )
+-    out = tmpl.render(items=items)
++    async def test():
++        async with closing_factory() as closing:
++            env_async.filters["customfilter"] = customfilter
++            tmpl = env_async.from_string(
++                "{{ closing(items())|customfilter }} .. {{ [3, 4, 5, 6]|customfilter }}"
++            )
++            return await tmpl.render_async(items=items, closing=closing)
++
++    out = run_async_fn(test)
+     assert out == "0,1,2 .. 3,4,5"
+diff --git a/tests/test_loader.py b/tests/test_loader.py
+index 77d686e..3e64f62 100644
+--- a/tests/test_loader.py
++++ b/tests/test_loader.py
+@@ -2,7 +2,6 @@ import importlib.abc
+ import importlib.machinery
+ import importlib.util
+ import os
+-import platform
+ import shutil
+ import sys
+ import tempfile
+@@ -364,8 +363,8 @@ def test_package_zip_source(package_zip_loader, template, expect):
+ 
+ 
+ @pytest.mark.xfail(
+-    platform.python_implementation() == "PyPy",
+-    reason="PyPy's zipimporter doesn't have a '_files' attribute.",
++    sys.implementation.name == "pypy" or sys.version_info > (3, 13),
++    reason="zipimporter doesn't have a '_files' attribute",
+     raises=TypeError,
+ )
+ def test_package_zip_list(package_zip_loader):
+-- 
+2.45.0
+
