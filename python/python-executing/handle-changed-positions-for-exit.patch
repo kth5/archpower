@@ -1,0 +1,89 @@
+From 6a6925e691681aa5bc05b42bf1f1f06adeb25722 Mon Sep 17 00:00:00 2001
+From: Frank Hoffmann <15r10nk-git@polarbit.de>
+Date: Sun, 15 Sep 2024 14:24:10 +0200
+Subject: [PATCH] fix: handle changed positions for __exit__ of ast.With
+
+---
+ executing/_position_node_finder.py            | 50 +++++++++++++++++++
+ ...3cd3a42b54914d66f7a67f8b2ade36f89ed761b.py |  3 ++
+ 2 files changed, 53 insertions(+)
+ create mode 100644 tests/small_samples/3e40f2921fbaf6ccbabb2fa5c3cd3a42b54914d66f7a67f8b2ade36f89ed761b.py
+
+diff --git a/executing/_position_node_finder.py b/executing/_position_node_finder.py
+index c923822..0f83441 100644
+--- a/executing/_position_node_finder.py
++++ b/executing/_position_node_finder.py
+@@ -257,6 +257,51 @@ def fix_result(
+             # https://github.com/python/cpython/issues/123142
+ 
+             return node.parent.parent
++
++        if sys.version_info >= (3, 12,6) and instruction.opname == "CALL":
++            before = self.instruction_before(instruction)
++            if (
++                before is not None
++                and before.opname == "LOAD_CONST"
++                and before.positions == instruction.positions
++                and isinstance(node.parent, ast.withitem)
++                and node is node.parent.context_expr
++            ):
++                # node positions for with-statements have change
++                # and is now equal to the expression which created the context-manager
++                # https://github.com/python/cpython/pull/120763
++
++                # with context_manager:
++                #     ...
++
++                # but there is one problem to distinguish call-expressions from __exit__()
++
++                # with context_manager():
++                #     ...
++
++                # the call for __exit__
++
++                # 20  1:5    1:22  LOAD_CONST(None)
++                # 22  1:5    1:22  LOAD_CONST(None)
++                # 24  1:5    1:22  LOAD_CONST(None)
++                # 26  1:5    1:22  CALL()         # <-- same source range as context_manager()
++
++                # but we can use the fact that the previous load for None
++                # has the same source range as the call, wich can not happen for normal calls
++
++                # we return the same ast.With statement at the and to preserve backward compatibility
++
++                return node.parent.parent
++
++        if (
++            sys.version_info >= (3, 12,6)
++            and instruction.opname == "BEFORE_WITH"
++            and isinstance(node.parent, ast.withitem)
++            and node is node.parent.context_expr
++        ):
++            # handle positions changes for __enter__
++            return node.parent.parent
++
+         return node
+ 
+     def known_issues(self, node: EnhancedAST, instruction: dis.Instruction) -> None:
+@@ -895,6 +940,11 @@ def node_match(node_type: Union[Type, Tuple[Type, ...]], **kwargs: Any) -> bool:
+     def instruction(self, index: int) -> Optional[dis.Instruction]:
+         return self.bc_dict.get(index,None)
+ 
++    def instruction_before(
++        self, instruction: dis.Instruction
++    ) -> Optional[dis.Instruction]:
++        return self.bc_dict.get(instruction.offset - 2, None)
++
+     def opname(self, index: int) -> str:
+         i=self.instruction(index)
+         if i is None:
+diff --git a/tests/small_samples/3e40f2921fbaf6ccbabb2fa5c3cd3a42b54914d66f7a67f8b2ade36f89ed761b.py b/tests/small_samples/3e40f2921fbaf6ccbabb2fa5c3cd3a42b54914d66f7a67f8b2ade36f89ed761b.py
+new file mode 100644
+index 0000000..bfffc14
+--- /dev/null
++++ b/tests/small_samples/3e40f2921fbaf6ccbabb2fa5c3cd3a42b54914d66f7a67f8b2ade36f89ed761b.py
+@@ -0,0 +1,3 @@
++async def wait():
++    async with something:
++        pass
+\ No newline at end of file

@@ -1,0 +1,88 @@
+From 4acebfaa89196785ccc893d56b97ac8598c30e71 Mon Sep 17 00:00:00 2001
+From: Frank Hoffmann <15r10nk-git@polarbit.de>
+Date: Mon, 26 Aug 2024 21:43:13 +0200
+Subject: [PATCH] fix: backward compatibility fix for changed source positions
+ in 3.12.6 (#85)
+
+---
+ executing/_position_node_finder.py | 15 +++++++++++++++
+ tests/generate_small_sample.py     |  9 ++++++---
+ tests/test_main.py                 |  5 +++++
+ 3 files changed, 26 insertions(+), 3 deletions(-)
+
+diff --git a/executing/_position_node_finder.py b/executing/_position_node_finder.py
+index 7a81415..c923822 100644
+--- a/executing/_position_node_finder.py
++++ b/executing/_position_node_finder.py
+@@ -242,6 +242,21 @@ def fix_result(
+             # keeping the old behaviour makes it possible to distinguish both cases.
+ 
+             return node.parent
++
++        if (
++            sys.version_info >= (3, 12, 6)
++            and instruction.opname in ("GET_ITER", "FOR_ITER")
++            and isinstance(
++                node.parent.parent,
++                (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp),
++            )
++            and isinstance(node.parent,ast.comprehension)
++            and node is node.parent.iter
++        ):
++            # same as above but only for comprehensions, see:
++            # https://github.com/python/cpython/issues/123142
++
++            return node.parent.parent
+         return node
+ 
+     def known_issues(self, node: EnhancedAST, instruction: dis.Instruction) -> None:
+diff --git a/tests/generate_small_sample.py b/tests/generate_small_sample.py
+index 89c7477..573d17a 100644
+--- a/tests/generate_small_sample.py
++++ b/tests/generate_small_sample.py
+@@ -18,6 +18,7 @@
+ from rich.syntax import Syntax
+ from rich.console import Console
+ import argparse
++import ast
+ 
+ last_samples_dir = Path(__file__).parent / "last_samples"
+ last_samples_dir.mkdir(exist_ok=True)
+@@ -63,6 +64,11 @@ def test_file(filename: Path):
+             delattr(Source, cache_name)
+ 
+     test = TestFiles()
++    try:
++        ast.parse(code)
++    except (RecursionError,SyntaxError):
++        return True
++
+     try:
+         with open(os.devnull, "w") as dev_null:
+             with contextlib.redirect_stderr(dev_null):
+@@ -122,9 +128,6 @@ def main():
+                     break_file.unlink()
+                     sys.exit(0)
+ 
+-                if time.time() > end_time:
+-                    print("Timeout")
+-                    sys.exit(0)
+ 
+                 if not result:
+                     print(f"{filename} is failing the tests -> minimize\n")
+diff --git a/tests/test_main.py b/tests/test_main.py
+index 5d4f83b..a3f92ee 100644
+--- a/tests/test_main.py
++++ b/tests/test_main.py
+@@ -609,6 +609,11 @@ def __next__(self):
+             assert {i: i for i in iter_test(ast.DictComp)} == {1: 1, 2: 2}
+             assert list(i for i in iter_test(ast.GeneratorExp)) == [1, 2]
+ 
++            assert [i for j in [0] for i in iter_test(ast.ListComp)] == [1, 2]
++            assert {i for j in [0] for i in iter_test(ast.SetComp)} == {1, 2}
++            assert {i: i for j in [0] for i in iter_test(ast.DictComp)} == {1: 1, 2: 2}
++            assert list(i for j in [0] for i in iter_test(ast.GeneratorExp)) == [1, 2]
++
+             for i in iter_test(ast.For):
+                 assert i in (1, 2)
+ 
