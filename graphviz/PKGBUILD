@@ -5,7 +5,7 @@
 
 pkgname=graphviz
 pkgver=12.1.2
-pkgrel=1
+pkgrel=2
 pkgdesc='Graph visualization software'
 url='https://www.graphviz.org/'
 license=('EPL')
