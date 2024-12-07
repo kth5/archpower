@@ -10,8 +10,8 @@
 
 pkgbase=samba
 pkgname=('libwbclient' 'ldb' 'smbclient' 'samba')
-pkgver=4.21.1
-pkgrel=1
+pkgver=4.21.2
+pkgrel=2
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://www.samba.org"
 license=('GPL-3.0-or-later')
@@ -65,7 +65,7 @@ source=(
   samba.conf
 )
 validpgpkeys=('81F5E2832BD2545A1897B713AA99442FB680B620') #Samba Distribution Verification Key <samba-bugs@samba.org>
-b2sums=('e99c6d45758d50195a634d2a2ebdbe324ca3f205d8013fb8fb2160c2581d7551bbff946f3413b2782648470e922d84d8a2f9c3d33e32c46db6391b749ba30000'
+b2sums=('f9c297f4ed0c00b7887e637beb6ab7f4e17882e0ed5a3d1f1faf1ae1c2d6b064ada53cf65a86f11237813197c043961735e8aad641630baa48ec259482bdab2a'
         'SKIP'
         '72ecb413ca3499af984a0bb391f96e678a24a19d8e5c96050ba227878f0770f03466ac7a0ee328416e08204e92e9d16ec22d63ef25b53c20d957a17221cd3a98'
         '3eab84d332d96678fe6e435ee243c8f1a82b838f601d61d3604d11e918aed7a62202edca5e476c4b9031ed284570e6fcd6c659cfdbd9624aa0019d3233755f81'
@@ -175,6 +175,7 @@ _ldb_headers=(
 provides=(libldb.so)
 _pkgsrc="${srcdir}"/samba-pkg
 
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
   install -d -m755 "${pkgdir}"/usr/bin
   for bin in ${_ldb_bins[@]}; do
     mv "${_pkgsrc}"/usr/bin/${bin} "${pkgdir}"/usr/bin/
@@ -191,9 +192,9 @@ _pkgsrc="${srcdir}"/samba-pkg
   for headers in ${_ldb_headers[@]}; do
     mv "${_pkgsrc}"/usr/include/samba-4.0/${headers} "${pkgdir}"/usr/include/samba-4.0/
   done
-  install -d -m755 "${pkgdir}"/usr/lib/python3.12/site-packages/
-  mv "${_pkgsrc}"/usr/lib/python3.12/site-packages/{_ldb_text.py,ldb.cpython-312-$CARCH-linux-gnu.so} \
-    "${pkgdir}"/usr/lib/python3.12/site-packages/
+  install -d -m755 "${pkgdir}${site_packages}/"
+  mv "${_pkgsrc}${site_packages}/"{_ldb_text.py,ldb.cpython-$(python -c 'import sys; print("".join(map(str, sys.version_info[:2])))')-$CARCH-linux-gnu.so} \
+    "${pkgdir}${site_packages}/"
 
   install -d -m755 "${pkgdir}"/usr/share/man/man1
   for bin in ${_ldb_bins[@]}; do
@@ -317,6 +318,7 @@ backup=(
 )
 install=samba.install
 
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
 _pkgsrc="${srcdir}"/samba-pkg
   # Everything that libwbclient and smbclient didn't install goes
   # into the samba package...
@@ -327,7 +329,7 @@ _pkgsrc="${srcdir}"/samba-pkg
   for script in bin/samba_dnsupdate bin/samba_kcc bin/samba_spnupdate \
                 bin/samba_upgradedns bin/samba-tool
   do
-    sed -i "/^sys\.path\.insert/ asys.path.insert(0, '/usr/lib/python${_pyver}/site-packages')" \
+    sed -i "/^sys\.path\.insert/ asys.path.insert(0, '$site_packages')" \
       "${pkgdir}"/usr/${script}
   done
 
