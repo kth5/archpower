@@ -3,18 +3,16 @@
 
 pkgbase=libjxl
 pkgname=('libjxl' 'libjxl-doc')
-pkgver=0.11.0
-pkgrel=1.1
+pkgver=0.11.1
+pkgrel=1
 pkgdesc='JPEG XL image format reference implementation'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://jpeg.org/jpegxl/'
 license=('BSD-3-Clause')
 makedepends=('git' 'cmake' 'brotli' 'gdk-pixbuf2' 'giflib' 'gimp'
-             'gperftools' 'highway' 'libjpeg-turbo' 'libpng' 'openexr'
-             'gtest' 'python' 'asciidoc' 'doxygen'
+             'gperftools' 'highway' 'libjpeg-turbo' 'libpng'
+             'gtest' 'java-environment>=11' 'java-environment<=17' 'python' 'asciidoc' 'doxygen'
              'graphviz' 'xdg-utils')
-makedepends_powerpc64le=('java-environment')
-makedepends_x86_64=('java-environment')
 source=("git+https://github.com/libjxl/libjxl.git#tag=v${pkgver}"
         'git+https://github.com/google/brotli.git'
         'git+https://github.com/mm2/Little-CMS.git'
@@ -26,7 +24,7 @@ source=("git+https://github.com/libjxl/libjxl.git#tag=v${pkgver}"
         'git+https://github.com/madler/zlib.git'
         'libjxl-testdata'::'git+https://github.com/libjxl/testdata.git'
         'git+https://github.com/libjpeg-turbo/libjpeg-turbo.git')
-sha256sums=('e8bd4fd3d3a561aa1875cc5253f9d0308474fa9825c07961b8a36ddda19f4011'
+sha256sums=('6420adcb5ccd23547eed91feb38ac9d7bdaac77def7183776e00699880148e3e'
             'SKIP'
             'SKIP'
             'SKIP'
@@ -51,17 +49,8 @@ prepare() {
 }
 
 build() {
-    case "${CARCH}" in
-      powerpc64) 
-        export CXXFLAGS="-O2 -pipe"
-        _cmake_options=(
-          -DSJPEG_ENABLE_SIMD=OFF
-        )
-      ;;
-    esac
-
     export CFLAGS+=' -DNDEBUG -ffat-lto-objects'
-    export CXXFLAGS+=' -DNDEBUG -ffat-lto-objects -Wp,-U_GLIBCXX_ASSERTIONS'
+    export CXXFLAGS+=' -DNDEBUG -ffat-lto-objects'
     cmake -B build -S libjxl \
         -G 'Unix Makefiles' \
         -DCMAKE_BUILD_TYPE:STRING='None' \
@@ -69,6 +58,7 @@ build() {
         -DJPEGXL_ENABLE_BENCHMARK:BOOL='false' \
         -DJPEGXL_ENABLE_EXAMPLES:BOOL='false' \
         -DJPEGXL_ENABLE_FUZZERS:BOOL='false' \
+        -DJPEGXL_ENABLE_OPENEXR:BOOL='false' \
         -DJPEGXL_ENABLE_PLUGINS:BOOL='true' \
         -DJPEGXL_ENABLE_VIEWERS:BOOL='false' \
         -DJPEGXL_FORCE_SYSTEM_BROTLI:BOOL='true' \
@@ -76,7 +66,7 @@ build() {
         -DJPEGXL_FORCE_SYSTEM_HWY:BOOL='true' \
         -DJPEGXL_BUNDLE_LIBPNG:BOOL='NO' \
         -DJPEGXL_INSTALL_JARDIR='/usr/share/java' \
-        -Wno-dev ${_cmake_options[@]}
+        -Wno-dev
     cmake --build build
     make -C build doc
 }
@@ -86,18 +76,15 @@ check() {
 }
 
 package_libjxl() {
-    depends=('brotli' 'giflib' 'gperftools' 'highway' 'libjpeg-turbo' 'libpng' 'openexr')
+    depends=('brotli' 'giflib' 'gperftools' 'highway' 'libjpeg-turbo' 'libpng')
     optdepends=('gdk-pixbuf2: for gdk-pixbuf loader'
-                'gimp: for gimp plugin')
-    optdepends_powerpc64le=('java-runtime: for JNI bindings')
-    optdepends_x86_64=('java-runtime: for JNI bindings')
+                'gimp: for gimp plugin'
+                'java-runtime: for JNI bindings')
     provides=('libjxl.so' 'libjxl_cms.so' 'libjxl_threads.so')
     
     DESTDIR="$pkgdir" cmake --install build
     install -D -m644 libjxl/{LICENSE,PATENTS} -t "${pkgdir}/usr/share/licenses/${pkgname}"
-    case "${CARCH}" in
-      powerpc64le|x86_64) mv "${pkgdir}/usr/share/java"/{org.jpeg.jpegxl,jpegxl}.jar ;;
-    esac
+    mv "${pkgdir}/usr/share/java"/{org.jpeg.jpegxl,jpegxl}.jar
 }
 
 package_libjxl-doc() {
