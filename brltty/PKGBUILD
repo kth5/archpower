@@ -8,7 +8,7 @@
 pkgbase=brltty
 pkgname=(brltty brltty-udev-generic)
 pkgver=6.7
-pkgrel=1
+pkgrel=2
 pkgdesc="Braille display driver for Linux/Unix"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://brltty.app"
@@ -30,6 +30,8 @@ makedepends=(
   glib2
   gpm
   icu
+  'java-environment>=11'
+  'java-environment<=17'
   libcap
   liblouis
   libspeechd
@@ -45,11 +47,6 @@ makedepends=(
   systemd-libs
   tcl
 )
-makedepends_powerpc=(java-environment)
-makedepends_powerpc64=(java-environment)
-makedepends_powerpc64le=(java-environment)
-makedepends_riscv64=('java-environment=11')
-makedepends_x86_64=(java-environment)
 options=(!emptydirs)
 source=(
   https://github.com/brltty/brltty/archive/refs/tags/${pkgbase^^}-$pkgver.tar.gz
@@ -83,12 +80,17 @@ build() {
     --enable-gpm
     --disable-stripping
   )
+
+  case "${CARCH}" in
+    powerpc64le) configure_options+=(--disable-ocaml-bindings) ;;
+  esac
+
   # fat-lto-objects is required for non-mangled static libs
   CFLAGS+=" -ffat-lto-objects"
 
   cd $pkgbase-${pkgbase^^}-$pkgver
   ./configure "${configure_options[@]}"
-  make -j1
+  make
   # make brlapi.jar deterministic
   find . -type f -iname "*.jar" -exec strip-nondeterminism {} \;
 }
@@ -113,7 +115,6 @@ package_brltty() {
   )
   optdepends=(
     'at-spi2-core: X11/GNOME Apps accessibility'
-    'atk: ATK bridge for X11/GNOME accessibility'
     'brltty-udev-generic: for initializing brltty with generic USB devices'
     'espeak-ng: espeak-ng driver'
     'java-runtime: Java support'
