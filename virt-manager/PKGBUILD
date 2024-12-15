@@ -7,31 +7,48 @@
 
 pkgbase=virt-manager
 pkgname=(virt-install virt-manager)
-pkgver=4.1.0
-pkgrel=3.1
+pkgver=5.0.0
+pkgrel=1
 arch=(any)
 url='https://virt-manager.org/'
-license=('GPL')
-makedepends=('python-docutils' 'python-setuptools')
-checkdepends=('python-pytest' 'libosinfo' 'libvirt-python' 'python-gobject' 'python-requests' 'cpio' 'cdrtools')
-optdepends=('x11-ssh-askpass: provide password for remote machines connected via ssh tunnel')
-source=("https://releases.pagure.org/virt-manager/virt-manager-${pkgver}.tar.gz")
-b2sums=('1b4203be81bd7b82251225d691a4d9068f268e610f049bcadb96de5b539e964ca0b001f22f06ddd8266b58b079f60046f6d11942a1e4eadbc43f0607c46bbddd')
+license=('GPL-2.0-only')
+makedepends=(
+  git
+  gtk-update-icon-cache
+  meson
+  python-docutils
+  python-pycodestyle
+  python-pylint
+  python-pytest
+  python-setuptools
+)
+optdepends=(
+  'x11-ssh-askpass: provide password for remote machines connected via ssh tunnel'
+)
+source=("git+https://github.com/virt-manager/virt-manager.git#tag=v${pkgver}")
+b2sums=('84564af1193f10cf530e9dd0adfc6b29b39eccf92f6ffc35550cc9fd4a9390f34e661b9dca6d89015c84beaac0d588d454a4ec942bc64859f4d50756f12f0c47')
 
 build() {
-  cd ${pkgbase}-${pkgver}
-  python setup.py configure --default-hvs qemu,lxc
-  python setup.py build
+  local meson_options=(
+    -D default-hvs=qemu,lxc
+  )
+
+  arch-meson ${pkgbase} build "${meson_options[@]}"
+  meson compile -C build
 }
 
 package_virt-install() {
   pkgdesc='Command line tool for creating new KVM , Xen, or Linux container guests using the libvirt hypervisor'
-  depends=('libosinfo' 'libvirt-python' 'python-gobject' 'python-requests' 'cpio' 'libisoburn')
+  depends=(
+    cpio
+    libisoburn
+    libosinfo
+    libvirt-python
+    python-gobject
+    python-requests
+  )
 
-  cd ${pkgbase}-${pkgver}
-  python setup.py --no-update-icon-cache --no-compile-schemas install --root "${pkgdir}"
-  python -m compileall "${pkgdir}"/usr/share/virt-manager
-  python -O -m compileall "${pkgdir}"/usr/share/virt-manager
+  meson install -C build --destdir "${pkgdir}"
 
   # Split virt-manager
   [[ -d "${srcdir}"/virt-manager ]] && rm -r "${srcdir}"/virt-manager/
@@ -44,7 +61,16 @@ package_virt-install() {
 
 package_virt-manager() {
   pkgdesc='Desktop user interface for managing virtual machines'
-  depends=("virt-install=${pkgver}" 'gtk-vnc' 'libvirt-glib' 'spice-gtk' 'vte3' 'python-cairo' 'gtksourceview4')
+  depends=(
+    "virt-install=${pkgver}"
+    gtk-update-icon-cache
+    gtk-vnc
+    libvirt-glib
+    spice-gtk
+    vte3
+    python-cairo
+    gtksourceview4
+  )
 
   mv -v split/* "${pkgdir}/"
 }
