@@ -1,29 +1,31 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer : Christian Rebischke <Chris.Rebischke@archlinux.org>
-# Contributor:dront78 <dront78@gmail.com>
-pkgname=systemtap
-pkgver=5.1
-pkgrel=1
-pkgdesc="provides infrastructure to simplify the gathering of information about the running system."
-url="http://sourceware.org/systemtap/"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=('GPL')
-depends=('elfutils' 'nss' 'python')
-makedepends=('cpio' 'python-setuptools' 'xmlto')
-optdepends=('sqlite3: for storing results in a database')
-source=("${pkgname}-${pkgver}.tar.gz::https://sourceware.org/systemtap/ftp/releases/${pkgname}-${pkgver}.tar.gz"
-        "${pkgname}-${pkgver}.tar.gz.asc::https://sourceware.org/systemtap/ftp/releases/${pkgname}-${pkgver}.tar.gz.asc"
-        'access_process_vm_h.patch')
-sha512sums=('da0fe237d2124031a5786d1221dbb420d90da5497376715fd43a7a9f61a354a229c1128e67ce6becbc012aa3796dc5d337149e239e3c1def0651b179e5bf199f'
-            'SKIP'
-            'f33d81d2e4d0892cb248e89eb11b76d390f78ef7e50dca8d15e0a868c1a42fb0fc40ea69d6d967ebd65dd7d7a910bf8b2faf31378dc744ef1e13aeb423a2572b')
-install='systemtap.install'
-validpgpkeys=('5D38116FA4D3A7CC77E378D37E83610126DCC2E8')
+# Maintainer: Sven-Hendrik Haase <svenstaro@archlinux.org>
+# Contributor: Manuel Hüsers <aur@huesers.de>
+# Contributor: Christian Pellegrin (chripell) <chripell@fsfe.org>
+# Contributor: An Nguyen (stk) <an@linux.com>
+# Contributor: George Angelopoulos <george@usermod.net>
+# Contributor: Christian Rebischke <Chris.Rebischke@archlinux.org>
+# Contributor: dront78 <dront78@gmail.com>
 
-prepare() {
-  cd "${pkgname}-${pkgver}"
-  patch -Np1 -i "${srcdir}/access_process_vm_h.patch"
-}
+pkgname=systemtap
+pkgver=5.2
+pkgrel=2
+pkgdesc="Infrastructure to simplify the gathering of information about the running Linux system"
+url="https://sourceware.org/systemtap/"
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+license=('GPL-2.0-or-later')
+depends=('elfutils' 'nss' 'python' 'cpio')
+makedepends=('python-setuptools' 'xmlto')
+optdepends=('sqlite3: for storing results in a database')
+options=('!emptydirs')
+source=("https://sourceware.org/ftp/${pkgname}/releases/${pkgname}-${pkgver}.tar.gz"{,.asc}
+        systemtap.sysusers)
+sha512sums=('30137e232e44abe98747ae61a71a162eff5abc89e9a922f86ade834eac2cac1923ae06d4ed17710718adba082ad06d2fb544822003a54e13b97eea9e183bdf9d'
+            'SKIP'
+            'c1ed109ee35081665fcf44138adf76255e1b802506375b3b6bce1f2fad11366e807ed4d9204379cc53a64ab18af4e411e5cedbac36f4fa659cab196d376c777c')
+
+validpgpkeys=('41A0C11274B1E87FE28E4C53E3D77E1F95161991')
+
 build() {
   cd "${pkgname}-${pkgver}"
   ./configure \
@@ -32,17 +34,28 @@ build() {
     --libexecdir=/usr/lib/"${pkgname}" \
     --libdir=/usr/lib/"${pkgname}" \
     --mandir=/usr/share/man/ \
+    --sbindir=/usr/bin \
     --localstatedir=/var \
     --enable-pie \
     --disable-docs \
-    --enable-htmldocs
+    --enable-htmldocs \
+    --with-python3
   make
 }
 
-package() {
-  cd "${srcdir}/${pkgname}-${pkgver}"
-  make DESTDIR="${pkgdir}" install
-  rmdir "${pkgdir}/var/run/stap-server/"
-  rmdir "${pkgdir}/var/run/"
+check() {
+  cd "${pkgname}-${pkgver}"
+  make check
 }
 
+package() {
+  cd "${pkgname}-${pkgver}"
+  make DESTDIR="${pkgdir}" install
+
+  chgrp 156 "${pkgdir}"/usr/bin/{stapbpf,staprun}
+  chmod 04110 "${pkgdir}"/usr/bin/{stapbpf,staprun}
+
+  install -Dm644 "${srcdir}"/systemtap.sysusers "${pkgdir}"/usr/lib/sysusers.d/systemtap.conf
+
+  rm -r "${pkgdir}/usr/include/sys"
+}
