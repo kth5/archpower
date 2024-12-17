@@ -1,44 +1,76 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Jonas Witschel <diabonas@archlinux.org>
+
 pkgname=swtpm
-pkgver=0.8.2
-pkgrel=1.1
+pkgver=0.10.0
+pkgrel=1
 pkgdesc='Libtpms-based TPM emulator with socket, character device, and Linux CUSE interface'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://github.com/stefanberger/swtpm'
-license=('BSD')
-depends=('fuse2' 'glib2' 'gnutls' 'json-glib' 'libseccomp' 'libtpms' 'openssl' 'libseccomp.so')
-makedepends=('git' 'expect' 'iproute2' 'libtasn1' 'python' 'socat')
+license=('BSD-3-Clause')
+depends=(
+  'fuse2'
+  'gcc-libs'
+  'glib2'
+  'glibc'
+  'gmp'
+  'gnutls'
+  'json-glib'
+  'libseccomp'
+  'libseccomp.so'
+  'libtasn1'
+  'libtpms'
+  'openssl'
+)
+makedepends=(
+  'expect'
+  'git'
+  'iproute2'
+  'python'
+  'socat'
+)
 checkdepends=('softhsm')
 source=("git+$url.git?signed#tag=v$pkgver")
-sha512sums=('6a55a3495638e73d9f61fbc6766b125328fab9aa8f71e45b810e92789f7db71c2370914f6fb313673db380a0faff058602d79d66f34128b55c69ed945ed88404')
+sha512sums=('90ca3afa851804a4a5245fd8c0b2291753ef14011e9dc4ac62c1fe9dc8ac77710d85e14223f02cab28a3a1d1714c2bd879f31ce866e3789bbd517f530473621f')
 validpgpkeys=('B818B9CADF9089C2D5CEC66B75AD65802A0B4211') # Stefan Berger <stefanb@linux.vnet.ibm.com>
 
+case "${CARCH}" in
+  powerpc) options=(!lto)
+esac
+
+
 prepare() {
-	cd "$pkgname"
+  cd "$pkgname"
+  # Remove usage of /usr/bin/env to avoid PATH manipulation attacks
+  sed --in-place 's/env //' \
+    samples/swtpm-create-tpmca \
+    samples/swtpm-create-user-config-files.in
 
-	# Remove usage of /usr/bin/env to avoid PATH manipulation attacks
-	sed --in-place 's/env //' samples/swtpm-create-tpmca samples/swtpm-create-user-config-files.in
-
-	autoreconf --install --force
+  autoreconf --install --force
 }
 
 build() {
-	cd "$pkgname"
-	./configure --prefix=/usr --with-cuse --with-gnutls --with-seccomp
-	make
+  cd "$pkgname"
+  ./configure \
+    --prefix=/usr \
+    --with-cuse \
+    --with-gnutls \
+    --with-seccomp
+  make
 }
 
 check() {
-	cd "$pkgname"
-	make check
+  cd "$pkgname"
+  make check
 }
 
 package() {
-	cd "$pkgname"
-	make DESTDIR="$pkgdir" install
-	install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
-	echo 'u tss - "tss user for tpm2"' | install -Dm644 /dev/stdin "$pkgdir/usr/lib/sysusers.d/$pkgname.conf"
-	echo 'z /var/lib/swtpm-localca 0750 tss root' | install -Dm644 /dev/stdin "$pkgdir/usr/lib/tmpfiles.d/$pkgname.conf"
-	chmod 750 "$pkgdir/var/lib/swtpm-localca"
+  cd "$pkgname"
+  make DESTDIR="$pkgdir" install
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
+  echo 'u tss - "tss user for tpm2"' \
+    | install -vDm644 /dev/stdin "$pkgdir/usr/lib/sysusers.d/$pkgname.conf"
+  echo 'z /var/lib/swtpm-localca 0750 tss root' \
+    | install -vDm644 /dev/stdin "$pkgdir/usr/lib/tmpfiles.d/$pkgname.conf"
+  chmod -v 750 "$pkgdir/var/lib/swtpm-localca"
 }
