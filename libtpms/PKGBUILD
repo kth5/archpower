@@ -1,24 +1,31 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Jonas Witschel <diabonas@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
+# Contributor: Jonas Witschel <diabonas@archlinux.org>
+
 pkgname=libtpms
-pkgver=0.9.6
-_tag=fccd9f0ec5febf75ccec2742e75889cdfa329e53 # git rev-parse "v$pkgver"
-pkgrel=1.1
+pkgver=0.10.0
+pkgrel=1
 pkgdesc='Library providing a software emulation of a Trusted Platform Module (TPM 1.2 and TPM 2.0)'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://github.com/stefanberger/libtpms'
-license=('BSD')
-depends=('openssl')
+license=('BSD-3-Clause')
+depends=(
+  'glibc'
+  'openssl'
+)
 makedepends=('git')
-options=(!lto)
-source=("git+$url.git?signed#tag=$_tag")
-sha512sums=('SKIP')
+# Fails to build with LTO enabled due to:
+#   tpm2/crypto/openssl/CryptCmac.c: In function 'CryptCmacEnd':
+#   tpm2/crypto/openssl/CryptCmac.c:194:48: error: writing 1 byte into a region of size 0 [-Werror=stringop-overflow=]
+#     194 |             subkey.t.buffer[subkey.t.size - 1] ^= xorVal;
+#         |                                                ^
+#   tpm2/TpmTypes.h:1477:33: note: at offset -1 into destination object 'buffer' of size 16
+#    1477 |         BYTE                    buffer[MAX_SYM_BLOCK_SIZE];
+#         |
+options=('!lto')
+source=("git+$url.git?signed#tag=v$pkgver")
+sha512sums=('67ad9bf751730896fc0386db502466b2b5a3d2e859caf59a2aeff01e869c971cf8bf3cf50e376bbab436aef5ec4c17fc882a08630dd46438f9dfeec4ae831ec0')
 validpgpkeys=('B818B9CADF9089C2D5CEC66B75AD65802A0B4211') # Stefan Berger <stefanb@linux.vnet.ibm.com>
-
-pkgver() {
-	cd "$pkgname"
-	git describe | sed 's/^v//;s/\([^-]*-\)g/r\1/;s/-/./g'
-}
 
 prepare() {
 	cd "$pkgname"
@@ -27,7 +34,10 @@ prepare() {
 
 build() {
 	cd "$pkgname"
-	./configure --prefix=/usr --with-openssl --with-tpm2
+  ./configure \
+    --prefix=/usr \
+    --with-openssl \
+    --with-tpm2
 	make
 }
 
@@ -39,5 +49,5 @@ check() {
 package() {
 	cd "$pkgname"
 	make DESTDIR="$pkgdir" install
-	install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
+	install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
 }
