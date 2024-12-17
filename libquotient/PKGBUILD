@@ -4,7 +4,7 @@
 # Contributor Sefa Eyeoglu <contact@scrumplex.net>
 
 pkgname=libquotient
-pkgver=0.9.0
+pkgver=0.9.1
 pkgrel=1
 pkgdesc='A Qt library to write cross-platform clients for Matrix'
 license=(LGPL-2.1-or-later)
@@ -19,7 +19,7 @@ depends=(gcc-libs
 makedepends=(cmake
              git)
 source=(git+https://github.com/quotient-im/libQuotient#tag=$pkgver)
-sha256sums=('bf146df936d7763d7c9dddefee4b3a4fc0298fb8f394cc0d11be21fca5d8584f')
+sha256sums=('75357c58ad43d7e4f144d9f31d9741659a99ab0006f1042501661f4e8eabe307')
 
 build() {
   cmake -B build -S libQuotient \
