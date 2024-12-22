@@ -10,7 +10,7 @@
 pkgname=julia
 epoch=2
 pkgver=1.11.1
-pkgrel=2.1
+pkgrel=3
 arch=(x86_64 powerpc64le)
 pkgdesc='High-level, high-performance, dynamic programming language'
 url='https://julialang.org/'
@@ -40,7 +40,7 @@ source=(https://github.com/JuliaLang/julia/releases/download/v$pkgver/$pkgname-$
         julia-hardcoded-libs.patch
         julia-libgit2-1.8.patch
         julia-metainfo.patch
-        https://github.com/JuliaLang/Downloads.jl/commit/1061ecc3.patch)
+        julia-curl-1.10.patch)
 backup=(etc/julia/startup.jl)
 sha256sums=('a49b804de6e86a03fe26c73f58851eaee1ff243d7204f2b5ae4dbc5c1dc2758d'
             'SKIP'
@@ -48,7 +48,7 @@ sha256sums=('a49b804de6e86a03fe26c73f58851eaee1ff243d7204f2b5ae4dbc5c1dc2758d'
             'e981ce26bb2394333c83512a607e8aa48ae0d66ec40e0f0b6d97ec70b6baa39f'
             'dc541120600e9c0574016a2738461ddb99be21fc8f763d4a3152169fd2f3bf54'
             '074690d913b9544bef11468454fbf5f52005b2a12160123340cfacc91d4daf9f'
-            '69297a9fcf35ffdb7961f4dd0c3bc07a7dffd936b879f29715b6d44929781b6b')
+            'f9953782524471c5a8ce819bf00bd47f8272cea17058d15f24522d01b5e827e5')
 validpgpkeys=('3673DF529D9049477F76B37566E3C7DC03D6E495') # Julia (Binary signing key) <buildbot@julialang.org>
 options=(!lto)
 
@@ -63,11 +63,11 @@ prepare() {
   patch -p1 -i ../julia-libgit2-1.8.patch
 # Don't hardcode library names
   patch -p1 -i ../julia-hardcoded-libs.patch
-# Revert Downloads commit that break tests
+# Fix segfaults with curl 1.10
   cd stdlib/srccache
   _SAsha=89d3c7dded535a77551e763a437a6d31e4d9bf84
   tar -xzf Downloads-$_SAsha.tar.gz
-  patch -d JuliaLang-Downloads.jl-${_SAsha:0:7} -Rp1 < "$srcdir"/1061ecc3.patch
+  patch -d JuliaLang-Downloads.jl-${_SAsha:0:7} -p1 < "$srcdir"/julia-curl-1.10.patch
   rm Downloads-$_SAsha.tar.gz
   tar -czf Downloads-$_SAsha.tar.gz JuliaLang-Downloads.jl-${_SAsha:0:7}
   md5sum Downloads-$_SAsha.tar.gz | cut -d ' ' -f 1 > ../../deps/checksums/Downloads-$_SAsha.tar.gz/md5
@@ -75,7 +75,6 @@ prepare() {
 }
 
 _make() {
-# Follow https://github.com/JuliaCI/julia-buildbot/blob/master/master/inventory.py for JULIA_CPU_TARGET
   local make_options=(
     prefix=/usr
     bindir=/usr/bin
