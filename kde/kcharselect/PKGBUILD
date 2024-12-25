@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kcharselect
-pkgver=24.08.2
+pkgver=24.08.3
 pkgrel=1
 pkgdesc='Character Selector'
 url='https://apps.kde.org/kcharselect/'
@@ -28,7 +28,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-utilities)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('899e956feb3c1e62d35a2c4020433993416e28a71600e7c97ef627f48e6cb38a'
+sha256sums=('275a373dce83cf9e28188e6ead0dbf85ef728a167c418b42550309787fbb5f9b'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
