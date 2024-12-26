@@ -6,7 +6,7 @@
 pkgbase=libksane
 pkgname=(libksane
          libksane5)
-pkgver=24.08.2
+pkgver=24.08.3
 pkgrel=1
 pkgdesc='An image scanning library'
 url='https://www.kde.org/'
@@ -28,7 +28,7 @@ makedepends=(extra-cmake-modules
              kwidgetsaddons
              qt6-base)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('eaf34e44910ea9d46f1149b0eb7f7762422cc39567e2a02b966ef618b9453091'
+sha256sums=('67855ea458ac9d37925f09f5816c8813a1db04f49c10803bc1265b9d566de1af'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
