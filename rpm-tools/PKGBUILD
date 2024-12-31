@@ -1,0 +1,56 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Anatol Pomozov <anatol pomozov at gmail>
+# Contributor: Johannes Dewender  arch at JonnyJD dot net
+# Contributor: Konrad <konrad AT knauber DOT name>
+# Contributor: Luka Perkov <archlinux <at> lukaperkov <dOt> net>
+# Contributor: Fernando M <f <at> beford.net>
+# Author: Wintershade <Wintershade AT google mail DOT com>
+
+# Note: rebuilds required: sogrep all librpmio.so and librpm.so
+
+pkgname=rpm-tools
+pkgver=4.20.0
+pkgrel=2
+pkgdesc="RPM Package Manager - RPM.org fork, used in major RPM distros"
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+url='https://rpm.org/'
+license=('GPL2')
+depends=('lua' 'file' 'nss' 'popt' 'elfutils' 'libarchive' 'libcap' 'rpm-sequoia')
+makedepends=('python' 'pkg-config' 'cmake')
+makedepends_powerpc64le=('podman')
+makedepends_riscv64=('podman')
+makedepends_x86_64=('podman')
+conflicts=('rpm' 'rpmextract')
+options=('!libtool')
+provides=("rpm=${pkgver}" 'rpmextract=1.0-4' 'rpm-org')
+install=rpm-tools.install
+
+_pkgver_major="${pkgver%%.*}"
+_pkgver_major_rem="${pkgver#*.}"
+_pkgver_minor="${_pkgver_major_rem%%.*}"
+_base_pkgver=$_pkgver_major.$_pkgver_minor.x
+
+source=(http://ftp.rpm.org/releases/rpm-$_base_pkgver/rpm-$pkgver.tar.bz2
+	rpmextract.sh
+        rpmlib-filesystem-check.patch)
+sha256sums=('56ff7638cff98b56d4a7503ff59bc79f281a6ddffcda0d238c082bedfb5fbe7b'
+            '3e5bf450d4628366ba35469ec0530a99cd09ab2616a3d261a3f68270f481f777'
+            'bd0e6dbd458f990268c60324190c6825b234647ecdde08296d2b453dc4bce27a')
+
+prepare() {
+	cd rpm-${pkgver}
+	patch -p1 < ../rpmlib-filesystem-check.patch
+}
+
+build() {
+    	cmake -B build -S "rpm-$pkgver" \
+		-DCMAKE_INSTALL_PREFIX='/usr' \
+		-DWITH_SELINUX=OFF \
+		-DWITH_DBUS=OFF \
+		-DENABLE_TESTSUITE=OFF
+    	cmake --build build
+}
+
+package() {
+	DESTDIR="$pkgdir" cmake --install build
+}
