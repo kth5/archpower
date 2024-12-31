@@ -1,0 +1,50 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jelle van der Waa <jelle@archlinux.org>
+# Author: Achilleas Koutsou <achilleas@koutsou.net>
+
+pkgname=rpm-sequoia
+pkgver=1.7.0
+pkgrel=1
+pkgdesc="An OpenPGP backend for rpm using Sequoia PGP"
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+url='https://github.com/rpm-software-management/rpm-sequoia'
+license=('LGPL-2.0-or-later')
+depends=(nettle)
+makedepends=(cargo rust clang pkg-config)
+
+source=(${pkgname}-${pkgver}.tar.gz::https://github.com/rpm-software-management/rpm-sequoia/archive/refs/tags/v$pkgver.tar.gz)
+sha256sums=('c141455379602614f7e8a7d3972e4bf10feafd9e7c37072bbedb793f647ab521')
+
+prepare() {
+  cd "rpm-sequoia-${pkgver}"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+
+}
+
+build() {
+  cd "rpm-sequoia-${pkgver}"
+
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "rpm-sequoia-${pkgver}"
+
+  PREFIX=/usr LIBDIR="\${prefix}/lib" cargo build --frozen --release
+  cargo test --release
+}
+
+package() {
+  cd "rpm-sequoia-${pkgver}"
+
+  install -Dm644 target/release/librpm_sequoia.so "${pkgdir}/usr/lib/librpm_sequoia.so.1"
+
+  # unversioned symlink
+  ln -s librpm_sequoia.so.1 "${pkgdir}/usr/lib/librpm_sequoia.so"
+
+  # install pkg-config
+  install -Dm644 target/release/rpm-sequoia.pc "${pkgdir}/usr/lib/pkgconfig/rpm-sequoia.pc"
+}
