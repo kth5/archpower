@@ -1,0 +1,2804 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Jan Alexander Steffens (heftig)" <jan.steffens@gmail.com>
+Date: Sun, 29 Dec 2024 15:20:28 +0100
+Subject: [PATCH] Fix Python compat and remove six
+
+Fix compatibility with Python 3.9 and remove shims for old Python.
+
+Includes several patches from Fedora:
+
+ - https://src.fedoraproject.org/rpms/gyp/blob/6b8579b88ec60d56c890e672ef3e3d0bc126f6d4/f/gyp-python38.patch
+ - https://src.fedoraproject.org/rpms/gyp/blob/6b8579b88ec60d56c890e672ef3e3d0bc126f6d4/f/gyp-fix-cmake.patch
+ - https://src.fedoraproject.org/rpms/gyp/blob/6b8579b88ec60d56c890e672ef3e3d0bc126f6d4/f/gyp-python39.patch
+ - https://src.fedoraproject.org/rpms/gyp/blob/6b8579b88ec60d56c890e672ef3e3d0bc126f6d4/f/gyp-fips.patch
+---
+ buildbot/buildbot_run.py                      |   2 -
+ gyptest.py                                    |   2 -
+ pylib/gyp/MSVSNew.py                          |  28 +-
+ pylib/gyp/MSVSSettings.py                     |  16 +-
+ pylib/gyp/MSVSSettings_test.py                |   5 +-
+ pylib/gyp/__init__.py                         |  10 +-
+ pylib/gyp/common.py                           |   7 +-
+ pylib/gyp/easy_xml.py                         |   6 +-
+ pylib/gyp/easy_xml_test.py                    |   5 +-
+ pylib/gyp/generator/analyzer.py               |   2 -
+ pylib/gyp/generator/cmake.py                  |  13 +-
+ pylib/gyp/generator/dump_dependency_json.py   |   2 -
+ pylib/gyp/generator/make.py                   |   4 +-
+ pylib/gyp/generator/msvs.py                   |   2 -
+ pylib/gyp/generator/msvs_test.py              |   5 +-
+ pylib/gyp/generator/ninja.py                  |  12 +-
+ pylib/gyp/generator/xcode.py                  |   2 -
+ pylib/gyp/input.py                            |  64 ++---
+ pylib/gyp/mac_tool.py                         |   2 -
+ pylib/gyp/msvs_emulation.py                   |  21 +-
+ pylib/gyp/simple_copy.py                      |  14 +-
+ pylib/gyp/win_tool.py                         |   2 -
+ pylib/gyp/xcode_emulation.py                  |   2 -
+ pylib/gyp/xcodeproj_file.py                   |  45 +---
+ samples/samples                               |   2 -
+ .../gyptest-action.py                         |   2 -
+ .../gyptest-multiple-outputs.py               |   2 -
+ test/actions/src/action_missing_name.gyp      |   2 +-
+ test/analyzer/gyptest-analyzer.py             |   2 -
+ test/arflags/gyptest-arflags.py               |   2 -
+ .../gyptest-compiler-global-settings.py       |   2 -
+ test/compiler-override/my_cc.py               |   1 -
+ test/compiler-override/my_cxx.py              |   1 -
+ test/compiler-override/my_ld.py               |   1 -
+ test/compiler-override/my_nm.py               |   1 -
+ test/compiler-override/my_readelf.py          |   1 -
+ .../inheritance/gyptest-duplicates.py         |   2 -
+ test/copies/gyptest-updir.py                  |   2 -
+ test/determinism/gyptest-solibs.py            |   2 -
+ test/determinism/rule.py                      |   2 -
+ test/escaping/gyptest-colon.py                |   2 -
+ test/generator-output/gyptest-mac-bundle.py   |   2 -
+ test/ios/gyptest-extension.py                 |   2 -
+ test/ios/gyptest-per-config-settings.py       |   2 -
+ test/ios/gyptest-watch.py                     |   2 -
+ test/lib/TestCmd.py                           | 246 +++---------------
+ test/lib/TestCommon.py                        |   7 +-
+ test/lib/TestGyp.py                           |   9 +-
+ test/lib/TestMac.py                           |   2 -
+ .../gyptest-shared-obj-install-path.py        |   3 -
+ .../linux/ldflags-duplicates/check-ldflags.py |   2 -
+ test/mac/gyptest-app-assets-catalog.py        |   2 -
+ test/mac/gyptest-app-error.py                 |  11 +-
+ test/mac/gyptest-app.py                       |   2 -
+ test/mac/gyptest-bundle-resources.py          |   2 -
+ test/mac/gyptest-copies.py                    |   2 -
+ test/mac/gyptest-depend-on-bundle.py          |   2 -
+ test/mac/gyptest-framework.py                 |   2 -
+ test/mac/gyptest-infoplist-process.py         |   2 -
+ test/mac/gyptest-installname.py               |   2 -
+ test/mac/gyptest-ldflags-passed-to-libtool.py |   2 -
+ test/mac/gyptest-loadable-module.py           |   2 -
+ test/mac/gyptest-missing-cfbundlesignature.py |   2 -
+ test/mac/gyptest-non-strs-flattened-to-env.py |   2 -
+ test/mac/gyptest-postbuild-defaults.py        |   2 -
+ test/mac/gyptest-postbuild-fail.py            |   2 -
+ test/mac/gyptest-rebuild.py                   |   2 -
+ test/mac/gyptest-sdkroot.py                   |   2 -
+ test/mac/gyptest-sourceless-module.py         |   2 -
+ test/mac/gyptest-strip-default.py             |   2 -
+ test/mac/gyptest-strip.py                     |   2 -
+ test/mac/gyptest-swift-library.py             |   2 -
+ test/mac/gyptest-xcode-env-order.py           |   2 -
+ test/make/gyptest-noload.py                   |   3 -
+ .../basics/gyptest-make_global_settings.py    |   2 -
+ .../env-wrapper/gyptest-wrapper.py            |   2 -
+ .../gyptest-make_global_settings.py           |   2 -
+ .../full-toolchain/my_nm.py                   |   1 -
+ .../full-toolchain/my_readelf.py              |   1 -
+ .../wrapper/gyptest-wrapper.py                |   2 -
+ .../gyptest-many-actions-unsorted.py          |   2 -
+ test/many-actions/gyptest-many-actions.py     |   2 -
+ .../msvs/config_attrs/gyptest-config_attrs.py |   2 -
+ test/msvs/rules_stdout_stderr/rule_stderr.py  |   1 -
+ test/msvs/rules_stdout_stderr/rule_stdout.py  |   1 -
+ .../gyptest-action-dependencies.py            |   2 -
+ .../gyptest-solibs-avoid-relinking.py         |   2 -
+ test/rules-dirname/gyptest-dirname.py         |   2 -
+ .../gyptest-rules-variables.py                |   2 -
+ test/rules/gyptest-all.py                     |   2 -
+ test/rules/gyptest-default.py                 |   2 -
+ test/standalone/gyptest-standalone.py         |   2 -
+ .../commands/gyptest-commands-ignore-env.py   |   1 -
+ .../commands/gyptest-commands-repeated.py     |   2 -
+ test/variables/commands/gyptest-commands.py   |   1 -
+ .../repeated_multidir/print_cwd_basename.py   |   1 -
+ test/variables/commands/test.py               |   2 -
+ .../filelist/gyptest-filelist-golden.py       |   2 -
+ ...test-cl-enable-enhanced-instruction-set.py |   2 -
+ test/win/gyptest-cl-function-level-linking.py |   2 -
+ test/win/gyptest-command-quote.py             |   2 -
+ test/win/gyptest-link-defrelink.py            |   2 -
+ test/win/gyptest-link-enable-uac.py           |  16 +-
+ .../gyptest-link-enable-winrt-app-revision.py |   2 -
+ ...nk-enable-winrt-target-platform-version.py |   2 -
+ test/win/gyptest-link-enable-winrt.py         |   2 -
+ test/win/gyptest-link-large-pdb.py            |   2 -
+ test/win/gyptest-link-ordering.py             |   2 -
+ test/win/gyptest-link-restat-importlib.py     |   2 -
+ test/win/gyptest-macro-targetfilename.py      |   2 -
+ test/win/gyptest-rc-build.py                  |   2 -
+ test/win/vs-macros/as.py                      |   2 -
+ tools/graphviz.py                             |   2 -
+ tools/pretty_gyp.py                           |   2 -
+ tools/pretty_sln.py                           |   2 -
+ tools/pretty_vcproj.py                        |  55 ++--
+ 116 files changed, 136 insertions(+), 643 deletions(-)
+
+diff --git a/buildbot/buildbot_run.py b/buildbot/buildbot_run.py
+index 89416520d3ac..964ed26bf0b0 100755
+--- a/buildbot/buildbot_run.py
++++ b/buildbot/buildbot_run.py
+@@ -5,8 +5,6 @@
+ 
+ """Argument-less script to select what to run on the buildbots."""
+ 
+-from __future__ import print_function
+-
+ import os
+ import shutil
+ import subprocess
+diff --git a/gyptest.py b/gyptest.py
+index 1a9ffca7a134..60ddba5e3f18 100755
+--- a/gyptest.py
++++ b/gyptest.py
+@@ -5,8 +5,6 @@
+ 
+ """gyptest.py -- test runner for GYP tests."""
+ 
+-from __future__ import print_function
+-
+ import argparse
+ import math
+ import os
+diff --git a/pylib/gyp/MSVSNew.py b/pylib/gyp/MSVSNew.py
+index 73182ec880ca..7698cfa3f70d 100644
+--- a/pylib/gyp/MSVSNew.py
++++ b/pylib/gyp/MSVSNew.py
+@@ -4,31 +4,14 @@
+ 
+ """New implementation of Visual Studio project generation."""
+ 
++from functools import total_ordering
++import hashlib
+ import os
+ import random
+ import sys
+ 
+ import gyp.common
+ 
+-# hashlib is supplied as of Python 2.5 as the replacement interface for md5
+-# and other secure hashes.  In 2.6, md5 is deprecated.  Import hashlib if
+-# available, avoiding a deprecation warning under 2.6.  Import md5 otherwise,
+-# preserving 2.4 compatibility.
+-try:
+-  import hashlib
+-  _new_md5 = hashlib.md5
+-except ImportError:
+-  import md5
+-  _new_md5 = md5.new
+-
+-
+-try:
+-  # cmp was removed in python3.
+-  cmp
+-except NameError:
+-  def cmp(a, b):
+-    return (a > b) - (a < b)
+-
+ # Initialize random number generator
+ random.seed()
+ 
+@@ -61,20 +44,17 @@ def MakeGuid(name, seed='msvs_new'):
+   to_hash = str(seed) + str(name)
+   to_hash = to_hash.encode('utf-8')
+   # Calculate a MD5 signature for the seed and name.
+-  d = _new_md5(to_hash).hexdigest().upper()
++  d = hashlib.md5(to_hash, usedforsecurity=False).hexdigest().upper()
+   # Convert most of the signature to GUID form (discard the rest)
+   guid = ('{' + d[:8] + '-' + d[8:12] + '-' + d[12:16] + '-' + d[16:20]
+           + '-' + d[20:32] + '}')
+   return guid
+ 
+ #------------------------------------------------------------------------------
+ 
+ 
++@total_ordering
+ class MSVSSolutionEntry(object):
+-  def __cmp__(self, other):
+-    # Sort by name then guid (so things are in order on vs2008).
+-    return cmp((self.name, self.get_guid()), (other.name, other.get_guid()))
+-
+   def __lt__(self, other):
+     return (self.name, self.get_guid()) < (other.name, other.get_guid())
+ 
+diff --git a/pylib/gyp/MSVSSettings.py b/pylib/gyp/MSVSSettings.py
+index 1d2e25ab90f1..01d05a74a26c 100644
+--- a/pylib/gyp/MSVSSettings.py
++++ b/pylib/gyp/MSVSSettings.py
+@@ -14,17 +14,9 @@ The MSBuild schemas were also considered.  They are typically found in the
+ MSBuild install directory, e.g. c:\Program Files (x86)\MSBuild
+ """
+ 
+-from __future__ import print_function
+-
+ import sys
+ import re
+ 
+-try:
+-  # basestring was removed in python3.
+-  basestring
+-except NameError:
+-  basestring = str
+-
+ # Dictionaries of settings validators. The key is the tool name, the value is
+ # a dictionary mapping setting names to validation functions.
+ _msvs_validators = {}
+@@ -114,27 +106,27 @@ class _String(_Type):
+   """A setting that's just a string."""
+ 
+   def ValidateMSVS(self, value):
+-    if not isinstance(value, basestring):
++    if not isinstance(value, str):
+       raise ValueError('expected string; got %r' % value)
+ 
+   def ValidateMSBuild(self, value):
+-    if not isinstance(value, basestring):
++    if not isinstance(value, str):
+       raise ValueError('expected string; got %r' % value)
+ 
+   def ConvertToMSBuild(self, value):
+     # Convert the macros
+     return ConvertVCMacrosToMSBuild(value)
+ 
+ 
+ class _StringList(_Type):
+   """A settings that's a list of strings."""
+ 
+   def ValidateMSVS(self, value):
+-    if not isinstance(value, basestring) and not isinstance(value, list):
++    if not isinstance(value, str) and not isinstance(value, list):
+       raise ValueError('expected string list; got %r' % value)
+ 
+   def ValidateMSBuild(self, value):
+-    if not isinstance(value, basestring) and not isinstance(value, list):
++    if not isinstance(value, str) and not isinstance(value, list):
+       raise ValueError('expected string list; got %r' % value)
+ 
+   def ConvertToMSBuild(self, value):
+diff --git a/pylib/gyp/MSVSSettings_test.py b/pylib/gyp/MSVSSettings_test.py
+index 73ed25e27d4d..1d4b9a2da3c4 100755
+--- a/pylib/gyp/MSVSSettings_test.py
++++ b/pylib/gyp/MSVSSettings_test.py
+@@ -6,10 +6,7 @@
+ 
+ """Unit tests for the MSVSSettings.py file."""
+ 
+-try:
+-  from StringIO import StringIO
+-except ImportError:
+-  from io import StringIO
++from io import StringIO
+ import unittest
+ import gyp.MSVSSettings as MSVSSettings
+ 
+diff --git a/pylib/gyp/__init__.py b/pylib/gyp/__init__.py
+index e038151ba714..a1afbb66bc09 100755
+--- a/pylib/gyp/__init__.py
++++ b/pylib/gyp/__init__.py
+@@ -4,24 +4,16 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-from __future__ import print_function
+-
+ import copy
+ import gyp.input
+ import optparse
+ import os.path
+ import re
+ import shlex
+ import sys
+ import traceback
+ from gyp.common import GypError
+ 
+-try:
+-  # basestring was removed in python3.
+-  basestring
+-except NameError:
+-  basestring = str
+-
+ # Default debug modes for GYP
+ debug = {}
+ 
+@@ -418,7 +410,7 @@ def gyp_main(args):
+     for option, value in sorted(options.__dict__.items()):
+       if option[0] == '_':
+         continue
+-      if isinstance(value, basestring):
++      if isinstance(value, str):
+         DebugOutput(DEBUG_GENERAL, "  %s: '%s'", option, value)
+       else:
+         DebugOutput(DEBUG_GENERAL, "  %s: %s", option, value)
+diff --git a/pylib/gyp/common.py b/pylib/gyp/common.py
+index f3ba8a0498f1..0f100852f38a 100644
+--- a/pylib/gyp/common.py
++++ b/pylib/gyp/common.py
+@@ -2,17 +2,14 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-from __future__ import with_statement
+-
++from collections.abc import MutableSet
+ import errno
+ import filecmp
+ import os.path
+ import re
+ import tempfile
+ import sys
+ 
+-from six.moves import collections_abc
+-
+ 
+ # A minimal memoizing decorator. It'll blow up if the args aren't immutable,
+ # among other "problems".
+@@ -495,7 +492,7 @@ def uniquer(seq, idfun=None):
+ 
+ 
+ # Based on http://code.activestate.com/recipes/576694/.
+-class OrderedSet(collections_abc.MutableSet):
++class OrderedSet(MutableSet):
+   def __init__(self, iterable=None):
+     self.end = end = []
+     end += [None, end, end]         # sentinel node for doubly linked list
+diff --git a/pylib/gyp/easy_xml.py b/pylib/gyp/easy_xml.py
+index 2de51e25fb04..ac2e93f5c2f5 100644
+--- a/pylib/gyp/easy_xml.py
++++ b/pylib/gyp/easy_xml.py
+@@ -2,16 +2,12 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
++from functools import reduce
+ import re
+ import os
+ import locale
+ import sys
+ 
+-try:
+-  # reduce moved to functools in python3.
+-  reduce
+-except NameError:
+-  from functools import reduce
+ 
+ def XmlToString(content, encoding='utf-8', pretty=False):
+   """ Writes the XML content to disk, touching the file only if it has changed.
+diff --git a/pylib/gyp/easy_xml_test.py b/pylib/gyp/easy_xml_test.py
+index c3be44641788..fce2b61b36f5 100755
+--- a/pylib/gyp/easy_xml_test.py
++++ b/pylib/gyp/easy_xml_test.py
+@@ -6,12 +6,9 @@
+ 
+ """ Unit tests for the easy_xml.py file. """
+ 
++from io import StringIO
+ import gyp.easy_xml as easy_xml
+ import unittest
+-try:
+-  from StringIO import StringIO
+-except ImportError:
+-  from io import StringIO
+ 
+ 
+ class TestSequenceFunctions(unittest.TestCase):
+diff --git a/pylib/gyp/generator/analyzer.py b/pylib/gyp/generator/analyzer.py
+index b3484dcb1bed..ab0d86456aab 100644
+--- a/pylib/gyp/generator/analyzer.py
++++ b/pylib/gyp/generator/analyzer.py
+@@ -62,8 +62,6 @@ directly supplied to gyp. OTOH if both "a.gyp" and "b.gyp" are supplied to gyp
+ then the "all" target includes "b1" and "b2".
+ """
+ 
+-from __future__ import print_function
+-
+ import gyp.common
+ import gyp.ninja_syntax as ninja_syntax
+ import json
+diff --git a/pylib/gyp/generator/cmake.py b/pylib/gyp/generator/cmake.py
+index 4a2041cf2687..6ed14d72a78b 100644
+--- a/pylib/gyp/generator/cmake.py
++++ b/pylib/gyp/generator/cmake.py
+@@ -28,21 +28,14 @@ not be able to find the header file directories described in the generated
+ CMakeLists.txt file.
+ """
+ 
+-from __future__ import print_function
+-
+ import multiprocessing
+ import os
+ import signal
+ import string
+ import subprocess
+ import gyp.common
+ import gyp.xcode_emulation
+ 
+-try:
+-  # maketrans moved to str in python3.
+-  _maketrans = string.maketrans
+-except NameError:
+-  _maketrans = str.maketrans
+ 
+ generator_default_variables = {
+   'EXECUTABLE_PREFIX': '',
+@@ -246,7 +239,7 @@ def StringToCMakeTargetName(a):
+   Invalid for make: ':'
+   Invalid for unknown reasons but cause failures: '.'
+   """
+-  return a.translate(_maketrans(' /():."', '_______'))
++  return a.translate(str.maketrans(' /():."', '_______'))
+ 
+ 
+ def WriteActions(target_name, actions, extra_sources, extra_deps,
+@@ -281,7 +274,7 @@ def WriteActions(target_name, actions, extra_sources, extra_deps,
+     dirs = set(dir for dir in (os.path.dirname(o) for o in outputs) if dir)
+ 
+     if int(action.get('process_outputs_as_sources', False)):
+-      extra_sources.extend(zip(cmake_outputs, outputs))
++      extra_sources.extend(list(zip(cmake_outputs, outputs)))
+ 
+     # add_custom_command
+     output.write('add_custom_command(OUTPUT ')
+@@ -987,7 +980,7 @@ def WriteTarget(namer, qualified_target, target_dicts, build_dir, config_to_use,
+ 
+     # XCode settings
+     xcode_settings = config.get('xcode_settings', {})
+-    for xcode_setting, xcode_value in xcode_settings.viewitems():
++    for xcode_setting, xcode_value in xcode_settings.items():
+       SetTargetProperty(output, cmake_target_name,
+                         "XCODE_ATTRIBUTE_%s" % xcode_setting, xcode_value,
+                         '' if isinstance(xcode_value, str) else ' ')
+diff --git a/pylib/gyp/generator/dump_dependency_json.py b/pylib/gyp/generator/dump_dependency_json.py
+index 2bf3f397d695..719b6c1e54ad 100644
+--- a/pylib/gyp/generator/dump_dependency_json.py
++++ b/pylib/gyp/generator/dump_dependency_json.py
+@@ -2,8 +2,6 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-from __future__ import print_function
+-
+ import collections
+ import os
+ import gyp
+diff --git a/pylib/gyp/generator/make.py b/pylib/gyp/generator/make.py
+index 997eec08666e..bc2c24cbefad 100644
+--- a/pylib/gyp/generator/make.py
++++ b/pylib/gyp/generator/make.py
+@@ -21,8 +21,6 @@
+ # toplevel Makefile.  It may make sense to generate some .mk files on
+ # the side to keep the the files readable.
+ 
+-from __future__ import print_function
+-
+ import os
+ import re
+ import sys
+@@ -1774,7 +1772,7 @@ $(obj).$(TOOLSET)/$(TARGET)/%%.o: $(obj)/%%%s FORCE_DO_CMD
+ 
+       # Hash the target name to avoid generating overlong filenames.
+       cmdstring = (command if command else self.target).encode('utf-8')
+-      cmddigest = hashlib.sha1(cmdstring).hexdigest()
++      cmddigest = hashlib.sha1(cmdstring, usedforsecurity=False).hexdigest()
+       intermediate = "%s.intermediate" % (cmddigest)
+       self.WriteLn('%s: %s' % (' '.join(outputs), intermediate))
+       self.WriteLn('\t%s' % '@:');
+diff --git a/pylib/gyp/generator/msvs.py b/pylib/gyp/generator/msvs.py
+index 2278c16acf3a..0d4c904df200 100644
+--- a/pylib/gyp/generator/msvs.py
++++ b/pylib/gyp/generator/msvs.py
+@@ -2,8 +2,6 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-from __future__ import print_function
+-
+ import copy
+ import ntpath
+ import os
+diff --git a/pylib/gyp/generator/msvs_test.py b/pylib/gyp/generator/msvs_test.py
+index 838d236a2d8e..db1382fc4cf2 100755
+--- a/pylib/gyp/generator/msvs_test.py
++++ b/pylib/gyp/generator/msvs_test.py
+@@ -5,12 +5,9 @@
+ 
+ """ Unit tests for the msvs.py file. """
+ 
++from io import StringIO
+ import gyp.generator.msvs as msvs
+ import unittest
+-try:
+-  from StringIO import StringIO
+-except ImportError:
+-  from io import StringIO
+ 
+ 
+ class TestSequenceFunctions(unittest.TestCase):
+diff --git a/pylib/gyp/generator/ninja.py b/pylib/gyp/generator/ninja.py
+index 3bcfe352925b..23d6467f41e3 100644
+--- a/pylib/gyp/generator/ninja.py
++++ b/pylib/gyp/generator/ninja.py
+@@ -2,29 +2,23 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-from __future__ import print_function
+-
++from io import StringIO
+ import collections
+ import copy
+ import hashlib
+ import json
+ import multiprocessing
+ import os.path
+ import re
+ import signal
+ import subprocess
+ import sys
+-import six
+ import gyp
+ import gyp.common
+ from gyp.common import OrderedSet
+ import gyp.msvs_emulation
+ import gyp.MSVSUtil as MSVSUtil
+ import gyp.xcode_emulation
+-try:
+-  from cStringIO import StringIO
+-except ImportError:
+-  from io import StringIO
+ 
+ from gyp.common import GetEnvironFallback
+ import gyp.ninja_syntax as ninja_syntax
+@@ -752,7 +746,7 @@ class NinjaWriter(object):
+         if self.flavor == 'win':
+           # WriteNewNinjaRule uses unique_name for creating an rsp file on win.
+           extra_bindings.append(('unique_name',
+-              hashlib.md5(six.ensure_binary(outputs[0])).hexdigest()))
++              hashlib.md5(outputs[0].encode('utf-8'), usedforsecurity=False).hexdigest()))
+ 
+         self.ninja.build(outputs, rule_name, self.GypPathToNinja(source),
+                          implicit=inputs,
+@@ -2389,7 +2383,7 @@ def GenerateOutputForConfig(target_list, target_dicts, data, params,
+     qualified_target_for_hash = gyp.common.QualifiedTarget(build_file, name,
+                                                            toolset)
+     qualified_target_for_hash = qualified_target_for_hash.encode('utf-8')
+-    hash_for_rules = hashlib.md5(qualified_target_for_hash).hexdigest()
++    hash_for_rules = hashlib.md5(qualified_target_for_hash, usedforsecurity=False).hexdigest()
+ 
+     base_path = os.path.dirname(build_file)
+     obj = 'obj'
+diff --git a/pylib/gyp/generator/xcode.py b/pylib/gyp/generator/xcode.py
+index 23571086c2b6..0455cf416350 100644
+--- a/pylib/gyp/generator/xcode.py
++++ b/pylib/gyp/generator/xcode.py
+@@ -2,8 +2,6 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-from __future__ import print_function
+-
+ import filecmp
+ import gyp.common
+ import gyp.xcodeproj_file
+diff --git a/pylib/gyp/input.py b/pylib/gyp/input.py
+index 4c1289164045..efcc4e55d6d5 100644
+--- a/pylib/gyp/input.py
++++ b/pylib/gyp/input.py
+@@ -2,8 +2,6 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-from __future__ import print_function
+-
+ import ast
+ import gyp.common
+ import gyp.simple_copy
+@@ -54,22 +52,6 @@ path_sections = set()
+ per_process_data = {}
+ per_process_aux_data = {}
+ 
+-try:
+-  _str_types = (basestring,)
+-# There's no basestring in python3.
+-except NameError:
+-  _str_types = (str,)
+-
+-try:
+-  _int_types = (int, long)
+-# There's no long in python3.
+-except NameError:
+-  _int_types = (int,)
+-
+-# Shortcuts as we use these combos a lot.
+-_str_int_types = _str_types + _int_types
+-_str_int_list_types = _str_int_types + (list,)
+-
+ 
+ def IsPathSection(section):
+   # If section ends in one of the '=+?!' characters, it's applied to a section
+@@ -657,7 +639,7 @@ def IsStrCanonicalInt(string):
+ 
+   The canonical form is such that str(int(string)) == string.
+   """
+-  if isinstance(string, _str_types):
++  if isinstance(string, str):
+     # This function is called a lot so for maximum performance, avoid
+     # involving regexps which would otherwise make the code much
+     # shorter. Regexps would need twice the time of this function.
+@@ -957,17 +939,17 @@ def ExpandVariables(input, phase, variables, build_file):
+ 
+     if type(replacement) is list:
+       for item in replacement:
+-        if not contents[-1] == '/' and not isinstance(item, _str_int_types):
++        if not contents[-1] == '/' and not isinstance(item, (str, int)):
+           raise GypError('Variable ' + contents +
+                          ' must expand to a string or list of strings; ' +
+                          'list contains a ' +
+                          item.__class__.__name__)
+       # Run through the list and handle variable expansions in it.  Since
+       # the list is guaranteed not to contain dicts, this won't do anything
+       # with conditions sections.
+       ProcessVariablesAndConditionsInList(replacement, phase, variables,
+                                           build_file)
+-    elif not isinstance(replacement, _str_int_types):
++    elif not isinstance(replacement, (str, int)):
+           raise GypError('Variable ' + str(contents) +
+                          ' must expand to a string or list of strings; ' +
+                          'found a ' + replacement.__class__.__name__)
+@@ -1086,7 +1068,7 @@ def EvalSingleCondition(
+   # use a command expansion directly inside a condition.
+   cond_expr_expanded = ExpandVariables(cond_expr, phase, variables,
+                                        build_file)
+-  if not isinstance(cond_expr_expanded, _str_int_types):
++  if not isinstance(cond_expr_expanded, (str, int)):
+     raise ValueError(
+           'Variable expansion in this context permits str and int ' + \
+             'only, found ' + cond_expr_expanded.__class__.__name__)
+@@ -1162,28 +1144,28 @@ def LoadAutomaticVariablesFromDict(variables, the_dict):
+   # Any keys with plain string values in the_dict become automatic variables.
+   # The variable name is the key name with a "_" character prepended.
+   for key, value in the_dict.items():
+-    if isinstance(value, _str_int_list_types):
++    if isinstance(value, (str, int, list)):
+       variables['_' + key] = value
+ 
+ 
+ def LoadVariablesFromVariablesDict(variables, the_dict, the_dict_key):
+   # Any keys in the_dict's "variables" dict, if it has one, becomes a
+   # variable.  The variable name is the key name in the "variables" dict.
+   # Variables that end with the % character are set only if they are unset in
+   # the variables dict.  the_dict_key is the name of the key that accesses
+   # the_dict in the_dict's parent dict.  If the_dict's parent is not a dict
+   # (it could be a list or it could be parentless because it is a root dict),
+   # the_dict_key will be None.
+   for key, value in the_dict.get('variables', {}).items():
+-    if not isinstance(value, _str_int_list_types):
++    if not isinstance(value, (str, int, list)):
+       continue
+ 
+     if key.endswith('%'):
+       variable_name = key[:-1]
+       if variable_name in variables:
+         # If the variable is already set, don't set it.
+         continue
+-      if the_dict_key is 'variables' and variable_name in the_dict:
++      if the_dict_key == 'variables' and variable_name in the_dict:
+         # If the variable is set without a % in the_dict, and the_dict is a
+         # variables dict (making |variables| a varaibles sub-dict of a
+         # variables dict), use the_dict's definition.
+@@ -1228,9 +1210,9 @@ def ProcessVariablesAndConditionsInDict(the_dict, phase, variables_in,
+ 
+   for key, value in the_dict.items():
+     # Skip "variables", which was already processed if present.
+-    if key != 'variables' and isinstance(value, _str_types):
++    if key != 'variables' and isinstance(value, str):
+       expanded = ExpandVariables(value, phase, variables, build_file)
+-      if not isinstance(expanded, _str_int_types):
++      if not isinstance(expanded, (str, int)):
+         raise ValueError(
+               'Variable expansion in this context permits str and int ' + \
+               'only, found ' + expanded.__class__.__name__ + ' for ' + key)
+@@ -1287,54 +1269,54 @@ def ProcessVariablesAndConditionsInDict(the_dict, phase, variables_in,
+   for key, value in the_dict.items():
+     # Skip "variables" and string values, which were already processed if
+     # present.
+-    if key == 'variables' or isinstance(value, _str_types):
++    if key == 'variables' or isinstance(value, str):
+       continue
+     if type(value) is dict:
+       # Pass a copy of the variables dict so that subdicts can't influence
+       # parents.
+       ProcessVariablesAndConditionsInDict(value, phase, variables,
+                                           build_file, key)
+     elif type(value) is list:
+       # The list itself can't influence the variables dict, and
+       # ProcessVariablesAndConditionsInList will make copies of the variables
+       # dict if it needs to pass it to something that can influence it.  No
+       # copy is necessary here.
+       ProcessVariablesAndConditionsInList(value, phase, variables,
+                                           build_file)
+-    elif not isinstance(value, _int_types):
++    elif not isinstance(value, int):
+       raise TypeError('Unknown type ' + value.__class__.__name__ + \
+                       ' for ' + key)
+ 
+ 
+ def ProcessVariablesAndConditionsInList(the_list, phase, variables,
+                                         build_file):
+   # Iterate using an index so that new values can be assigned into the_list.
+   index = 0
+   while index < len(the_list):
+     item = the_list[index]
+     if type(item) is dict:
+       # Make a copy of the variables dict so that it won't influence anything
+       # outside of its own scope.
+       ProcessVariablesAndConditionsInDict(item, phase, variables, build_file)
+     elif type(item) is list:
+       ProcessVariablesAndConditionsInList(item, phase, variables, build_file)
+-    elif isinstance(item, _str_types):
++    elif isinstance(item, str):
+       expanded = ExpandVariables(item, phase, variables, build_file)
+-      if isinstance(expanded, _str_int_types):
++      if isinstance(expanded, (str, int)):
+         the_list[index] = expanded
+       elif type(expanded) is list:
+         the_list[index:index+1] = expanded
+         index += len(expanded)
+ 
+         # index now identifies the next item to examine.  Continue right now
+         # without falling into the index increment below.
+         continue
+       else:
+         raise ValueError(
+               'Variable expansion in this context permits strings and ' + \
+               'lists only, found ' + expanded.__class__.__name__ + ' at ' + \
+               index)
+-    elif not isinstance(item, _int_types):
++    elif not isinstance(item, int):
+       raise TypeError('Unknown type ' + item.__class__.__name__ + \
+                       ' at index ' + index)
+     index = index + 1
+@@ -2069,14 +2051,14 @@ def MergeLists(to, fro, to_file, fro_file, is_paths=False, append=True):
+   hashable_to_set = set(x for x in to if is_hashable(x))
+   for item in fro:
+     singleton = False
+-    if isinstance(item, _str_int_types):
++    if isinstance(item, (str, int)):
+       # The cheap and easy case.
+       if is_paths:
+         to_item = MakePathRelative(to_file, fro_file, item)
+       else:
+         to_item = item
+ 
+-      if not (isinstance(item, _str_types) and item.startswith('-')):
++      if not (isinstance(item, str) and item.startswith('-')):
+         # Any string that doesn't begin with a "-" is a singleton - it can
+         # only appear once in a list, to be enforced by the list merge append
+         # or prepend.
+@@ -2133,18 +2115,18 @@ def MergeDicts(to, fro, to_file, fro_file):
+     # modified.
+     if k in to:
+       bad_merge = False
+-      if isinstance(v, _str_int_types):
+-        if not isinstance(to[k], _str_int_types):
++      if isinstance(v, (str, int)):
++        if not isinstance(to[k], (str, int)):
+           bad_merge = True
+       elif type(v) is not type(to[k]):
+         bad_merge = True
+ 
+       if bad_merge:
+         raise TypeError(
+             'Attempt to merge dict value of type ' + v.__class__.__name__ + \
+             ' into incompatible type ' + to[k].__class__.__name__ + \
+             ' for key ' + k)
+-    if isinstance(v, _str_int_types):
++    if isinstance(v, (str, int)):
+       # Overwrite the existing value, if any.  Cheap and easy.
+       is_path = IsPathSection(k)
+       if is_path:
+@@ -2619,7 +2601,7 @@ def ValidateRunAsInTarget(target, target_dict, build_file):
+                    "must be a list." %
+                    (target_name, build_file))
+   working_directory = run_as.get('working_directory')
+-  if working_directory and not isinstance(working_directory, _str_types):
++  if working_directory and not isinstance(working_directory, str):
+     raise GypError("The 'working_directory' for 'run_as' in target %s "
+                    "in file %s should be a string." %
+                    (target_name, build_file))
+@@ -2654,24 +2636,24 @@ def TurnIntIntoStrInDict(the_dict):
+   # Use items instead of iteritems because there's no need to try to look at
+   # reinserted keys and their associated values.
+   for k, v in the_dict.items():
+-    if isinstance(v, _int_types):
++    if isinstance(v, int):
+       v = str(v)
+       the_dict[k] = v
+     elif type(v) is dict:
+       TurnIntIntoStrInDict(v)
+     elif type(v) is list:
+       TurnIntIntoStrInList(v)
+ 
+-    if isinstance(k, _int_types):
++    if isinstance(k, int):
+       del the_dict[k]
+       the_dict[str(k)] = v
+ 
+ 
+ def TurnIntIntoStrInList(the_list):
+   """Given list the_list, recursively converts all integers into strings.
+   """
+   for index, item in enumerate(the_list):
+-    if isinstance(item, _int_types):
++    if isinstance(item, int):
+       the_list[index] = str(item)
+     elif type(item) is dict:
+       TurnIntIntoStrInDict(item)
+diff --git a/pylib/gyp/mac_tool.py b/pylib/gyp/mac_tool.py
+index 64d21063ff6a..3537fa21ed9b 100755
+--- a/pylib/gyp/mac_tool.py
++++ b/pylib/gyp/mac_tool.py
+@@ -8,8 +8,6 @@
+ These functions are executed via gyp-mac-tool when using the Makefile generator.
+ """
+ 
+-from __future__ import print_function
+-
+ import fcntl
+ import fnmatch
+ import glob
+diff --git a/pylib/gyp/msvs_emulation.py b/pylib/gyp/msvs_emulation.py
+index 034ef49591f8..98ba8a8b76c0 100644
+--- a/pylib/gyp/msvs_emulation.py
++++ b/pylib/gyp/msvs_emulation.py
+@@ -7,24 +7,17 @@ This module helps emulate Visual Studio 2008 behavior on top of other
+ build systems, primarily ninja.
+ """
+ 
++from collections.abc import Iterable
+ import os
+ import re
+ import subprocess
+ import sys
+ 
+-from six.moves import collections_abc
+-
+ from gyp.common import OrderedSet
+ import gyp.MSVSUtil
+ import gyp.MSVSVersion
+ from gyp.MSVSVersion import version_to_tuple
+ 
+-try:
+-  # basestring was removed in python3.
+-  basestring
+-except NameError:
+-  basestring = str
+-
+ 
+ windows_quoter_regex = re.compile(r'(\\*)"')
+ 
+@@ -94,34 +87,34 @@ def _AddPrefix(element, prefix):
+   """Add |prefix| to |element| or each subelement if element is iterable."""
+   if element is None:
+     return element
+-  if (isinstance(element, collections_abc.Iterable) and
+-      not isinstance(element, basestring)):
++  if (isinstance(element, Iterable) and
++      not isinstance(element, str)):
+     return [prefix + e for e in element]
+   else:
+     return prefix + element
+ 
+ 
+ def _DoRemapping(element, map):
+   """If |element| then remap it through |map|. If |element| is iterable then
+   each item will be remapped. Any elements not found will be removed."""
+   if map is not None and element is not None:
+     if not callable(map):
+       map = map.get # Assume it's a dict, otherwise a callable to do the remap.
+-    if (isinstance(element, collections_abc.Iterable) and
+-        not isinstance(element, basestring)):
++    if (isinstance(element, Iterable) and
++        not isinstance(element, str)):
+       element = filter(None, [map(elem) for elem in element])
+     else:
+       element = map(element)
+   return element
+ 
+ 
+ def _AppendOrReturn(append, element):
+   """If |append| is None, simply return |element|. If |append| is not None,
+   then add |element| to it, adding each item in |element| if it's a list or
+   tuple."""
+   if append is not None and element is not None:
+-    if (isinstance(element, collections_abc.Iterable) and
+-        not isinstance(element, basestring)):
++    if (isinstance(element, Iterable) and
++        not isinstance(element, str)):
+       append.extend(element)
+     else:
+       append.append(element)
+diff --git a/pylib/gyp/simple_copy.py b/pylib/gyp/simple_copy.py
+index 58a61c34231f..20a9958dab02 100644
+--- a/pylib/gyp/simple_copy.py
++++ b/pylib/gyp/simple_copy.py
+@@ -28,19 +28,7 @@ _deepcopy_dispatch = d = {}
+ def _deepcopy_atomic(x):
+   return x
+ 
+-try:
+-  _string_types = (str, unicode)
+-# There's no unicode in python3
+-except NameError:
+-  _string_types = (str, )
+-
+-try:
+-  _integer_types = (int, long)
+-# There's no long in python3
+-except NameError:
+-  _integer_types = (int, )
+-
+-for x in (type(None), float, bool, type) + _integer_types + _string_types:
++for x in (type(None), float, bool, type, int, str):
+   d[x] = _deepcopy_atomic
+ 
+ def _deepcopy_list(x):
+diff --git a/pylib/gyp/win_tool.py b/pylib/gyp/win_tool.py
+index e7c0dd81f752..41fdab9352cc 100755
+--- a/pylib/gyp/win_tool.py
++++ b/pylib/gyp/win_tool.py
+@@ -9,8 +9,6 @@
+ These functions are executed via gyp-win-tool when using the ninja generator.
+ """
+ 
+-from __future__ import print_function
+-
+ import os
+ import re
+ import shutil
+diff --git a/pylib/gyp/xcode_emulation.py b/pylib/gyp/xcode_emulation.py
+index 4de25f9f4a00..ada688e2acb8 100644
+--- a/pylib/gyp/xcode_emulation.py
++++ b/pylib/gyp/xcode_emulation.py
+@@ -7,8 +7,6 @@ This module contains classes that help to emulate xcodebuild behavior on top of
+ other build systems, such as make and ninja.
+ """
+ 
+-from __future__ import print_function
+-
+ import copy
+ import gyp.common
+ import os
+diff --git a/pylib/gyp/xcodeproj_file.py b/pylib/gyp/xcodeproj_file.py
+index 9374add9b0f8..fe82756a6fa2 100644
+--- a/pylib/gyp/xcodeproj_file.py
++++ b/pylib/gyp/xcodeproj_file.py
+@@ -139,35 +139,12 @@ a project file is output.
+ 
+ import functools
+ import gyp.common
++import hashlib
+ import posixpath
+ import re
+ import struct
+ import sys
+ 
+-# hashlib is supplied as of Python 2.5 as the replacement interface for sha
+-# and other secure hashes.  In 2.6, sha is deprecated.  Import hashlib if
+-# available, avoiding a deprecation warning under 2.6.  Import sha otherwise,
+-# preserving 2.4 compatibility.
+-try:
+-  import hashlib
+-  _new_sha1 = hashlib.sha1
+-except ImportError:
+-  import sha
+-  _new_sha1 = sha.new
+-
+-try:
+-  # basestring was removed in python3.
+-  basestring
+-except NameError:
+-  basestring = str
+-
+-try:
+-  # cmp was removed in python3.
+-  cmp
+-except NameError:
+-  def cmp(a, b):
+-    return (a > b) - (a < b)
+-
+ # See XCObject._EncodeString.  This pattern is used to determine when a string
+ # can be printed unquoted.  Strings that match this pattern may be printed
+ # unquoted.  Strings that do not match must be quoted and may be further
+@@ -337,7 +314,7 @@ class XCObject(object):
+           that._properties[key] = new_value
+         else:
+           that._properties[key] = value
+-      elif isinstance(value, basestring) or isinstance(value, int):
++      elif isinstance(value, str) or isinstance(value, int):
+         that._properties[key] = value
+       elif isinstance(value, list):
+         if is_strong:
+@@ -434,7 +411,7 @@ class XCObject(object):
+       hash.update(data.encode('utf-8'))
+ 
+     if seed_hash is None:
+-      seed_hash = _new_sha1()
++      seed_hash = hashlib.sha1()
+ 
+     hash = seed_hash.copy()
+ 
+@@ -615,13 +592,6 @@ class XCObject(object):
+       comment = value.Comment()
+     elif isinstance(value, str):
+       printable += self._EncodeString(value)
+-    # A python3 compatible way of saying isinstance(value, unicode).
+-    # basestring is str in python3 so this is equivalent to the above
+-    # isinstance. Thus if it failed above it will fail here.
+-    # In python2 we test against str and unicode at this point. str has already
+-    # failed in the above isinstance so we test against unicode.
+-    elif isinstance(value, basestring):
+-      printable += self._EncodeString(value.encode('utf-8'))
+     elif isinstance(value, int):
+       printable += str(value)
+     elif isinstance(value, list):
+@@ -783,29 +753,29 @@ class XCObject(object):
+                 ' must be list, not ' + value.__class__.__name__)
+         for item in value:
+           if not isinstance(item, property_type) and \
+-             not (isinstance(item, basestring) and property_type == str):
++             not (isinstance(item, str) and property_type == str):
+             # Accept unicode where str is specified.  str is treated as
+             # UTF-8-encoded.
+             raise TypeError(
+                   'item of ' + property + ' of ' + self.__class__.__name__ + \
+                   ' must be ' + property_type.__name__ + ', not ' + \
+                   item.__class__.__name__)
+       elif not isinstance(value, property_type) and \
+-           not (isinstance(value, basestring) and property_type == str):
++           not (isinstance(value, str) and property_type == str):
+         # Accept unicode where str is specified.  str is treated as
+         # UTF-8-encoded.
+         raise TypeError(
+               property + ' of ' + self.__class__.__name__ + ' must be ' + \
+               property_type.__name__ + ', not ' + value.__class__.__name__)
+ 
+       # Checks passed, perform the assignment.
+       if do_copy:
+         if isinstance(value, XCObject):
+           if is_strong:
+             self._properties[property] = value.Copy()
+           else:
+             self._properties[property] = value
+-        elif isinstance(value, basestring) or isinstance(value, int):
++        elif isinstance(value, str) or isinstance(value, int):
+           self._properties[property] = value
+         elif isinstance(value, list):
+           if is_strong:
+@@ -1032,6 +1002,9 @@ class XCHierarchicalElement(XCObject):
+ 
+     if self_type == other_type:
+       # If the two objects are of the same sort rank, compare their names.
++      def cmp(a, b):
++        return (a > b) - (a < b)
++
+       return cmp(self.Name(), other.Name())
+ 
+     # Otherwise, sort groups before everything else.
+diff --git a/samples/samples b/samples/samples
+index ff26de38258f..ceaee5e46137 100755
+--- a/samples/samples
++++ b/samples/samples
+@@ -4,8 +4,6 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-from __future__ import print_function
+-
+ import os.path
+ import shutil
+ import sys
+diff --git a/test/actions-multiple-outputs-with-dependencies/gyptest-action.py b/test/actions-multiple-outputs-with-dependencies/gyptest-action.py
+index a9d218282cc1..d0aee50c0f2d 100755
+--- a/test/actions-multiple-outputs-with-dependencies/gyptest-action.py
++++ b/test/actions-multiple-outputs-with-dependencies/gyptest-action.py
+@@ -10,8 +10,6 @@ Verifies actions with multiple outputs & dependncies will correctly rebuild.
+ This is a regression test for crrev.com/1177163002.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ import os
+ import sys
+diff --git a/test/actions-multiple-outputs/gyptest-multiple-outputs.py b/test/actions-multiple-outputs/gyptest-multiple-outputs.py
+index 5e2682d00ff6..3d25945987a0 100755
+--- a/test/actions-multiple-outputs/gyptest-multiple-outputs.py
++++ b/test/actions-multiple-outputs/gyptest-multiple-outputs.py
+@@ -8,8 +8,6 @@
+ Verifies actions with multiple outputs will correctly rebuild.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ import os
+ import sys
+diff --git a/test/actions/src/action_missing_name.gyp b/test/actions/src/action_missing_name.gyp
+index 6647aac3b509..30fe051c0477 100644
+--- a/test/actions/src/action_missing_name.gyp
++++ b/test/actions/src/action_missing_name.gyp
+@@ -15,7 +15,7 @@
+           'action': [
+             'python',
+             '-c',
+-            'from __future__ import print_function; print(\'missing name\')',
++            'print(\'missing name\')',
+           ],
+         },
+       ],
+diff --git a/test/analyzer/gyptest-analyzer.py b/test/analyzer/gyptest-analyzer.py
+index 58a1ce6f0715..2bf0c7a31df9 100644
+--- a/test/analyzer/gyptest-analyzer.py
++++ b/test/analyzer/gyptest-analyzer.py
+@@ -6,8 +6,6 @@
+ """Tests for analyzer
+ """
+ 
+-from __future__ import print_function
+-
+ import json
+ import TestGyp
+ 
+diff --git a/test/arflags/gyptest-arflags.py b/test/arflags/gyptest-arflags.py
+index 870a2d894695..36248fd63bd8 100644
+--- a/test/arflags/gyptest-arflags.py
++++ b/test/arflags/gyptest-arflags.py
+@@ -8,8 +8,6 @@
+ Verifies that building a target with invalid arflags fails.
+ """
+ 
+-from __future__ import print_function
+-
+ import os
+ import sys
+ import TestGyp
+diff --git a/test/compiler-override/gyptest-compiler-global-settings.py b/test/compiler-override/gyptest-compiler-global-settings.py
+index 9f062a4fef72..a46325c28184 100755
+--- a/test/compiler-override/gyptest-compiler-global-settings.py
++++ b/test/compiler-override/gyptest-compiler-global-settings.py
+@@ -6,8 +6,6 @@
+ Verifies that make_global_settings can be used to override the
+ compiler settings.
+ """
+-from __future__ import print_function
+-
+ import TestGyp
+ import os
+ import copy
+diff --git a/test/compiler-override/my_cc.py b/test/compiler-override/my_cc.py
+index 09e1d3c58d18..b4d9e32b8ba3 100755
+--- a/test/compiler-override/my_cc.py
++++ b/test/compiler-override/my_cc.py
+@@ -2,6 +2,5 @@
+ # Copyright (c) 2012 Google Inc. All rights reserved.
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+-from __future__ import print_function
+ import sys
+ print(sys.argv)
+diff --git a/test/compiler-override/my_cxx.py b/test/compiler-override/my_cxx.py
+index 09e1d3c58d18..b4d9e32b8ba3 100755
+--- a/test/compiler-override/my_cxx.py
++++ b/test/compiler-override/my_cxx.py
+@@ -2,6 +2,5 @@
+ # Copyright (c) 2012 Google Inc. All rights reserved.
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+-from __future__ import print_function
+ import sys
+ print(sys.argv)
+diff --git a/test/compiler-override/my_ld.py b/test/compiler-override/my_ld.py
+index 09e1d3c58d18..b4d9e32b8ba3 100755
+--- a/test/compiler-override/my_ld.py
++++ b/test/compiler-override/my_ld.py
+@@ -2,6 +2,5 @@
+ # Copyright (c) 2012 Google Inc. All rights reserved.
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+-from __future__ import print_function
+ import sys
+ print(sys.argv)
+diff --git a/test/compiler-override/my_nm.py b/test/compiler-override/my_nm.py
+index 2c4e678110bb..578d680bc545 100755
+--- a/test/compiler-override/my_nm.py
++++ b/test/compiler-override/my_nm.py
+@@ -2,7 +2,6 @@
+ # Copyright (c) 2014 Google Inc. All rights reserved.
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+-from __future__ import print_function
+ import sys
+ print(sys.argv)
+ with open('RAN_MY_NM', 'w') as f:
+diff --git a/test/compiler-override/my_readelf.py b/test/compiler-override/my_readelf.py
+index 626665435e68..6ec7c9ea22b7 100755
+--- a/test/compiler-override/my_readelf.py
++++ b/test/compiler-override/my_readelf.py
+@@ -2,7 +2,6 @@
+ # Copyright (c) 2014 Google Inc. All rights reserved.
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+-from __future__ import print_function
+ import sys
+ print(sys.argv)
+ with open('RAN_MY_READELF', 'w') as f:
+diff --git a/test/configurations/inheritance/gyptest-duplicates.py b/test/configurations/inheritance/gyptest-duplicates.py
+index f015638b6ddd..ebf5a5791fef 100755
+--- a/test/configurations/inheritance/gyptest-duplicates.py
++++ b/test/configurations/inheritance/gyptest-duplicates.py
+@@ -8,8 +8,6 @@
+ Verifies that configurations do not duplicate other settings.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ test = TestGyp.TestGyp(format='gypd')
+diff --git a/test/copies/gyptest-updir.py b/test/copies/gyptest-updir.py
+index 47a2ca2e1d58..19012d6d2792 100755
+--- a/test/copies/gyptest-updir.py
++++ b/test/copies/gyptest-updir.py
+@@ -9,8 +9,6 @@ Verifies file copies where the destination is one level above an expansion that
+ yields a make variable.
+ """
+ 
+-from __future__ import print_function
+-
+ import sys
+ 
+ import TestGyp
+diff --git a/test/determinism/gyptest-solibs.py b/test/determinism/gyptest-solibs.py
+index a9c312573bd8..309ce6d9a0a0 100644
+--- a/test/determinism/gyptest-solibs.py
++++ b/test/determinism/gyptest-solibs.py
+@@ -9,8 +9,6 @@ Verifies builds are the same even with different PYTHONHASHSEEDs.
+ Tests all_targets, implicit_deps and solibs.
+ """
+ 
+-from __future__ import print_function
+-
+ import os
+ import sys
+ import TestGyp
+diff --git a/test/determinism/rule.py b/test/determinism/rule.py
+index e18c31455743..9581874234b0 100644
+--- a/test/determinism/rule.py
++++ b/test/determinism/rule.py
+@@ -3,6 +3,4 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-from __future__ import print_function
+-
+ print('Hello World')
+diff --git a/test/escaping/gyptest-colon.py b/test/escaping/gyptest-colon.py
+index f62f8dc65eaf..115199ee801a 100644
+--- a/test/escaping/gyptest-colon.py
++++ b/test/escaping/gyptest-colon.py
+@@ -9,8 +9,6 @@ Tests that filenames that contain colons are handled correctly.
+ (This is important for absolute paths on Windows.)
+ """
+ 
+-from __future__ import print_function
+-
+ import os
+ import sys
+ 
+diff --git a/test/generator-output/gyptest-mac-bundle.py b/test/generator-output/gyptest-mac-bundle.py
+index 14597d8de288..38f4f6fce260 100644
+--- a/test/generator-output/gyptest-mac-bundle.py
++++ b/test/generator-output/gyptest-mac-bundle.py
+@@ -8,8 +8,6 @@
+ Verifies mac bundles work with --generator-output.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import sys
+diff --git a/test/ios/gyptest-extension.py b/test/ios/gyptest-extension.py
+index bb239ae5b816..2a7da63a9933 100755
+--- a/test/ios/gyptest-extension.py
++++ b/test/ios/gyptest-extension.py
+@@ -8,8 +8,6 @@
+ Verifies that ios app extensions are built correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ import TestMac
+ import subprocess
+diff --git a/test/ios/gyptest-per-config-settings.py b/test/ios/gyptest-per-config-settings.py
+index c3a22e05623a..75b76cc7fa0a 100644
+--- a/test/ios/gyptest-per-config-settings.py
++++ b/test/ios/gyptest-per-config-settings.py
+@@ -8,8 +8,6 @@
+ Verifies that device and simulator bundles are built correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import plistlib
+ import TestGyp
+ import os
+diff --git a/test/ios/gyptest-watch.py b/test/ios/gyptest-watch.py
+index 39bab49bb0a4..885637421a15 100755
+--- a/test/ios/gyptest-watch.py
++++ b/test/ios/gyptest-watch.py
+@@ -8,8 +8,6 @@
+ Verifies that ios watch extensions and apps are built correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ import TestMac
+ 
+diff --git a/test/lib/TestCmd.py b/test/lib/TestCmd.py
+index 1ec50933a4a8..39da97c212d3 100644
+--- a/test/lib/TestCmd.py
++++ b/test/lib/TestCmd.py
+@@ -218,106 +218,66 @@ version.
+ # AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
+ # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
+ 
+-from __future__ import print_function
+-
+ __author__ = "Steven Knight <knight at baldmt dot com>"
+ __revision__ = "TestCmd.py 0.37.D001 2010/01/11 16:55:50 knight"
+ __version__ = "0.37"
+ 
++from collections import UserList, UserString
++import atexit
++import difflib
+ import errno
+ import os
+ import os.path
+ import re
+ import shutil
+ import stat
++import subprocess
+ import sys
+ import tempfile
+ import time
+ import traceback
+-try:
+-    from UserList import UserList
+-except ImportError:
+-    from collections import UserList
+ 
+ __all__ = [
+     'diff_re',
+     'fail_test',
+     'no_result',
+     'pass_test',
+     'match_exact',
+     'match_re',
+     'match_re_dotall',
+     'python_executable',
++    'simple_diff'
+     'TestCmd'
+ ]
+ 
+-try:
+-    import difflib
+-except ImportError:
+-    __all__.append('simple_diff')
+-
+ def is_List(e):
+     return (type(e) is list) or isinstance(e, UserList)
+ 
+-try:
+-    from UserString import UserString
+-except ImportError:
+-    try:
+-        from collections import UserString
+-    except ImportError:
+-        class UserString:
+-            pass
+-
+-try:
+-  # basestring was removed in python3.
+-  basestring
+-except NameError:
+-  basestring = str
+-
+ def is_String(e):
+-    return isinstance(e, basestring) or isinstance(e, UserString)
++    return isinstance(e, str) or isinstance(e, UserString)
+ 
+ tempfile.template = 'testcmd.'
+ if os.name in ('posix', 'nt'):
+     tempfile.template = 'testcmd.' + str(os.getpid()) + '.'
+ else:
+     tempfile.template = 'testcmd.'
+ 
+-re_space = re.compile('\s')
++re_space = re.compile(r'\s')
+ 
+ _Cleanup = []
+ 
+ _chain_to_exitfunc = None
+ 
+ def _clean():
+     global _Cleanup
+     for test in reversed(_Cleanup):
+         if test:
+             test.cleanup()
+     del _Cleanup[:]
+     if _chain_to_exitfunc:
+         _chain_to_exitfunc()
+ 
+-try:
+-    import atexit
+-except ImportError:
+-    # TODO(1.5): atexit requires python 2.0, so chain sys.exitfunc
+-    try:
+-        _chain_to_exitfunc = sys.exitfunc
+-    except AttributeError:
+-        pass
+-    sys.exitfunc = _clean
+-else:
+-    atexit.register(_clean)
+-
+-try:
+-    zip
+-except NameError:
+-    def zip(*lists):
+-        result = []
+-        for i in range(min(map(len, lists))):
+-            result.append(tuple(map(lambda l, i=i: l[i], lists)))
+-        return result
++atexit.register(_clean)
+ 
+ class Collector:
+     def __init__(self, top):
+@@ -464,35 +424,30 @@ def match_re_dotall(lines = None, res = None):
+     if expr.match(lines):
+         return 1
+ 
+-try:
+-    import difflib
+-except ImportError:
+-    pass
+-else:
+-    def simple_diff(a, b, fromfile='', tofile='',
+-                    fromfiledate='', tofiledate='', n=3, lineterm='\n'):
+-        """
+-        A function with the same calling signature as difflib.context_diff
+-        (diff -c) and difflib.unified_diff (diff -u) but which prints
+-        output like the simple, unadorned 'diff" command.
+-        """
+-        sm = difflib.SequenceMatcher(None, a, b)
+-        def comma(x1, x2):
+-            return x1+1 == x2 and str(x2) or '%s,%s' % (x1+1, x2)
+-        result = []
+-        for op, a1, a2, b1, b2 in sm.get_opcodes():
+-            if op == 'delete':
+-                result.append("%sd%d" % (comma(a1, a2), b1))
+-                result.extend(map(lambda l: '< ' + l, a[a1:a2]))
+-            elif op == 'insert':
+-                result.append("%da%s" % (a1, comma(b1, b2)))
+-                result.extend(map(lambda l: '> ' + l, b[b1:b2]))
+-            elif op == 'replace':
+-                result.append("%sc%s" % (comma(a1, a2), comma(b1, b2)))
+-                result.extend(map(lambda l: '< ' + l, a[a1:a2]))
+-                result.append('---')
+-                result.extend(map(lambda l: '> ' + l, b[b1:b2]))
+-        return result
++def simple_diff(a, b, fromfile='', tofile='',
++                fromfiledate='', tofiledate='', n=3, lineterm='\n'):
++    """
++    A function with the same calling signature as difflib.context_diff
++    (diff -c) and difflib.unified_diff (diff -u) but which prints
++    output like the simple, unadorned 'diff" command.
++    """
++    sm = difflib.SequenceMatcher(None, a, b)
++    def comma(x1, x2):
++        return x1+1 == x2 and str(x2) or '%s,%s' % (x1+1, x2)
++    result = []
++    for op, a1, a2, b1, b2 in sm.get_opcodes():
++        if op == 'delete':
++            result.append("%sd%d" % (comma(a1, a2), b1))
++            result.extend(map(lambda l: '< ' + l, a[a1:a2]))
++        elif op == 'insert':
++            result.append("%da%s" % (a1, comma(b1, b2)))
++            result.extend(map(lambda l: '> ' + l, b[b1:b2]))
++        elif op == 'replace':
++            result.append("%sc%s" % (comma(a1, a2), comma(b1, b2)))
++            result.extend(map(lambda l: '< ' + l, a[a1:a2]))
++            result.append('---')
++            result.extend(map(lambda l: '> ' + l, b[b1:b2]))
++    return result
+ 
+ def diff_re(a, b, fromfile='', tofile='',
+                 fromfiledate='', tofiledate='', n=3, lineterm='\n'):
+@@ -578,107 +533,6 @@ else:
+ 
+     default_sleep_seconds = 1
+ 
+-
+-
+-try:
+-    import subprocess
+-except ImportError:
+-    # The subprocess module doesn't exist in this version of Python,
+-    # so we're going to cobble up something that looks just enough
+-    # like its API for our purposes below.
+-    import new
+-
+-    subprocess = new.module('subprocess')
+-
+-    subprocess.PIPE = 'PIPE'
+-    subprocess.STDOUT = 'STDOUT'
+-    subprocess.mswindows = (sys.platform == 'win32')
+-
+-    try:
+-        import popen2
+-        popen2.Popen3
+-    except AttributeError:
+-        class Popen3:
+-            universal_newlines = 1
+-            def __init__(self, command, **kw):
+-                if sys.platform == 'win32' and command[0] == '"':
+-                    command = '"' + command + '"'
+-                (stdin, stdout, stderr) = os.popen3(' ' + command)
+-                self.stdin = stdin
+-                self.stdout = stdout
+-                self.stderr = stderr
+-            def close_output(self):
+-                self.stdout.close()
+-                self.resultcode = self.stderr.close()
+-            def wait(self):
+-                resultcode = self.resultcode
+-                if os.WIFEXITED(resultcode):
+-                    return os.WEXITSTATUS(resultcode)
+-                elif os.WIFSIGNALED(resultcode):
+-                    return os.WTERMSIG(resultcode)
+-                else:
+-                    return None
+-
+-    else:
+-        try:
+-            popen2.Popen4
+-        except AttributeError:
+-            # A cribbed Popen4 class, with some retrofitted code from
+-            # the Python 1.5 Popen3 class methods to do certain things
+-            # by hand.
+-            class Popen4(popen2.Popen3):
+-                childerr = None
+-
+-                def __init__(self, cmd, bufsize=-1):
+-                    p2cread, p2cwrite = os.pipe()
+-                    c2pread, c2pwrite = os.pipe()
+-                    self.pid = os.fork()
+-                    if self.pid == 0:
+-                        # Child
+-                        os.dup2(p2cread, 0)
+-                        os.dup2(c2pwrite, 1)
+-                        os.dup2(c2pwrite, 2)
+-                        for i in range(3, popen2.MAXFD):
+-                            try:
+-                                os.close(i)
+-                            except: pass
+-                        try:
+-                            os.execvp(cmd[0], cmd)
+-                        finally:
+-                            os._exit(1)
+-                        # Shouldn't come here, I guess
+-                        os._exit(1)
+-                    os.close(p2cread)
+-                    self.tochild = os.fdopen(p2cwrite, 'w', bufsize)
+-                    os.close(c2pwrite)
+-                    self.fromchild = os.fdopen(c2pread, 'r', bufsize)
+-                    popen2._active.append(self)
+-
+-            popen2.Popen4 = Popen4
+-
+-        class Popen3(popen2.Popen3, popen2.Popen4):
+-            universal_newlines = 1
+-            def __init__(self, command, **kw):
+-                if kw.get('stderr') == 'STDOUT':
+-                    popen2.Popen4.__init__(self, command, 1)
+-                else:
+-                    popen2.Popen3.__init__(self, command, 1)
+-                self.stdin = self.tochild
+-                self.stdout = self.fromchild
+-                self.stderr = self.childerr
+-            def wait(self, *args, **kw):
+-                resultcode = popen2.Popen3.wait(self, *args, **kw)
+-                if os.WIFEXITED(resultcode):
+-                    return os.WEXITSTATUS(resultcode)
+-                elif os.WIFSIGNALED(resultcode):
+-                    return os.WTERMSIG(resultcode)
+-                else:
+-                    return None
+-
+-    subprocess.Popen = Popen3
+-
+-
+-
+ # From Josiah Carlson,
+ # ASPN : Python Cookbook : Module to allow Asynchronous subprocess use on Windows and Posix platforms
+ # http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/440554
+@@ -872,17 +726,12 @@ class TestCmd(object):
+         if diff is not None:
+             self.diff_function = diff
+         else:
+-            try:
+-                difflib
+-            except NameError:
+-                pass
+-            else:
+-                self.diff_function = simple_diff
+-                #self.diff_function = difflib.context_diff
+-                #self.diff_function = difflib.unified_diff
++            self.diff_function = simple_diff
++            #self.diff_function = difflib.context_diff
++            #self.diff_function = difflib.unified_diff
+         self._dirlist = []
+         self._preserve = {'pass_test': 0, 'fail_test': 0, 'no_result': 0}
+-        if 'PRESERVE' in os.environ and os.environ['PRESERVE'] is not '':
++        if 'PRESERVE' in os.environ and os.environ['PRESERVE'] != '':
+             self._preserve['pass_test'] = os.environ['PRESERVE']
+             self._preserve['fail_test'] = os.environ['PRESERVE']
+             self._preserve['no_result'] = os.environ['PRESERVE']
+@@ -1024,21 +873,12 @@ class TestCmd(object):
+         """
+         self.description = description
+ 
+-    try:
+-        difflib
+-    except NameError:
+-        def diff(self, a, b, name, *args, **kw):
+-            print(self.banner('Expected %s' % name))
+-            print(a)
+-            print(self.banner('Actual %s' % name))
+-            print(b)
+-    else:
+-        def diff(self, a, b, name, *args, **kw):
+-            print(self.banner(name))
+-            args = (a.splitlines(), b.splitlines()) + args
+-            lines = self.diff_function(*args, **kw)
+-            for l in lines:
+-                print(l)
++    def diff(self, a, b, name, *args, **kw):
++        print(self.banner(name))
++        args = (a.splitlines(), b.splitlines()) + args
++        lines = self.diff_function(*args, **kw)
++        for l in lines:
++            print(l)
+ 
+     def fail_test(self, condition = 1, function = None, skip = 0):
+         """Cause the test to fail.
+@@ -1103,7 +943,7 @@ class TestCmd(object):
+         the temporary working directories to be preserved for all
+         conditions.
+         """
+-        if conditions is ():
++        if len(conditions) == 0:
+             conditions = ('pass_test', 'fail_test', 'no_result')
+         for cond in conditions:
+             self._preserve[cond] = 1
+diff --git a/test/lib/TestCommon.py b/test/lib/TestCommon.py
+index 6850ce9ada37..80527a29e660 100644
+--- a/test/lib/TestCommon.py
++++ b/test/lib/TestCommon.py
+@@ -92,21 +92,16 @@ The TestCommon module also provides the following variables
+ # AND THERE IS NO OBLIGATION WHATSOEVER TO PROVIDE MAINTENANCE,
+ # SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
+ 
+-from __future__ import print_function
+-
+ __author__ = "Steven Knight <knight at baldmt dot com>"
+ __revision__ = "TestCommon.py 0.37.D001 2010/01/11 16:55:50 knight"
+ __version__ = "0.37"
+ 
++from collections import UserList
+ import copy
+ import os
+ import os.path
+ import stat
+ import sys
+-try:
+-    from UserList import UserList
+-except ImportError:
+-    from collections import UserList
+ 
+ from TestCmd import *
+ from TestCmd import __all__
+diff --git a/test/lib/TestGyp.py b/test/lib/TestGyp.py
+index 2aa78684f517..deff3f21c511 100644
+--- a/test/lib/TestGyp.py
++++ b/test/lib/TestGyp.py
+@@ -5,21 +5,18 @@
+ """
+ TestGyp.py:  a testing framework for GYP integration tests.
+ """
+-from __future__ import print_function
+-
++from collections.abc import Iterable
+ import errno
+ import itertools
+ import os
+ import re
+ import shutil
+ import subprocess
+ import sys
+ import tempfile
+ 
+ from contextlib import contextmanager
+ 
+-from six.moves import collections_abc
+-
+ import TestCmd
+ import TestCommon
+ from TestCommon import __all__
+@@ -497,7 +494,7 @@ class TestGypCMake(TestGypBase):
+     if status is None:
+       kw['status'] = None
+     else:
+-      if not isinstance(status, collections_abc.Iterable): status = (status,)
++      if not isinstance(status, Iterable): status = (status,)
+       kw['status'] = list(itertools.chain((0,), status))
+     self.cmake_build(gyp_file, target, **kw)
+     kw['status'] = status
+@@ -743,7 +740,7 @@ def FindVisualStudioInstallation():
+           build_tool = None
+       if not build_tool:
+         args1 = ['reg', 'query',
+-                    'HKLM\Software\Microsoft\VisualStudio\SxS\VS7',
++                    r'HKLM\Software\Microsoft\VisualStudio\SxS\VS7',
+                     '/v', '15.0', '/reg:32']
+         build_tool = subprocess.check_output(args1).decode(
+             'utf-8', 'ignore').strip().split(b'\r\n').pop().split(b' ').pop()
+diff --git a/test/lib/TestMac.py b/test/lib/TestMac.py
+index d13afd5781f8..e92fbd14bcba 100644
+--- a/test/lib/TestMac.py
++++ b/test/lib/TestMac.py
+@@ -6,8 +6,6 @@
+ TestMac.py:  a collection of helper function shared between test on Mac OS X.
+ """
+ 
+-from __future__ import print_function
+-
+ import re
+ import subprocess
+ 
+diff --git a/test/library/gyptest-shared-obj-install-path.py b/test/library/gyptest-shared-obj-install-path.py
+index af335365f98e..021e340ab609 100755
+--- a/test/library/gyptest-shared-obj-install-path.py
++++ b/test/library/gyptest-shared-obj-install-path.py
+@@ -9,9 +9,6 @@ Verifies that .so files that are order only dependencies are specified by
+ their install location rather than by their alias.
+ """
+ 
+-# Python 2.5 needs this for the with statement.
+-from __future__ import with_statement
+-
+ import os
+ import TestGyp
+ 
+diff --git a/test/linux/ldflags-duplicates/check-ldflags.py b/test/linux/ldflags-duplicates/check-ldflags.py
+index ef1029529d51..ff783185c60e 100755
+--- a/test/linux/ldflags-duplicates/check-ldflags.py
++++ b/test/linux/ldflags-duplicates/check-ldflags.py
+@@ -8,8 +8,6 @@
+ Verifies duplicate ldflags are not removed.
+ """
+ 
+-from __future__ import print_function
+-
+ import sys
+ 
+ def CheckContainsFlags(args, substring):
+diff --git a/test/mac/gyptest-app-assets-catalog.py b/test/mac/gyptest-app-assets-catalog.py
+index 7b1c0f67deeb..6834b22e6468 100755
+--- a/test/mac/gyptest-app-assets-catalog.py
++++ b/test/mac/gyptest-app-assets-catalog.py
+@@ -8,8 +8,6 @@
+ Verifies that app bundles are built correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ import TestMac
+ 
+diff --git a/test/mac/gyptest-app-error.py b/test/mac/gyptest-app-error.py
+index df0781d45562..02bfa348b619 100755
+--- a/test/mac/gyptest-app-error.py
++++ b/test/mac/gyptest-app-error.py
+@@ -8,42 +8,41 @@
+ Verifies that invalid strings files cause the build to fail.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestCmd
+ import TestGyp
+ 
+ import sys
+ 
+ if sys.platform == 'darwin':
+   print("This test is currently disabled: https://crbug.com/483696.")
+   sys.exit(0)
+ 
+   expected_error = 'Old-style plist parser: missing semicolon in dictionary'
+-  saw_expected_error = [False]  # Python2 has no "nonlocal" keyword.
++  saw_expected_error = False
+   def match(a, b):
++    nonlocal saw_expected_error
+     if a == b:
+       return True
+     if not TestCmd.is_List(a):
+       a = a.split('\n')
+     if not TestCmd.is_List(b):
+       b = b.split('\n')
+     if expected_error in '\n'.join(a) + '\n'.join(b):
+-      saw_expected_error[0] = True
++      saw_expected_error = True
+       return True
+     return False
+   test = TestGyp.TestGyp(formats=['ninja', 'make', 'xcode'], match=match)
+ 
+   test.run_gyp('test-error.gyp', chdir='app-bundle')
+ 
+   test.build('test-error.gyp', test.ALL, chdir='app-bundle')
+ 
+   # Ninja pipes stderr of subprocesses to stdout.
+   if test.format in ['ninja', 'xcode-ninja'] \
+       and expected_error in test.stdout():
+-    saw_expected_error[0] = True
++    saw_expected_error = True
+ 
+-  if saw_expected_error[0]:
++  if saw_expected_error:
+     test.pass_test()
+   else:
+     test.fail_test()
+diff --git a/test/mac/gyptest-app.py b/test/mac/gyptest-app.py
+index 16c96403733e..3754e5a3fd97 100755
+--- a/test/mac/gyptest-app.py
++++ b/test/mac/gyptest-app.py
+@@ -8,8 +8,6 @@
+ Verifies that app bundles are built correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ import TestMac
+ 
+diff --git a/test/mac/gyptest-bundle-resources.py b/test/mac/gyptest-bundle-resources.py
+index 275cdbaa54a2..45b28f438dd0 100644
+--- a/test/mac/gyptest-bundle-resources.py
++++ b/test/mac/gyptest-bundle-resources.py
+@@ -8,8 +8,6 @@
+ Verifies things related to bundle resources.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import os
+diff --git a/test/mac/gyptest-copies.py b/test/mac/gyptest-copies.py
+index 838c62dc37b7..59156e5054f3 100755
+--- a/test/mac/gyptest-copies.py
++++ b/test/mac/gyptest-copies.py
+@@ -8,8 +8,6 @@
+ Verifies that 'copies' with app bundles are handled correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import os
+diff --git a/test/mac/gyptest-depend-on-bundle.py b/test/mac/gyptest-depend-on-bundle.py
+index b8b06d4cc009..568f741034b9 100644
+--- a/test/mac/gyptest-depend-on-bundle.py
++++ b/test/mac/gyptest-depend-on-bundle.py
+@@ -8,8 +8,6 @@
+ Verifies that a dependency on a bundle causes the whole bundle to be built.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import sys
+diff --git a/test/mac/gyptest-framework.py b/test/mac/gyptest-framework.py
+index faf05cf31391..5b762aecd60d 100755
+--- a/test/mac/gyptest-framework.py
++++ b/test/mac/gyptest-framework.py
+@@ -8,8 +8,6 @@
+ Verifies that app bundles are built correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import os
+diff --git a/test/mac/gyptest-infoplist-process.py b/test/mac/gyptest-infoplist-process.py
+index 24260e1c3498..dff099135673 100755
+--- a/test/mac/gyptest-infoplist-process.py
++++ b/test/mac/gyptest-infoplist-process.py
+@@ -8,8 +8,6 @@
+ Verifies the Info.plist preprocessor functionality.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import sys
+diff --git a/test/mac/gyptest-installname.py b/test/mac/gyptest-installname.py
+index 17831aeaf432..0cc80d920085 100644
+--- a/test/mac/gyptest-installname.py
++++ b/test/mac/gyptest-installname.py
+@@ -9,8 +9,6 @@ Verifies that LD_DYLIB_INSTALL_NAME and DYLIB_INSTALL_NAME_BASE are handled
+ correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import re
+diff --git a/test/mac/gyptest-ldflags-passed-to-libtool.py b/test/mac/gyptest-ldflags-passed-to-libtool.py
+index e24e305d9fe5..5c9c17b3f4a9 100644
+--- a/test/mac/gyptest-ldflags-passed-to-libtool.py
++++ b/test/mac/gyptest-ldflags-passed-to-libtool.py
+@@ -8,8 +8,6 @@
+ Verifies that OTHER_LDFLAGS is passed to libtool.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import sys
+diff --git a/test/mac/gyptest-loadable-module.py b/test/mac/gyptest-loadable-module.py
+index 77dde1d6cd19..19242b040b5c 100755
+--- a/test/mac/gyptest-loadable-module.py
++++ b/test/mac/gyptest-loadable-module.py
+@@ -8,8 +8,6 @@
+ Tests that a loadable_module target is built correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import os
+diff --git a/test/mac/gyptest-missing-cfbundlesignature.py b/test/mac/gyptest-missing-cfbundlesignature.py
+index be66492467c8..0289c92e3191 100644
+--- a/test/mac/gyptest-missing-cfbundlesignature.py
++++ b/test/mac/gyptest-missing-cfbundlesignature.py
+@@ -8,8 +8,6 @@
+ Verifies that an Info.plist with CFBundleSignature works.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import sys
+diff --git a/test/mac/gyptest-non-strs-flattened-to-env.py b/test/mac/gyptest-non-strs-flattened-to-env.py
+index cb42a939d4ca..571c12523b12 100644
+--- a/test/mac/gyptest-non-strs-flattened-to-env.py
++++ b/test/mac/gyptest-non-strs-flattened-to-env.py
+@@ -9,8 +9,6 @@ Verifies that list xcode_settings are flattened before being exported to the
+ environment.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import sys
+diff --git a/test/mac/gyptest-postbuild-defaults.py b/test/mac/gyptest-postbuild-defaults.py
+index 0f7d25bd89b7..f223e354a5c2 100644
+--- a/test/mac/gyptest-postbuild-defaults.py
++++ b/test/mac/gyptest-postbuild-defaults.py
+@@ -8,8 +8,6 @@
+ Verifies that a postbuild invoking |defaults| works.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import sys
+diff --git a/test/mac/gyptest-postbuild-fail.py b/test/mac/gyptest-postbuild-fail.py
+index 1a229df6955e..2369e2d0ff1d 100755
+--- a/test/mac/gyptest-postbuild-fail.py
++++ b/test/mac/gyptest-postbuild-fail.py
+@@ -8,8 +8,6 @@
+ Verifies that a failing postbuild step lets the build fail.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import sys
+diff --git a/test/mac/gyptest-rebuild.py b/test/mac/gyptest-rebuild.py
+index c7d8cad02d55..4473ce73511d 100755
+--- a/test/mac/gyptest-rebuild.py
++++ b/test/mac/gyptest-rebuild.py
+@@ -8,8 +8,6 @@
+ Verifies that app bundles are rebuilt correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import sys
+diff --git a/test/mac/gyptest-sdkroot.py b/test/mac/gyptest-sdkroot.py
+index f8edbaa583de..38733d3f7787 100644
+--- a/test/mac/gyptest-sdkroot.py
++++ b/test/mac/gyptest-sdkroot.py
+@@ -8,8 +8,6 @@
+ Verifies that setting SDKROOT works.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import os
+diff --git a/test/mac/gyptest-sourceless-module.py b/test/mac/gyptest-sourceless-module.py
+index f2801c20aa23..a1280c97fe62 100644
+--- a/test/mac/gyptest-sourceless-module.py
++++ b/test/mac/gyptest-sourceless-module.py
+@@ -8,8 +8,6 @@
+ Verifies that bundles that have no 'sources' (pure resource containers) work.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import sys
+diff --git a/test/mac/gyptest-strip-default.py b/test/mac/gyptest-strip-default.py
+index b851782fd52d..aa997152cd43 100644
+--- a/test/mac/gyptest-strip-default.py
++++ b/test/mac/gyptest-strip-default.py
+@@ -8,8 +8,6 @@
+ Verifies that the default STRIP_STYLEs match between different generators.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import re
+diff --git a/test/mac/gyptest-strip.py b/test/mac/gyptest-strip.py
+index d4694834ac40..b5586f2f6739 100755
+--- a/test/mac/gyptest-strip.py
++++ b/test/mac/gyptest-strip.py
+@@ -8,8 +8,6 @@
+ Verifies that stripping works.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ import TestMac
+ 
+diff --git a/test/mac/gyptest-swift-library.py b/test/mac/gyptest-swift-library.py
+index d3433753fd07..961128a3756f 100644
+--- a/test/mac/gyptest-swift-library.py
++++ b/test/mac/gyptest-swift-library.py
+@@ -8,8 +8,6 @@
+ Verifies that a swift framework builds correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ import TestMac
+ 
+diff --git a/test/mac/gyptest-xcode-env-order.py b/test/mac/gyptest-xcode-env-order.py
+index bda19988b2fc..9898c226ee29 100755
+--- a/test/mac/gyptest-xcode-env-order.py
++++ b/test/mac/gyptest-xcode-env-order.py
+@@ -8,8 +8,6 @@
+ Verifies that dependent Xcode settings are processed correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ import TestMac
+ 
+diff --git a/test/make/gyptest-noload.py b/test/make/gyptest-noload.py
+index 1f5103315cfc..0a9a218d2316 100755
+--- a/test/make/gyptest-noload.py
++++ b/test/make/gyptest-noload.py
+@@ -9,9 +9,6 @@ Tests the use of the NO_LOAD flag which makes loading sub .mk files
+ optional.
+ """
+ 
+-# Python 2.5 needs this for the with statement.
+-from __future__ import with_statement
+-
+ import os
+ import TestGyp
+ 
+diff --git a/test/make_global_settings/basics/gyptest-make_global_settings.py b/test/make_global_settings/basics/gyptest-make_global_settings.py
+index 8f48875967d3..9df9ac15de63 100644
+--- a/test/make_global_settings/basics/gyptest-make_global_settings.py
++++ b/test/make_global_settings/basics/gyptest-make_global_settings.py
+@@ -8,8 +8,6 @@
+ Verifies make_global_settings.
+ """
+ 
+-from __future__ import print_function
+-
+ import os
+ import sys
+ import TestGyp
+diff --git a/test/make_global_settings/env-wrapper/gyptest-wrapper.py b/test/make_global_settings/env-wrapper/gyptest-wrapper.py
+index 409799e315a1..f7549a8b7920 100644
+--- a/test/make_global_settings/env-wrapper/gyptest-wrapper.py
++++ b/test/make_global_settings/env-wrapper/gyptest-wrapper.py
+@@ -8,8 +8,6 @@
+ Verifies *_wrapper in environment.
+ """
+ 
+-from __future__ import print_function
+-
+ import os
+ import sys
+ import TestGyp
+diff --git a/test/make_global_settings/full-toolchain/gyptest-make_global_settings.py b/test/make_global_settings/full-toolchain/gyptest-make_global_settings.py
+index 542fd631c249..def79a0c3ac9 100644
+--- a/test/make_global_settings/full-toolchain/gyptest-make_global_settings.py
++++ b/test/make_global_settings/full-toolchain/gyptest-make_global_settings.py
+@@ -8,8 +8,6 @@
+ Verifies make_global_settings works with the full toolchain.
+ """
+ 
+-from __future__ import print_function
+-
+ import os
+ import sys
+ import TestGyp
+diff --git a/test/make_global_settings/full-toolchain/my_nm.py b/test/make_global_settings/full-toolchain/my_nm.py
+index 2c4e678110bb..578d680bc545 100755
+--- a/test/make_global_settings/full-toolchain/my_nm.py
++++ b/test/make_global_settings/full-toolchain/my_nm.py
+@@ -2,7 +2,6 @@
+ # Copyright (c) 2014 Google Inc. All rights reserved.
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+-from __future__ import print_function
+ import sys
+ print(sys.argv)
+ with open('RAN_MY_NM', 'w') as f:
+diff --git a/test/make_global_settings/full-toolchain/my_readelf.py b/test/make_global_settings/full-toolchain/my_readelf.py
+index 626665435e68..6ec7c9ea22b7 100755
+--- a/test/make_global_settings/full-toolchain/my_readelf.py
++++ b/test/make_global_settings/full-toolchain/my_readelf.py
+@@ -2,7 +2,6 @@
+ # Copyright (c) 2014 Google Inc. All rights reserved.
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+-from __future__ import print_function
+ import sys
+ print(sys.argv)
+ with open('RAN_MY_READELF', 'w') as f:
+diff --git a/test/make_global_settings/wrapper/gyptest-wrapper.py b/test/make_global_settings/wrapper/gyptest-wrapper.py
+index 7ef4314b3e8c..55a4f822f989 100644
+--- a/test/make_global_settings/wrapper/gyptest-wrapper.py
++++ b/test/make_global_settings/wrapper/gyptest-wrapper.py
+@@ -8,8 +8,6 @@
+ Verifies *_wrapper in make_global_settings.
+ """
+ 
+-from __future__ import print_function
+-
+ import os
+ import sys
+ import TestGyp
+diff --git a/test/many-actions/gyptest-many-actions-unsorted.py b/test/many-actions/gyptest-many-actions-unsorted.py
+index 6927d1c7a750..47779fd4362f 100644
+--- a/test/many-actions/gyptest-many-actions-unsorted.py
++++ b/test/many-actions/gyptest-many-actions-unsorted.py
+@@ -9,8 +9,6 @@ Make sure lots of actions in the same target don't cause exceeding command
+ line length.
+ """
+ 
+-from __future__ import print_function
+-
+ import sys
+ 
+ if sys.platform == 'win32':
+diff --git a/test/many-actions/gyptest-many-actions.py b/test/many-actions/gyptest-many-actions.py
+index 4a525d32d65d..aec9bedd8bc3 100644
+--- a/test/many-actions/gyptest-many-actions.py
++++ b/test/many-actions/gyptest-many-actions.py
+@@ -9,8 +9,6 @@ Make sure lots of actions in the same target don't cause exceeding command
+ line length.
+ """
+ 
+-from __future__ import print_function
+-
+ import sys
+ 
+ if sys.platform == 'win32':
+diff --git a/test/msvs/config_attrs/gyptest-config_attrs.py b/test/msvs/config_attrs/gyptest-config_attrs.py
+index 29a8022bd4ee..b01f3c93110c 100644
+--- a/test/msvs/config_attrs/gyptest-config_attrs.py
++++ b/test/msvs/config_attrs/gyptest-config_attrs.py
+@@ -10,8 +10,6 @@ msbuild_configuration_attributes are applied by using
+ them to set the OutputDirectory.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ import os
+ 
+diff --git a/test/msvs/rules_stdout_stderr/rule_stderr.py b/test/msvs/rules_stdout_stderr/rule_stderr.py
+index 2081513ec883..fc1b04331c71 100644
+--- a/test/msvs/rules_stdout_stderr/rule_stderr.py
++++ b/test/msvs/rules_stdout_stderr/rule_stderr.py
+@@ -3,6 +3,5 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-from __future__ import print_function
+ import sys
+ print("This will go to stderr", file=sys.stderr)
+diff --git a/test/msvs/rules_stdout_stderr/rule_stdout.py b/test/msvs/rules_stdout_stderr/rule_stdout.py
+index 4c073ebc4537..0dd17dbad85c 100644
+--- a/test/msvs/rules_stdout_stderr/rule_stdout.py
++++ b/test/msvs/rules_stdout_stderr/rule_stdout.py
+@@ -3,5 +3,4 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-from __future__ import print_function
+ print("This will go to stdout")
+diff --git a/test/ninja/action_dependencies/gyptest-action-dependencies.py b/test/ninja/action_dependencies/gyptest-action-dependencies.py
+index 89813bab17e3..16556ef9a850 100755
+--- a/test/ninja/action_dependencies/gyptest-action-dependencies.py
++++ b/test/ninja/action_dependencies/gyptest-action-dependencies.py
+@@ -9,8 +9,6 @@ Verify that building an object file correctly depends on running actions in
+ dependent targets, but not the targets themselves.
+ """
+ 
+-from __future__ import print_function
+-
+ import os
+ import sys
+ 
+diff --git a/test/ninja/solibs_avoid_relinking/gyptest-solibs-avoid-relinking.py b/test/ninja/solibs_avoid_relinking/gyptest-solibs-avoid-relinking.py
+index fd4470ac2378..b8277509deb3 100755
+--- a/test/ninja/solibs_avoid_relinking/gyptest-solibs-avoid-relinking.py
++++ b/test/ninja/solibs_avoid_relinking/gyptest-solibs-avoid-relinking.py
+@@ -9,8 +9,6 @@ Verify that relinking a solib doesn't relink a dependent executable if the
+ solib's public API hasn't changed.
+ """
+ 
+-from __future__ import print_function
+-
+ import os
+ import sys
+ import TestCommon
+diff --git a/test/rules-dirname/gyptest-dirname.py b/test/rules-dirname/gyptest-dirname.py
+index da5429cbad4e..efe7b2eee7f1 100755
+--- a/test/rules-dirname/gyptest-dirname.py
++++ b/test/rules-dirname/gyptest-dirname.py
+@@ -8,8 +8,6 @@
+ Verifies simple rules when using an explicit build target of 'all'.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ import os
+ import sys
+diff --git a/test/rules-variables/gyptest-rules-variables.py b/test/rules-variables/gyptest-rules-variables.py
+index 16afc22ef9b7..c8a95704fe45 100755
+--- a/test/rules-variables/gyptest-rules-variables.py
++++ b/test/rules-variables/gyptest-rules-variables.py
+@@ -8,8 +8,6 @@
+ Verifies rules related variables are expanded.
+ """
+ 
+-from __future__ import print_function
+-
+ import sys
+ 
+ if sys.platform == 'win32':
+diff --git a/test/rules/gyptest-all.py b/test/rules/gyptest-all.py
+index 0520c2f6a034..4aa925d5018e 100755
+--- a/test/rules/gyptest-all.py
++++ b/test/rules/gyptest-all.py
+@@ -8,8 +8,6 @@
+ Verifies simple rules when using an explicit build target of 'all'.
+ """
+ 
+-from __future__ import print_function
+-
+ import sys
+ 
+ if sys.platform == 'win32':
+diff --git a/test/rules/gyptest-default.py b/test/rules/gyptest-default.py
+index 5d01094197bb..29c9ea97e664 100755
+--- a/test/rules/gyptest-default.py
++++ b/test/rules/gyptest-default.py
+@@ -8,8 +8,6 @@
+ Verifies simple rules when using an explicit build target of 'all'.
+ """
+ 
+-from __future__ import print_function
+-
+ import sys
+ 
+ if sys.platform == 'win32':
+diff --git a/test/standalone/gyptest-standalone.py b/test/standalone/gyptest-standalone.py
+index 0581d5387954..423b97a4cb37 100644
+--- a/test/standalone/gyptest-standalone.py
++++ b/test/standalone/gyptest-standalone.py
+@@ -9,8 +9,6 @@ Verifies that a project hierarchy created with the --generator-output=
+ option can be built even when it's relocated to a different path.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ import os
+ 
+diff --git a/test/variables/commands/gyptest-commands-ignore-env.py b/test/variables/commands/gyptest-commands-ignore-env.py
+index 5470d5ce3645..6d1cdbd0cefc 100755
+--- a/test/variables/commands/gyptest-commands-ignore-env.py
++++ b/test/variables/commands/gyptest-commands-ignore-env.py
+@@ -9,7 +9,6 @@ Test that environment variables are ignored when --ignore-environment is
+ specified.
+ """
+ 
+-from __future__ import print_function
+ import os
+ 
+ import TestGyp
+diff --git a/test/variables/commands/gyptest-commands-repeated.py b/test/variables/commands/gyptest-commands-repeated.py
+index fcf98ee02ad2..eb76542250e1 100755
+--- a/test/variables/commands/gyptest-commands-repeated.py
++++ b/test/variables/commands/gyptest-commands-repeated.py
+@@ -9,8 +9,6 @@ Test variable expansion of '<!()' syntax commands where they are evaluated
+ more then once..
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ test = TestGyp.TestGyp(format='gypd')
+diff --git a/test/variables/commands/gyptest-commands.py b/test/variables/commands/gyptest-commands.py
+index 3251120ff477..1b0d256eb00b 100755
+--- a/test/variables/commands/gyptest-commands.py
++++ b/test/variables/commands/gyptest-commands.py
+@@ -8,7 +8,6 @@
+ Test variable expansion of '<!()' syntax commands.
+ """
+ 
+-from __future__ import print_function
+ import os
+ 
+ import TestGyp
+diff --git a/test/variables/commands/repeated_multidir/print_cwd_basename.py b/test/variables/commands/repeated_multidir/print_cwd_basename.py
+index 9b206bb3d431..52c99e0c8c3f 100755
+--- a/test/variables/commands/repeated_multidir/print_cwd_basename.py
++++ b/test/variables/commands/repeated_multidir/print_cwd_basename.py
+@@ -4,7 +4,6 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-from __future__ import print_function
+ import os
+ import os.path
+ 
+diff --git a/test/variables/commands/test.py b/test/variables/commands/test.py
+index eb64f953837f..854089696cd8 100644
+--- a/test/variables/commands/test.py
++++ b/test/variables/commands/test.py
+@@ -2,6 +2,4 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-from __future__ import print_function
+-
+ print("sample\\path\\foo.cpp")
+diff --git a/test/variables/filelist/gyptest-filelist-golden.py b/test/variables/filelist/gyptest-filelist-golden.py
+index 3ddc6698f8ac..7162043390ca 100644
+--- a/test/variables/filelist/gyptest-filelist-golden.py
++++ b/test/variables/filelist/gyptest-filelist-golden.py
+@@ -8,8 +8,6 @@
+ Test variable expansion of '<|(list.txt ...)' syntax commands.
+ """
+ 
+-from __future__ import print_function
+-
+ import os
+ import sys
+ 
+diff --git a/test/win/gyptest-cl-enable-enhanced-instruction-set.py b/test/win/gyptest-cl-enable-enhanced-instruction-set.py
+index f34e67112527..c5ca9adbaf28 100644
+--- a/test/win/gyptest-cl-enable-enhanced-instruction-set.py
++++ b/test/win/gyptest-cl-enable-enhanced-instruction-set.py
+@@ -8,8 +8,6 @@
+ Test VCCLCompilerTool EnableEnhancedInstructionSet setting.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import os
+diff --git a/test/win/gyptest-cl-function-level-linking.py b/test/win/gyptest-cl-function-level-linking.py
+index 6ad7b8c48490..bcc03de59407 100644
+--- a/test/win/gyptest-cl-function-level-linking.py
++++ b/test/win/gyptest-cl-function-level-linking.py
+@@ -8,8 +8,6 @@
+ Make sure function-level linking setting is extracted properly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import sys
+diff --git a/test/win/gyptest-command-quote.py b/test/win/gyptest-command-quote.py
+index 656a69da5302..1006cd6285e6 100644
+--- a/test/win/gyptest-command-quote.py
++++ b/test/win/gyptest-command-quote.py
+@@ -12,8 +12,6 @@ application in the path. Specifically, this means not quoting something like
+ than calling "x.bat".
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import sys
+diff --git a/test/win/gyptest-link-defrelink.py b/test/win/gyptest-link-defrelink.py
+index cb3f86bb0e51..5ca7277cd73e 100644
+--- a/test/win/gyptest-link-defrelink.py
++++ b/test/win/gyptest-link-defrelink.py
+@@ -8,8 +8,6 @@
+ Make sure a relink is performed when a .def file is touched.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import sys
+diff --git a/test/win/gyptest-link-enable-uac.py b/test/win/gyptest-link-enable-uac.py
+index 0ddbde5fa550..5749e1c341fa 100644
+--- a/test/win/gyptest-link-enable-uac.py
++++ b/test/win/gyptest-link-enable-uac.py
+@@ -68,36 +68,28 @@ if sys.platform == 'win32':
+   test.fail_test(len(execution_level) != 1)
+   execution_level = execution_level[0].attributes
+ 
+-  def _has_key(node, key):
+-    # 'in' doesn't work with the NamedNodeMap interface in Python2,
+-    # but 'has_key' was removed from it in Python3, so we need to
+-    # shim things :(.
+-    if hasattr(node, 'has_key'):
+-      return node.has_key(key)
+-    return key in node
+-
+   test.fail_test(not (
+-      _has_key(execution_level, 'level') and
+-      _has_key(execution_level, 'uiAccess') and
++      'level' in execution_level and
++      'uiAccess' in execution_level and
+       execution_level['level'].nodeValue == 'asInvoker' and
+       execution_level['uiAccess'].nodeValue == 'false'))
+ 
+   # Verify that <requestedExecutionLevel> is not in the menifest.
+   manifest = parseString(extract_manifest(
+       test.built_file_path('enable_uac_no.exe', chdir=CHDIR), 1))
+   execution_level = manifest.getElementsByTagName('requestedExecutionLevel')
+   test.fail_test(len(execution_level) != 0)
+ 
+   # Verify that <requestedExecutionLevel level="requireAdministrator"
+   # uiAccess="true" /> is present.
+   manifest = parseString(extract_manifest(
+       test.built_file_path('enable_uac_admin.exe', chdir=CHDIR), 1))
+   execution_level = manifest.getElementsByTagName('requestedExecutionLevel')
+   test.fail_test(len(execution_level) != 1)
+   execution_level = execution_level[0].attributes
+   test.fail_test(not (
+-      _has_key(execution_level, 'level') and
+-      _has_key(execution_level, 'uiAccess') and
++      'level' in execution_level and
++      'uiAccess' in execution_level and
+       execution_level['level'].nodeValue == 'requireAdministrator' and
+       execution_level['uiAccess'].nodeValue == 'true'))
+ 
+diff --git a/test/win/gyptest-link-enable-winrt-app-revision.py b/test/win/gyptest-link-enable-winrt-app-revision.py
+index 45d86e1c69df..34a51dbdf5c9 100644
+--- a/test/win/gyptest-link-enable-winrt-app-revision.py
++++ b/test/win/gyptest-link-enable-winrt-app-revision.py
+@@ -8,8 +8,6 @@
+ Make sure msvs_application_type_revision works correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import os
+diff --git a/test/win/gyptest-link-enable-winrt-target-platform-version.py b/test/win/gyptest-link-enable-winrt-target-platform-version.py
+index 877cb68f8ceb..87e51d2d3ad2 100644
+--- a/test/win/gyptest-link-enable-winrt-target-platform-version.py
++++ b/test/win/gyptest-link-enable-winrt-target-platform-version.py
+@@ -8,8 +8,6 @@
+ Make sure msvs_target_platform_version works correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import os
+diff --git a/test/win/gyptest-link-enable-winrt.py b/test/win/gyptest-link-enable-winrt.py
+index 5e0493aade42..2b8844d54a77 100644
+--- a/test/win/gyptest-link-enable-winrt.py
++++ b/test/win/gyptest-link-enable-winrt.py
+@@ -8,8 +8,6 @@
+ Make sure msvs_enable_winrt works correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import os
+diff --git a/test/win/gyptest-link-large-pdb.py b/test/win/gyptest-link-large-pdb.py
+index 1fb27b0ab716..b89ef1c13690 100644
+--- a/test/win/gyptest-link-large-pdb.py
++++ b/test/win/gyptest-link-large-pdb.py
+@@ -8,8 +8,6 @@
+ Make sure msvs_large_pdb works correctly.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import struct
+diff --git a/test/win/gyptest-link-ordering.py b/test/win/gyptest-link-ordering.py
+index ed8ee98c9e67..44f2889ab687 100644
+--- a/test/win/gyptest-link-ordering.py
++++ b/test/win/gyptest-link-ordering.py
+@@ -8,8 +8,6 @@
+ Make sure the link order of object files is the same between msvs and ninja.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import sys
+diff --git a/test/win/gyptest-link-restat-importlib.py b/test/win/gyptest-link-restat-importlib.py
+index d249e0a6bdca..5d1f6777e662 100644
+--- a/test/win/gyptest-link-restat-importlib.py
++++ b/test/win/gyptest-link-restat-importlib.py
+@@ -9,8 +9,6 @@ Make sure we don't cause unnecessary builds due to import libs appearing
+ to be out of date.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import os
+diff --git a/test/win/gyptest-macro-targetfilename.py b/test/win/gyptest-macro-targetfilename.py
+index 759e26c5669b..817e4fa88a90 100644
+--- a/test/win/gyptest-macro-targetfilename.py
++++ b/test/win/gyptest-macro-targetfilename.py
+@@ -8,8 +8,6 @@
+ Make sure macro expansion of $(TargetFileName) is handled.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import os
+diff --git a/test/win/gyptest-rc-build.py b/test/win/gyptest-rc-build.py
+index 4df33ab5d959..16bae51bf7f0 100644
+--- a/test/win/gyptest-rc-build.py
++++ b/test/win/gyptest-rc-build.py
+@@ -8,8 +8,6 @@
+ Make sure we build and include .rc files.
+ """
+ 
+-from __future__ import print_function
+-
+ import TestGyp
+ 
+ import sys
+diff --git a/test/win/vs-macros/as.py b/test/win/vs-macros/as.py
+index 806c91d926cb..6b2739454551 100644
+--- a/test/win/vs-macros/as.py
++++ b/test/win/vs-macros/as.py
+@@ -4,8 +4,6 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-from __future__ import print_function
+-
+ from optparse import OptionParser
+ 
+ parser = OptionParser()
+diff --git a/tools/graphviz.py b/tools/graphviz.py
+index 538b059da4a7..99c5a5c6dc11 100755
+--- a/tools/graphviz.py
++++ b/tools/graphviz.py
+@@ -8,8 +8,6 @@
+ generate input suitable for graphviz to render a dependency graph of
+ targets."""
+ 
+-from __future__ import print_function
+-
+ import collections
+ import json
+ import sys
+diff --git a/tools/pretty_gyp.py b/tools/pretty_gyp.py
+index 5060d1d9e29d..18981cea37be 100755
+--- a/tools/pretty_gyp.py
++++ b/tools/pretty_gyp.py
+@@ -6,8 +6,6 @@
+ 
+ """Pretty-prints the contents of a GYP file."""
+ 
+-from __future__ import print_function
+-
+ import sys
+ import re
+ 
+diff --git a/tools/pretty_sln.py b/tools/pretty_sln.py
+index 12a6dadd1735..b1f5bda35725 100755
+--- a/tools/pretty_sln.py
++++ b/tools/pretty_sln.py
+@@ -12,8 +12,6 @@
+    Then it outputs a possible build order.
+ """
+ 
+-from __future__ import print_function
+-
+ __author__ = 'nsylvain (Nicolas Sylvain)'
+ 
+ import os
+diff --git a/tools/pretty_vcproj.py b/tools/pretty_vcproj.py
+index 4454d9b2b99d..b01b0b596919 100755
+--- a/tools/pretty_vcproj.py
++++ b/tools/pretty_vcproj.py
+@@ -12,59 +12,38 @@
+    It outputs the resulting xml to stdout.
+ """
+ 
+-from __future__ import print_function
+-
+ __author__ = 'nsylvain (Nicolas Sylvain)'
+ 
+ import os
+ import sys
+ 
+ from xml.dom.minidom import parse
+ from xml.dom.minidom import Node
+ 
+-try:
+-  # cmp was removed in python3.
+-  cmp
+-except NameError:
+-  def cmp(a, b):
+-    return (a > b) - (a < b)
+-
+ REPLACEMENTS = dict()
+ ARGUMENTS = None
+ 
+ 
+-class CmpTuple(object):
+-  """Compare function between 2 tuple."""
+-  def __call__(self, x, y):
+-    return cmp(x[0], y[0])
++def get_string(node):
++  node_string = "node"
++  node_string += node.nodeName
++  if node.nodeValue:
++    node_string += node.nodeValue
+ 
++  if node.attributes:
++    # We first sort by name, if present.
++    node_string += node.getAttribute("Name")
+ 
+-class CmpNode(object):
+-  """Compare function between 2 xml nodes."""
++    all_nodes = []
++    for (name, value) in node.attributes.items():
++      all_nodes.append((name, value))
+ 
+-  def __call__(self, x, y):
+-    def get_string(node):
+-      node_string = "node"
+-      node_string += node.nodeName
+-      if node.nodeValue:
+-        node_string += node.nodeValue
++    all_nodes.sort(key=(lambda attr: attr[0]))
++    for (name, value) in all_nodes:
++      node_string += name
++      node_string += value
+ 
+-      if node.attributes:
+-        # We first sort by name, if present.
+-        node_string += node.getAttribute("Name")
+-
+-        all_nodes = []
+-        for (name, value) in node.attributes.items():
+-          all_nodes.append((name, value))
+-
+-        all_nodes.sort(CmpTuple())
+-        for (name, value) in all_nodes:
+-          node_string += name
+-          node_string += value
+-
+-      return node_string
+-
+-    return cmp(get_string(x), get_string(y))
++  return node_string
+ 
+ 
+ def PrettyPrintNode(node, indent=0):
+@@ -195,7 +174,7 @@ def CleanupVcproj(node):
+ 
+ 
+   # Sort the list.
+-  node_array.sort(CmpNode())
++  node_array.sort(key=get_string)
+ 
+   # Insert the nodes in the correct order.
+   for new_node in node_array:
