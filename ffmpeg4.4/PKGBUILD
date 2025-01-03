@@ -7,7 +7,7 @@
 
 pkgname=ffmpeg4.4
 pkgver=4.4.5
-pkgrel=1
+pkgrel=2
 pkgdesc='Complete solution to record, convert and stream audio and video'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url=https://ffmpeg.org/
@@ -73,21 +73,20 @@ depends_x86_64=(
 makedepends=(
   amf-headers
   avisynthplus
-  clang
   git
   ladspa
 )
 makedepends_x86_64=(
-  libmfx
-  ffnvcodec-headers
   nasm
 )
 optdepends=(
   'avisynthplus: AviSynthPlus support'
   'ladspa: LADSPA filters'
+)
+optdepends_x86_64=(
+  'intel-media-sdk: Intel QuickSync support'
   'nvidia-utils: Nvidia NVDEC/NVENC support'
 )
-optdepends_x86_64=('intel-media-sdk: Intel QuickSync support')
 provides=(
   libavcodec.so
   libavdevice.so
@@ -99,10 +98,12 @@ provides=(
   libswscale.so
 )
 _tag=9bcede27c26b2f7cd469ab6b5c8b9694c30cfca3
-source=(git+https://git.ffmpeg.org/ffmpeg.git#tag=${_tag})
-b2sums=('d9975a7578d982a1beab69cd63b6894bc4ab0338cf15716c3775bc09ffafe469eb0213c07b0575d4ca192148d29e67d00f0c3779aea0a1c1099b5505589db67b')
-
-options=(!distcc)
+source=(
+  git+https://git.ffmpeg.org/ffmpeg.git#tag=${_tag}
+  binutils-2.41.patch
+)
+b2sums=('d9975a7578d982a1beab69cd63b6894bc4ab0338cf15716c3775bc09ffafe469eb0213c07b0575d4ca192148d29e67d00f0c3779aea0a1c1099b5505589db67b'
+        'b656a17dd3996c6871d322ba1fcf25410ed580d9600348cda087d705660601d06070492300d31c12d54b0e9914cb92bb9d997e51462c0577e1a90539bf0b76ee')
 
 pkgver() {
   cd ffmpeg
@@ -128,8 +129,6 @@ build() {
     ;;
     x86_64) _configure_flags=(
                --enable-libmfx
-               --enable-nvdec
-               --enable-nvenc
             )
     ;;
   esac
@@ -145,7 +144,6 @@ build() {
     --disable-stripping \
     --enable-amf \
     --enable-avisynth \
-    --enable-cuda-llvm \
     --enable-lto \
     --enable-fontconfig \
     --enable-gmp \
@@ -189,7 +187,7 @@ build() {
     --enable-libxvid \
     --enable-libzimg \
     --enable-shared \
-    --enable-version3 ${_configure_flags}
+    --enable-version3 ${_configure_flags[@]}
 
   make
   make tools/qt-faststart
@@ -198,9 +196,7 @@ build() {
 
 package() {
   make DESTDIR="${pkgdir}" -C ffmpeg install
-
   cd "${pkgdir}"
-
   # Move libs to /usr/lib, except the .so symlinks
   local f
   for f in usr/lib/ffmpeg4.4/*; do
@@ -210,7 +206,6 @@ package() {
       mv "$f" usr/lib
     fi
   done
-
   rm -r usr/share
 }
 
