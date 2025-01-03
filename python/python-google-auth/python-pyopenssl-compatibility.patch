@@ -1,0 +1,33 @@
+diff --git a/tests/transport/test__mtls_helper.py b/tests/transport/test__mtls_helper.py
+index f6e20b7..f899d0d 100644
+--- a/tests/transport/test__mtls_helper.py
++++ b/tests/transport/test__mtls_helper.py
+@@ -18,6 +18,8 @@ import re
+ import mock
+ from OpenSSL import crypto
+ import pytest  # type: ignore
++from cryptography.hazmat.primitives.asymmetric import ec
++from cryptography.hazmat.primitives import hashes
+ 
+ from google.auth import exceptions
+ from google.auth.transport import _mtls_helper
+@@ -630,8 +632,17 @@ class TestDecryptPrivateKey(object):
+         x509.set_pubkey(public_key)
+ 
+         # Test the decrypted key works by signing and verification.
+-        signature = crypto.sign(private_key, b"data", "sha256")
+-        crypto.verify(x509, signature, b"data", "sha256")
++        cryptography_key = private_key.to_cryptography_key()
++        signature = cryptography_key.sign(
++          data=b"data",
++          signature_algorithm=ec.ECDSA(hashes.SHA256()),
++        )
++        cryptography_public_key = public_key.to_cryptography_key()
++        cryptography_public_key.verify(
++          signature=signature,
++          data=b"data",
++          signature_algorithm=ec.ECDSA(hashes.SHA256())
++        )
+ 
+     def test_crypto_error(self):
+         with pytest.raises(crypto.Error):
