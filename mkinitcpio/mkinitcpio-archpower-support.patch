@@ -1,6 +1,6 @@
 diff -ruN mkinitcpio-39.2.orig/functions mkinitcpio-39.2/functions
---- mkinitcpio-39.2.orig/functions	2024-07-16 11:15:26.634313139 +0200
-+++ mkinitcpio-39.2/functions	2024-07-16 11:15:56.515344147 +0200
+--- mkinitcpio-39.2.orig/functions	2025-01-06 22:51:07.940474218 +0100
++++ mkinitcpio-39.2/functions	2025-01-06 22:51:15.355753793 +0100
 @@ -161,6 +161,14 @@
      printf '%s' "$kver"
  }
@@ -47,9 +47,39 @@ diff -ruN mkinitcpio-39.2.orig/functions mkinitcpio-39.2/functions
                  ln -s "lib"     "$root/usr/lib64"
                  ln -s "usr/lib" "$root/lib64"
                  ;;
+diff -ruN mkinitcpio-39.2.orig/install/fsck mkinitcpio-39.2/install/fsck
+--- mkinitcpio-39.2.orig/install/fsck	2025-01-06 22:51:07.936474607 +0100
++++ mkinitcpio-39.2/install/fsck	2025-01-06 22:52:30.476458079 +0100
+@@ -15,6 +15,10 @@
+                     add_file /etc/e2fsck.conf
+                 fi
+                 ;;
++            hfs|hfsplus)
++                add_binary fsck.hfsplus
++                add_symlink /usr/bin/fsck.hfs fsck.hfsplus
++                ;;
+             xfs)
+                 add_binary fsck.xfs
+                 add_binary xfs_repair
+diff -ruN mkinitcpio-39.2.orig/install/kms mkinitcpio-39.2/install/kms
+--- mkinitcpio-39.2.orig/install/kms	2025-01-06 22:51:07.936474607 +0100
++++ mkinitcpio-39.2/install/kms	2025-01-06 22:51:15.355753793 +0100
+@@ -5,8 +5,10 @@
+     # AGP and DRM modules for GPUs
+     map add_checked_modules '/drivers/char/agp/' '/drivers/gpu/drm/'
+ 
+-    # modules that implement the privacy screen interface
+-    add_checked_modules_from_symbol 'drm_privacy_screen_register' '=drivers/platform'
++    # modules that implement the privacy screen interface on x86_64
++    if [ "$(uname -m)" == 'x86_64' ]; then
++      add_checked_modules_from_symbol 'drm_privacy_screen_register' '=drivers/platform'
++    fi
+ }
+ 
+ help() {
 diff -ruN mkinitcpio-39.2.orig/mkinitcpio mkinitcpio-39.2/mkinitcpio
---- mkinitcpio-39.2.orig/mkinitcpio	2024-07-16 11:15:26.634313139 +0200
-+++ mkinitcpio-39.2/mkinitcpio	2024-07-16 11:15:33.777603348 +0200
+--- mkinitcpio-39.2.orig/mkinitcpio	2025-01-06 22:51:07.936474607 +0100
++++ mkinitcpio-39.2/mkinitcpio	2025-01-06 22:51:15.359753404 +0100
 @@ -135,7 +135,7 @@
      error "invalid kernel specified: '%s'" "$1"
  
@@ -59,8 +89,21 @@ diff -ruN mkinitcpio-39.2.orig/mkinitcpio mkinitcpio-39.2/mkinitcpio
          error "kernel version extraction from image not supported for '%s' architecture" "$arch"
          error "there's a chance the generic version extractor may work with a valid uncompressed kernel image"
      fi
---- mkinitcpio-39.2.orig/test/cases/zsh-completion.bats	2024-07-16 11:26:02.735159982 +0200
-+++ mkinitcpio-39.2/test/cases/zsh-completion.bats	2024-07-16 11:33:46.005417563 +0200
+diff -ruN mkinitcpio-39.2.orig/mkinitcpio.conf mkinitcpio-39.2/mkinitcpio.conf
+--- mkinitcpio-39.2.orig/mkinitcpio.conf	2025-01-06 22:51:07.936474607 +0100
++++ mkinitcpio-39.2/mkinitcpio.conf	2025-01-06 22:51:15.359753404 +0100
+@@ -52,7 +52,7 @@
+ #
+ ##   NOTE: If you have /usr on a separate partition, you MUST include the
+ #    usr and fsck hooks.
+-HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block filesystems fsck)
++HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesystems fsck)
+ 
+ # COMPRESSION
+ # Use this to compress the initramfs image. By default, zstd compression
+diff -ruN mkinitcpio-39.2.orig/test/cases/zsh-completion.bats mkinitcpio-39.2/test/cases/zsh-completion.bats
+--- mkinitcpio-39.2.orig/test/cases/zsh-completion.bats	2025-01-06 22:51:07.940474218 +0100
++++ mkinitcpio-39.2/test/cases/zsh-completion.bats	2025-01-06 22:51:15.359753404 +0100
 @@ -13,6 +13,9 @@
  }
  
