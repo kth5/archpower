@@ -4,11 +4,11 @@
 # Contributor: Caltlgin Stsodaat <contact@fossdaily.xyz>
 
 pkgname=python-rapidfuzz
-pkgver=3.6.2
-pkgrel=4
+pkgver=3.11.0
+pkgrel=1
 pkgdesc='Rapid fuzzy string matching in Python using various string metrics'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url='https://github.com/maxbachmann/rapidfuzz'
+url='https://github.com/rapidfuzz/RapidFuzz'
 license=('MIT')
 depends=(
   'glibc'
@@ -20,24 +20,19 @@ makedepends=(
   'python-build'
   'python-installer'
   'cython'
-  'python-scikit-build'
+  'python-scikit-build-core'
   'rapidfuzz-cpp'
 )
 checkdepends=('python-hypothesis' 'python-pandas' 'python-pytest')
 optdepends=('python-numpy')
-_commit='26917be34e943fd082f13f3106b84b4c27a7f56a'
 source=(
-  "$pkgname::git+$url#commit=$_commit"
+  "$pkgname::git+$url#tag=v$pkgver"
   'github.com-taskflow-taskflow::git+https://github.com/taskflow/taskflow'
 )
-b2sums=('SKIP'
+sha512sums=('931dbcce60c5bf0c54e946e111b4270b9dafb7224b8eae5f8e0d58ff97d47696092db55ee095b4758c201b8c658891793655b658b6d0749b309c7037beda4fa3'
+            'SKIP')
+b2sums=('593822ccbc878da8602edd8a062d8b67f11c27293f0c6465f7c8d2c899a68319833443ef4743ad7df840369976710fec597275674d128cb8e4a2bf2b59822b65'
         'SKIP')
-
-pkgver() {
-  cd "$pkgname"
-
-  git describe --tags | sed 's/^v//'
-}
 
 prepare() {
   cd "$pkgname"
@@ -50,6 +45,7 @@ prepare() {
 
 build() {
   cd "$pkgname"
+
   case "${CARCH}" in
     powerpc) ;;
     *) RAPIDFUZZ_BUILD_EXTENSION=1 ;;
@@ -61,9 +57,13 @@ build() {
 check() {
   cd "$pkgname"
 
-  python -m venv --system-site-packages test-env
-  test-env/bin/python -m installer dist/*.whl
-  test-env/bin/python -m pytest
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+
+  # install to temporary directory
+  python -m installer --destdir="$PWD/tmp_install" dist/*.whl
+
+  PYTHONPATH="$PWD/tmp_install$site_packages" pytest -v
+
 }
 
 package() {
@@ -74,9 +74,6 @@ package() {
   # documentation
   install -vDm644 -t "$pkgdir/usr/share/doc/$pkgname" README.md
 
-  # symlink license file
-  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-  install -d "$pkgdir/usr/share/licenses/$pkgname"
-  ln -s "$site_packages/${pkgname#python-}-$pkgver.dist-info/LICENSE" \
-    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  # license
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
 }
