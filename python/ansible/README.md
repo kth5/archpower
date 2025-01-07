@@ -10,4 +10,4 @@ To put it simply, `ansible` new releases should always be built against an up to
 
 Fortunately, upstream usually syncs the releases of new `ansible` and `ansible-core` versions. They are usually released a few hours apart (with `ansible-core` always being released first).
 
-As a matter of precaution, it is appropriate to maintain both `ansible` and `ansible-core` as one package group (e.g. package, release and move new versions accross repositories at the same time).
+As a matter of precaution, it is appropriate to maintain both `ansible` and `ansible-core` as one package group (e.g. package, release and move new versions of those packages accross repositories together).
