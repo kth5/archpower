@@ -3,8 +3,8 @@
 # Maintainer: Carl Smedstad <carsme@archlinux.org>
 
 pkgname=python-cryptography
-pkgver=43.0.3
-pkgrel=2
+pkgver=44.0.0
+pkgrel=1
 pkgdesc="A package designed to expose cryptographic recipes and primitives to Python developers"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=('Apache-2.0 OR BSD-3-Clause')
@@ -33,25 +33,14 @@ checkdepends=(
   'python-pretend'
   'python-pytest'
 )
-source=("git+https://github.com/pyca/cryptography.git#tag=$pkgver"
-        "disable-rust-lto.patch")
-sha512sums=('ed17b32ef6b2a380d637905e543538e532d65166833144bd8b4de32928a0732cb9b18408f791230b1f4ee23a1e850a626ea8edfd5c81f572cfcbf265a3cba13a'
-            'd1c2611f91fb9971ab57ebe5af5d1286132e06cfe6e346f16a6ba24d0b9bfc4c1f6351f517913dc135ba12b3603244ce38ab6ab3d974f5595f620c31f508bf5b')
+source=("git+https://github.com/pyca/cryptography.git#tag=$pkgver")
+sha512sums=('0cafd1b68e731e6960fc394940f57d9437a19ea6cd715d10e1ca2c74df27e9e00a4ee677d50a75649c8f7aefd0930080c0983ca1429d5aea8698f28953f77c95')
 
 prepare() {
   cd cryptography
   # Drop all benchmark tests, this means we don't have to checkdepends on
   # pytest-benchmark nor are benchmark tests interesting for a distribution.
   rm -rf tests/bench
-
-  case "${CARCH}" in
-    powerpc)
-      patch -Np0 -i ${srcdir}/disable-rust-lto.patch
-      pushd src/rust
-      cargo update
-      popd
-    ;;
-  esac
 }
 
 build() {
@@ -59,8 +48,16 @@ build() {
   echo $RUSTFLAGS
 
   # https://github.com/pyca/cryptography/issues/9023
-  CC=clang RUSTFLAGS+="-Clinker-plugin-lto -Clinker=clang -Clink-arg=-fuse-ld=lld" \
-    python -m build --wheel --no-isolation --skip-dependency-check
+  CC=clang
+  RUSTFLAGS+="-Clinker-plugin-lto -Clinker=clang -Clink-arg=-fuse-ld=lld"
+  case "${CARCH}" in
+    powerpc)
+      CC=gcc
+      RUSTFLAGS=""
+    ;;
+  esac
+
+  python -m build --wheel --no-isolation --skip-dependency-check
 }
 
 check() {
