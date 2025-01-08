@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alper Nebi Yasak <alpernebiyasak@gmail.com>
+Date: Wed, 4 Dec 2024 17:34:45 +0300
+Subject: [PATCH] alsa-ucm: Fix segfault from recursion due to too many devices
+
+While trying to figure out device subsets that have aren't internally
+contain conflicting devices, we walk through all possible subsets and
+check each set if it satisfies ConflictingDevices/SupportedDevices
+listed in UCM configuration. For a better user experience, we want to
+skip subsets that are fully included in another valid subset we will
+also generate.
+
+The iterate_device_subsets() function that achieves the former is
+intentionally in iterative form to avoid a stack overflow, since it will
+walk through 2^n sets. However, the iterate_maximal_device_subsets()
+function that skips incomplete sets is in recursive form, as I had
+assumed tail-call optimization would take care of the potential problem.
+
+Convert iterate_maximal_device_subsets() to an iterative form, because
+the recursion seems to trigger a segfault with more than 16 devices.
+
+Signed-off-by: Alper Nebi Yasak <alpernebiyasak@gmail.com>
+---
+ src/modules/alsa/alsa-ucm.c | 22 ++++++++++------------
+ 1 file changed, 10 insertions(+), 12 deletions(-)
+
+diff --git a/src/modules/alsa/alsa-ucm.c b/src/modules/alsa/alsa-ucm.c
+index 018c01739ba0..34a9d30ade48 100644
+--- a/src/modules/alsa/alsa-ucm.c
++++ b/src/modules/alsa/alsa-ucm.c
+@@ -1404,22 +1404,20 @@ static pa_idxset *iterate_device_subsets(pa_idxset *devices, void **state) {
+ static pa_idxset *iterate_maximal_device_subsets(pa_idxset *devices, void **state) {
+     uint32_t idx;
+     pa_alsa_ucm_device *dev;
+-    pa_idxset *subset;
++    pa_idxset *subset = NULL;
+ 
+     pa_assert(devices);
+     pa_assert(state);
+ 
+-    subset = iterate_device_subsets(devices, state);
+-    if (!subset)
+-        return subset;
+-
+-    /* Skip this group if it's incomplete, by checking if we can add any
+-     * other device. If we can, this iteration is a subset of another
+-     * group that we already returned or eventually return. */
+-    PA_IDXSET_FOREACH(dev, devices, idx) {
+-        if (!pa_idxset_contains(subset, dev) && devset_supports_device(subset, dev)) {
+-            pa_idxset_free(subset, NULL);
+-            return iterate_maximal_device_subsets(devices, state);
++    while (subset == NULL && (subset = iterate_device_subsets(devices, state))) {
++        /* Skip this group if it's incomplete, by checking if we can add any
++         * other device. If we can, this iteration is a subset of another
++         * group that we already returned or eventually return. */
++        PA_IDXSET_FOREACH(dev, devices, idx) {
++            if (subset && !pa_idxset_contains(subset, dev) && devset_supports_device(subset, dev)) {
++                pa_idxset_free(subset, NULL);
++                subset = NULL;
++            }
+         }
+     }
+ 
