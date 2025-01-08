@@ -1,0 +1,43 @@
+From c83348cca66f8b851dd4053509d9f85078b86019 Mon Sep 17 00:00:00 2001
+From: Carl Smedstad <carl.smedstad@protonmail.com>
+Date: Sun, 8 Dec 2024 17:18:42 +0100
+Subject: [PATCH] Adapt to GPGME handling invalid GPG data in signature
+ differently
+
+GPGME seems to have changed behaviour since the last release of Breezy
+(24-10-20) - Invalid GPG data now throws a GPGMEError when verified.
+
+This broke the test breezy.tests.test_gpg.TestVerify.test_verify_invalid
+- adapt the GPG handling code to ensure the test passes.
+---
+ breezy/gpg.py | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/breezy/gpg.py b/breezy/gpg.py
+index d5bd842..ccb9ee2 100644
+--- a/breezy/gpg.py
++++ b/breezy/gpg.py
+@@ -296,12 +296,14 @@ class GPGStrategy:
+ 
+             return SIGNATURE_NOT_VALID, None, None
+         except gpg.errors.GPGMEError as error:
+-            raise SignatureVerificationFailed(error)
+-
+-        # No result if input is invalid.
+-        # test_verify_invalid()
+-        if len(result.signatures) == 0:
+-            return SIGNATURE_NOT_VALID, None, plain_output
++            try:
++                # No result if input is invalid.
++                # test_verify_invalid()
++                if len(error.results[1].signatures) == 0:
++                    plain_output = error.results[0]
++                    return SIGNATURE_NOT_VALID, None, plain_output
++            except Exception:
++                raise SignatureVerificationFailed(error)
+ 
+         # User has specified a list of acceptable keys, check our result is in
+         # it.  test_verify_unacceptable_key()
+-- 
+2.47.1
+
