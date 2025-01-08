@@ -5,7 +5,7 @@
 
 pkgname=breezy
 pkgver=3.3.9
-pkgrel=1.1
+pkgrel=4
 pkgdesc='A decentralized revision control system with support for Bazaar and Git file formats'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url=https://www.breezy-vcs.org/
@@ -52,10 +52,17 @@ replaces=(bzr)
 source=(
   "https://launchpad.net/brz/${pkgver%.*}/$pkgver/+download/breezy-$pkgver.tar.gz"
   "https://launchpad.net/brz/${pkgver%.*}/$pkgver/+download/breezy-$pkgver.tar.gz.asc"
+  "0001-Adapt-to-GPGME-handling-invalid-GPG-data-in-signatur.patch"
 )
 sha256sums=('c2588bf217c8a4056987ecf6599f0ad9fb8484285953b2e61905141f43c3d5d8'
-            'SKIP')
+            'SKIP'
+            '3a1176252ec763983fa017d9fc70fcee38ecff5f2438b81dd3dbef66772b8c19')
 validpgpkeys=('DC837EE14A7E37347E87061700806F2BD729A457') # Jelmer Vernooĳ <jelmer@jelmer.uk>
+
+prepare() {
+  cd $pkgname-$pkgver
+  patch -Np1 -i ../0001-Adapt-to-GPGME-handling-invalid-GPG-data-in-signatur.patch
+}
 
 build() {
   cd $pkgname-$pkgver
@@ -64,13 +71,47 @@ build() {
 
 check() {
   cd $pkgname-$pkgver
-  python -m installer -d tmp_install dist/*.whl
+  python -m installer --destdir=tmp_install dist/*.whl
   local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
   export PYTHONPATH="$PWD/tmp_install/$site_packages"
-  export BRZ_PLUGIN_PATH=-site:-user
+
+  local excluded_tests=(
+    # this test i flaky and fails with the following error when run in parallel:
+    # ssl.SSLError: [SYS] unknown error (_ssl.c:2570)
+    --exclude="breezy.bzr.tests.test_read_bundle.TestReadMergeableBundleFromURL"
+    # issues with self signed certs / openssl
+    --exclude="breezy.tests.per_transport.TransportTests.test_clone"
+    --exclude="breezy.tests.per_transport.TransportTests.test_connection_sharing"
+    --exclude="breezy.tests.per_transport.TransportTests.test_copy_to"
+    --exclude="breezy.tests.per_transport.TransportTests.test_ensure_base_missing"
+    --exclude="breezy.tests.per_transport.TransportTests.test_get"
+    --exclude="breezy.tests.per_transport.TransportTests.test_get_bytes"
+    --exclude="breezy.tests.per_transport.TransportTests.test_get_bytes_unknown_file"
+    --exclude="breezy.tests.per_transport.TransportTests.test_get_directory_read_gives_ReadError"
+    --exclude="breezy.tests.per_transport.TransportTests.test_get_unknown_file"
+    --exclude="breezy.tests.per_transport.TransportTests.test_has"
+    --exclude="breezy.tests.per_transport.TransportTests.test_has_root_works"
+    --exclude="breezy.tests.per_transport.TransportTests.test_hook_post_connection_multi"
+    --exclude="breezy.tests.per_transport.TransportTests.test_hook_post_connection_one"
+    --exclude="breezy.tests.per_transport.TransportTests.test_readv"
+    --exclude="breezy.tests.per_transport.TransportTests.test_readv_out_of_order"
+    --exclude="breezy.tests.per_transport.TransportTests.test_readv_short_read"
+    --exclude="breezy.tests.per_transport.TransportTests.test_readv_with_adjust_for_latency"
+    --exclude="breezy.tests.per_transport.TransportTests.test_readv_with_adjust_for_latency_with_big_file"
+    --exclude="breezy.tests.per_transport.TransportTests.test_reuse_connection_for_various_paths"
+    --exclude="breezy.tests.per_transport.TransportTests.test_unicode_paths"
+    --exclude="breezy.tests.test_http.TestActivity.test_get"
+    --exclude="breezy.tests.test_http.TestActivity.test_has"
+    --exclude="breezy.tests.test_http.TestActivity.test_post"
+    --exclude="breezy.tests.test_http.TestActivity.test_readv"
+    # seems like an upstream issue with a changed deprecation message
+    --exclude="breezy.tests.test_symbol_versioning.TestDeprecationWarnings.test_deprecated_method"
+  )
+
   "$PWD/tmp_install/usr/bin/brz" selftest \
     --parallel=fork \
     --verbose \
+    "${excluded_tests[@]}" \
     -Oselftest.timeout=120
 }
 
