@@ -6,7 +6,7 @@
 pkgbase=libkexiv2
 pkgname=(libkexiv2
          libkexiv2-qt5)
-pkgver=24.08.3
+pkgver=24.12.0
 pkgrel=1
 pkgdesc='A library to manipulate pictures metadata'
 url='https://www.kde.org/'
@@ -19,7 +19,7 @@ makedepends=(extra-cmake-modules
              qt5-base
              qt6-base)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('9f3865411afb594ad2da9f2907e5124277f662be3f4c614bd4d5ccc36cfb8906'
+sha256sums=('27c7919d13ab7d481c064f115831fd4e276354bf1b61adf48350e28fab6730f6'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
