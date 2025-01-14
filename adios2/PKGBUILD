@@ -1,50 +1,111 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Bruno Pagani <archange@archlinux.org>
+# Maintainer: Jakub Klinkovský <lahwaacz at archlinux dot org>
 
 pkgname=adios2
 pkgver=2.10.2
-pkgrel=5
+pkgrel=6
 pkgdesc="The Adaptable Input/Output System version 2"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://adios2.readthedocs.io/en/latest/"
-license=(Apache)
-depends=(blosc bzip2 glibc gcc-libs hdf5 libfabric libpng nlohmann-json
-         openmpi pugixml pybind11 sz yaml-cpp zeromq zfp zlib)
-# with mgard does not build currently, not time to investigate
-makedepends=(cmake gcc-fortran gtest python python-mpi4py python-numpy)
-source=(https://github.com/ornladios/ADIOS2/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz)
-sha256sums=('14cf0bcd94772194bce0f2c0e74dba187965d1cffd12d45f801c32929158579e')
+license=(Apache-2.0)
+depends=(
+  blosc2
+  bzip2 libbz2.so
+  gcc-libs
+  glibc
+  hdf5
+  libfabric
+  libpng libpng16.so
+  libsodium libsodium.so
+  mgard
+  openmpi libmpi.so
+  pugixml
+  python
+  python-yaml
+  sqlite libsqlite3.so
+  sz
+  yaml-cpp libyaml-cpp.so
+  zeromq libzmq.so
+  zfp
+  zlib libz.so
+)
+makedepends=(
+  cmake
+  gcc-fortran
+  gtest
+  ninja
+  nlohmann-json
+  pybind11
+  python-mpi4py
+  python-numpy
+)
+makedepends_x86_64=(
+  cuda
+  openucx
+  paraview-catalyst
+)
+optdepends=(
+  'python-numpy: for Python bindings'
+)
+source=(https://github.com/ornladios/ADIOS2/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz
+        fix-destdir-installation.patch)
+sha256sums=('14cf0bcd94772194bce0f2c0e74dba187965d1cffd12d45f801c32929158579e'
+            '601dccc582f957b19bbe5e980ed37fcaeec85b66f63fbb357735345ac0a16d60')
+
+prepare() {
+  # Fix DESTDIR installation https://github.com/ornladios/ADIOS2/pull/4402
+  patch --directory=${pkgname^^}-${pkgver} -Np1 < fix-destdir-installation.patch
+}
 
 build() {
+  # In general, we want to list all real archs (sm_XX) and the latest virtual arch (compute_XX) for future PTX compatibility.
+  # Valid values can be discovered from nvcc --help
+  local cuda_archs="50;52;53;60;61;62;70;72;75;80;86;87;89;90;90a;90a-virtual"
+
+  local cmake_options=(
+    -B build
+    -S ${pkgname^^}-${pkgver}
+    -G Ninja
+    -W no-dev
+    -DCMAKE_INSTALL_PREFIX=/usr
+    -DADIOS2_USE_EXTERNAL_DEPENDENCIES=ON
+    #-DADIOS2_HAVE_HDF5_VOL needs hdf5-openmpi
+    -DADIOS2_HAVE_HDF5_VOL=OFF
+    -DADIOS2_BUILD_EXAMPLES=OFF
+    -DADIOS2_USE_Derived_Variables=ON
+  )
+
   case "${CARCH}" in
     powerpc)
       export CFLAGS+=' -Wno-narrowing'
       export CXXFLAGS+=' -Wno-narrowing'
-      cmake_options=(
+      cmake_options+=(
+        #FIXME: RefactorMDR.cpp:444:29: error: invalid initialization of reference of type ‘const adios2::Dims&’ {
+        -DADIOS2_USE_MGARD=OFF
         -DDILL_NATIVE_ONLY=OFF
       )
     ;;
     powerpc64|riscv64)
-      cmake_options=(
+      cmake_options+=(
         -DDILL_NATIVE_ONLY=OFF
+      )
+    ;;
+    x86_64)
+      cmake_options+=(
+        -DCMAKE_CUDA_ARCHITECTURES="$cuda_archs"
+        # Compile source code for supported GPU archs in parallel
+        -DCMAKE_CUDA_FLAGS="--threads $(nproc)"
+        -DADIOS2_USE_CUDA=ON
       )
     ;;
   esac
 
-  cmake -B build -S ${pkgname^^}-${pkgver} \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DADIOS2_USE_EXTERNAL_DEPENDENCIES=ON \
-    -DADIOS2_HAVE_HDF5_VOL=OFF \
-    -DADIOS2_BUILD_EXAMPLES=OFF ${cmake_options[@]} #\
-    #-DMGARD_INCLUDE_DIR=/usr/include/mgard
-    #-DADIOS2_HAVE_HDF5_VOL needs hdf5-openmpi
-  make VERBOSE=1 -C build
+  cmake "${cmake_options[@]}"
+  cmake --build build
 }
 
 package() {
   CMAKE_PREFIX_PATH="$pkgdir"/usr/lib/cmake \
-  make -C build DESTDIR="${pkgdir}" install
-
-  # conflicts with the actual libffi
-  rm -fv ${pkgdir}/usr/lib/{,pkgconfig/}libffi.*
+  DESTDIR="$pkgdir" cmake --install build
 }
