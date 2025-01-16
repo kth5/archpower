@@ -1,0 +1,80 @@
+From 93eabf6a91d30e7bb852d20ade1e5b542dee6b35 Mon Sep 17 00:00:00 2001
+From: Jelle van der Waa <jelle@archlinux.org>
+Date: Fri, 6 Dec 2024 18:24:41 +0100
+Subject: [PATCH 1/2] test: make test-crypto-hash compatible with OpenSSL >
+ 3.4.0
+
+OpenSSL 3.4 has a breaking change where the outputLength is now
+mandatory for shake* hash algorithms.
+
+https://github.com/openssl/openssl/commit/b911fef216d1386210ec24e201d54d709528abb4
+---
+ test/common/index.js              |  4 ++++
+ test/parallel/test-crypto-hash.js | 29 ++++++++++++++++-------------
+ 2 files changed, 20 insertions(+), 13 deletions(-)
+
+diff --git a/test/common/index.js b/test/common/index.js
+index 50595945b1..df5784068e 100644
+--- a/test/common/index.js
++++ b/test/common/index.js
+@@ -1059,6 +1059,10 @@ const common = {
+     return hasOpenSSL(3, 2);
+   },
+ 
++  get hasOpenSSL34() {
++    return hasOpenSSL(3, 4);
++  },
++
+   get inFreeBSDJail() {
+     if (inFreeBSDJail !== null) return inFreeBSDJail;
+ 
+diff --git a/test/parallel/test-crypto-hash.js b/test/parallel/test-crypto-hash.js
+index 83218c105a..a386de866f 100644
+--- a/test/parallel/test-crypto-hash.js
++++ b/test/parallel/test-crypto-hash.js
+@@ -7,6 +7,7 @@ const assert = require('assert');
+ const crypto = require('crypto');
+ const fs = require('fs');
+ 
++const { hasOpenSSL34 } = common;
+ const fixtures = require('../common/fixtures');
+ 
+ let cryptoType;
+@@ -182,19 +183,21 @@ assert.throws(
+ 
+ // Test XOF hash functions and the outputLength option.
+ {
+-  // Default outputLengths.
+-  assert.strictEqual(crypto.createHash('shake128').digest('hex'),
+-                     '7f9c2ba4e88f827d616045507605853e');
+-  assert.strictEqual(crypto.createHash('shake128', null).digest('hex'),
+-                     '7f9c2ba4e88f827d616045507605853e');
+-  assert.strictEqual(crypto.createHash('shake256').digest('hex'),
+-                     '46b9dd2b0ba88d13233b3feb743eeb24' +
+-                     '3fcd52ea62b81b82b50c27646ed5762f');
+-  assert.strictEqual(crypto.createHash('shake256', { outputLength: 0 })
+-                           .copy()  // Default outputLength.
+-                           .digest('hex'),
+-                     '46b9dd2b0ba88d13233b3feb743eeb24' +
+-                     '3fcd52ea62b81b82b50c27646ed5762f');
++  // Default outputLengths. Since OpenSSL 3.4 an outputLength is mandatory
++  if (!hasOpenSSL34) {
++    assert.strictEqual(crypto.createHash('shake128').digest('hex'),
++                       '7f9c2ba4e88f827d616045507605853e');
++    assert.strictEqual(crypto.createHash('shake128', null).digest('hex'),
++                       '7f9c2ba4e88f827d616045507605853e');
++    assert.strictEqual(crypto.createHash('shake256').digest('hex'),
++                       '46b9dd2b0ba88d13233b3feb743eeb24' +
++                       '3fcd52ea62b81b82b50c27646ed5762f');
++    assert.strictEqual(crypto.createHash('shake256', { outputLength: 0 })
++                             .copy()  // Default outputLength.
++                             .digest('hex'),
++                       '46b9dd2b0ba88d13233b3feb743eeb24' +
++                       '3fcd52ea62b81b82b50c27646ed5762f');
++  }
+ 
+   // Short outputLengths.
+   assert.strictEqual(crypto.createHash('shake128', { outputLength: 0 })
+-- 
+2.47.1
+
