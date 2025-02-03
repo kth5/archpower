@@ -7,32 +7,39 @@
 
 pkgname=procps-ng
 pkgver=4.0.5
-pkgrel=1
+pkgrel=2
 pkgdesc='Utilities for monitoring your system and its processes'
 url='https://gitlab.com/procps-ng/procps'
 license=(GPL LGPL)
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso riscv64)
 depends=(glibc ncurses libncursesw.so systemd-libs)
-makedepends=(systemd)
+makedepends=(gettext git po4a systemd)
 conflicts=(procps sysvinit-tools)
 provides=(procps sysvinit-tools libproc2.so)
 replaces=(procps sysvinit-tools)
 options=('!emptydirs')
 validpgpkeys=('5D2FB320B825D93904D205193938F96BDF50FEA5') # Craig Small <csmall@debian.org>
-source=("https://downloads.sourceforge.net/project/$pkgname/Production/${pkgname}-${pkgver}.tar.xz"{,.asc})
-sha256sums=('c2e6d193cc78f84cd6ddb72aaf6d5c6a9162f0470e5992092057f5ff518562fa'
-            'SKIP')
-b2sums=('4b273ac7737202147fbf392995da1c5ff385df2b53ad84180b6412dc45c2a671e81d7659c0a5824c0d8c19fa37cbf2e58b0545841c74399b3717a9f27fd26c23'
-        'SKIP')
+source=("git+https://gitlab.com/procps-ng/procps.git#tag=v${pkgver}?signed"
+        '0001-fix-breakage-in-unhex.patch')
+sha256sums=('640ad0085ee013efb94877072cfa7c0c025884dc8cc398e331b7efb6ebaefc01'
+            '5386ca099f38dc1c0e0521f193896ff38c6c7a3855090ff4e245f1d6d165708d')
+b2sums=('4f5d23ecd02434e83896e93840dddbe0896e321c7cb2294a54d280abf03b87302489ef7d99c56476952d1364eb4acfe7715b06b2b56a956373e037b0a273111b'
+        '80c67d37768c56e9c9eff24ed51ffef115cdba8ed670294ac02241b752167fc595ecb7cfebfb203dc9ba2891350c4921660f694cd1acea49fb2f55d521ee99b2')
 
 prepare() {
-  cd procps-ng-$pkgver
-  sed 's:<ncursesw/:<:g' -i src/watch.c
-  autoreconf -fi
+  cd procps
+
+  # fix breakage in unhex
+  # https://gitlab.com/procps-ng/procps/-/issues/369
+  # https://gitlab.com/procps-ng/procps/-/merge_requests/247
+  patch -Np1 < ../0001-fix-breakage-in-unhex.patch
+
+  ./autogen.sh
 }
 
 build() {
-  cd procps-ng-$pkgver
+  cd procps
+
   ./configure \
     --prefix=/usr \
     --exec-prefix=/ \
@@ -49,6 +56,7 @@ build() {
 }
 
 package() {
-  cd procps-ng-$pkgver
+  cd procps
+
   make DESTDIR="$pkgdir" install
 }
