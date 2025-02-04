@@ -15,7 +15,7 @@ case "${CARCH}" in
   x86_64) pkgname+=('hyperv' 'turbostat' 'x86_energy_perf_policy') ;;
 esac
 pkgver=6.12
-pkgrel=9
+pkgrel=9.1
 license=('GPL-2.0-only')
 arch=(powerpc64le powerpc64 powerpc riscv64)
 url='https://www.kernel.org'
@@ -64,6 +64,8 @@ sha256sums=('267bab84f30e3ce4a88b6441aeee777b114fd58041b43cabfe50fdf0c0a97321'
 prepare() {
   cd linux
 
+  git cherry-pick -n 710fbca820c721cdd60fa8c5bbe9deb4c0788aae
+
   # apply patch from the source array (should be a pacman feature)
   local src
   for src in "${source[@]}"; do
@@ -86,6 +88,11 @@ build() {
   sed -i -e 's@-Werror@@' ${srcdir}/linux/tools/lib/bpf/Makefile \
             ${srcdir}/linux/tools/lib/perf/Makefile
 
+  case "${CARCH}" in
+    powerpc*) SRCARCH=powerpc ;;
+    riscv64)  SRCARCH=riscv ;;
+  esac
+
   echo ':: perf'
   pushd linux/tools/perf
   make -f Makefile.perf \
@@ -97,7 +104,8 @@ build() {
     BUILD_BPF_SKEL=1 \
     PYTHON=python \
     PYTHON_CONFIG=python-config \
-    DESTDIR="$pkgdir"
+    DESTDIR="$pkgdir" \
+    SRCARCH=${SRCARCH}
   popd
 
   echo ':: cpupower'
