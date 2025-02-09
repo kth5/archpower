@@ -3,8 +3,8 @@
 
 pkgbase=wasi-libc++
 pkgname=(wasi-libc++ wasi-libc++abi)
-pkgver=18.1.8
-pkgrel=4.1
+pkgver=19.1.6
+pkgrel=2
 pkgdesc="WASI LLVM C++ standard library"
 url="https://libcxx.llvm.org/"
 license=('Apache-2.0 WITH LLVM-exception')
@@ -12,30 +12,40 @@ arch=(any)
 depends=('wasi-libc' 'wasi-compiler-rt')
 makedepends=('cmake' 'ninja' 'python' 'clang' 'llvm' 'lld' 'util-linux')
 source=("https://github.com/llvm/llvm-project/releases/download/llvmorg-$pkgver/llvm-project-$pkgver.src.tar.xz"{,.sig}
+        no-normalize-triple.diff
         WASI.cmake
         wasi-sdk.cmake)
-b2sums=('a950492f1dbfb874dff63b1ffef86468169ba2f211a9733ec2d4cf30040f7f277ef00f048bb44dee9f97d7d762f0f241f19e5a2a7b0b49217d3821ddfc8c354f'
+b2sums=('b35ab0c754f28c850ac6fd4ee584e963b1d5cf06885c59827ee4ac11f93cde5b8e0268fbed560839137de2c495c9da2b889331cd12a8a02958d8e0cbdbed2607'
         'SKIP'
+        'cdf8d39eb9c11ba363159f995bb7236a11fa5c42d2bc92f7253fb3429e552020902f54afe8a93782b004d55387100eaf84d651809e7d171b2a19c7f086ba119e'
         'c829d807c257921fddb8c4d3752ad2291a2beb116d414dd31e34b7f6b01599d8c4807db87ef9930456ed8c9f30e8648e77028fa0b903c3a5ea840514f6022cf4'
-        '0da3e98a7e09eb500a593f78f92a3b23238cf969be326e2711313f95daff39f8a890a7826b2526a81d8c22a035772ed420fddc2d6182f216be9b732755b94f8e')
+        '9f20eaa64069d20510a5ba6acdedfa4bbf723e1da13792bbbdfc57cc20d232962f5603a56c9723879624ab65e18f3770fda509dc76e3f099c3744acbfeabafc2')
 options=('!lto' 'staticlibs' '!debug')
-validpgpkeys=('474E22316ABF4785A88C6E8EA2C794A986419D8A') # Tom Stellard <tstellar@redhat.com>
+validpgpkeys=(
+  '474E22316ABF4785A88C6E8EA2C794A986419D8A' # Tom Stellard <tstellar@redhat.com>
+  'D574BD5D1D0E98895E3BF90044F2485E45D59042' # Tobias Hieta <tobias@hieta.se>
+)
 
 _targets=(wasm32-wasi wasm32-wasip1 wasm32-wasip1-threads wasm32-wasip2)
 
 prepare() {
+  cd llvm-project-$pkgver.src
+
+  # Don't normalize the target triple - causes wrong multiarch dir
+  # (also see getMultiarchTriple in clang/lib/Driver/ToolChains/WebAssembly.cpp)
+  patch -Np1 -i ../no-normalize-triple.diff
+
   # Platform files have been copied from
   # https://github.com/WebAssembly/wasi-sdk
-
-  mkdir -p llvm-project-$pkgver.src/cmake/Platform
-  cp WASI.cmake llvm-project-$pkgver.src/cmake/Platform
+  mkdir -p cmake/Platform
+  cp ../WASI.cmake cmake/Platform
 }
 
 build() {
   # Build options are derived from
   # https://github.com/WebAssembly/wasi-sdk/blob/main/Makefile
 
-  # remove compiler options not supported by the wasm32-wasi target
+  # remove compiler options not supported by the wasi targets
   local sanitize_flags=(
     -r
     -e 's/-fcf-protection ?//'
@@ -43,7 +53,7 @@ build() {
     -e 's/-fstack-clash-protection ?//'
     -e 's/-march=x86-64 ?//'
     -e 's/-mtune=generic ?//'
-    -e 's/-mcpu=[a-z0-9]+ ?//'
+    -e 's/-mcpu=[a-zA-Z0-9]+ //'
   )
   CFLAGS="$(<<<"$CFLAGS" sed "${sanitize_flags[@]}")"
   CXXFLAGS="$(<<<"$CXXFLAGS" sed "${sanitize_flags[@]}")"
@@ -96,6 +106,8 @@ build() {
       -DLIBCXXABI_USE_LLVM_UNWINDER:BOOL=OFF
       -DWASI_SDK_PREFIX=/usr
       -DUNIX:BOOL=ON
+      -DLIBCXX_INCLUDE_TESTS:BOOL=OFF
+      -DLIBCXX_INCLUDE_BENCHMARKS:BOOL=OFF
       -DCMAKE_SYSROOT=/usr/share/wasi-sysroot
       -DCMAKE_C_FLAGS="$CFLAGS $threads_cflags --target=$target"
       -DCMAKE_CXX_FLAGS="$CXXFLAGS $threads_cflags --target=$target"
