@@ -4,8 +4,8 @@
 # Contributor: Guillaume Horel <guillaume.horel@gmail.com>
 
 pkgname=arrow
-pkgver=18.1.0
-pkgrel=2
+pkgver=19.0.0
+pkgrel=1
 pkgdesc="Columnar in-memory analytics layer for big data."
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://arrow.apache.org"
@@ -13,6 +13,10 @@ license=(Apache-2.0)
 depends=(
   abseil-cpp
   apache-orc
+  aws-crt-cpp
+  aws-sdk-cpp-core
+  aws-sdk-cpp-iam
+  aws-sdk-cpp-s3
   brotli
   bzip2
   gcc-libs
@@ -39,6 +43,10 @@ makedepends=(
   rapidjson
   xsimd
 )
+checkdepends=(
+  minio
+  python
+)
 provides=(parquet-cpp)
 conflicts=(parquet-cpp)
 source=(
@@ -46,13 +54,19 @@ source=(
   git+https://github.com/apache/parquet-testing.git
   git+https://github.com/apache/arrow-testing.git
 )
-sha512sums=('7249c03a6097bc64fb0092143e4d4aaef3227565147e6254f026ddd504177c8dd565a184a0df39743dc989070dc3785e5b66f738c8e310ed9c982b61c2ec4914'
+sha512sums=('6820de33a5d5b0922ea64dd8ff55d186ef02596ad0415578067aaf3e5cf7d3eead473bc3a5f92d6d3f19b97d153fe1c901359008d922d1ffb0fc2a65dc860c79'
             'SKIP'
             'SKIP'
             'SKIP')
 validpgpkeys=(265F80AB84FE03127E14F01125BCCA5220D84079  # Krisztian Szucs (apache) <szucs.krisztian@gmail.com>
               08D3564B7C6A9CAFBFF6A66791D18FCF079F8007  # Kouhei Sutou <kou@cozmixng.org>
               AF6AADA4C9835B75973FF5DA275C532289DD0F4A) # Raúl Cumplido Domínguez (CODE SIGNING KEY) <raulcd@apache.org>
+
+prepare() {
+  cd apache-$pkgname-$pkgver
+  # Patch out unused AWS-SDK component https://github.com/apache/arrow/pull/45191
+  sed -i 's|COMPONENTS config|COMPONENTS|' cpp/cmake_modules/FindAWSSDKAlt.cmake
+}
 
 build() {
   # Arrow options are defined in https://github.com/apache/arrow/blob/main/cpp/cmake_modules/DefineOptions.cmake
@@ -83,6 +97,7 @@ build() {
     -DARROW_JSON=ON
     -DARROW_ORC=ON
     -DARROW_PARQUET=ON
+    -DARROW_S3=ON
     -DARROW_SUBSTRAIT=ON
     -DARROW_TENSORFLOW=ON
     -DARROW_USE_GLOG=ON
@@ -95,7 +110,6 @@ build() {
     -DPARQUET_REQUIRE_ENCRYPTION=ON
   )
 
-  BUILD_TESTS='ON'
   case "${CARCH}" in
     powerpc64le) cmake_options+=(-DARROW_BUILD_TESTS=ON) ;;
     powerpc64)
