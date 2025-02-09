@@ -1,0 +1,64 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Maintainer: Thomas Jost <schnouki@schnouki.net>
+
+pkgname=opendkim
+pkgver=2.11.0beta
+pkgrel=8
+_commit=551ab3820476234def82eb2223ca6c7b45b45076
+pkgdesc="Open source implementation of the DKIM sender authentication system. Based on a fork of dkim-milter."
+arch=(x86_64 powerpc64le powerpc64 powerpc)
+url="http://www.opendkim.org/"
+license=('BSD' 'custom:Sendmail')
+depends=("db" "openssl" "libbsd" "opendbx" "libldap")
+optdepends=("perl: for opendkim-genkey")
+makedepends=("libmilter" "git")
+options=(!emptydirs)
+validpgpkeys=('5CDD574C22FF4D2480ACABDF5254B96BC608B511')
+# https://github.com/trusteddomainproject/OpenDKIM/commits/develop
+source=("git+https://github.com/trusteddomainproject/OpenDKIM.git#commit=${_commit}"
+        "https://github.com/trusteddomainproject/OpenDKIM/commit/7c70ee7c86da1cecc621182355cc950d3b193314.patch"
+        opendkim.sysusers
+        opendkim.tmpfiles
+        opendkim.service
+        openssl_1.1.0_compat.patch)
+sha256sums=('7ecf55e6cc7f2b167ac109223e270d35d0c1f467f0574260cafab5ced0f2d0d3'
+            'd677e975977a94c09aaf1c92a98797189d969cdce98ac3867d7a3737ad4eaab0'
+            '9cf80fce628104be279f82c120119284e5ab295d5ce64ced5b9d98271d2c752e'
+            'ab66c9fdcb8913f2a550289dd44d56d17b960cf5275839ffd03cba70a27ab6ed'
+            'a9beeedc6fb543d92a9dd50c99c018dccdc2b7123675d37d7a4123a93d211487'
+            '5095a7516493af08396060852851231c9b1cba5ee00493f810f0dfc9a69f8dfe')
+
+prepare() {
+  cd "$srcdir/OpenDKIM"
+  patch -p1 -i "$srcdir"/7c70ee7c86da1cecc621182355cc950d3b193314.patch
+  autoreconf -i
+}
+
+build() {
+  cd "$srcdir/OpenDKIM"
+  ./configure --prefix=/usr --sbindir=/usr/bin --with-db --sysconfdir="/etc/$pkgname" \
+    --with-odbx --with-sql-backend --with-openldap
+  make
+}
+
+check() {
+  cd "$srcdir/OpenDKIM"
+  make check -j1
+}
+
+package() {
+  cd "$srcdir/OpenDKIM"
+
+  make DESTDIR="$pkgdir/" install
+  install -Dm644 "$srcdir/opendkim.sysusers" "$pkgdir/usr/lib/sysusers.d/opendkim.conf"
+  install -Dm644 "$srcdir/opendkim.tmpfiles" "$pkgdir/usr/lib/tmpfiles.d/opendkim.conf"
+
+  # License
+  mkdir -p "$pkgdir/usr/share/licenses/opendkim"
+  for f in LICENSE LICENSE.Sendmail; do
+    ln -s ../../doc/opendkim/$f "$pkgdir/usr/share/licenses/opendkim/$f"
+  done
+
+  install -Dm0644 "$srcdir"/$pkgname.service "$pkgdir"/usr/lib/systemd/system/$pkgname.service
+}
