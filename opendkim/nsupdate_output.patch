@@ -1,0 +1,125 @@
+opendkim-genzone: fix nsupdate output
+
+This patch addresses several issues with the nsupdate output:
+
+o Add the correct fields (v=DKIM1, etc) before the key
+o Properly break fields into 255 byte chunks
+o Add the possibility to restrict the key to email signing
+
+Based on an original patch by Marco Favero as posted at:
+https://sourceforge.net/p/opendkim/feature-requests/200/
+
+Bug: https://sourceforge.net/p/opendkim/feature-requests/200/
+
+--- a/opendkim/opendkim-genzone.8.in
++++ b/opendkim/opendkim-genzone.8.in
+@@ -7,6 +7,7 @@
+ [\-C address]
+ [\-d domain]
+ [\-D]
++[\-M]
+ [\-E secs]
+ [\-F]
+ [\-N ns[,...]]
+@@ -64,6 +65,10 @@
+ .I \-D
+ Adds a "._domainkey" suffix to selector names in the zone file.
+ .TP
++.I \-M
++Restricts the keys for use in e-mail signing only.  The default is to allow
++the keys to be used for any service.
++.TP
+ .I \-E secs
+ When generating an SOA record (see
+ .I \-S
+--- a/opendkim/opendkim-genzone.c
++++ b/opendkim/opendkim-genzone.c
+@@ -52,7 +52,7 @@
+ 
+ /* definitions */
+ #define	BUFRSZ		1024
+-#define	CMDLINEOPTS	"C:d:DE:Fo:N:r:R:sSt:T:uvx:"
++#define	CMDLINEOPTS	"C:d:DME:Fo:N:r:R:sSt:T:uvx:"
+ #define	DEFCONFFILE	CONFIG_BASE "/opendkim.conf"
+ #define	DEFEXPIRE	604800
+ #define	DEFREFRESH	10800
+@@ -195,6 +195,7 @@
+ 	                "\t-D          \tinclude '._domainkey' suffix\n"
+ 	                "\t-E secs     \tuse specified expiration time in SOA\n"
+ 	                "\t-F          \tinclude '._domainkey' suffix and domainname\n"
++			"\t-M          \trestricts the keys for use in e-mail signing only\n"
+ 	                "\t-o file     \toutput file\n"
+ 	                "\t-N ns[,...] \tlist NS records\n"
+ 	                "\t-r secs     \tuse specified refresh time in SOA\n"
+@@ -230,6 +231,7 @@
+ 	_Bool fqdnsuffix = FALSE;
+ 	_Bool subdomains = FALSE;
+ 	_Bool writesoa = FALSE;
++	_Bool mailrestrict = FALSE;
+ 	int c;
+ 	int status;
+ 	int verbose = 0;
+@@ -309,6 +311,10 @@
+ 			fqdnsuffix = TRUE;
+ 			break;
+ 
++		  case 'M':
++			mailrestrict = TRUE;
++			break;
++
+ 		  case 'N':
+ 			nameservers = strdup(optarg);
+ 			break;
+@@ -873,42 +879,42 @@
+ 			fprintf(out, "zone %s\n", domain);
+ 
+ 			snprintf(tmpbuf, sizeof tmpbuf,
+-			         "update add %s%s%s%s%s %d TXT \"",
++			         "update add %s%s%s%s%s %d TXT \"v=DKIM1\\;k=rsa\\;%sp=",
+ 			         selector, suffix ? DKIMZONE : "",
+ 			         fqdnsuffix ? "." : "",
+ 			         fqdnsuffix ? domain : "",
+ 			         fqdnsuffix ? "." : "",
+-			         ttl == -1 ? defttl : ttl);
++			         ttl == -1 ? defttl : ttl,
++				 mailrestrict ? "s=email\\;" : "");
+ 		}
+ 		else
+ 		{
+ 			if (ttl == -1)
+ 			{
+ 				snprintf(tmpbuf, sizeof tmpbuf,
+-				         "%s%s%s%s%s\tIN\tTXT\t( \"v=DKIM1; k=rsa; p=",
++				         "%s%s%s%s%s\tIN\tTXT\t( \"v=DKIM1\\;k=rsa\\;%sp=",
+ 				         selector, suffix ? DKIMZONE : "",
+ 				         fqdnsuffix ? "." : "",
+ 				         fqdnsuffix ? domain : "",
+-				         fqdnsuffix ? "." : "");
++				         fqdnsuffix ? "." : "",
++					 mailrestrict ? "s=email\\;" : "");
+ 			}
+ 			else
+ 			{
+ 				snprintf(tmpbuf, sizeof tmpbuf,
+-				         "%s%s%s%s%s\t%d\tIN\tTXT\t( \"v=DKIM1; k=rsa; p=",
++				         "%s%s%s%s%s\t%d\tIN\tTXT\t( \"v=DKIM1\\;k=rsa\\;%sp=",
+ 				         selector, suffix ? DKIMZONE : "",
+ 				         fqdnsuffix ? "." : "",
+ 				         fqdnsuffix ? domain : "",
+ 				         fqdnsuffix ? "." : "",
+-				         ttl);
++				         ttl,
++				         mailrestrict ? "s=email\\;" : "");
+ 			}
+ 		}
+ 
+ 		fprintf(out, "%s", tmpbuf);
+ 
+-		if (nsupdate)
+-			olen = 0;
+-		else
+-			olen = strflen(tmpbuf);
++		olen = strflen(strstr(tmpbuf, "v=DKIM1"));
+ 
+ 		seenlf = FALSE;
+ 

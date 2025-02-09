@@ -1,0 +1,90 @@
+Description: Reorder mlfi_close logic fixing use-after-free error
+Author: David Bürgin <dbuergin@gluet.ch>
+Bug: https://github.com/trusteddomainproject/OpenDKIM/pull/129
+
+--- a/opendkim/opendkim.c
++++ b/opendkim/opendkim.c
+@@ -15360,6 +15360,41 @@
+ 	cc = (connctx) dkimf_getpriv(ctx);
+ 	if (cc != NULL)
+ 	{
++#ifdef QUERY_CACHE
++		if (querycache)
++		{
++			time_t now;
++
++			(void) time(&now);
++			if (cache_lastlog + CACHESTATSINT < now)
++			{
++				u_int c_hits;
++				u_int c_queries;
++				u_int c_expired;
++				u_int c_pct;
++				u_int c_keys;
++
++				dkim_getcachestats(cc->cctx_config->conf_libopendkim,
++				                   &c_queries, &c_hits, &c_expired,
++				                   &c_keys, FALSE);
++
++				cache_lastlog = now;
++
++				if (c_queries == 0)
++					c_pct = 0;
++				else
++					c_pct = (c_hits * 100) / c_queries;
++
++				syslog(LOG_INFO,
++				       "cache: %u quer%s, %u hit%s (%d%%), %u expired, %u key%s",
++				       c_queries, c_queries == 1 ? "y" : "ies",
++				       c_hits, c_hits == 1 ? "" : "s",
++				       c_pct, c_expired,
++				       c_keys, c_keys == 1 ? "" : "s");
++			}
++		}
++#endif /* QUERY_CACHE */
++
+ 		pthread_mutex_lock(&conf_lock);
+ 
+ 		cc->cctx_config->conf_refcnt--;
+@@ -15374,41 +15409,6 @@
+ 		dkimf_setpriv(ctx, NULL);
+ 	}
+ 
+-#ifdef QUERY_CACHE
+-	if (querycache)
+-	{
+-		time_t now;
+-
+-		(void) time(&now);
+-		if (cache_lastlog + CACHESTATSINT < now)
+-		{
+-			u_int c_hits;
+-			u_int c_queries;
+-			u_int c_expired;
+-			u_int c_pct;
+-			u_int c_keys;
+-
+-			dkim_getcachestats(cc->cctx_config->conf_libopendkim,
+-			                   &c_queries, &c_hits, &c_expired,
+-			                   &c_keys, FALSE);
+-
+-			cache_lastlog = now;
+-
+-			if (c_queries == 0)
+-				c_pct = 0;
+-			else
+-				c_pct = (c_hits * 100) / c_queries;
+-
+-			syslog(LOG_INFO,
+-			       "cache: %u quer%s, %u hit%s (%d%%), %u expired, %u key%s",
+-			       c_queries, c_queries == 1 ? "y" : "ies",
+-			       c_hits, c_hits == 1 ? "" : "s",
+-			       c_pct, c_expired,
+-			       c_keys, c_keys == 1 ? "" : "s");
+-		}
+-	}
+-#endif /* QUERY_CACHE */
+-
+ 	return SMFIS_CONTINUE;
+ }
+ 
