@@ -2,56 +2,54 @@
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
 pkgname=webrtc-audio-processing
-pkgver=0.3.1
-pkgrel=5.1
+pkgver=2.1
+pkgrel=1
 pkgdesc="AudioProcessing library based on Google's implementation of WebRTC"
 url="https://freedesktop.org/software/pulseaudio/webrtc-audio-processing/"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=(custom)
-depends=(gcc-libs)
-makedepends=(git)
-provides=(libwebrtc_audio_processing.so)
-_commit=e882a5442ac22c93648e12837248d651d18b9247  # tags/v0.3.1^0
-source=("git+https://gitlab.freedesktop.org/pulseaudio/webrtc-audio-processing.git#commit=$_commit"
-        big-endian.patch)
-b2sums=('5ebffa25cd06b1ebefb84d05e7698b0f1cd1f25355480953742bd95b13bb6348e6f0fa2aa019ce5017783eec6919debf7a98a5425bfa6e403dc8c0a4c5773b98'
-        '7c2826cf485c5c6b548adaafbdcf40d9a6e2d867f16085ef8ec0c4372d657fce0f739f42904a31a6c939e603231dbd1093d7fa2ca6372e20f782d89c3d709cff')
-
-pkgver() {
-  cd $pkgname
-  git describe --tags | sed 's/^v//;s/[^-]*-g/r&/;s/-/+/g'
-}
+license=(BSD-3-Clause)
+depends=(
+  abseil-cpp
+  gcc-libs
+  glibc
+)
+makedepends=(
+  git
+  meson
+)
+provides=(
+  libwebrtc-audio-processing-2.so
+)
+source=("git+https://gitlab.freedesktop.org/pulseaudio/webrtc-audio-processing.git?signed#tag=v$pkgver")
+b2sums=('835d68d138f6081eee657d7d454c0c3fbb6389638da5d011020a25a20002ec6e1bc8a3fd756bdfd24c0060323cd52e99e9fece4f069852139aa2d2f274f93689')
+validpgpkeys=(
+  52DFA7B8BAC74687C8A88EF48165E3D1987E2132 # Arun Raghavan <arun@asymptotic.io>
+)
 
 prepare() {
-  cd $pkgname
-
-  patch -Np0 -i ${srcdir}/big-endian.patch
-
-  NOCONFIGURE=1 ./autogen.sh
+  cd webrtc-audio-processing
 }
 
 build() {
-  local configure_options=(
-    --build=${CHOST}
-    --prefix /usr
-    --disable-static
+  local meson_options=(
+    # must match abseil
+    -D cpp_std=c++17
+
+    -D neon=disabled
   )
 
-  cd $pkgname
-  ./configure "${configure_options[@]}"
-  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-  make
+  arch-meson webrtc-audio-processing build "${meson_options[@]}"
+  meson compile -C build
 }
 
 check() {
-  cd $pkgname
-  make check
+  meson test -C build --print-errorlogs
 }
 
 package() {
-  cd $pkgname
-  make DESTDIR="$pkgdir" install
-  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 COPYING
+  meson install -C build --destdir "$pkgdir"
+  install -Dm644 webrtc-audio-processing/COPYING \
+    -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 # vim:set sw=2 sts=-1 et:
