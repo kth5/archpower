@@ -1,0 +1,191 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: robb_force <robb_force@holybuffalo.net>
+# Contributor: JJDaNiMoTh <jjdanimoth@gmail.com>
+
+pkgbase=mame
+pkgname=(mame
+         mame-tools)
+pkgver=0.274
+pkgrel=1
+pkgdesc='Port of the popular Multiple Arcade Machine Emulator using SDL with OpenGL support'
+url='https://mamedev.org/'
+license=(BSD-2-Clause
+         BSD-3-Clause
+         BSL-1.0
+         CC0-1.0
+         GPL-2.0-only
+         LGPL-2.1-only
+         MIT
+         Zlib)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+makedepends=(asio
+             flac
+             git
+             glm
+             libpulse
+             libutf8proc
+             libxi
+             libxinerama
+             lua
+             portaudio
+             portmidi
+             pugixml
+             python
+             qt6-base
+             rapidjson
+             sdl2_ttf)
+makedepends_x86_64=(
+             nasm
+)
+source=(git+https://github.com/mamedev/mame#tag=mame${pkgver/./}
+        mame.desktop
+        mame.sh
+        mame.svg
+        fix-922619.patch
+        python3.patch)
+sha256sums=('2a64b73a7da64c1ea427c1566035b7ef89c67c93f66cccfe86d19f8da0437760'
+            '0e5e93f84673c2d17a1bf7a6b256cfa54ef89a086a828df19bc054c12776d821'
+            'ee1c59bafc5e5441e99fa4c58108a3e18048e60672f34de865c8a5a976094dba'
+            '17c442c933d764175e4ce1de50a80c0c2ddd5d733caf09c3cd5e6ba697ac43f4'
+            '6946f783b6ab5981ef489bb76bc26764858719daa2a73df956f10385a55dc241'
+            '4aa2864f8d65e466ccbc28f4b9c187c24bb21390a5a5f0d49a378bb486826f84')
+options=(!debug
+         !lto) # debug build fails
+
+prepare() {
+  cd mame
+
+# Use system libraries
+  sed -e 's|\# USE_SYSTEM_LIB|USE_SYSTEM_LIB|g' -i makefile
+# Use C++ LUA
+  sed -e 's|ext_lib("lua")|ext_lib("lua++")|' -i scripts/src/main.lua -i scripts/src/3rdparty.lua
+# Drop hardcoded libexec
+  sed -e 's|libexec/||' -i scripts/src/osd/modules.lua
+
+# Fixes MAME deadlocks with controller disconnects
+# See https://github.com/mamedev/mame/issues/12825
+  git cherry-pick -n 59363d3d3f3fe9c1fe8f53ed4b3ca79f8fb6065d
+
+  patch -Np1 -i ${srcdir}/fix-922619.patch
+  patch -Np1 -i ${srcdir}/python3.patch
+}
+
+build() {
+  cd mame
+
+  MY_CPU=${CARCH}
+  case "${CARCH}" in
+    powerpc*) MY_CPU=ppc ;;
+    riscv64) ARCHOPTS='-fPIC' ;;
+  esac
+
+  export CXXFLAGS+="  -Wp,-U_GLIBCXX_ASSERTIONS" # FS#73202
+  make \
+    -j10 \
+    VERBOSE=1 \
+    NOWERROR=1 \
+    OPTIMIZE=2 \
+    TOOLS=1 \
+    QT_HOME=/usr/lib/qt6 \
+    ARCHOPTS="-flifetime-dse=1 ${ARCHOPTS}" \
+    USE_WAYLAND=1 \
+    MY_CPU=${MY_CPU}
+}
+
+package_mame() {
+  depends=(expat
+           flac
+           fontconfig
+           gcc-libs
+           glibc
+           libglvnd
+           libjpeg-turbo
+           libpulse
+           libutf8proc
+           libx11
+           libxi
+           lua
+           portaudio
+           portmidi
+           pugixml
+           qt6-base
+           sdl2
+           sdl2_ttf
+           sh
+           sqlite
+           wayland
+           zlib
+           zstd)
+  conflicts=(sdlmame)
+  replaces=(sdlmame) 
+
+  cd mame
+
+  # Install the mame script
+  install -Dm755 "$srcdir"/$pkgname.sh "$pkgdir"/usr/bin/$pkgname
+
+  # Install the binaries
+  install -Dm755 mame -t "$pkgdir"/usr/lib/mame
+
+  # Install the extra bits
+  install -Dm644 src/osd/modules/opengl/shader/glsl*.*h -t "$pkgdir"/usr/lib/$pkgname/shader/
+  cp -ar {artwork,bgfx,plugins,language,ctrlr,keymaps,hash} "$pkgdir"/usr/lib/$pkgname/
+
+  # Install the license
+  install -Dm644 docs/LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+
+  # FS#28203
+  sed -i 's|KEYCODE_2_PAD|KEYCODE_2PAD|' "$pkgdir"/usr/lib/mame/ctrlr/*.cfg
+  sed -i 's|KEYCODE_4_PAD|KEYCODE_4PAD|' "$pkgdir"/usr/lib/mame/ctrlr/*.cfg
+  sed -i 's|KEYCODE_6_PAD|KEYCODE_6PAD|' "$pkgdir"/usr/lib/mame/ctrlr/*.cfg
+  sed -i 's|KEYCODE_8_PAD|KEYCODE_8PAD|' "$pkgdir"/usr/lib/mame/ctrlr/*.cfg
+
+  # documentation
+  install -dm0755 "$pkgdir"/usr/share/doc
+  cp -a docs "$pkgdir"/usr/share/doc/$pkgname
+  rm -r "$pkgdir"/usr/share/doc/$pkgname/man
+  install -Dm644 docs/man/*.6* -t "$pkgdir"/usr/share/man/man6/
+
+  # install desktop file and icon
+  install -Dm644 "$srcdir"/mame.desktop -t "$pkgdir"/usr/share/applications
+  install -Dm644 "$srcdir"/mame.svg -t "$pkgdir"/usr/share/icons/hicolor/scalable/apps
+}
+
+package_mame-tools() {
+  pkgdesc='Port of the popular Multiple Arcade Machine Emulator using SDL with OpenGL support (tools)'
+  depends=(flac
+           gcc-libs
+           glibc
+           libutf8proc
+           sdl2
+           zlib
+           zstd)
+
+  cd mame
+  for _i in castool \
+            chdman \
+            floptool \
+            imgtool \
+            jedutil \
+            ldresample \
+            ldverify \
+            nltool \
+            nlwav \
+            pngcmp \
+            regrep \
+            romcmp \
+            split \
+            srcclean \
+            testkeys \
+            unidasm; do
+    install -Dm755 $_i -t "$pkgdir"/usr/bin
+  done
+  mv "$pkgdir"/usr/bin/{,mame-}split # Fix conflicts
+
+  install -Dm644 docs/man/*.1* -t "$pkgdir"/usr/share/man/man1/
+
+  # Install the license
+  install -Dm644 docs/LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
