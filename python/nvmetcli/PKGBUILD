@@ -1,0 +1,36 @@
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=nvmetcli
+pkgver=0.8
+pkgrel=5
+pkgdesc="Command line interface for the kernel NVMe target"
+arch=('any')
+url="http://git.infradead.org/users/hch/nvmetcli.git"
+license=('Apache-2.0')
+depends=('python' 'python-configshell-fb' 'python-six')  # kmod
+makedepends=('git' 'python-build' 'python-installer' 'python-setuptools' 'python-wheel' 'asciidoc' 'xmlto')
+# NOTE: Tests need /sys/kernel/config/nvmet (present after modprobe nvmet)
+source=(git://git.infradead.org/users/hch/nvmetcli.git#tag=v$pkgver)
+sha512sums=('39ce10f6604a6eb5fd42c952c556f1d4421de166fab9ef03c4afd8bf3661b026ed6dbfa29713a19212a8918ead7030df6a036940662264ced284db2473b15418')
+
+prepare() {
+  cd nvmetcli
+  sed -i 's|/usr/sbin|/usr/bin|' setup.cfg nvmet.service
+}
+
+build() {
+  cd nvmetcli
+  python -m build --wheel --no-isolation
+  cd Documentation
+  make
+  gzip -f nvmetcli.8
+}
+
+package() {
+  cd nvmetcli
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  install -Dm644 nvmet.service -t "$pkgdir"/usr/lib/systemd/system/
+  install -Dm644 README *.json Documentation/nvmetcli.txt -t "$pkgdir"/usr/share/doc/nvmetcli/
+  install -Dm644 Documentation/nvmetcli.8.gz -t "$pkgdir"/usr/share/man/man8/
+}
