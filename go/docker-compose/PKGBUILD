@@ -1,0 +1,44 @@
+# Maintainer: Andrew Crerar <crerar@archlinux.org>
+# Maintainer: Morten Linderud <foxboron@archlinux.org>
+# Contributor: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Iwan Timmer <irtimmer@gmail.com>
+# Contributor: Vincent Demeester <vincent@sbr.io>
+# Contributor: Josh VanderLinden <arch@cloudlery.com>
+
+pkgname=docker-compose
+pkgver=2.32.4
+pkgrel=1
+pkgdesc="Fast, isolated development environments using Docker"
+arch=('x86_64' 'powerpc64le')
+url="https://www.docker.com/"
+license=("Apache-2.0")
+makedepends=('go')
+checkdepends=('docker')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/docker/compose/archive/v$pkgver.tar.gz")
+b2sums=('526e72c212f4db5a621f69c507b9aee59a4f1f93ff3180e1905a426c9da4a5ca46d32d7a5b2b5f9b9a2e8a807afa7bfc9e66b80a137ffcb0ee341719020b9d4a')
+
+build() {
+  cd "compose-$pkgver"
+  export CGO_CPPFLAGS="${CPPFLAGS}"
+  export CGO_CFLAGS="${CFLAGS}"
+  export CGO_CXXFLAGS="${CXXFLAGS}"
+  export CGO_LDFLAGS="${LDFLAGS}"
+  export GOPATH="${srcdir}"
+  export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
+  GO_LDFLAGS="-linkmode=external -compressdwarf=false -X=github.com/docker/compose/v2/internal.Version=${pkgver}"
+  go build -ldflags "${GO_LDFLAGS}" -trimpath -tags "e2e,kube" -o compose ./cmd
+}
+
+check(){
+  cd "compose-$pkgver"
+  rm pkg/compose/ps_test.go
+  go test -tags "e2e,kube" -v $(go list -tags "e2e,kube" ./... | grep -vE 'e2e')
+}
+
+package() {
+  cd "compose-$pkgver"
+  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  install -Dm755 compose "$pkgdir"/usr/lib/docker/cli-plugins/docker-compose
+  install -d "$pkgdir/usr/bin"
+  ln -sf /usr/lib/docker/cli-plugins/docker-compose "$pkgdir/usr/bin/docker-compose"
+}
