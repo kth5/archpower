@@ -1,0 +1,84 @@
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Maintainer: Giancarlo Razzolini <grazzolini@archlinux.org>
+# Maintainer: Anton Hvornum <torxed@archlinux.org>
+# Contributor: Anton Hvornum <anton@hvornum.se>
+# Contributor: demostanis worlds <demostanis@protonmail.com>
+
+pkgname=archinstall
+pkgver=3.0.2
+pkgrel=2
+pkgdesc="Just another guided/automated Arch Linux installer with a twist"
+arch=(any)
+url="https://github.com/archlinux/archinstall"
+license=(GPL-3.0-only)
+depends=(
+  arch-install-scripts
+  btrfs-progs
+  coreutils
+  cryptsetup
+  dosfstools
+  e2fsprogs
+  glibc
+  kbd
+  pciutils
+  procps-ng
+  python
+  python-pydantic
+  python-pyparted
+  systemd
+  util-linux
+  xfsprogs
+  lvm2
+  f2fs-tools
+  ntfs-3g
+)
+makedepends=(
+  ruff
+  python-build
+  python-installer
+  python-setuptools
+  python-sphinx
+  python-wheel
+  python-sphinx_rtd_theme
+  python-pylint
+  python-pylint-pydantic
+)
+optdepends=(
+  'python-systemd: for systemd-journald support'
+)
+provides=(python-archinstall)
+source=(
+  $pkgname-$pkgver.tar.gz::$url/archive/refs/tags/$pkgver.tar.gz
+  $pkgname-$pkgver.tar.gz.sig::$url/releases/download/$pkgver/$pkgname-$pkgver.tar.gz.sig
+)
+sha512sums=('54ae6b8ede034dc832be4f924b98736fb492e86961cca21ff72ef4e4ba92564cbccbda7ba71a50d00864ffe50a85474ff8309050b78318ebe65b879384f09af5'
+            'SKIP')
+b2sums=('41fa08ba85f9fbd5f4d508667cd6c1a26ff65753cf4e4caeb0c1f18ee4e45d24815be7dd4be70a02bc5940152b47a6d90cd223ad859abbf8a44b1871f98e3217'
+        'SKIP')
+validpgpkeys=('8AA2213C8464C82D879C8127D4B58E897A929F2E') # torxed@archlinux.org
+
+check() {
+  cd $pkgname-$pkgver
+#  pylint .
+  ruff check
+}
+
+prepare() {
+  cd $pkgname-$pkgver
+  # Patching away `wayfire` as it's an AUR package.
+  # Instead of pushing an entire release on github, we patch
+  # here for simplicity until the next version is out.
+  rm archinstall/default_profiles/desktops/wayfire.py
+}
+
+build() {
+  cd $pkgname-$pkgver
+  python -m build --wheel --no-isolation
+  PYTHONDONTWRITEBYTECODE=1 make man -C docs
+}
+
+package() {
+  cd $pkgname-$pkgver
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm 644 docs/_build/man/archinstall.1 -t "$pkgdir/usr/share/man/man1/"
+}
