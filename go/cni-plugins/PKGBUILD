@@ -5,10 +5,10 @@
 
 _name=plugins
 pkgname=cni-plugins
-pkgver=1.6.1
+pkgver=1.6.2
 pkgrel=1
 pkgdesc='Some standard networking plugins, maintained by the CNI team'
-arch=(x86_64 powerpc64le riscv64)
+arch=(x86_64 powerpc64le powerpc64 riscv64)
 url="https://github.com/containernetworking/plugins"
 license=(Apache-2.0)
 depends=(glibc)
@@ -19,8 +19,8 @@ options=(
   emptydirs  # NOTE: we need /etc/cni/net.d/ for configs
 )
 source=($url/archive/v$pkgver/$_name-v$pkgver.tar.gz)
-sha512sums=('62b4e2c5c4bf6a9b21880e7b145547bec153f591926419d9960345cc7fb7d499ae44b0236928bbfeb46e383f38018d7504e58da1dd8a6ad39ef4ae3122b3be56')
-b2sums=('eaeb9d48645efe680f259c3b6d295134459a79a8890cb8645dd4e0e32215decb44f6f72d8b8f575daedc34f0a55a517e213f505639c0a203b0479ca1067b5e38')
+sha512sums=('ee577e3fe39558d6a6296754c97de6608f95152805c01b8053e2958d16634ab57d147eea7c950fcc4d1a98d6733a85717adf7078ee2dffff007ec3b063386c24')
+b2sums=('b53061312cf96f0e4a385a63433e76695f4c8b419e18a14296644cc435cf49be5f76021cadc4186955c99af74cf0b06c46c344b0368355f47e4fe9fd6773d8c3')
 
 prepare() {
   mkdir -vp $_name-$pkgver/bin
@@ -36,11 +36,20 @@ build() {
   export GOPATH="${srcdir}"
   export GOFLAGS="-buildmode=pie -mod=readonly -modcacherw"
 
+  case "${CARCH}" in 
+    powerpc64)
+      export GOFLAGS="-mod=readonly -modcacherw"
+    ;;
+    *)
+      LINKMODE="-linkmode external"
+    ;;
+  esac
+
   # custom go build calls, since build_linux.sh is not flexible enough
   for plugin in plugins/meta/* plugins/main/* plugins/ipam/*; do
     if [[ -d "$plugin"  && "$plugin" != *windows ]]; then
       printf "Building plugin: %s\n" "$(basename $plugin)"
-      go build -o bin/ -ldflags "-compressdwarf=false -linkmode external" "./$plugin"
+      go build -o bin/ -ldflags "-compressdwarf=false ${LINKMODE}" "./$plugin"
     fi
   done
 }
