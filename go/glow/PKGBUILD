@@ -9,7 +9,7 @@ pkgver=2.0.0
 pkgrel=1
 pkgdesc="Command-line markdown renderer"
 url="https://github.com/charmbracelet/glow"
-arch=(x86_64 powerpc64le riscv64)
+arch=(x86_64 powerpc64 powerpc64le riscv64)
 license=('MIT')
 depends=('glibc')
 makedepends=('git' 'go')
@@ -26,13 +26,21 @@ prepare() {
 
 build() {
 	cd "${pkgname}"
-
+	export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
+	case "${CARCH}" in
+		"powerpc64")
+			export GOFLAGS="-trimpath -mod=readonly -modcacherw"
+			LINKMODE="-linkmode=internal"
+	 	;;
+		*)
+			LINKMODE="-linkmode=external"
+		;;
+	esac
 	export CGO_CPPFLAGS="${CPPFLAGS}"
 	export CGO_CFLAGS="${CFLAGS}"
 	export CGO_CXXFLAGS="${CXXFLAGS}"
 	export CGO_LDFLAGS="${LDFLAGS}"
-	export GOFLAGS="-buildmode=pie -trimpath -ldflags=-linkmode=external -mod=readonly -modcacherw"
-	go build -v -ldflags "-X main.Version=${pkgver}" -o build .
+	go build -v -ldflags "${LINKMODE} -X main.Version=${pkgver}" -o build .
 
 	build/glow completion bash > completion.bash
 	build/glow completion fish > completion.fish

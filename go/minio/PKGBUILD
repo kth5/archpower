@@ -11,7 +11,7 @@ _timever=T13-15-44Z
 _pkgver="${pkgver//./-}${_timever//:/-}"
 pkgrel=1
 pkgdesc='Object storage server compatible with Amazon S3'
-arch=(x86_64 powerpc64le riscv64)
+arch=(x86_64 powerpc64 powerpc64le riscv64)
 url='https://minio.io'
 license=('AGPL-3.0-or-later')
 depends=('glibc')
@@ -29,15 +29,23 @@ sha512sums=('445ce83657663911ef47d7ea8b8fd9af2bc6fcdf5a4a39dbb2784e652d46ebd8050
 
 build() {
   cd minio
+  export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
+  case "${CARCH}" in
+    powerpc64)
+      LINKMODE="-linkmode=internal"
+      export GOFLAGS="-trimpath -mod=readonly -modcacherw"
+    ;;
+    *)
+      LINKMODE="-linkmode=external"
+  esac
 
   export CGO_LDFLAGS="${LDFLAGS}"
   export CGO_CFLAGS="${CFLAGS}"
   export CGO_CPPFLAGS="${CPPFLAGS}"
   export CGO_CXXFLAGS="${CXXFLAGS}"
-  export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
   export MINIO_RELEASE="RELEASE"
   GO_LDFLAGS="\
-      -linkmode=external \
+      ${LINKMODE} \
       -compressdwarf=false \
       $(go run buildscripts/gen-ldflags.go)"
 
