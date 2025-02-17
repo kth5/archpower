@@ -10,62 +10,184 @@
 # Contributor: mutantmonkey
 
 pkgbase=rabbitmq
-pkgname=(rabbitmq rabbitmqadmin)
-pkgver=4.0.5
-pkgrel=2
+pkgname=(
+  rabbitmq
+  rabbitmqadmin
+)
+pkgver=4.0.6
+pkgrel=1
 pkgdesc='Highly reliable and performant enterprise messaging implementation of AMQP written in Erlang/OTP'
 url='https://rabbitmq.com'
 arch=(any)
 license=('MPL-2.0')
 makedepends=(
-  'zip' 'unzip' 'libxslt' 'xmlto' 'systemd' 'elixir' 'python' 'python-simplejson' 'rsync'
-  'util-linux' 'inetutils' 'erlang-nox' 'socat'
+  'elixir'
+  'erlang-eldap'
+  'erlang-erts'
+  'erlang-eunit'
+  'erlang-kernel'
+  'erlang-mnesia'
+  'erlang-os_mon'
+  'erlang-parsetools'
+  'erlang-public_key'
+  'erlang-sasl'
+  'erlang-ssl'
+  'erlang-stdlib'
+  'erlang-syntax_tools'
+  'erlang-tools'
+  'erlang-xmerl'
+  'git'
+  'inetutils'
+  'libxslt'
+  'python'
+  'python-simplejson'
+  'rebar3'
+  'rsync'
+  'socat'
+  'systemd'
+  'unzip'
+  'util-linux'
+  'xmlto'
+  'zip'
 )
-source=(https://github.com/rabbitmq/rabbitmq-server/releases/download/v${pkgver}/rabbitmq-server-${pkgver}.tar.xz{,.asc}
-        rabbitmq-customize-systemd-service.patch
-        rabbitmq-env.conf
-        rabbitmq.sysusers
-        rabbitmq.tmpfiles
-        rabbitmq.logrotate)
-sha512sums=('0648f5efc78b53f41b731628f5f90d0d067a35ccd27ee910b4a4f4be4480f579936389307ea7dd610f675087bfbf441408336d9c8aa94824ac40276cfe631b51'
-            'SKIP'
+_commit=293a4f665ac59c6d53732a18340a76e69c257ea8
+source=(
+  "git+https://github.com/rabbitmq/rabbitmq-server.git#commit=${_commit}?signed"
+  rabbitmq-customize-systemd-service.patch
+  rabbitmq-devendor-rebar3.patch
+  rabbitmq-env.conf
+  rabbitmq.sysusers
+  rabbitmq.tmpfiles
+  rabbitmq.logrotate
+)
+sha512sums=('ac6e468bb4e6324b9531a382f9cd67371df297954d935d89d24b3ea702d08eea1658646582d516d522ef6a815d33236fa5437df1f00d36dad9d5307567ad57b3'
             '81d74e006dcf6641b5fd00aba098423809b3d0e36fcfaa2467b54ed08ebd2b666b4cfb06a3e41c31fe41bf8e51df3581ef6b5e0a0bdf9f90b6ef60d5ba913e6a'
+            '67eca945ac5c5acf5f64f52ec65803a7b2ea098e6b38a685a0d85b8a91db907782dffb2e1facff6fa5dbf21d6b71fae6eced13ea9c714a27d167259080523d34'
             '8b841e28fa0a1424dd9e57c0988e015f3cd4cccef0f73ccdb7c7b66d11ca62ba8ef3a59c7ca5e5f0c9c9d8003ac72bf53785985d98aae867961787003286e179'
             '33c6af8810d8cbc479c63ed535de0a27b2e90eeed8fc9b39255683028478529a7e8953aa992f615d4101c6aefdc066f95c98fb9fb5bf1faf0ea327364101914c'
             '5cbef5497029ff227050c6f18c4fcc35b3922747408d01b7590f096253af82a8a8f16008efcc8ea21f970ce87244de62e2e375f65c49e407e53440eada5d7114'
             'f2a6aaa38e575e7c947191a7c67add1434beb768c50acb16d5faa5dd83d390a9a5ec7c153487add4ac26de058a02bbb5c3a7d6377e91a1d0cbcca3c1d6797b02')
-validpgpkeys=('0A9AF2115F4687BD29803A206B73A36E6026DFCA') # RabbitMQ Release Signing Key <info@rabbitmq.com>
+validpgpkeys=(
+  '0A9AF2115F4687BD29803A206B73A36E6026DFCA' # RabbitMQ Release Signing Key <info@rabbitmq.com>
+  '968479A1AFF927E37D1A566BB5690EEEBB952194' # GitHub <noreply@github.com>
+  '1CD01B692130F8E525601C8A44BF2725475205B2' # Michael Klishin <michaelklishin@icloud.com>
+)
 
 prepare() {
-  cd ${pkgbase}-server-${pkgver}
+  cd ${pkgbase}-server
   sed -E 's|^(SYS_PREFIX=).*$|\1""|' -i deps/rabbit/scripts/rabbitmq-defaults
   sed -E 's|@RABBITMQ_USER@|rabbitmq|g' -i scripts/rabbitmq-script-wrapper
   sed -E 's|@RABBITMQ_GROUP@|rabbitmq|g' -i scripts/rabbitmq-script-wrapper
-  sed -e "s|%%VSN%%|${pkgver}|" -i deps/rabbitmq_management/bin/rabbitmqadmin
   patch -p1 < ../rabbitmq-customize-systemd-service.patch
+  patch -p1 < ../rabbitmq-devendor-rebar3.patch
 }
 
 build() {
-  cd ${pkgbase}-server-${pkgver}
-  make
+  cd ${pkgbase}-server
+  make -j1 dist manpages RABBITMQ_VERSION=${pkgver}
+}
+
+check() {
+  cd ${pkgbase}-server
+  # The test suite starts epmd but doesn't kill it afterwards.
+  export ERL_EPMD_PORT=5369
+  trap 'epmd -port $ERL_EPMD_PORT -kill' EXIT
+
+  # Subset of tests suites that work in offload builds. Most other tests run
+  # fine on my machine but freeze in a chroot, not sure why.
+  # To list all (fast) test suites, run:
+  #   sed -i 's/$(MAKE) ct/@echo/' deps/rabbit/Makefile
+  #   make -C deps/rabbit ct-fast
+  local ct_suites=(
+    amqqueue_backward_compatibility
+    deprecated_features
+    feature_flags_v2
+    lqueue
+    mc_unit
+    metadata_store_phase1
+    peer_discovery_dns
+    peer_discovery_tmp_hidden_node
+    rabbit_access_control
+    rabbit_confirms
+    rabbit_cuttlefish
+    rabbit_direct_reply_to_prop
+    rabbit_fifo
+    rabbit_fifo_dlx
+    rabbit_fifo_int
+    rabbit_fifo_q
+    rabbit_fifo_v0
+    rabbit_stream_coordinator
+    rabbit_stream_sac_coordinator
+    term_to_binary_compat_prop
+    unit_cluster_formation_sort_nodes
+    unit_collections
+    unit_config_value_encryption
+    unit_operator_policy
+    unit_pg_local
+    unit_plugin_directories
+    unit_plugin_versioning
+    unit_policy_validators
+    unit_priority_queue
+    unit_queue_consumers
+    unit_queue_location
+    unit_quorum_queue
+    unit_supervisor2
+  )
+  make -C deps/rabbit ct CT_SUITES="${ct_suites[*]}"
 }
 
 package_rabbitmq() {
-  depends=('util-linux' 'inetutils' 'erlang-nox' 'socat')
-  optdepends=('rabbitmqadmin: CLI management tool'
-              'logrotate: rotate log files')
+  depends=(
+    'erlang-eldap'
+    'erlang-erts'
+    'erlang-kernel'
+    'erlang-mnesia'
+    'erlang-os_mon'
+    'erlang-public_key'
+    'erlang-sasl'
+    'erlang-ssl'
+    'erlang-stdlib'
+    'erlang-syntax_tools'
+    'erlang-tools'
+    'erlang-xmerl'
+    'inetutils'
+    'socat'
+    'util-linux'
+  )
+  optdepends=(
+    'rabbitmqadmin: CLI management tool'
+    'logrotate: rotate log files'
+  )
   backup=('etc/rabbitmq/rabbitmq-env.conf')
   install=rabbitmq.install
-  cd ${pkgbase}-server-${pkgver}
-  make DESTDIR="${pkgdir}" PREFIX=/usr RMQ_ROOTDIR=/usr/lib/rabbitmq \
-    install install-man install-bin
 
-  # using script wrapper for better bin handling
-  local libdir="${pkgdir}/usr/lib/rabbitmq/lib/rabbitmq_server-${pkgver}"
+  cd ${pkgbase}-server
+  make install install-man install-bin \
+    DESTDIR="${pkgdir}" \
+    PREFIX=/usr \
+    RMQ_ROOTDIR=/usr/lib/rabbitmq \
+    PROJECT_VERSION=${pkgver}
+
+  # Remove rabbitmqadmin, packaged separately.
+  rm "$pkgdir/usr/lib/rabbitmq/lib/rabbitmq_server-${pkgver}/plugins/rabbitmq_management-${pkgver}/priv/www/cli/rabbitmqadmin"
+
+  # Using script wrapper for better bin handling.
   install -vdm 755 "${pkgdir}/usr/bin"
   install -vDm 755 scripts/rabbitmq-script-wrapper -t "${pkgdir}/usr/lib/rabbitmq/bin"
-  for script in "${libdir}"/sbin/rabbit*; do
-    ln -vs /usr/lib/rabbitmq/bin/rabbitmq-script-wrapper "${pkgdir}/usr/bin/${script#${libdir}/sbin/}"
+  local scripts=(
+    rabbitmq-defaults
+    rabbitmq-diagnostics
+    rabbitmq-env
+    rabbitmq-plugins
+    rabbitmq-queues
+    rabbitmq-server
+    rabbitmq-streams
+    rabbitmq-upgrade
+    rabbitmqctl
+    vmware-rabbitmq
+  )
+  for script in ${scripts}; do
+    ln -vs /usr/lib/rabbitmq/bin/rabbitmq-script-wrapper "${pkgdir}/usr/bin/${script}"
   done
 
   install -vDm 644 deps/rabbit/docs/rabbitmq-server.service.example "${pkgdir}/usr/lib/systemd/system/rabbitmq.service"
@@ -79,11 +201,11 @@ package_rabbitmq() {
 
 package_rabbitmqadmin() {
   pkgdesc='Command-line tool for managing RabbitMQ server (requires "management" plugin)'
-  url='https://www.rabbitmq.com/management-cli.html'
+  url='https://www.rabbitmq.com/management-cli'
   depends=('python')
-  cd ${pkgbase}-server-${pkgver}/deps/rabbitmq_management
+
+  cd ${pkgbase}-server/deps/rabbitmq_management
   install -vDm 755 bin/rabbitmqadmin -t "${pkgdir}/usr/bin"
-  install -vDm 644 LICENSE-MPL-RabbitMQ -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
 
 # vim: ts=2 sw=2 et:
