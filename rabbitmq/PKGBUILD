@@ -1,5 +1,6 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 # Contributor: Marcello "mereghost" Rocha <marcello.rocha@gmail.com>
 # Contributor: Gianni Vialetto <gianni at rootcube dot net>
 # Contributor: Stefan J. Betz <info at stefan-betz dot net>
@@ -10,28 +11,27 @@
 
 pkgbase=rabbitmq
 pkgname=(rabbitmq rabbitmqadmin)
-pkgver=3.13.7
-pkgrel=1
+pkgver=4.0.5
+pkgrel=2
 pkgdesc='Highly reliable and performant enterprise messaging implementation of AMQP written in Erlang/OTP'
 url='https://rabbitmq.com'
 arch=(any)
-license=('MPL')
+license=('MPL-2.0')
 makedepends=(
   'zip' 'unzip' 'libxslt' 'xmlto' 'systemd' 'elixir' 'python' 'python-simplejson' 'rsync'
   'util-linux' 'inetutils' 'erlang-nox' 'socat'
 )
-options=('!makeflags')
 source=(https://github.com/rabbitmq/rabbitmq-server/releases/download/v${pkgver}/rabbitmq-server-${pkgver}.tar.xz{,.asc}
         rabbitmq-customize-systemd-service.patch
         rabbitmq-env.conf
         rabbitmq.sysusers
         rabbitmq.tmpfiles
         rabbitmq.logrotate)
-sha512sums=('4403ae7432310781a3144a22a3892f6a4df67f85c8f1f346d43b2147c7a48d11cedb9055a930cbf3a0dc984458384da843333f4a524309302e64afd320ab7ec9'
+sha512sums=('0648f5efc78b53f41b731628f5f90d0d067a35ccd27ee910b4a4f4be4480f579936389307ea7dd610f675087bfbf441408336d9c8aa94824ac40276cfe631b51'
             'SKIP'
-            '4859e67725dc8467b43102200bf47bdf69e3f3b700da859e861327e2f01491bfaeed8e32da4fc2415d8a127037420b768ef321a42d535f181cab56945f83d2c2'
+            '81d74e006dcf6641b5fd00aba098423809b3d0e36fcfaa2467b54ed08ebd2b666b4cfb06a3e41c31fe41bf8e51df3581ef6b5e0a0bdf9f90b6ef60d5ba913e6a'
             '8b841e28fa0a1424dd9e57c0988e015f3cd4cccef0f73ccdb7c7b66d11ca62ba8ef3a59c7ca5e5f0c9c9d8003ac72bf53785985d98aae867961787003286e179'
-            '17d33e7104172bc265d97821fec58f1402ad3103f1ea4b1f6bbabcf0dd840685708a1bdc808b48c1a60726c5c0aa7b6479395afd9360d3116b812c143c432423'
+            '33c6af8810d8cbc479c63ed535de0a27b2e90eeed8fc9b39255683028478529a7e8953aa992f615d4101c6aefdc066f95c98fb9fb5bf1faf0ea327364101914c'
             '5cbef5497029ff227050c6f18c4fcc35b3922747408d01b7590f096253af82a8a8f16008efcc8ea21f970ce87244de62e2e375f65c49e407e53440eada5d7114'
             'f2a6aaa38e575e7c947191a7c67add1434beb768c50acb16d5faa5dd83d390a9a5ec7c153487add4ac26de058a02bbb5c3a7d6377e91a1d0cbcca3c1d6797b02')
 validpgpkeys=('0A9AF2115F4687BD29803A206B73A36E6026DFCA') # RabbitMQ Release Signing Key <info@rabbitmq.com>
@@ -41,7 +41,6 @@ prepare() {
   sed -E 's|^(SYS_PREFIX=).*$|\1""|' -i deps/rabbit/scripts/rabbitmq-defaults
   sed -E 's|@RABBITMQ_USER@|rabbitmq|g' -i scripts/rabbitmq-script-wrapper
   sed -E 's|@RABBITMQ_GROUP@|rabbitmq|g' -i scripts/rabbitmq-script-wrapper
-  sed -E 's|@STDOUT_STDERR_REDIRECTION@||g' -i scripts/rabbitmq-script-wrapper
   sed -e "s|%%VSN%%|${pkgver}|" -i deps/rabbitmq_management/bin/rabbitmqadmin
   patch -p1 < ../rabbitmq-customize-systemd-service.patch
 }
@@ -63,19 +62,19 @@ package_rabbitmq() {
 
   # using script wrapper for better bin handling
   local libdir="${pkgdir}/usr/lib/rabbitmq/lib/rabbitmq_server-${pkgver}"
-  install -d "${pkgdir}/usr/bin"
-  install -Dm 755 scripts/rabbitmq-script-wrapper -t "${pkgdir}/usr/lib/rabbitmq/bin"
+  install -vdm 755 "${pkgdir}/usr/bin"
+  install -vDm 755 scripts/rabbitmq-script-wrapper -t "${pkgdir}/usr/lib/rabbitmq/bin"
   for script in "${libdir}"/sbin/rabbit*; do
-    ln -s /usr/lib/rabbitmq/bin/rabbitmq-script-wrapper "${pkgdir}/usr/bin/${script#${libdir}/sbin/}"
+    ln -vs /usr/lib/rabbitmq/bin/rabbitmq-script-wrapper "${pkgdir}/usr/bin/${script#${libdir}/sbin/}"
   done
 
-  install -Dm 644 deps/rabbit/docs/rabbitmq-server.service.example "${pkgdir}/usr/lib/systemd/system/rabbitmq.service"
-  install -Dm 644 "${srcdir}/rabbitmq-env.conf" "${pkgdir}/etc/rabbitmq/rabbitmq-env.conf"
-  install -Dm 644 "${srcdir}/rabbitmq.sysusers" "${pkgdir}/usr/lib/sysusers.d/rabbitmq.conf"
-  install -Dm 644 "${srcdir}/rabbitmq.tmpfiles" "${pkgdir}/usr/lib/tmpfiles.d/rabbitmq.conf"
-  install -Dm 644 "${srcdir}/rabbitmq.logrotate" "${pkgdir}/etc/logrotate.d/rabbitmq"
+  install -vDm 644 deps/rabbit/docs/rabbitmq-server.service.example "${pkgdir}/usr/lib/systemd/system/rabbitmq.service"
+  install -vDm 644 "${srcdir}/rabbitmq-env.conf" "${pkgdir}/etc/rabbitmq/rabbitmq-env.conf"
+  install -vDm 644 "${srcdir}/rabbitmq.sysusers" "${pkgdir}/usr/lib/sysusers.d/rabbitmq.conf"
+  install -vDm 644 "${srcdir}/rabbitmq.tmpfiles" "${pkgdir}/usr/lib/tmpfiles.d/rabbitmq.conf"
+  install -vDm 644 "${srcdir}/rabbitmq.logrotate" "${pkgdir}/etc/logrotate.d/rabbitmq"
 
-  chown -R 197:0 "${pkgdir}/etc/rabbitmq"
+  chown -vR 197:0 "${pkgdir}/etc/rabbitmq"
 }
 
 package_rabbitmqadmin() {
@@ -83,8 +82,8 @@ package_rabbitmqadmin() {
   url='https://www.rabbitmq.com/management-cli.html'
   depends=('python')
   cd ${pkgbase}-server-${pkgver}/deps/rabbitmq_management
-  install -Dm 755 bin/rabbitmqadmin -t "${pkgdir}/usr/bin"
-  install -Dm 644 LICENSE-MPL-RabbitMQ -t "${pkgdir}/usr/share/licenses/${pkgname}"
+  install -vDm 755 bin/rabbitmqadmin -t "${pkgdir}/usr/bin"
+  install -vDm 644 LICENSE-MPL-RabbitMQ -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
 
 # vim: ts=2 sw=2 et:
