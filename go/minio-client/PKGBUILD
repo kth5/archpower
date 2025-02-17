@@ -10,7 +10,7 @@ _timever=T17-21-54Z
 _pkgver="${pkgver//./-}${_timever//:/-}"
 pkgrel=1
 pkgdesc='Replacement for ls, cp, mkdir, diff and rsync commands for filesystems and object storage'
-arch=(x86_64 powerpc64le riscv64)
+arch=(x86_64 powerpc64 powerpc64le riscv64)
 url='https://minio.io/downloads/#minio-client'
 license=('AGPL-3.0-or-later')
 makedepends=('go' 'git')
@@ -22,15 +22,23 @@ sha512sums=('7b25ecc11ea12a2afe1fd88f10a2f95b553ee117410d975e7408e4da496a54a2c77
 
 build() {
   cd mc
+  export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
+  case "${CARCH}" in
+    powerpc64)
+      LINKMODE="-linkmode=internal"
+      export GOFLAGS="-trimpath -mod=readonly -modcacherw"
+    ;;
+    *)
+      LINKMODE="-linkmode=external"
+  esac
 
   export CGO_LDFLAGS="${LDFLAGS}"
   export CGO_CFLAGS="${CFLAGS}"
   export CGO_CPPFLAGS="${CPPFLAGS}"
   export CGO_CXXFLAGS="${CXXFLAGS}"
-  export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
   export MC_RELEASE="RELEASE"
   GO_LDFLAGS="\
-      -linkmode=external \
+      ${LINKMODE} \
       -compressdwarf=false \
       $(go run buildscripts/gen-ldflags.go)"
 
