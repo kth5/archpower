@@ -1,36 +1,41 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Jelle van der Waa <jelle@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 
 pkgname=python-validate-pyproject
-pkgver=0.22
-pkgrel=2
+pkgver=0.23
+pkgrel=1
 pkgdesc="Validation library and CLI tool for checking on 'pyproject.toml' files using JSON Schema"
 url="https://github.com/abravalheri/validate-pyproject"
-license=('MPL')
+license=('MPL-2.0')
 arch=(any)
-depends=('python-fastjsonschema' 'python-packaging' 'python-trove-classifiers')
+depends=('python' 'python-fastjsonschema' 'python-packaging' 'python-trove-classifiers')
 makedepends=('git' 'python-build' 'python-installer' 'python-wheel' 'python-setuptools-scm')
 checkdepends=('python-pytest')
-source=("git+https://github.com/abravalheri/validate-pyproject.git#tag=v$pkgver")
-sha512sums=('47ad0fe1f741a2f23e3b4ab64fce89950fb090ce001cc7bd71431b9f085a9b3e6064b0449f7ac25f3fdf9719cdd427781afae8a9414e03d4c136c7f5662b88a7')
+source=(
+  "git+$url.git#tag=v$pkgver"
+  # https://github.com/abravalheri/validate-pyproject/pull/225
+  "fix-tests.patch::$url/commit/7e3db65608d811d792960c9320a8775fc9e03b0e.patch"
+)
+sha512sums=('f4497c1da0bf9097d4daf69c406e0eee973d67b6803e1b8052ecb1e3d8f5a800d48db5999b97b652c9e3ce1fd2b201df87a1141c31399f22d6787b9b482eac94'
+            '4a562557695923a1ce451a0359173ac243a61cf7f2b770e20f7530d207cbe12705688046fe066d683478c555a2b090a6fd393b2291f2e16324f2dc379a33be12')
 
 prepare() {
   cd validate-pyproject
+  patch -Np1 -i ../fix-tests.patch
 }
 
 build() {
   cd validate-pyproject
-  python -m build -wn
+  python -m build --wheel --no-isolation
 }
 
 check() {
-  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-
   cd validate-pyproject
-  python -m installer --destdir=tmp_install dist/*.whl
-  PYTHONPATH="$PWD/tmp_install/$site_packages:$PYTHONPATH" pytest -o addopts='' --doctest-modules --ignore src/validate_pyproject/_vendor src
-  # Deselected tests requiring a installed validate-pyproject
-  PYTHONPATH="$PWD/tmp_install/$site_packages:$PYTHONPATH" pytest -o addopts='' --deselect tests/test_pre_compile.py --deselect tests/test_vendoring.py
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer dist/*.whl
+  test-env/bin/python -m pytest --override-ini="addopts="
 }
 
 package() {
