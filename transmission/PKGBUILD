@@ -52,6 +52,10 @@ build() {
 	export CFLAGS+=' -ffat-lto-objects'
 	cd "$_archive"
 
+	case "${CARCH}" in
+		powerpc64*) _cmake_options=(-D REBUILD_WEB=ON) ;;
+	esac
+
 	cmake \
 		-G Ninja \
 		-D CMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -61,7 +65,6 @@ build() {
 		-D ENABLE_GTK=ON \
 		-D ENABLE_MAC=OFF \
 		-D ENABLE_QT=ON \
-		-D REBUILD_WEB=ON \
 		-D ENABLE_TESTS=ON \
 		-D ENABLE_UTILS=ON \
 		-D ENABLE_UTP=ON \
@@ -76,7 +79,7 @@ build() {
 		-D USE_SYSTEM_UTP=OFF \
 		-D WITH_CRYPTO=openssl \
 		-S . \
-		-B build
+		-B build ${_cmake_options[@]}
 	cmake --build build --config Release
 }
 
@@ -101,11 +104,25 @@ package_transmission-cli() {
 	         miniupnpc
 	         systemd)
 	cd "$_archive"
-	for dir in daemon cli web utils; do
+        case "${CARCH}" in
+          powerpc64*|x86_64)
+            _components=(daemon cli web utils)
+          ;;
+          *)
+            _components=(daemon cli utils)
+          ;;
+        esac
+	for dir in ${_components[@]}; do
 		_install_component $dir
 	done
 	install -d "$pkgdir"/usr/share/transmission
-	cp -a build/web/public_html/ "$pkgdir"/usr/share/transmission
+
+	case "${CARCH}" in
+		powerpc64*|x86_64)
+			cp -a build/web/public_html/ "$pkgdir"/usr/share/transmission
+		;;
+	esac
+
 	install -Dm644 daemon/transmission-daemon.service \
 		"$pkgdir/usr/lib/systemd/system/transmission.service"
 	install -Dm644 COPYING "$pkgdir/usr/share/licenses/transmission-cli/COPYING"
