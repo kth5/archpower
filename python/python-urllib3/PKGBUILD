@@ -1,13 +1,14 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 # Contributor: Patrice Peterson <runiq at archlinux dot us>
 # Contributor: Chris Brannon <cmbrannon79@gmail.com>
 # Contributor: BorgHunter <borghunter at gmail dot com>
 
 _name=urllib3
 pkgname=python-urllib3
-pkgver=1.26.20
-pkgrel=4
+pkgver=2.3.0
+pkgrel=1
 pkgdesc="HTTP library with thread-safe connection pooling and file post support"
 arch=(any)
 url="https://github.com/urllib3/urllib3"
@@ -15,63 +16,80 @@ license=("MIT")
 depends=('python')
 makedepends=(
   'python-build'
+  'python-hatch-vcs'
+  'python-hatchling'
   'python-installer'
-  'python-setuptools'
   'python-wheel'
 )
 checkdepends=(
-  'python-brotli'
-  'python-certifi'
+  'python-cffi'
   'python-cryptography'
-  'python-dateutil'
-  'python-flaky'
-  'python-gcp-devrel-py-tools'
+  'python-h2'
+  'python-httpx'
   'python-idna'
   'python-pyopenssl'
   'python-pysocks'
   'python-pytest'
-  'python-pytest-freezer'
+  'python-pytest-socket'
   'python-pytest-timeout'
-  'python-tornado'
+  'python-quart'
+  'python-quart-trio'
+  'python-trio'
   'python-trustme'
+  # Required for building fork of hypercorn
+  'python-poetry-core'
 )
 optdepends=(
   'python-brotli: Brotli support'
-  'python-certifi: security support'
-  'python-cryptography: security support'
-  'python-idna: security support'
-  'python-pyopenssl: security support'
+  'python-brotlicffi: Brotli support'
+  'python-h2: HTTP/2 support'
   'python-pysocks: SOCKS support'
+  'python-zstandard: Zstandard support'
 )
-source=("$url/archive/$pkgver/$pkgname-$pkgver.tar.gz")
-sha512sums=('63c4263c5e61adf28344e79b6c864c70e555b715a93e735aca5b6e169f041f3e4518961993c86c83dd13bcb149f7dd77b6e90140cf4aa2310c14fcaa0a52179b')
+_urllib3_hypercorn_commit=d1719f8c1570cbd8e6a3719ffdb14a4d72880abb
+source=(
+  "$url/archive/$pkgver/$pkgname-$pkgver.tar.gz"
+  "ensure-compatibility-with-httpx-0.28.patch::$url/commit/3ccbdc909e4f9488567be46b76be9dcfd949ee2f.patch"
+  "https://github.com/urllib3/hypercorn/archive/$_urllib3_hypercorn_commit/hypercorn-$_urllib3_hypercorn_commit.tar.gz"
+)
+sha512sums=('7b4b8732f4a4cddb8a6f6854d21febcbecba0762bff65d2291d95d1f54a972c3168f8d7ca1786edfb5c0a0c955cf3812ff6fe1b7925973d3fe31077fbfbdc39c'
+            'af7c174e6253e927a92752d713795ef91307f03016e2bb15c14869e1c479ba86488891100540573a48536a59b50a99273fb6c88ab4d2688aab6909baa06c28fe'
+            '62d6787d88a2e716f0ac04fc49f6cdc586e473a660ee754ff66961922ae78bcc75d1f78b091e78557dd60f006e8e480114738c7b4ff71beac804e4fc9603240b')
 
 prepare() {
-  # remove python-mock requirement
-  find $_name-$pkgver -type f -iname "*.py" -exec sed 's/import mock/from unittest import mock/; s/from mock/from unittest.mock/' -i {} +
+  cd $_name-$pkgver
+  patch -Np1 -i ../ensure-compatibility-with-httpx-0.28.patch
 }
 
 build() {
   cd $_name-$pkgver
+  export SETUPTOOLS_SCM_PRETEND_VERSION=$pkgver
   python -m build --wheel --no-isolation
 }
 
 check() {
-  local pytest_options=(
-    -vv
-    --deselect=test/contrib/test_pyopenssl.py::TestClientCerts::test_missing_client_certs_raises_error
-    --deselect=test/contrib/test_pyopenssl.py::TestHTTPS::test_client_no_intermediate
-    --deselect=test/contrib/test_pyopenssl.py::TestHTTPS_TLSv1_3::test_client_no_intermediate
-    --deselect=test/contrib/test_pyopenssl.py::TestSSL::test_ssl_read_timeout
-    --deselect=test/with_dummyserver/test_socketlevel.py::TestSSL::test_ssl_read_timeout
-  )
-  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-
   cd $_name-$pkgver
-  # install to temporary location, as importlib is used
-  python -m installer --destdir=test_dir dist/*.whl
-  export PYTHONPATH="$PWD/test_dir/$site_packages:$PYTHONPATH"
-  pytest "${pytest_options[@]}"
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer dist/*.whl
+
+  # The test suite depends on upstream's custom fork of hypercorn,
+  # https://github.com/urllib3/hypercorn/tree/urllib3-changes, and ~60/1800
+  # tests fail with the upstream hypercorn.
+  # See the following in dev-requirements.txt:
+  #   # https://github.com/pgjones/hypercorn/issues/62
+  #   # https://github.com/pgjones/hypercorn/issues/168
+  #   # https://github.com/pgjones/hypercorn/issues/169
+  #   hypercorn @ git+https://github.com/urllib3/hypercorn@urllib3-changes
+  python -m build --wheel --no-isolation ../hypercorn-$_urllib3_hypercorn_commit
+  test-env/bin/python -m installer ../hypercorn-$_urllib3_hypercorn_commit/dist/*.whl
+
+  # Deselected tests fail on the following assertion:
+  # >   assert type(cm2.value.reason) is SSLError
+  # E   assert <class 'urllib3.exceptions.NewConnectionError'> is SSLError
+  test-env/bin/python -m pytest \
+    --deselect=test/contrib/test_pyopenssl.py::TestSocketSSL::test_ssl_failed_fingerprint_verification \
+    --deselect=test/with_dummyserver/test_socketlevel.py::TestSSL::test_ssl_failed_fingerprint_verification \
+    -W=ignore::pytest.PytestUnhandledThreadExceptionWarning
 }
 
 package() {
