@@ -4,7 +4,7 @@
 
 pkgname=pifpaf
 pkgver=3.2.3
-pkgrel=2
+pkgrel=3
 pkgdesc='Suite of tools and fixtures to manage daemons for testing'
 arch=(any)
 url='https://github.com/jd/pifpaf'
@@ -46,15 +46,18 @@ replaces=('python-pifpaf')
 source=(
   "git+$url.git#tag=$pkgver"
   "skip-failing-tests.patch"
+  "postgresql-fix-initdb-options.patch::https://github.com/jd/pifpaf/commit/0f4abc1306563ccca72bddf89f430fcbd8a7a6e9.patch"
 )
 sha512sums=('9443fdff77a2164499a95186755faea16af2aadc6d4e344764e48eb05e19f33cff99f4e278bf498587fa82d81d1debc44387216b8d7e8eb16437951f58596518'
-            'd3d470971accce527213d3e811240c867ffcf3c4ba9a62bc60f5991b2eac93d17b9365e7ce0d5f845b3b2fab7667481120f437d6b0e745889ed3543e34f51ece')
+  'd3d470971accce527213d3e811240c867ffcf3c4ba9a62bc60f5991b2eac93d17b9365e7ce0d5f845b3b2fab7667481120f437d6b0e745889ed3543e34f51ece'
+  'df223acb7c3a0c6d40a4c8d1ddb303694273c50000a3f956481e97c2e46a24a0506c6313688edad9bbcdd12955e9961f8a5361a365ba967f63ba1bd0657401cd')
 # Version 3.2.0 is not signed.
 # validpgpkeys=('5361BD40015B74382739101A611BA9508B78A5C2') # Julien Danjou <julien@danjou.info>
 
 prepare() {
   cd $pkgname
-  patch -Np1 -i "$srcdir/skip-failing-tests.patch"
+  patch -Np1 -i ../skip-failing-tests.patch
+  patch -Np1 -i ../postgresql-fix-initdb-options.patch
   # Move tests out of package to avoid installing.
   mv pifpaf/tests tests
 }
@@ -66,11 +69,10 @@ build() {
 
 check() {
   cd $pkgname
-  python -m installer --destdir=tmp_install dist/*.whl
-  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-  export PYTHONPATH="$PWD/tmp_install/$site_packages"
-  export PATH="$PWD/tmp_install/usr/bin:$PATH"
-  python -m unittest discover -v
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer dist/*.whl
+  PATH="$PWD/test-env/bin:$PATH" \
+    test-env/bin/python -m unittest discover -v
 }
 
 package() {
