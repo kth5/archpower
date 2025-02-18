@@ -8,7 +8,7 @@ pkgname=(
   python-maturin
 )
 pkgver=1.8.1
-pkgrel=1
+pkgrel=2
 pkgdesc="Build and publish crates with pyo3, rust-cpython and cffi bindings"
 url="https://github.com/PyO3/maturin"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
@@ -25,36 +25,44 @@ makedepends=(
   python-wheel
   rust
 )
+checkdepends=(
+  python-cffi
+  python-pycparser
+  python-virtualenv
+)
 # Disable LTO until ring can be built with it:
 # https://github.com/briansmith/ring/issues/1444
 options=(!lto)
-source=("$url/archive/v$pkgver/$pkgname-v$pkgver.tar.gz")
-sha512sums=('2f07ced149fd59035c3acddbc4449cdfa59f8680d1784a68fbb71414a8a6309d3e138b10a7aeb3ca1f35f52ffe04c0e557e4636c84b7d8c60cd012798e3ec041')
-b2sums=('0ded1146c03d1139cc826bff520dbed4f27f4c0d2fa58a1336b075d222bb73881ec455d9b8480206c9f25756d6680a3918db4b4043fb6a63a023d94d23c5ea48')
-
-_pick() {
-  local p="$1" f d; shift
-  for f; do
-    d="$srcdir/$p/${f#"$pkgdir/"}"
-    mkdir -p "$(dirname "$d")"
-    mv "$f" "$d"
-    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
-  done
-}
+source=("$pkgname::git+$url.git#tag=v$pkgver")
+sha512sums=('16ca21678ff46b0cc4d50401a83eafdfec840a9ddc43d7f99aae6a06e4719dad581fe33c7242455cd4a4c92290e233699f29af15c822f0bf07ec5191c87454bf')
+b2sums=('98f7f159c28d7b773a8daa103c1d2280a6ceab979d3d564d3c3ae47f9540c6307cfbde0e19b6928fc49e5da3fd65ddfc917d135761cc67bba69e775886c91f83')
 
 prepare() {
-  cd $pkgbase-$pkgver
   MYARCH=${CARCH}
   case "${CARCH}" in
     riscv64) MYARCH=riscv64gc ;;
   esac
+  cd $pkgbase
   cargo fetch --locked --target "$MYARCH-unknown-linux-gnu"
 }
 
 build() {
-  cd $pkgbase-$pkgver
+  cd $pkgbase
   MATURIN_SETUP_ARGS="--frozen --all-features" \
     python -m build --wheel --no-isolation
+}
+
+check() {
+  cd $pkgbase
+  mkdir -p test-crates/venvs
+  local cargo_skip_args=(
+    # Requires wasm32-wasip1 target
+    --skip=integration_wasm_hello_world
+    # Fails with the following error, not sure why:
+    # AttributeError: module 'uniffi_pure_proc_macro' has no attribute 'add'
+    --skip=integration_uniffi_pure_proc_macro
+  )
+  cargo test --frozen --all-features -- "${cargo_skip_args[@]}"
 }
 
 package_maturin() {
@@ -66,15 +74,11 @@ package_maturin() {
     rust
   )
 
-  cd $pkgbase-$pkgver
+  cd $pkgbase
   python -m installer --destdir="$pkgdir" dist/*.whl
+  rm -vr "$pkgdir/usr/lib"
   install -vDm 644 {Changelog,README}.md -t "$pkgdir/usr/share/doc/$pkgname/"
   install -vDm 644 license-mit -t "$pkgdir/usr/share/licenses/$pkgname/"
-
-  (
-    cd "$pkgdir"
-    _pick python-$pkgbase usr/lib
-  )
 }
 
 package_python-maturin() {
@@ -85,8 +89,8 @@ package_python-maturin() {
     python
   )
 
-  mv -v "$pkgname/"* "$pkgdir"
-
-  install -vDm 644 -t "$pkgdir/usr/share/licenses/$pkgname/" \
-    $pkgbase-$pkgver/license-mit
+  cd $pkgbase
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  rm -vr "$pkgdir/usr/bin"
+  install -vDm 644 -t "$pkgdir/usr/share/licenses/$pkgname/" license-mit
 }
