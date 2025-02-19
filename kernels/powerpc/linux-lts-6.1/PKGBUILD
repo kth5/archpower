@@ -1,0 +1,227 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+
+pkgbase=linux-lts-6.1
+pkgver=6.1.128.arch1
+pkgrel=1
+pkgdesc="Linux (${CARCH})"
+url='https://github.com/archlinux/linux'
+arch=(powerpc64le powerpc)
+license=(GPL-2.0-only)
+makedepends=(
+  bc
+  cpio
+  gettext
+  libelf
+  pahole
+  perl
+  python
+  tar
+  xz
+)
+options=('!debug' '!strip')
+_srcname=linux-${pkgver%.*}
+_srctag=v${pkgver%.*}-${pkgver##*.}
+source=(
+  https://cdn.kernel.org/pub/linux/kernel/v${pkgver%%.*}.x/${_srcname}.tar.{xz,sign}
+  config  # the main kernel config file
+  config.ppc32
+  0002-hotfix-usb-audio.patch
+  0003-ppc-radeon-qw-pm.patch
+  0004-pcmcia-iomega-clik.patch
+  0005-i915-diag.patch
+  0006-i915-page-64k.patch
+  0007-i915-ppc.patch
+)
+options=(!debug) # reduce build time
+validpgpkeys=(
+  ABAF11C65A2970B130ABE3C479BE3E4300411886  # Linus Torvalds
+  647F28654894E3BD457199BE38DBBDC86092693E  # Greg Kroah-Hartman
+  83BC8889351B5DEBBB68416EB8AC08600F108CDF  # Jan Alexander Steffens (heftig)
+)
+# https://www.kernel.org/pub/linux/kernel/v6.x/sha256sums.asc
+sha256sums=('874d67d3181570e69ac6b33853f0448f05fc90d4cf3e4baaadc4a9cede7c50f3'
+            'SKIP'
+            'fe7a2f6374db6f053b2d71f464a1873c27b8fcf114c35fb528d191db52e7ceed'
+            '5cce4429c61529b74e72c1a43357d537df64497af6405a83c271c1b625b72882'
+            'd1f25e9415a749268ede5ce2aa2595faa08d5bf6e29cee63b27b9334d5efc3a2'
+            '07dbbf3e8f743e8d2ad90891a8b567392271db139e339529df1ab4387e0e6400'
+            'b8a5d1e9dbed702d23bda79af3ac6f3d61228e123f7d6e5717779f2e28c4b677'
+            '060a30a4148aa88701003fd56bb389971db8527fa376e3436094cddcdec76c24'
+            '5dc5eb5772dd79ea4c87a60c2bafbb0503f20a3e4ddbf2075c02ca69e159e21d'
+            '7d44df97c0e565cfec60b77c0ad582e7f0da54726cfedc149c0b49e45f3a5d8b')
+b2sums=('3eec2717e5dd1cea12fc9f0747ecff1b5681bc979ea618b6ec0c4b40caa0a572a17f48e1b44e0aff352e941c35c00189793da2d868e1ef326651a47efd3de714'
+        'SKIP'
+        '3717584e969683754617a6fd985abb7fc63daff73158dbf9edc51c53163f5f22c89fa5efb0815b4d833078b0c59c9e9e48d017a447609b5a83b985701629b7e5'
+        'd2d1b7bf0bcd5de6d2c0992eda8838eaf9e97eed96890172d6e2034403d052dc976ee9aa22ab290fe7a32a4ed185801604475fab632a7cca4ed9d2258f18efd9'
+        '91b488e69c8b34c7347d135cde425e681faa6a329951648172ab00561e498a74063e345b897ea45142d167a2c02a27fee9ffe585f6a7919040b37f43547c1fc8'
+        '9677bbe86e5bb846c1fef6065f854e72b97a6e2b3b0e547192159fd56fac8b879999c6d52a835ebf7566be00c1a78644112564a4f76ec1c912181474479ad0a0'
+        '7af37e02f6b8233a72c03be8586abeabc253dae70208e8169b208f49360c96c63edc5d68c1dbb51d6480d8b1bfdf8ba5f3303d1b18e9ab453c01ebebf3cf19a7'
+        'bae7c8f1b50b9a43c99b91496446e9e0eff9442e40c7501aa5c1f24587dd39bea5bc0c5b48e6439118dcc779e36fbfaf75b2d92617257ade5e30109df21ae102'
+        '6dc95da4e14b9c4dd8c62480560c061a5c1a29ce1af8d9ee1e73401f79339e1b6c4f8339568d57414a51341f382c1ee1a636bdaaf70bca72692d62c0a03670f8'
+        '45ca140885508e53bc779fe650e84702928980b7b3cedd63d68558a20a9504e93cb2e78ca20e613917d17732b6e18c3fb37b348cfdf5e1a5325b827986268a1e')
+
+export KBUILD_BUILD_HOST=archpower
+export KBUILD_BUILD_USER=$pkgbase
+export KBUILD_BUILD_TIMESTAMP="$(date -Ru${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH})"
+
+prepare() {
+  cd $_srcname
+
+  echo "Setting version..."
+  echo "-$pkgrel" > localversion.10-pkgrel
+  echo "${pkgbase#linux}" > localversion.20-pkgname
+
+  local src
+  for src in "${source[@]}"; do
+    src="${src%%::*}"
+    src="${src##*/}"
+    src="${src%.zst}"
+    [[ $src = *.patch ]] || continue
+    echo "Applying patch $src..."
+    patch -Np1 < "../$src"
+  done
+
+  echo "Setting config..."
+  cp ../config .config
+  [ "${CARCH}" == 'powerpc' ] && cp ../config.ppc32 .config
+  make olddefconfig
+  diff -u ../config .config || :
+
+  make -s kernelrelease > version
+  echo "Prepared $pkgbase version $(<version)"
+}
+
+build() {
+  cd $_srcname
+  make all
+}
+
+_package() {
+  pkgdesc="The $pkgdesc kernel and modules"
+  depends=(
+    coreutils
+    initramfs
+    kmod
+  )
+  optdepends=(
+    'wireless-regdb: to set the correct wireless channels of your country'
+    'linux-firmware: firmware images needed for some devices'
+  )
+  provides=(
+    KSMBD-MODULE
+    VIRTUALBOX-GUEST-MODULES
+    WIREGUARD-MODULE
+  )
+  replaces=(
+    virtualbox-guest-modules-arch
+    wireguard-arch
+  )
+
+  cd $_srcname
+  local modulesdir="$pkgdir/usr/lib/modules/$(<version)"
+
+  echo "Installing boot image..."
+  # systemd expects to find the kernel here to allow hibernation
+  # https://github.com/systemd/systemd/commit/edda44605f06a41fb86b7ab8128dcf99161d2344
+  install -Dm644 "$(make -s image_name)" "$modulesdir/vmlinuz"
+
+  # Used by mkinitcpio to name the kernel
+  echo "$pkgbase" | install -Dm644 /dev/stdin "$modulesdir/pkgbase"
+
+  echo "Installing modules..."
+  ZSTD_CLEVEL=19 make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
+    DEPMOD=/doesnt/exist modules_install  # Suppress depmod
+
+  # remove build link
+  rm "$modulesdir"/build
+}
+
+_package-headers() {
+  pkgdesc="Headers and scripts for building modules for the $pkgdesc kernel"
+  depends=(pahole)
+
+  cd $_srcname
+  local builddir="$pkgdir/usr/lib/modules/$(<version)/build"
+
+  echo "Installing build files..."
+  install -Dt "$builddir" -m644 .config Makefile Module.symvers System.map \
+    localversion.* version vmlinux
+  install -Dt "$builddir/kernel" -m644 kernel/Makefile
+  install -Dt "$builddir/arch/powerpc" -m644 arch/powerpc/Makefile
+  cp -t "$builddir" -a scripts
+
+  echo "Installing headers..."
+  cp -t "$builddir" -a include
+  cp -t "$builddir/arch/powerpc" -a arch/powerpc/include
+  install -Dt "$builddir/arch/powerpc/kernel" -m644 arch/powerpc/kernel/asm-offsets.s
+
+  install -Dt "$builddir/drivers/md" -m644 drivers/md/*.h
+  install -Dt "$builddir/net/mac80211" -m644 net/mac80211/*.h
+
+  # https://bugs.archlinux.org/task/13146
+  install -Dt "$builddir/drivers/media/i2c" -m644 drivers/media/i2c/msp3400-driver.h
+
+  # https://bugs.archlinux.org/task/20402
+  install -Dt "$builddir/drivers/media/usb/dvb-usb" -m644 drivers/media/usb/dvb-usb/*.h
+  install -Dt "$builddir/drivers/media/dvb-frontends" -m644 drivers/media/dvb-frontends/*.h
+  install -Dt "$builddir/drivers/media/tuners" -m644 drivers/media/tuners/*.h
+
+  # https://bugs.archlinux.org/task/71392
+  install -Dt "$builddir/drivers/iio/common/hid-sensors" -m644 drivers/iio/common/hid-sensors/*.h
+
+  echo "Installing KConfig files..."
+  find . -name 'Kconfig*' -exec install -Dm644 {} "$builddir/{}" \;
+
+  echo "Removing unneeded architectures..."
+  local arch
+  for arch in "$builddir"/arch/*/; do
+    [[ $arch = */powerpc/ ]] && continue
+    echo "Removing $(basename "$arch")"
+    rm -r "$arch"
+  done
+
+  echo "Removing documentation..."
+  rm -r "$builddir/Documentation"
+
+  echo "Removing broken symlinks..."
+  find -L "$builddir" -type l -printf 'Removing %P\n' -delete
+
+  echo "Removing loose objects..."
+  find "$builddir" -type f -name '*.o' -printf 'Removing %P\n' -delete
+
+  echo "Stripping build tools..."
+  local file
+  while read -rd '' file; do
+    case "$(file -Sib "$file")" in
+      application/x-sharedlib\;*)      # Libraries (.so)
+        strip -v $STRIP_SHARED "$file" ;;
+      application/x-archive\;*)        # Libraries (.a)
+        strip -v $STRIP_STATIC "$file" ;;
+      application/x-executable\;*)     # Binaries
+        strip -v $STRIP_BINARIES "$file" ;;
+      application/x-pie-executable\;*) # Relocatable binaries
+        strip -v $STRIP_SHARED "$file" ;;
+    esac
+  done < <(find "$builddir" -type f -perm -u+x ! -name vmlinux -print0)
+
+  echo "Stripping vmlinux..."
+  strip -v $STRIP_STATIC "$builddir/vmlinux"
+
+  echo "Adding symlink..."
+  mkdir -p "$pkgdir/usr/src"
+  ln -sr "$builddir" "$pkgdir/usr/src/$pkgbase"
+}
+
+pkgname=(
+  "$pkgbase"
+  "$pkgbase-headers"
+)
+for _p in "${pkgname[@]}"; do
+  eval "package_$_p() {
+    $(declare -f "_package${_p#$pkgbase}")
+    _package${_p#$pkgbase}
+  }"
+done
+
+# vim:set ts=8 sts=2 sw=2 et:
