@@ -1,72 +1,94 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Anatol Pomozov <anatol.pomozov@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Alexander F. Rødseth <xyproto@archlinux.org>
+# Contributor: Emil Renner Berthing <aur@esmil.dk>
 
 _target=aarch64-linux-gnu
 pkgname=$_target-binutils
-pkgver=2.43
+pkgver=2.43_1+r186+g61f8adadd6db
+_commit=61f8adadd6db110f4a333c0a853dc492d8abe4bc
 pkgrel=1
-pkgdesc='A set of programs to assemble and manipulate binary and object files for the ARM64 target'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url='https://www.gnu.org/software/binutils/'
+pkgdesc='Assemble and manipulate binary and object files for riscv64'
+arch=(x86_64 powerpc64le powerpc64 riscv64)
+url='https://gnu.org/software/binutils/'
 license=(GPL)
-depends=(zlib libelf)
-source=(https://ftp.gnu.org/gnu/binutils/binutils-$pkgver.tar.bz2{,.sig})
-sha1sums=('9b0b465bf52fdbb677bd67ba64424842e297ebcd'
-          'SKIP')
-sha256sums=('fed3c3077f0df7a4a1aa47b080b8c53277593ccbb4e5e78b73ffb4e3f265e750'
-            'SKIP')
-validpgpkeys=('3A24BC1E8FB409FA9F14371813FCEF89DD9E3C4F') # Nick Clifton (Chief Binutils Maintainer) <nickc@redhat.com>
+depends=(glibc zlib libelf jansson)
+makedepends=(git setconf)
+source=(git+https://sourceware.org/git/binutils-gdb.git#commit=${_commit}
+	gold-warn-unsupported.patch)
+sha256sums=('bf0b750964266ac0a6790209eab3e23a2a143714d39e3ee2f568b3be04a57c69'
+            '2d430b66f84a19c154725ec535280c493be1d34f1a90f95208dce02fecd0e4e4')
+validpgpkeys=(3A24BC1E8FB409FA9F14371813FCEF89DD9E3C4F)
+
+pkgver() {
+  cd binutils-gdb
+  git describe --abbrev=12 --tags | sed 's/[^-]*-//;s/[^-]*-/&r/;s/-/+/g;s/_/./'
+}
 
 prepare() {
-  cd binutils-$pkgver
-  sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" libiberty/configure
+  cd ${srcdir}
+  [[ ! -d binutils-gdb ]] && ln -s binutils-$pkgver binutils-gdb
+
+  cd "binutils-gdb"
+  # Creds @Fedora
+  # Change the gold configuration script to only warn about
+  # unsupported targets.  This allows the binutils to be built with
+  # BPF support enabled.
+  patch -Np1 -i "${srcdir}"/gold-warn-unsupported.patch
+
+  setconf libiberty/configure ac_cpp "'\$CPP \$CPPFLAGS -O2'"
 }
 
 build() {
-  cd binutils-$pkgver
+  cd "binutils-gdb"
 
-  if [ "${CARCH}" != "i686" ];
-  then
-    # enabling gold linker at i686 makes the install fail
-    enable_gold='--enable-gold'
-  fi
-
-  ./configure --target=$_target \
-              --with-sysroot=/usr/$_target \
-              --prefix=/usr \
-              --disable-multilib \
-              --with-gnu-as \
-              --with-gnu-ld \
-              --disable-nls \
-              --enable-ld=default \
-              $enable_gold \
-              --enable-plugins \
-              --enable-deterministic-archives
-
+  unset CPPFLAGS
+  ./configure \
+    --disable-nls \
+    --enable-deterministic-archives \
+    --enable-gold \
+    --enable-ld=default \
+    --enable-multilib \
+    --enable-plugins \
+    --prefix=/usr \
+    --target=$_target \
+    --with-gnu-as \
+    --with-gnu-ld \
+    --with-sysroot=/usr/$_target/usr \
+    --with-system-zlib \
+    --disable-werror \
+    --disable-sim \
+    --enable-colored-disassembly \
+    --enable-targets=no
   make
+
+  # Extract the FSF All Permissive License
+  # <https://www.gnu.org/prep/maintain/html_node/License-Notices-for-Other-Files.html>
+  # used for some linker scripts.
+  tail -n 5 "${srcdir}"/binutils-gdb/ld/scripttempl/README > FSFAP
 }
 
 check() {
-  cd binutils-$pkgver
-
-  # unset LDFLAGS as testsuite makes assumptions about which ones are active
-  # do not abort on errors - manually check log files
-  make -k LDFLAGS="" check || true
+  # * Unset LDFLAGS as testsuite makes assumptions about which ones are active.
+  # * Do not abort on errors - manually check log files.
+  make -C "binutils-gdb" LDFLAGS="" -k check
 }
 
 package() {
-  cd binutils-$pkgver
+  make -C "binutils-gdb" DESTDIR="$pkgdir" install
 
-  make DESTDIR="$pkgdir" install
-
-  # Remove file conflicting with host binutils and manpages for MS Windows tools
-  rm -fv "$pkgdir"/usr/share/man/man1/$_target-{dlltool,windres,windmc}*
-  rm -fv "$pkgdir"/usr/lib/bfd-plugins/libdep.so
-  rm -fv "$pkgdir"/usr/etc/gprofng.rc
-  rm -fv "$pkgdir"/usr/lib/libgprofng.a
-  rm -frv "$pkgdir"/usr/include
-  rm -frv "$pkgdir"/usr/lib/gprofng/
+  install -d -m755 "$pkgdir/usr/$_target/usr"
+  mv $pkgdir/usr/$_target/{bin,lib} "$pkgdir/usr/$_target/usr/"
 
   # Remove info documents that conflict with host version
-  rm -frv "$pkgdir"/usr/share/info
+  rm -r "$pkgdir/usr/share/info"
+  rm -r "$pkgdir/usr/share/gdb"
+  rm "$pkgdir/usr/include/gdb/jit-reader.h"
+
+  rm "$pkgdir"/usr/lib/bfd-plugins/libdep.so
+
+  # install FSF All Permissive License
+  install -Dm644 -t "${pkgdir}"/usr/share/licenses/${pkgname}/ binutils-gdb/FSFAP
 }
+
+# getver: gnu.org/software/binutils
