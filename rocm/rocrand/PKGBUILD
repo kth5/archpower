@@ -1,0 +1,45 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Torsten Keßler <tpkessler at archlinux dot org>
+# Contributor: Jakub Okoński <jakub@okonski.org>
+pkgname=rocrand
+pkgver=6.3.2
+pkgrel=1
+pkgdesc='Pseudo-random and quasi-random number generator on ROCm'
+arch=(x86_64 powerpc64le powerpc riscv64)
+url='https://rocm.docs.amd.com/projects/rocRAND/en/latest/index.html'
+license=('MIT')
+depends=('rocm-core' 'hip-runtime-amd' 'glibc' 'gcc-libs')
+makedepends=('rocm-cmake' 'gcc-fortran' 'python' 'git')
+optdepends=('gcc-fortran: Use Fortran wrapper')
+_git='https://github.com/ROCmSoftwarePlatform/rocRAND'
+source=("$pkgname-$pkgver.tar.gz::$_git/archive/rocm-$pkgver.tar.gz")
+sha256sums=('57f364806369ddb80761ce44187920075cf446de527dd1fbc6adbb4b4b3e9bb8')
+options=(!lto)
+_dirname="$(basename "$_git")-$(basename "${source[0]}" ".tar.gz")"
+
+build() {
+  case "${CARCH}" in
+    powerpc64) export CXXFLAGS='-O2 -pipe' ;;
+  esac
+
+  # -fcf-protection is not supported by HIP, see
+  # https://rocm.docs.amd.com/projects/llvm-project/en/latest/reference/rocmcc.html#support-status-of-other-clang-options
+  local cmake_args=(
+    -Wno-dev
+    -S "$_dirname"
+    -B build
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_TOOLCHAIN_FILE=toolchain-linux.cmake
+    -D CMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc
+    -D CMAKE_CXX_FLAGS="${CXXFLAGS} -fcf-protection=none"
+    -D CMAKE_INSTALL_PREFIX=/opt/rocm
+  )
+  cmake "${cmake_args[@]}"
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+
+  install -Dm644 "$_dirname/LICENSE.txt" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
