@@ -1,0 +1,176 @@
+Author: Ash Logan <ash@heyquark.com>
+
+adds a whole bunch of ppc32 relocation types - probably only REL32 and REL24 are actually needed, or
+indeed tested.
+mostly copypasted from the ppc64 code with ELFv2 ABI removed. No attempt is made to support GOT/PLT
+relocations, since the JIT doesn't seem to generate these.
+
+makes clang-repl and the ExecutionEngine testsuites pass, and allows llvmpipe to run
+
+diff -rup llvm/lib/ExecutionEngine/RuntimeDyld/RuntimeDyld.cpp llvm/lib/ExecutionEngine/RuntimeDyld/RuntimeDyld.cpp
+--- llvm/lib/ExecutionEngine/RuntimeDyld/RuntimeDyld.cpp	2024-06-16 03:21:32.000000000 +1000
++++ llvm/lib/ExecutionEngine/RuntimeDyld/RuntimeDyld.cpp	2025-02-26 00:10:04.114888980 +1100
+@@ -1029,6 +1029,14 @@ uint8_t *RuntimeDyldImpl::createStubFunc
+     writeBytesUnaligned(JrT9Instr, Addr + 24, 4);
+     writeBytesUnaligned(NopInstr, Addr + 28, 4);
+     return Addr;
++  } else if (Arch == Triple::ppc || Arch == Triple::ppcle) {
++    // The ABI docs talk endlessly of PLTs and GOTs which have special relocation types.
++    // For the generic types, just do a generic jump.
++    writeInt32BE(Addr,    0x3D800000); // lis   r12, h(addr)
++    writeInt32BE(Addr+4,  0x618C0000); // ori   r12, l(addr)
++    writeInt32BE(Addr+8,  0x7D8903A6); // mtctr r12
++    writeInt32BE(Addr+12, 0x4E800420); // bctr
++    return Addr;
+   } else if (Arch == Triple::ppc64 || Arch == Triple::ppc64le) {
+     // Depending on which version of the ELF ABI is in use, we need to
+     // generate one of two variants of the stub.  They both start with
+diff -rup llvm/lib/ExecutionEngine/RuntimeDyld/RuntimeDyldELF.cpp llvm/lib/ExecutionEngine/RuntimeDyld/RuntimeDyldELF.cpp
+--- llvm/lib/ExecutionEngine/RuntimeDyld/RuntimeDyldELF.cpp	2024-06-16 03:21:32.000000000 +1000
++++ llvm/lib/ExecutionEngine/RuntimeDyld/RuntimeDyldELF.cpp	2025-02-26 00:32:57.021079997 +1100
+@@ -819,7 +819,7 @@ void RuntimeDyldELF::resolvePPC32Relocat
+   uint8_t *LocalAddress = Section.getAddressWithOffset(Offset);
+   switch (Type) {
+   default:
+-    report_fatal_error("Relocation type not implemented yet!");
++    report_fatal_error("Relocation type " + Twine(Type) + " not implemented yet!");
+     break;
+   case ELF::R_PPC_ADDR16_LO:
+     writeInt16BE(LocalAddress, applyPPClo(Value + Addend));
+@@ -835,6 +835,37 @@ void RuntimeDyldELF::resolvePPC32Relocat
+     int64_t delta = static_cast<int64_t>(Value - FinalAddress + Addend);
+     writeInt32BE(LocalAddress, delta);
+   } break;
++  case ELF::R_PPC_REL24: {
++    uint32_t FinalAddress = Section.getLoadAddressWithOffset(Offset);
++    int64_t delta = static_cast<int64_t>(Value - FinalAddress + Addend);
++    if (SignExtend64<26>(delta) != delta)
++      llvm_unreachable("Relocation R_PPC_REL24 overflow");
++    uint32_t Inst = readBytesUnaligned(LocalAddress, 4);
++    writeInt32BE(LocalAddress, (Inst & 0xFC000003) | (delta & 0x03FFFFFC));
++  } break;
++  case ELF::R_PPC_ADDR32: {
++    int64_t delta = static_cast<int64_t>(Value + Addend);
++    writeInt32BE(LocalAddress, delta);
++  } break;
++  case ELF::R_PPC_ADDR30: {
++    uint32_t FinalAddress = Section.getLoadAddressWithOffset(Offset);
++    int64_t delta = static_cast<int64_t>(Value - FinalAddress + Addend);
++    uint32_t Inst = readBytesUnaligned(LocalAddress, 4);
++    writeInt32BE(LocalAddress, (Inst & 0x00000003) | (delta & 0xFFFFFFFC));
++  } break;
++  case ELF::R_PPC_ADDR24: {
++    int64_t delta = static_cast<int64_t>(Value + Addend);
++    if (SignExtend64<26>(delta) != delta)
++      llvm_unreachable("Relocation R_PPC_ADDR24 overflow");
++    uint32_t Inst = readBytesUnaligned(LocalAddress, 4);
++    writeInt32BE(LocalAddress, (Inst & 0xFC000003) | (delta & 0x03FFFFFC));
++  } break;
++  case ELF::R_PPC_ADDR16: {
++    int64_t delta = static_cast<int64_t>(Value + Addend);
++    if (SignExtend64<16>(delta) != delta)
++      llvm_unreachable("Relocation R_PPC_ADDR16 overflow");
++    writeInt16BE(LocalAddress, delta);
++  } break;
+   }
+ }
+
+@@ -1551,6 +1587,76 @@ RuntimeDyldELF::processRelocationRef(
+       processSimpleRelocation(SectionID, Offset, RelType, Value);
+     }
+
++  } else  if (Arch == Triple::ppc || Arch == Triple::ppcle) {
++    if (RelType == ELF::R_PPC_REL24) {
++      // A PPC branch relocation will need a stub function if the target is
++      // an external symbol (either Value.SymbolName is set, or SymType is
++      // Symbol::ST_Unknown) or if the target address is not within the
++      // signed 24-bits branch address.
++      SectionEntry &Section = Sections[SectionID];
++      uint8_t *Target = Section.getAddressWithOffset(Offset);
++      bool RangeOverflow = false;
++      bool IsExtern = Value.SymbolName || SymType == SymbolRef::ST_Unknown;
++      if (!IsExtern) {
++        uint8_t *RelocTarget =
++            Sections[Value.SectionID].getAddressWithOffset(Value.Addend);
++        int64_t delta = static_cast<int64_t>(Target - RelocTarget);
++        // If it is within 26-bits branch range, just set the branch target
++        if (SignExtend64<26>(delta) != delta) {
++          RangeOverflow = true;
++        } else  {
++          RelocationEntry RE(SectionID, Offset, RelType, Value.Addend);
++          addRelocationForSection(RE, Value.SectionID);
++        }
++      }
++      if (IsExtern || RangeOverflow) {
++        // It is an external symbol (either Value.SymbolName is set, or
++        // SymType is SymbolRef::ST_Unknown) or out of range.
++        StubMap::const_iterator i = Stubs.find(Value);
++        if (i != Stubs.end()) {
++          // Symbol function stub already created, just relocate to it
++          resolveRelocation(Section, Offset,
++                            reinterpret_cast<uint64_t>(
++                                Section.getAddressWithOffset(i->second)),
++                            RelType, 0);
++          LLVM_DEBUG(dbgs() << " Stub function found\n");
++        } else {
++          // Create a new stub function.
++          LLVM_DEBUG(dbgs() << " Create a new stub function\n");
++          Stubs[Value] = Section.getStubOffset();
++          uint8_t *StubTargetAddr = createStubFunction(
++              Section.getAddressWithOffset(Section.getStubOffset()));
++
++          // The PPC32 ELF ABI doesn't really provide any guidance on the no-PLT case so let's do
++          // our best
++          uint64_t StubRelocOffset = StubTargetAddr - Section.getAddress();
++          if (!IsTargetLittleEndian)
++            StubRelocOffset += 2;
++
++          RelocationEntry REh(SectionID, StubRelocOffset + 0,
++                              ELF::R_PPC_ADDR16_HI, Value.Addend);
++          RelocationEntry REl(SectionID, StubRelocOffset + 4,
++                              ELF::R_PPC_ADDR16_LO, Value.Addend);
++
++          if (Value.SymbolName) {
++            addRelocationForSymbol(REh, Value.SymbolName);
++            addRelocationForSymbol(REl, Value.SymbolName);
++          } else {
++            addRelocationForSection(REh, Value.SectionID);
++            addRelocationForSection(REl, Value.SectionID);
++          }
++
++          resolveRelocation(Section, Offset, reinterpret_cast<uint64_t>(
++                                                 Section.getAddressWithOffset(
++                                                     Section.getStubOffset())),
++                            RelType, 0);
++          Section.advanceStubOffset(getMaxStubSize());
++        }
++      }
++    } else {
++      // Normal relocations are fine as-is probs
++      processSimpleRelocation(SectionID, Offset, RelType, Value);
++    }
+   } else if (Arch == Triple::ppc64 || Arch == Triple::ppc64le) {
+     if (RelType == ELF::R_PPC64_REL24) {
+       // Determine ABI variant in use for this object.
+@@ -2228,6 +2334,8 @@ size_t RuntimeDyldELF::getGOTEntrySize()
+   case Triple::x86:
+   case Triple::arm:
+   case Triple::thumb:
++  case Triple::ppc:
++  case Triple::ppcle:
+     Result = sizeof(uint32_t);
+     break;
+   case Triple::mips:
+diff -rup llvm/lib/ExecutionEngine/RuntimeDyld/RuntimeDyldELF.h llvm/lib/ExecutionEngine/RuntimeDyld/RuntimeDyldELF.h
+--- llvm/lib/ExecutionEngine/RuntimeDyld/RuntimeDyldELF.h	2024-06-16 03:21:32.000000000 +1000
++++ llvm/lib/ExecutionEngine/RuntimeDyld/RuntimeDyldELF.h	2025-02-25 23:51:24.830956991 +1100
+@@ -69,6 +69,8 @@ class RuntimeDyldELF : public RuntimeDyl
+       return 16;
+     else if (IsMipsN64ABI)
+       return 32;
++    else if (Arch == Triple::ppc || Arch == Triple::ppcle)
++      return 16;
+     else if (Arch == Triple::ppc64 || Arch == Triple::ppc64le)
+       return 44;
+     else if (Arch == Triple::x86_64)
+
