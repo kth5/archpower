@@ -14,9 +14,13 @@ pkgname=(
 case "${CARCH}" in
   powerpc64le|riscv64|x86_64)
     pkgname+=(
+      vulkan-intel
+    )
+  ;&
+  *)
+    pkgname+=(
       opencl-clover-mesa
       opencl-rusticl-mesa
-      vulkan-intel
       vulkan-powervr
       vulkan-radeon
       vulkan-swrast
@@ -185,15 +189,15 @@ build() {
       _platform_gallium_drivers=',crocus,i915,iris,svga,virgl,zink,d3d12'
     ;;
     powerpc64le)
-      _platform_vulkan_drivers='amd,virtio,swrast,intel,intel,imagination-experimental,nouveau'
+      _platform_vulkan_drivers='amd,virtio,swrast,intel,imagination-experimental,nouveau'
       _platform_gallium_drivers=',i915,iris,etnaviv,lima,swrast,virgl,zink,d3d12'
     ;;
     powerpc|powerpc64)
-      _platform_vulkan_drivers=''
-      _platform_gallium_drivers=',swrast'
+      _platform_vulkan_drivers='amd,virtio,swrast,imagination-experimental,nouveau'
+      _platform_gallium_drivers=',i915,etnaviv,lima,svga,swrast,virgl,zink,d3d12'
     ;;
     riscv64)
-      _platform_vulkan_drivers='amd,virtio,swrast,intel,intel,imagination-experimental,nouveau'
+      _platform_vulkan_drivers='amd,virtio,swrast,intel,imagination-experimental,nouveau'
       _platform_gallium_drivers=',i915,iris,etnaviv,lima,swrast,virgl,zink,d3d12'
     ;;
   esac
@@ -216,13 +220,29 @@ build() {
   )
 
   case "${CARCH}" in
-    powerpc|powerpc64) meson_options+=(
-               -D gallium-nine=false
-               -D glx-direct=true
-               -D llvm=disabled
-               -D draw-use-llvm=false
+    x86_64) meson_options+=(
+               -D gallium-nine=true
+               -D gallium-opencl=icd
+               -D gallium-rusticl=true
+               #-D html-docs=enabled
+               -D intel-clc=enabled
+               -D intel-rt=enabled
                -D osmesa=true
+               # intel_hasvk is gen7/gen8
+               -D vulkan-drivers=amd,intel,intel_hasvk,nouveau,swrast,virtio
+               # i915 supports all intel iGPU, crocus better for sandybridge, iris better for intel gen8+ CPUs
+               -D gallium-drivers=r300,r600,radeonsi,nouveau,virgl,svga,llvmpipe,softpipe,iris,crocus,i915,zink,d3d12
+               -D vulkan-layers=device-select,intel-nullhw,overlay,screenshot
+      )
+    ;;
+    powerpc|powerpc64) meson_options+=(
+               -D llvm=enabled
+               -D gallium-nine=true
+               -D glx-direct=true
+               -D gallium-opencl=icd
+               -D gallium-rusticl=true
                -D intel-rt=disabled
+               -D osmesa=true
                -D power8=disabled
              )
     ;;
@@ -323,8 +343,11 @@ package_mesa() {
     _pick vdpau $libdir/vdpau
 
     case "${CARCH}" in
-      powerpc|powerpc64) ;;
-      *) 
+      powerpc64le|x86_64|riscv64)
+    _pick vkintel $icddir/intel_*.json
+    _pick vkintel $libdir/libvulkan_intel*.so
+      ;&
+      *)
     _pick clover $libdir/gallium-pipe
 
     _pick clover $libdir/libMesaOpenCL*
@@ -332,9 +355,6 @@ package_mesa() {
 
     _pick clrust $libdir/libRusticlOpenCL*
     _pick clrust etc/OpenCL/vendors/rusticl.icd
-
-    _pick vkintel $icddir/intel_*.json
-    _pick vkintel $libdir/libvulkan_intel*.so
 
     _pick vklayer $libdir/libVkLayer_*.so
     _pick vklayer usr/bin/mesa-overlay-control.py
