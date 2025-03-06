@@ -1,0 +1,55 @@
+# Maintainer: Johannes Löthberg <johannes@kyriasis.com>
+# Contributor:  Bartłomiej Piotrowski <barthalion@gmail.com>
+# Contributor: Maciej Sitarz <macieks@freesco.pl>
+
+pkgname=hunspell-pl
+pkgver=20240901
+pkgrel=1
+pkgdesc='Polish dictionary for Hunspell'
+arch=('any')
+url='https://www.sjp.pl/slownik/ort/'
+license=('GPL')
+optdepends=('hunspell: the spell checking libraries and apps')
+makedepends_x86_64=('qt6-webengine')
+provides=('hunspell-dictionary')
+source=(https://people.freebsd.org/~sunpoet/office/20240926-010000/hunspell/sjp-myspell-pl-$pkgver.zip)
+sha256sums=('0c7e5ebf3430ddec239e39047c74db51dbb105352b9c3301ee385aba139890e8')
+
+prepare() {
+  bsdtar -xf pl_PL.zip
+
+  # fix file encoding - FS#68481
+  # check for broken files using
+  # file -i  $(pacman -Qql hunspell-pl) | grep iso
+  for file in pl_PL.aff pl_PL.dic; do
+      mv $file $file.ISO-8859
+      iconv -f iso-8859-2 -t utf-8 $file.ISO-8859 -o $file
+      # fix encoding in .aff files
+      sed -i "s/SET ISO8859-2/SET UTF-8/" $file
+  done
+}
+
+package() {
+  install -dm755 "$pkgdir"/usr/share/hunspell
+  install -m644 pl_PL.aff "$pkgdir"/usr/share/hunspell
+  install -m644 pl_PL.dic "$pkgdir"/usr/share/hunspell
+
+  # the symlinks
+  install -dm755 "$pkgdir"/usr/share/myspell/dicts
+  pushd "$pkgdir"/usr/share/myspell/dicts
+  for file in "$pkgdir"/usr/share/hunspell/*; do
+    ln -sv /usr/share/hunspell/$(basename $file) .
+  done
+  popd
+
+  # docs
+  install -dm755 "$pkgdir"/usr/share/doc/$pkgname
+  install -m644 README_pl_PL.txt "$pkgdir"/usr/share/doc/$pkgname
+
+ # Install webengine dictionaries
+  if [ "${CARCH}" == "x86_64" ]; then
+  install -d "$pkgdir"/usr/share/qt{,6}/qtwebengine_dictionaries/
+  /usr/lib/qt6/qwebengine_convert_dict "$pkgdir"/usr/share/hunspell/pl_PL.dic "$pkgdir"/usr/share/qt6/qtwebengine_dictionaries/pl_PL.bdic
+  ln -rs "$pkgdir"/usr/share/qt6/qtwebengine_dictionaries/pl_PL.bdic "$pkgdir"/usr/share/qt/qtwebengine_dictionaries/
+  fi
+}
