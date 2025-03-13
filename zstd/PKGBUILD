@@ -5,8 +5,8 @@
 # Contributor: Johan Förberg <johan@forberg.se>
 
 pkgname=zstd
-pkgver=1.5.6
-pkgrel=1.2
+pkgver=1.5.7
+pkgrel=2
 pkgdesc='Zstandard - Fast real-time compression algorithm'
 url='https://facebook.github.io/zstd/'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso riscv64)
@@ -27,11 +27,14 @@ makedepends=(
   ninja
 )
 provides=(libzstd.so)
-source=(https://github.com/facebook/zstd/releases/download/v${pkgver}/zstd-${pkgver}.tar.zst{,.sig})
-sha256sums=('4aa8dd1c1115c0fd6b6b66c35c7f6ce7bd58cc1dfd3e4f175b45b39e84b14352'
-            'SKIP')
-b2sums=('88430a6a5db47462f93f2458cd3cc4823913de2d2d979cad56b06b48367a4ee51f59c795944c16d06abfdd19758b69f0b6e504ed833d02ff76e4cda519d220e4'
-        'SKIP')
+source=(https://github.com/facebook/zstd/releases/download/v${pkgver}/zstd-${pkgver}.tar.zst{,.sig}
+  https://github.com/facebook/zstd/commit/6af3842118ea5325480b403213b2a9fbed3d3d74.patch)
+sha256sums=('5b331d961d6989dc21bb03397fc7a2a4d86bc65a14adc5ffbbce050354e30fd2'
+            'SKIP'
+            '7c07be222d45718b81fb16f97e611adfeb24efa0712ca77fb1e08f4c67803ec3')
+b2sums=('20df0493d9d960b8fc98f7cac7630f84dae6226bd906364ab9c9ce7dfb2be44a303fd077e4264979f3ee92efd59072d63c4bb4ae7b65c52f6ce0153513088837'
+        'SKIP'
+        '02e472b01ead30ebc703f64d35ccbfe1db8a9eae6b15a3690e6e5092c6b8cdfaaca585b31b965d94eea7da04cebd6bcca7f5c8bbf9e2c2e84b4acd7f3ce54e5d')
 validpgpkeys=(4EF4AC63455FC9F4545D9B7DEF8FE99528B52FFD)
 
 prepare() {
@@ -39,25 +42,25 @@ prepare() {
   # avoid error on tests without static libs, we use LD_LIBRARY_PATH
   sed '/build static library to build tests/d' -i build/cmake/CMakeLists.txt
   sed 's/libzstd_static/libzstd_shared/g' -i build/cmake/tests/CMakeLists.txt
+  # fix manpages
+  patch -Np1 -i ../6af3842118ea5325480b403213b2a9fbed3d3d74.patch
 }
 
 build() {
   cd ${pkgname}-${pkgver}
-  export CFLAGS+=' -ffat-lto-objects -I/usr/include'
-  export CXXFLAGS+=' -ffat-lto-objects -I/usr/include'
-
-  [ "${CARCH}" = 'riscv64' ] && export CXXFLAGS+=' -latomic'
+  export CFLAGS+=' -ffat-lto-objects'
+  export CXXFLAGS+=' -ffat-lto-objects'
 
   cmake -S build/cmake -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_INSTALL_PREFIX=/usr \
+    -DZSTD_ZLIB_SUPPORT=ON \
     -DZSTD_LZMA_SUPPORT=ON \
     -DZSTD_LZ4_SUPPORT=ON \
-    -DZSTD_ZLIB_SUPPORT=ON \
     -DZSTD_BUILD_CONTRIB=ON \
     -DZSTD_BUILD_STATIC=OFF \
     -DZSTD_BUILD_TESTS=ON \
-    -DZSTD_PROGRAMS_LINK_SHARED=ON ${cmake_options[@]}
+    -DZSTD_PROGRAMS_LINK_SHARED=ON
   cmake --build build
 }
 
