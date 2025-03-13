@@ -1,0 +1,65 @@
+# Maintainer: Balló György <ballogyor+arch at gmail dot com>
+# Contributor: Giovanni Scafora <giovanni@archlinux.org>
+# Contributor: Jan de Groot <jgc@archlinux.org>
+
+pkgname=link-grammar
+pkgver=5.12.5
+pkgrel=5
+pkgdesc='Grammar checking library'
+arch=(x86_64 powerpc powerpc64 powerpc64le riscv64)
+url='https://opencog.github.io/link-grammar-website/'
+license=(LGPL-2.1-or-later)
+depends=(
+  glibc
+  hunspell
+  libedit
+  pcre2
+  sqlite
+)
+makedepends=(
+  ant
+  autoconf-archive
+  git
+  strip-nondeterminism
+  swig
+)
+checkdepends=(hunspell-en_us)
+optdepends=(
+  'java-runtime: Java bindings'
+  'python: Python bindings'
+)
+source=("git+https://github.com/opencog/link-grammar.git?signed#tag=$pkgname-$pkgver")
+b2sums=(da2b7133b8b7f96cca55ea606233734e37684de2e0f0e07ccc9c26daa9d777a630eaf936f4cda443744e4eb657bcff2b5f598d5d68f1297d6aaebcaf5ec74738)
+validpgpkeys=(
+  6407453C98BECC19ADB03D82EB6AA534E0C0651C # Linas Vepstas <linasvepstas@gmail.com>
+  8305252160000B5E89843F5464A99A8201045933 # Linas Vepstas <linasvepstas@gmail.com>
+)
+
+prepare() {
+  cd $pkgname
+  autoreconf -fi
+}
+
+build() {
+  cd $pkgname
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+  make
+
+  # Strip non-deterministic information from the jar file (e.g. timestamps)
+  # This is required for reproducible builds
+  find . -name "linkgrammar-${pkgver}.jar" -exec strip-nondeterminism {} +
+}
+
+check() {
+  cd $pkgname
+  make check
+}
+
+package() {
+  cd $pkgname
+  make DESTDIR="$pkgdir" install
+}

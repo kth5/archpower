@@ -1,0 +1,78 @@
+# Maintainer: AndyRTR <andyrtr@archlinux.org>
+# Contributor: Alexander Fehr <pizzapunk gmail com>
+
+pkgname=hunspell-de
+pkgver=20161207
+pkgrel=9
+pkgdesc="German hunspell dictionaries"
+arch=('any')
+url="https://www.j3e.de/ispell/igerman98/"
+license=('GPL-2.0-only' 'GPL-3.0-only')
+makedepends=('hunspell' 'ispell')
+makedepends_x86_64=('qt6-webengine')
+optdepends=('hunspell: the spell checking libraries and apps')
+provides=('hunspell-dictionary')
+source=("https://www.j3e.de/ispell/igerman98/dict/igerman98-$pkgver.tar.bz2")
+sha256sums=('17296f03c5fea62d76ecc530ebe80f6adc430278f58d472dc1842d71612960a8')
+
+build() {
+  cd "$srcdir/igerman98-$pkgver"
+  make hunspell/de_AT.dic hunspell/de_AT.aff \
+       hunspell/de_CH.dic hunspell/de_CH.aff \
+       hunspell/de_DE.dic hunspell/de_DE.aff
+
+  # fix file encoding - FS#68481
+  # check for broken files using
+  # file -i  $(pacman -Ql hunspell-de | sed "s/hunspell-de//") | grep iso
+  pushd hunspell
+    for file in de_AT.dic de_AT.aff README_de_AT.txt \
+                de_CH.dic de_CH.aff README_de_CH.txt \
+                de_DE.dic de_DE.aff README_de_DE.txt; do
+      mv $file $file.ISO-8859
+      iconv -f iso-8859-1 -t utf-8 $file.ISO-8859 -o $file
+      # fix encoding in .aff files
+      sed -i "s/ISO8859-1/UTF-8/" $file
+    done
+  popd
+}
+
+package() {
+  cd "$srcdir/igerman98-$pkgver/hunspell"
+  install -dm755 "${pkgdir}"/usr/share/hunspell
+  cp -p de_??.dic de_??.aff "$pkgdir"/usr/share/hunspell
+
+  pushd "$pkgdir"/usr/share/hunspell/
+  de_DE_aliases="de_BE de_LU"
+  for lang in $de_DE_aliases; do
+    ln -s de_DE.aff $lang.aff
+    ln -s de_DE.dic $lang.dic
+  done
+  de_CH_aliases="de_LI"
+  for lang in $de_CH_aliases; do
+    ln -s de_CH.aff $lang.aff
+    ln -s de_CH.dic $lang.dic
+  done
+  popd
+
+  # the symlinks
+  install -dm755 "${pkgdir}"/usr/share/myspell/dicts
+  pushd "$pkgdir"/usr/share/myspell/dicts
+    for file in "$pkgdir"/usr/share/hunspell/*; do
+      ln -sv /usr/share/hunspell/$(basename $file) .
+    done
+  popd
+
+  if [ "${CARCH}" == "x86_64" ]; then
+  # Install webengine dictionaries
+  install -d "$pkgdir"/usr/share/qt{,6}/qtwebengine_dictionaries/
+  for _file in "$pkgdir"/usr/share/hunspell/*.dic; do
+  _filename=$(basename $_file)
+    /usr/lib/qt6/qwebengine_convert_dict $_file "$pkgdir"/usr/share/qt6/qtwebengine_dictionaries/${_filename/\.dic/\.bdic}
+  ln -rs "$pkgdir"/usr/share/qt6/qtwebengine_dictionaries/${_filename/\.dic/\.bdic} "$pkgdir"/usr/share/qt/qtwebengine_dictionaries/
+  done
+  fi
+
+  # docs
+  install -dm755 ${pkgdir}/usr/share/doc/$pkgname
+  cp -p README_de_??.txt "$pkgdir"/usr/share/doc/$pkgname
+}
