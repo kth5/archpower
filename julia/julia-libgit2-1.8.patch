@@ -78,3 +78,175 @@ index 96cea96d013e5..b0b463c69e2f1 100644
  end
  @assert Base.allocatedinline(ConfigEntry)
  
+From 18dde6ec3605cf43b8ceaa4f892662b0392aa475 Mon Sep 17 00:00:00 2001
+From: Chengyu Han <cyhan.dev@outlook.com>
+Date: Fri, 6 Dec 2024 11:42:43 +0800
+Subject: [PATCH 1/5] libgit2: update enums from v1.8.0
+
+---
+ stdlib/LibGit2/src/error.jl | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/stdlib/LibGit2/src/error.jl b/stdlib/LibGit2/src/error.jl
+index 1a493006ea1b5..d21fbd9c01d75 100644
+--- a/stdlib/LibGit2/src/error.jl
++++ b/stdlib/LibGit2/src/error.jl
+@@ -27,6 +27,11 @@ export GitError
+             EAPPLIED        = Cint(-18), # patch/merge has already been applied
+             EPEEL           = Cint(-19), # the requested peel operation is not possible
+             EEOF            = Cint(-20), # unexpected EOF
++            EINVALID        = Cint(-21), # Invalid operation or input
++            EUNCOMMITTED    = Cint(-22), # Uncommitted changes in index prevented operation
++            EDIRECTORY      = Cint(-23), # The operation is not valid for a directory
++            EMERGECONFLICT  = Cint(-24), # A merge conflict exists and cannot continue
++
+             PASSTHROUGH     = Cint(-30), # internal only
+             ITEROVER        = Cint(-31), # signals end of iteration
+             RETRY           = Cint(-32), # internal only
+@@ -34,7 +39,11 @@ export GitError
+             EINDEXDIRTY     = Cint(-34), # unsaved changes in the index would be overwritten
+             EAPPLYFAIL      = Cint(-35), # patch application failed
+             EOWNER          = Cint(-36), # the object is not owned by the current user
+-            TIMEOUT         = Cint(-37)) # The operation timed out
++            TIMEOUT         = Cint(-37), # The operation timed out
++            EUNCHANGED      = Cint(-38), # There were no changes
++            ENOTSUPPORTED   = Cint(-39), # An option is not supported
++            EREADONLY       = Cint(-40), # The subject is read-only
++) 
+ 
+ @enum(Class, None,
+              NoMemory,
+
+From ade0d3925b4c6019c5b6dfd5f9e120ce512bdd00 Mon Sep 17 00:00:00 2001
+From: Chengyu Han <cyhan.dev@outlook.com>
+Date: Fri, 6 Dec 2024 11:56:44 +0800
+Subject: [PATCH 2/5] libgit2: replace deprecated function call
+
+dep warn: https://github.com/libgit2/libgit2/blob/v1.8.0/src/util/errors.c#L376-L385
+---
+ stdlib/LibGit2/src/error.jl | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/stdlib/LibGit2/src/error.jl b/stdlib/LibGit2/src/error.jl
+index d21fbd9c01d75..4cc7620a8a07e 100644
+--- a/stdlib/LibGit2/src/error.jl
++++ b/stdlib/LibGit2/src/error.jl
+@@ -97,7 +97,7 @@ Base.show(io::IO, err::GitError) = print(io, "GitError(Code:$(err.code), Class:$
+ 
+ function last_error()
+     ensure_initialized()
+-    err = ccall((:giterr_last, libgit2), Ptr{ErrorStruct}, ())
++    err = ccall((:git_error_last, libgit2), Ptr{ErrorStruct}, ())
+     if err != C_NULL
+         err_obj   = unsafe_load(err)
+         err_class = Class(err_obj.class)
+
+From 01cc37f3a2dab25f8cbbe9bebfcc77c735daea98 Mon Sep 17 00:00:00 2001
+From: Chengyu Han <cyhan.dev@outlook.com>
+Date: Fri, 6 Dec 2024 12:27:12 +0800
+Subject: [PATCH 3/5] libgit2: replace deprecated call `giterr_set_str`
+
+---
+ stdlib/LibGit2/src/callbacks.jl      | 8 ++++----
+ stdlib/LibGit2/test/libgit2-tests.jl | 2 +-
+ 2 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/stdlib/LibGit2/src/callbacks.jl b/stdlib/LibGit2/src/callbacks.jl
+index 043e04e0dfad6..c4156d4a44c71 100644
+--- a/stdlib/LibGit2/src/callbacks.jl
++++ b/stdlib/LibGit2/src/callbacks.jl
+@@ -43,7 +43,7 @@ end
+ function user_abort()
+     ensure_initialized()
+     # Note: Potentially it could be better to just throw a Julia error.
+-    ccall((:giterr_set_str, libgit2), Cvoid,
++    ccall((:git_error_set_str, libgit2), Cvoid,
+           (Cint, Cstring), Cint(Error.Callback),
+           "Aborting, user cancelled credential request.")
+     return Cint(Error.EUSER)
+@@ -51,7 +51,7 @@ end
+ 
+ function prompt_limit()
+     ensure_initialized()
+-    ccall((:giterr_set_str, libgit2), Cvoid,
++    ccall((:git_error_set_str, libgit2), Cvoid,
+           (Cint, Cstring), Cint(Error.Callback),
+           "Aborting, maximum number of prompts reached.")
+     return Cint(Error.EAUTH)
+@@ -59,7 +59,7 @@ end
+ 
+ function exhausted_abort()
+     ensure_initialized()
+-    ccall((:giterr_set_str, libgit2), Cvoid,
++    ccall((:git_error_set_str, libgit2), Cvoid,
+           (Cint, Cstring), Cint(Error.Callback),
+           "All authentication methods have failed.")
+     return Cint(Error.EAUTH)
+@@ -339,7 +339,7 @@ function credentials_callback(libgit2credptr::Ptr{Ptr{Cvoid}}, url_ptr::Cstring,
+     if err == 0
+         if p.explicit !== nothing
+             ensure_initialized()
+-            ccall((:giterr_set_str, libgit2), Cvoid, (Cint, Cstring), Cint(Error.Callback),
++            ccall((:git_error_set_str, libgit2), Cvoid, (Cint, Cstring), Cint(Error.Callback),
+                   "The explicitly provided credential is incompatible with the requested " *
+                   "authentication methods.")
+         end
+diff --git a/stdlib/LibGit2/test/libgit2-tests.jl b/stdlib/LibGit2/test/libgit2-tests.jl
+index 9ab75ed1dc39b..1dfa5429368b6 100644
+--- a/stdlib/LibGit2/test/libgit2-tests.jl
++++ b/stdlib/LibGit2/test/libgit2-tests.jl
+@@ -1070,7 +1070,7 @@ mktempdir() do dir
+ 
+                 # test workaround for git_tree_walk issue
+                 # https://github.com/libgit2/libgit2/issues/4693
+-                ccall((:giterr_set_str, libgit2), Cvoid, (Cint, Cstring),
++                ccall((:git_error_set_str, libgit2), Cvoid, (Cint, Cstring),
+                       Cint(LibGit2.Error.Invalid), "previous error")
+                 try
+                     # file needs to exist in tree in order to trigger the stop walk condition
+
+From e657f964f170a7419cf7ae4792a998cef81e4f57 Mon Sep 17 00:00:00 2001
+From: CY Han <git@wo-class.cn>
+Date: Fri, 6 Dec 2024 12:33:56 +0800
+Subject: [PATCH 4/5] Update stdlib/LibGit2/src/error.jl
+
+---
+ stdlib/LibGit2/src/error.jl | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/stdlib/LibGit2/src/error.jl b/stdlib/LibGit2/src/error.jl
+index 4cc7620a8a07e..4c7493ee6518a 100644
+--- a/stdlib/LibGit2/src/error.jl
++++ b/stdlib/LibGit2/src/error.jl
+@@ -43,7 +43,7 @@ export GitError
+             EUNCHANGED      = Cint(-38), # There were no changes
+             ENOTSUPPORTED   = Cint(-39), # An option is not supported
+             EREADONLY       = Cint(-40), # The subject is read-only
+-) 
++)
+ 
+ @enum(Class, None,
+              NoMemory,
+
+From 6b47c70b16975131e29f62d6c757caebb1a66ae7 Mon Sep 17 00:00:00 2001
+From: Chengyu Han <cyhan.dev@outlook.com>
+Date: Fri, 6 Dec 2024 12:48:28 +0800
+Subject: [PATCH 5/5] libgit2: fix dup enum `ECONFLICT`
+
+---
+ stdlib/LibGit2/src/error.jl | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/stdlib/LibGit2/src/error.jl b/stdlib/LibGit2/src/error.jl
+index 4cc7620a8a07e..790f3b66d563b 100644
+--- a/stdlib/LibGit2/src/error.jl
++++ b/stdlib/LibGit2/src/error.jl
+@@ -19,7 +19,7 @@ export GitError
+             EUNMERGED       = Cint(-10), # merge in progress prevented op
+             ENONFASTFORWARD = Cint(-11), # ref not fast-forwardable
+             EINVALIDSPEC    = Cint(-12), # name / ref not in valid format
+-            EMERGECONFLICT  = Cint(-13), # merge conflict prevented op
++            ECONFLICT       = Cint(-13), # Checkout conflicts prevented operation
+             ELOCKED         = Cint(-14), # lock file prevented op
+             EMODIFIED       = Cint(-15), # ref value does not match expected
+             EAUTH           = Cint(-16), # authentication error

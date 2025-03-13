@@ -1,7 +1,7 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer : Christian Hesse <mail@eworm.de>
-# Maintainer : Ronald van Haren <ronald.archlinux.org>
-# Contributor: Tobias Powalowski <tpowa@archlinux.org>
+# Maintainer : Tobias Powalowski <tpowa@archlinux.org>
+# Contributor: Ronald van Haren <ronald.archlinux.org>
 # Contributor: Keshav Amburay <(the ddoott ridikulus ddoott rat) (aatt) (gemmaeiil) (ddoott) (ccoomm)>
 
 ## "1" to enable IA32-EFI build in Arch x86_64, "0" to disable
@@ -43,14 +43,16 @@ pkgname='grub'
 pkgdesc='GNU GRand Unified Bootloader (2)'
 epoch=2
 _pkgver=2.12
-_unifont_ver='15.1.05'
+_unifont_ver='16.0.02'
 pkgver=${_pkgver/-/}
-pkgrel=2.1
+pkgrel=3
 url='https://www.gnu.org/software/grub/'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=('GPL-3.0-or-later')
-backup=('etc/default/grub'
-	'etc/grub.d/40_custom')
+backup=(
+  etc/default/grub
+  etc/grub.d/40_custom
+)
 install="${pkgname}.install"
 options=('!makeflags' '!distcc' '!ccache')
 
@@ -91,18 +93,22 @@ source=("git+https://git.savannah.gnu.org/git/grub.git#tag=grub-${_pkgver}?signe
 	'0003-support-dropins-for-default-configuration.patch'
 	'0004-ieee1275-clear-reset.patch'
 	'0005-install-powerpc-machtypes.patch'
+        '0006-fat-fix-listing-the-root-directory.patch'
+        '0007-ppc64el-disable-vsx.patch'
 	'grub.default'
 	'sbat.csv')
 
 sha256sums=('304d5c0d506d3aaab496bdcbfc325b89fc83348aeb9e69d7b6a928f4051bedb2'
             'SKIP'
-            '8ea5b5a14d71e3353d1fea373f5d88d198ad1e285cedd8294655926ee11fd91d'
+            '521f2b92e8b6bd4ea190cea049a039dde359a6e2cae9458e45d696008fa6997f'
             'SKIP'
             '5dee6628c48eef79812bb9e86ee772068d85e7fcebbd2b2b8d1e19d24eda9dab'
             '8488aec30a93e8fe66c23ef8c23aefda39c38389530e9e73ba3fbcc8315d244d'
             'b5d9fcd62ffb3c3950fdeb7089ec2dc2294ac52e9861980ad90a437dedbd3d47'
             '04c0a3e811d14367f7b26c1e3d6862dd5406fc29a3b741f752e7d214a2212b53'
             'ab508aefda6b5c6c9119c98e2d6fc65cb383408b29d2652e8f67049553b04776'
+            'd928cedb7bd6b404fbf71b5052628462f6b2d6b893f3b2918ecb17f133057c13'
+            '4084fd43eeba348f52a3d2058e4cf3c34a8a447553b4ec9f68ce1e7e7cc6b7fe'
             '99feaaecb725a29cf404b98eb29ce0fc21ce1babcaf036d86c31ab492d52f8e5'
             '5f2455d3c4c4777173a66090ba8e13a3b4d4bfa1bcf06f2f2f334d455f0fe9af')
 
@@ -202,6 +208,8 @@ prepare() {
 
 	patch -Np1 -i ${srcdir}/0004-ieee1275-clear-reset.patch
 	patch -Np1 -i ${srcdir}/0005-install-powerpc-machtypes.patch
+        patch -Np1 -i ${srcdir}/0006-fat-fix-listing-the-root-directory.patch
+        patch -Np1 -i ${srcdir}/0007-ppc64el-disable-vsx.patch
 }
 
 _build_grub-common_and_bios() {
@@ -317,10 +325,14 @@ build() {
 }
 
 _package_grub-common_and_bios() {
-	cd "${srcdir}/grub-bios/"
-
-	echo "Run make install for bios build..."
-	make DESTDIR="${pkgdir}/" bashcompletiondir="/usr/share/bash-completion/completions" install
+	case "${CARCH}" in
+		powerpc64le) ;;
+		*)
+			cd "${srcdir}/grub-bios/"
+			echo "Run make install for bios build..."
+			make DESTDIR="${pkgdir}/" bashcompletiondir="/usr/share/bash-completion/completions" install
+		;;
+	esac
 
 	echo "Remove gdb debugging related files for bios build..."
 	rm -f "${pkgdir}/usr/lib/grub/${_TARGET}-${_PLATFORM}"/*.module || true

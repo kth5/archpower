@@ -1,39 +1,72 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 pkgname=arcticfox
-pkgver=45.1
+pkgver=45.2
 pkgrel=1
 pkgdesc='A fork of Palemoon with TenFourFox enhancements'
 arch=(powerpc powerpc64)
 license=(MPL2)
 url='https://github.com/rmottola/Arctic-Fox'
-depends=(gtk2 libxcb libxt alsa-lib libpulse gconf icu)
+depends=(gtk2 gtk3 libxcb libxt alsa-lib libpulse gconf icu nss)
 makedepends=(zip unzip autoconf2.13 python2 xorgproto python2-setuptools git
-             pulseaudio)
+             pulseaudio yasm hunspell)
 provides=('browser')
 options=(!debug !lto)
-source=("git+https://github.com/rmottola/Arctic-Fox.git#tag=v${pkgver}"
-        mozconfig-powerpc{,64}
-        powerpc-disable-malloc-static-sizes.patch)
-sha256sums=('8cad5365588ad7ad6ca5087a788f59487a6259c687aa69419c55827270892f30'
-            '5f4c756aecd1bcca97ff4eb908db16b256585b55163500456155695265f6c360'
+_commit="ad84bb61f5054d6280f432949bcb3315839a5ae4"
+source=("git+https://github.com/rmottola/Arctic-Fox.git#commit=${_commit}"
+        mozconfig-powerpc{,64,64le}
+        powerpc-disable-malloc-static-sizes.patch
+        stackwalk-x86-ppc.patch
+override-cxx-version.patch
+hunspell.patch)
+sha256sums=('290496a794359f987be085a3cdabf3009e57ea0494c6a447d4c9b3b6f087439e'
+            'b1affc5c32284b8d66cfdd7d0977cf3e06e848f6d39ee80e55ae769e8b316326'
             '138b88d5c6c092eed2e7b5b50db498c8f385a9f70f1653b67e737c3afbc89262'
-            '040b262c985df9b7d53c7e739124e604b17975ca3c2bee3a99cb14ba39991e24')
+            '138b88d5c6c092eed2e7b5b50db498c8f385a9f70f1653b67e737c3afbc89262'
+            '040b262c985df9b7d53c7e739124e604b17975ca3c2bee3a99cb14ba39991e24'
+            '344ac2087e985ef3d08d3ef9770db80f1afcdfe731dff881531bcca98fa2e68f'
+            '529b2e7090974b872f2b4b4c4011966bcb13b5ca5fd7af54a3eb03c808762353'
+            '1b3f726e481ce8ce0fd3cbb3801cd71b2a503fff42a1568f05ef6432a0399806')
 
 prepare() {
   cd Arctic-Fox
 
-  cp ${srcdir}/mozconfig-${CARCH} .mozconfig
+  cp ${srcdir}/mozconfig-${CARCH} mozconfig
   [ ! -z "${MAKEFLAGS}" ] &&
-    echo "mk_add_options MOZ_MAKE_FLAGS=\"${MAKEFLAGS}\"" >> .mozconfig
+    echo "mk_add_options MOZ_MAKE_FLAGS=\"${MAKEFLAGS}\"" >> mozconfig
+
+  case "${CARCH}" in
+    powerpc) export LDFLAGS="$LDFLAGS -latomic" ;;
+    powerpc64) echo "ac_add_options --enable-altivec" >> ${srcdir}/mozconfig ;;
+  esac
+
+  echo "ac_add_options --enable-optimize=\"${CFLAGS}\"" >> ${srcdir}/mozconfig
 
   patch -Np1 -i ${srcdir}/powerpc-disable-malloc-static-sizes.patch
+  patch -Np1 -i ${srcdir}/stackwalk-x86-ppc.patch
+  patch -Np1 -i ${srcdir}/override-cxx-version.patch
+  patch -Np1 -i ${srcdir}/hunspell.patch
 }
 
 build() {
   cd Arctic-Fox 
 
-  #FIXME: build only works the second time around on powerpc
-  python2 mach build || python2 mach build
+
+	export CFLAGS="$CFLAGS -Wno-dangling-pointer -Wno-array-bounds -Wno-comment -Wno-maybe-uninitialized -Wno-misleading-indentation -Wno-multistatement-macros -Wno-stringop-overflow -Wno-unused-function -Wno-unused-value -Wno-ignored-qualifiers -Wno-deprecated-declarations -Wno-implicit-fallthrough -Wno-unused-but-set-variable -Wno-int-in-bool-context -Wno-stringop-overread -Wno-address -Wno-use-after-free -Wno-implicit-int -Wno-incompatible-pointer-types -Wno-int-conversion"
+	export CXXFLAGS="$CFLAGS -Wno-class-memaccess -Wno-changes-meaning -Wno-subobject-linkage -Wno-return-local-addr -Wno-unused-local-typedefs"
+	export SHELL=/bin/sh
+	export BUILD_OFFICIAL=1
+	export MOZILLA_OFFICIAL=1
+	export USE_SHORT_LIBNAME=1
+	export MACH_BUILD_PYTHON_NATIVE_PACKAGE_SOURCE=system
+	export PATH="$PATH:$srcdir/python/bin"
+	export CXX="/usr/bin/g++ -std=gnu++17"
+
+	# set rpath so linker finds the libs
+	export UNIXCONFDIR="$srcdir"
+
+	python2 ./mach configure
+	python2 ./mach build -j1 export
+	python2 ./mach build
 }
 
 package() {
