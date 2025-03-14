@@ -4,7 +4,7 @@
 
 pkgname=libarchive
 pkgver=3.7.7
-pkgrel=1
+pkgrel=2
 pkgdesc='Multi-format archive and compression library'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso riscv64)
 url='https://libarchive.org/'
@@ -24,8 +24,32 @@ validpgpkeys=('A5A45B12AD92D964B89EEE2DEC560C81CEC2276E'  # Martin Matuska <mm@F
 source=("git+https://github.com/${pkgname}/${pkgname}.git?signed#tag=v${pkgver}")
 sha256sums=('5f34ae74d1a780a7147f255903a04b475f674ea48252f3a059fb27d67eb083a9')
 
+_backports=(
+  # upstream/patch/3.7
+  "v${pkgver}..eddb9fcf93974f1ecca14fcfa4f67992f25bb790"
+
+  # fix CVE-2025-1632 and CVE-2025-25724 (#2532)
+  'c9bc934e7e91d302e0feca6e713ccc38d6d01532'
+)
+
+_reverts=(
+)
+
 prepare() {
   cd "${pkgname}"
+
+  local _c _l
+  for _c in "${_backports[@]}"; do
+    if [[ "${_c}" == *..* ]]; then _l='--reverse'; else _l='--max-count=1'; fi
+    git log --oneline "${_l}" "${_c}"
+    git cherry-pick --mainline 1 --no-commit "${_c}"
+  done
+  for _c in "${_reverts[@]}"; do
+    if [[ "${_c}" == *..* ]]; then _l='--reverse'; else _l='--max-count=1'; fi
+    git log --oneline "${_l}" "${_c}"
+    git revert --mainline 1 --no-commit "${_c}"
+  done
+
   autoreconf -fiv
 }
 
