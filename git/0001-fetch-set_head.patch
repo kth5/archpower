@@ -1,0 +1,169 @@
+commit 638060dcb95ed7ef3b2f6e6038ac12744d8ba238
+Author: Bence Ferdinandy <bence@ferdinandy.com>
+Date:   Sun Jan 26 23:02:10 2025 +0100
+
+    fetch set_head: refactor to use remote directly
+    
+    As a preparatory step to use even more properties from the remote
+    struct, refactor set_head to take the entire struct as a parameter,
+    instead of the necessary bits. This also allows consolidating the use of
+    gtransport->remote in set_head, making the access of the remote's
+    properties consistent in the function.
+    
+    Signed-off-by: Bence Ferdinandy <bence@ferdinandy.com>
+    Signed-off-by: Junio C Hamano <gitster@pobox.com>
+
+diff --git a/builtin/fetch.c b/builtin/fetch.c
+index fe2b26c74a..3167b055d1 100644
+--- a/builtin/fetch.c
++++ b/builtin/fetch.c
+@@ -1617,13 +1617,13 @@ static void report_set_head(const char *remote, const char *head_name,
+ 	strbuf_release(&buf_prefix);
+ }
+ 
+-static int set_head(const struct ref *remote_refs, int follow_remote_head,
+-		const char *no_warn_branch)
++static int set_head(const struct ref *remote_refs, struct remote *remote)
+ {
+ 	int result = 0, create_only, is_bare, was_detached;
+ 	struct strbuf b_head = STRBUF_INIT, b_remote_head = STRBUF_INIT,
+ 		      b_local_head = STRBUF_INIT;
+-	const char *remote = gtransport->remote->name;
++	int follow_remote_head = remote->follow_remote_head;
++	const char *no_warn_branch = remote->no_warn_branch;
+ 	char *head_name = NULL;
+ 	struct ref *ref, *matches;
+ 	struct ref *fetch_map = NULL, **fetch_map_tail = &fetch_map;
+@@ -1661,8 +1661,8 @@ static int set_head(const struct ref *remote_refs, int follow_remote_head,
+ 		strbuf_addstr(&b_head, "HEAD");
+ 		strbuf_addf(&b_remote_head, "refs/heads/%s", head_name);
+ 	} else {
+-		strbuf_addf(&b_head, "refs/remotes/%s/HEAD", remote);
+-		strbuf_addf(&b_remote_head, "refs/remotes/%s/%s", remote, head_name);
++		strbuf_addf(&b_head, "refs/remotes/%s/HEAD", remote->name);
++		strbuf_addf(&b_remote_head, "refs/remotes/%s/%s", remote->name, head_name);
+ 	}
+ 		/* make sure it's valid */
+ 	if (!is_bare && !refs_ref_exists(refs, b_remote_head.buf)) {
+@@ -1678,7 +1678,7 @@ static int set_head(const struct ref *remote_refs, int follow_remote_head,
+ 	if (verbosity >= 0 &&
+ 		follow_remote_head == FOLLOW_REMOTE_WARN &&
+ 		(!no_warn_branch || strcmp(no_warn_branch, head_name)))
+-		report_set_head(remote, head_name, &b_local_head, was_detached);
++		report_set_head(remote->name, head_name, &b_local_head, was_detached);
+ 
+ cleanup:
+ 	free(head_name);
+@@ -1924,8 +1924,7 @@ static int do_fetch(struct transport *transport,
+ 				  "you need to specify exactly one branch with the --set-upstream option"));
+ 		}
+ 	}
+-	if (set_head(remote_refs, transport->remote->follow_remote_head,
+-		transport->remote->no_warn_branch))
++	if (set_head(remote_refs, transport->remote))
+ 		;
+ 		/*
+ 		 * Way too many cases where this can go wrong
+
+commit 93dc16483a312b77c0b6533a6c2705d1df3e3687
+Author: Bence Ferdinandy <bence@ferdinandy.com>
+Date:   Sun Jan 26 23:02:11 2025 +0100
+
+    fetch set_head: fix non-mirror remotes in bare repositories
+    
+    In b1b713f722 (fetch set_head: handle mirrored bare repositories,
+    2024-11-22) it was implicitly assumed that all remotes will be mirrors
+    in a bare repository, thus fetching a non-mirrored remote could lead to
+    HEAD pointing to a non-existent reference. Make sure we only overwrite
+    HEAD if we are in a bare repository and fetching from a mirror.
+    Otherwise, proceed as normally, and create
+    refs/remotes/<nonmirrorremote>/HEAD instead.
+    
+    Reported-by: Christian Hesse <list@eworm.de>
+    Signed-off-by: Bence Ferdinandy <bence@ferdinandy.com>
+    Signed-off-by: Junio C Hamano <gitster@pobox.com>
+
+diff --git a/builtin/fetch.c b/builtin/fetch.c
+index 3167b055d1..1c740d5aac 100644
+--- a/builtin/fetch.c
++++ b/builtin/fetch.c
+@@ -1619,7 +1619,7 @@ static void report_set_head(const char *remote, const char *head_name,
+ 
+ static int set_head(const struct ref *remote_refs, struct remote *remote)
+ {
+-	int result = 0, create_only, is_bare, was_detached;
++	int result = 0, create_only, baremirror, was_detached;
+ 	struct strbuf b_head = STRBUF_INIT, b_remote_head = STRBUF_INIT,
+ 		      b_local_head = STRBUF_INIT;
+ 	int follow_remote_head = remote->follow_remote_head;
+@@ -1655,9 +1655,9 @@ static int set_head(const struct ref *remote_refs, struct remote *remote)
+ 
+ 	if (!head_name)
+ 		goto cleanup;
+-	is_bare = is_bare_repository();
+-	create_only = follow_remote_head == FOLLOW_REMOTE_ALWAYS ? 0 : !is_bare;
+-	if (is_bare) {
++	baremirror = is_bare_repository() && remote->mirror;
++	create_only = follow_remote_head == FOLLOW_REMOTE_ALWAYS ? 0 : !baremirror;
++	if (baremirror) {
+ 		strbuf_addstr(&b_head, "HEAD");
+ 		strbuf_addf(&b_remote_head, "refs/heads/%s", head_name);
+ 	} else {
+@@ -1665,7 +1665,7 @@ static int set_head(const struct ref *remote_refs, struct remote *remote)
+ 		strbuf_addf(&b_remote_head, "refs/remotes/%s/%s", remote->name, head_name);
+ 	}
+ 		/* make sure it's valid */
+-	if (!is_bare && !refs_ref_exists(refs, b_remote_head.buf)) {
++	if (!baremirror && !refs_ref_exists(refs, b_remote_head.buf)) {
+ 		result = 1;
+ 		goto cleanup;
+ 	}
+diff --git a/t/t5505-remote.sh b/t/t5505-remote.sh
+index 519f7973e3..66e373f71d 100755
+--- a/t/t5505-remote.sh
++++ b/t/t5505-remote.sh
+@@ -589,6 +589,16 @@ test_expect_success 'add --mirror setting HEAD' '
+ 	)
+ '
+ 
++test_expect_success 'non-mirror fetch does not interfere with mirror' '
++	test_when_finished rm -rf headnotmain &&
++	(
++		git init --bare -b notmain headnotmain &&
++		cd headnotmain &&
++		git remote add -f other ../two &&
++		test "$(git symbolic-ref HEAD)" = "refs/heads/notmain"
++	)
++'
++
+ test_expect_success 'add --mirror=fetch' '
+ 	mkdir mirror-fetch &&
+ 	git init -b main mirror-fetch/parent &&
+diff --git a/t/t5510-fetch.sh b/t/t5510-fetch.sh
+index 2d9587059f..c9d7b46c87 100755
+--- a/t/t5510-fetch.sh
++++ b/t/t5510-fetch.sh
+@@ -84,6 +84,23 @@ test_expect_success "fetch test remote HEAD" '
+ 	branch=$(git rev-parse refs/remotes/origin/main) &&
+ 	test "z$head" = "z$branch"'
+ 
++test_expect_success "fetch test remote HEAD in bare repository" '
++	test_when_finished rm -rf barerepo &&
++	(
++		cd "$D" &&
++		git init --bare barerepo &&
++		cd barerepo &&
++		git remote add upstream ../two &&
++		git fetch upstream &&
++		git rev-parse --verify refs/remotes/upstream/HEAD &&
++		git rev-parse --verify refs/remotes/upstream/main &&
++		head=$(git rev-parse refs/remotes/upstream/HEAD) &&
++		branch=$(git rev-parse refs/remotes/upstream/main) &&
++		test "z$head" = "z$branch"
++	)
++'
++
++
+ test_expect_success "fetch test remote HEAD change" '
+ 	cd "$D" &&
+ 	cd two &&
