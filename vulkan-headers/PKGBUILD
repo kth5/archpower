@@ -1,34 +1,54 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Maintainer: Laurent Carlier <lordheavym@gmail.com>
 
 pkgname=vulkan-headers
-_pkgname=Vulkan-Headers
-pkgver=1.4.303
-pkgrel=1
+pkgver=1.4.304.1
+pkgrel=2
 epoch=1
-pkgdesc="Vulkan header files"
+pkgdesc="Vulkan header files and API registry"
+url="https://www.vulkan.org/"
 arch=(any)
-url="https://www.khronos.org/vulkan/"
-license=('Apache-2.0' 'MIT')
-makedepends=(cmake ninja git)
-provides=("vulkan-hpp=${pkgver}")
+license=("Apache-2.0 OR MIT")
+depends=()
+makedepends=(
+  cmake
+  git
+  ninja
+  python
+)
+optdepends=(
+  "python: Registry tools"
+)
+provides=("vulkan-hpp=$pkgver")
 groups=(vulkan-devel)
-source=("${pkgname}-${pkgver}.tar.gz::https://github.com/KhronosGroup/Vulkan-Headers/archive/v${pkgver}.tar.gz")
-sha256sums=('fdf0e2e05356b455137ff97f837c9689ba253ec7d20f87ad81575b9bdbe7fdd4')
+source=("git+https://github.com/KhronosGroup/Vulkan-Headers#tag=vulkan-sdk-$pkgver")
+b2sums=('b9fe40dc7f431a7ec0cd125e4b00d1f704bf5782d22da8ae888b1110a76dbf271fedcaef6c6018aa361b1a2950865d6f638929be8fd1ff14495a297a002998b2')
 
 build() {
-  cd Vulkan-Headers*
+  local cmake_options=(
+    -D CMAKE_BUILD_TYPE=Release
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_INSTALL_SYSCONFDIR=/etc
+    -D CMAKE_SKIP_INSTALL_RPATH=ON
+  )
 
-  cmake . -Bbuild \
-    -GNinja \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_BUILD_TYPE=Release
-  ninja -C build
+  cmake -S Vulkan-Headers -B build -G Ninja "${cmake_options[@]}"
+  cmake --build build
+}
+
+check() {
+  ctest --test-dir build --output-on-failure --stop-on-failure
 }
 
 package() {
-  cd Vulkan-Headers*
+  DESTDIR="$pkgdir" cmake --install build
 
-  DESTDIR="$pkgdir" ninja -C build install
-  install -Dm644 "${srcdir}"/Vulkan-Headers*/LICENSES/*.txt -t "$pkgdir/usr/share/licenses/$pkgname"
+  python -m compileall -d /usr "$pkgdir/usr"
+  python -O -m compileall -d /usr "$pkgdir/usr"
+
+  install -Dm644 Vulkan-Headers/LICENSES/MIT.txt \
+    -t "$pkgdir/usr/share/licenses/$pkgname"
 }
+
+# vim:set sw=2 sts=-1 et:
