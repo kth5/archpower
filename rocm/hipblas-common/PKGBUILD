@@ -1,0 +1,36 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Torsten Keßler <tpkessler at archlinux dot org>
+pkgname=hipblas-common
+pkgver=6.3.2
+pkgrel=1
+pkgdesc='Common files shared by hipBLAS and hipBLASLt'
+arch=('any')
+url='https://rocm.docs.amd.com/projects/hipBLAS/en/latest/index.html'
+license=('MIT')
+depends=('rocm-core')
+makedepends=('rocm-cmake' 'cmake' 'hip-runtime-amd')
+_git='https://github.com/ROCm/hipBLAS-common'
+source=("$pkgname-$pkgver.tar.gz::$_git/archive/rocm-$pkgver.tar.gz")
+sha256sums=('29aa1ac1a0f684a09fe2ea8a34ae8af3622c27708c7df403a7481e75174e1984')
+_dirname="$(basename "$_git")-$(basename "${source[0]}" ".tar.gz")"
+
+build() {
+  # -fcf-protection is not supported by HIP, see
+  # https://rocm.docs.amd.com/projects/llvm-project/en/latest/reference/rocmcc.html#support-status-of-other-clang-options
+  local cmake_args=(
+    -Wno-dev
+    -S "$_dirname"
+    -B build
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc
+    -D CMAKE_CXX_FLAGS="${CXXFLAGS} -fcf-protection=none"
+  )
+  cmake "${cmake_args[@]}"
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+
+  install -Dm644 "$_dirname/LICENSE.md" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
