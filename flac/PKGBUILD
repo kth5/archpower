@@ -3,69 +3,96 @@
 # Contributor: Eric Bélanger <eric@archlinux.org>
 
 pkgbase=flac
-pkgname=('flac' 'flac-doc')
-pkgver=1.4.3
-pkgrel=2.1
+pkgname=(
+  'flac'
+  'flac-doc'
+)
+pkgver=1.5.0
+pkgrel=1
 pkgdesc='Free Lossless Audio Codec'
 url='https://xiph.org/flac/'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=('BSD' 'GPL')
-depends=('gcc-libs' 'libogg')
-makedepends=('cmake' 'ninja' 'doxygen')
-makedepends_x86_64=('nasm')
-source=(https://github.com/xiph/flac/releases/download/${pkgver}/flac-${pkgver}.tar.xz)
-b2sums=('c4f441aeaa0493433347b8a110ca01865fd40d5b21150174372af2fee4fa5c3397a67add31138e92999eab9d9abe6c46a5ac29e13cbac60093fbff6d7a672ad3')
-
-# https://github.com/xiph/flac/releases
-sha256sums=('6c58e69cd22348f441b861092b825e591d0b822e106de6eb0ee4d05d27205b70')
+license=(
+  'BSD-3-Clause'     # library
+  'GPL-2.0-or-later' # apps
+)
+depends=(
+  'glibc'
+  'gcc-libs'
+  'libogg'
+)
+makedepends=(
+  'cmake'
+  'doxygen'
+  'git'
+  'ninja'
+)
+makedepends_x86_64=(
+  'nasm'
+  'pandoc-cli'
+)
+source=("git+https://github.com/xiph/flac#tag=${pkgver}")
+b2sums=('2df577ac40233cdbea3389b076b239b266cdb3cf04a7a57982ae16b9c6f99af245b15590c19954d34cd3c8617ed2ddec3346c13c3f4b6e495df127104a978d19')
 
 prepare() {
-  cd flac-${pkgver}
+  cd flac
 
   # Shorten tests
   sed -i 's/FLAC__TEST_LEVEL=1/FLAC__TEST_LEVEL=0/' test/CMakeLists.txt
 }
 
 build() {
-  cmake -S flac-${pkgver} -B build -G Ninja \
-    -DCMAKE_BUILD_TYPE=None \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DBUILD_SHARED_LIBS=ON \
-    -DINSTALL_MANPAGES=ON \
-    -DWITH_STACK_PROTECTOR=OFF \
-    -DNDEBUG=ON
-  cmake --build build
+  local cmake_options=(
+    -D BUILD_SHARED_LIBS=ON
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D NDEBUG=ON
 
-  # Build docs and place them where install expects them
-  cmake --build build --target FLAC-doxygen
-  mv build/doc/doxytmp/html flac-${pkgver}/doc/api
+    # Handled by our CFLAGS
+    -D WITH_FORTIFY_SOURCE=OFF
+    -D WITH_STACK_PROTECTOR=OFF
+  )
+
+  # disable pandoc on non-x86_64 so we don't need GHC
+  case "${CARCH}" in
+    powerpc*|riscv64)
+      cmake_options+=(
+        -DINSTALL_MANPAGES=OFF
+      )
+    ;;
+    *) ;;
+  esac
+
+  cmake -S flac -B build -G Ninja "${cmake_options[@]}"
+  cmake --build build
 }
 
 check() {
-  cd build
-  ctest --output-on-failure --stop-on-failure -j1
+  ctest --test-dir build --output-on-failure --stop-on-failure -j1
 }
 
 package_flac() {
-  provides=('libFLAC.so' 'libFLAC++.so')
+  provides=(
+    'libFLAC.so'
+    'libFLAC++.so'
+  )
 
   DESTDIR="${pkgdir}" cmake --install build
 
-  install -Dm 644 flac-${pkgver}/src/*/*.m4 -t "${pkgdir}/usr/share/aclocal"
+  install -Dm 644 flac/src/*/*.m4 -t "${pkgdir}/usr/share/aclocal"
 
   mkdir -p doc/usr/share
   mv {"${pkgdir}",doc}/usr/share/doc
 
-  install -Dm 644 flac-${pkgver}/COPYING.Xiph -t "${pkgdir}/usr/share/licenses/${pkgname}"
+  install -Dm 644 flac/COPYING.Xiph -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
 
 package_flac-doc() {
-  pkgdesc+=' documentation'
+  pkgdesc+=' - documentation'
+  license=('GFDL-1.3-no-invariants-or-later')
   depends=()
 
   mv doc/* "$pkgdir"
-
-  install -Dm 644 flac-${pkgver}/COPYING.Xiph -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
 
 # vim:set sw=2 sts=-1 et:
