@@ -1,0 +1,63 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Maintainer: Christian Heusel <gromit@archlinux.org>
+
+_name=pydantic-settings
+pkgname=python-pydantic-settings
+pkgver=2.8.1
+pkgrel=1
+pkgdesc="Settings management using pydantic"
+arch=(any)
+url="https://github.com/pydantic/pydantic-settings"
+license=(MIT)
+depends=(
+  python
+  python-dotenv
+  python-pydantic
+  python-pydantic-core  # directly used, but transitive dependency of python-pydantic
+  python-typing_extensions
+)
+makedepends=(
+  python-build
+  python-hatchling
+  python-installer
+)
+checkdepends=(
+  python-pytest
+  python-pytest-examples
+  python-pytest-mock
+  # TODO: add python-azure-keyvault-secrets and python-azure-identity for azure-key-vault optdepend
+)
+optdepends=(
+  'python-pyyaml: for YAML support'
+)
+source=($_name-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz)
+sha512sums=('6a43597b3cc51127497fb303d9d1dfc76628e773d122d437f1c545199f35c7685321f7cdc88d00afd36485f5ffaa87c66eb03d201327059e55dae71753396855')
+b2sums=('899902b153dc9d9bc866824207f5e450fbc8bf73d53081a165de74de9bc6c5c81478eea0af30ee00e46c599951b9a1ab461fc9ec957abe3c55e493d93d0d1f2a')
+
+build() {
+  cd $_name-$pkgver
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  local pytest_options=(
+    -vv
+    --ignore tests/test_docs.py  # we are not interested in linting and formatting
+    --ignore tests/test_source_azure_key_vault.py  # we don't yet have azure integration in the repos
+  )
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+
+  cd $_name-$pkgver
+  # install to temporary location, as importlib is used
+  python -m installer --destdir=test_dir dist/*.whl
+  export PYTHONPATH="$PWD/test_dir/$site_packages:$PYTHONPATH"
+  pytest "${pytest_options[@]}"
+}
+
+package() {
+  cd $_name-$pkgver
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm 644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -vDm 644 README.md -t "$pkgdir/usr/share/doc/$pkgname/"
+}
