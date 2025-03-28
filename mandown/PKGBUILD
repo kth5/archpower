@@ -2,24 +2,40 @@
 # Maintainer: Jelle van der Waa <jelle@archlinux.org>
 
 pkgname=mandown
-pkgver=0.1.5
+pkgver=1.0.0
 pkgrel=1
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 license=('Apache-2.0')
 url="https://gitlab.com/kornelski/mandown"
 pkgdesc="Create man pages from markdown markup"
-depends=(glibc)
+depends=(
+  gcc-libs
+  glibc
+)
 makedepends=(rust cargo)
-source=(https://gitlab.com/kornelski/mandown/-/archive/${pkgver}/mandown-${pkgver}.tar.gz)
-sha512sums=('de3687bd7060a4d9e91dc8a637be8bcb32bfa35a439b0f31a16ca5fd8ebc9d415d55ca072500d873741204d55e9e1051d02037baa90966e0b67a803729cf134b')
+source=(https://gitlab.com/kornelski/mandown/-/archive/v${pkgver}/mandown-v${pkgver}.tar.gz)
+sha512sums=('93b908170586f8b6f90d8f6a5d3fceabaab83cbc7ed6c42fcf27dbd39d0778c160235fa566d667d3fed6949f884d045462434ea319588cd941ea7f7a2357c303')
+
+prepare() {
+  cd "$pkgname-v$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
 
 build() {
-  cd "${pkgname}-${pkgver}"
-  cargo build --release --all-features --target-dir=target
+  cd "$pkgname-v$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release --all-features
+}
+
+check() {
+  cd "$pkgname-v$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo test --frozen --all-features
 }
 
 package() {
-  cd "${pkgname}-${pkgver}"
-  cargo build --release --locked --all-features --target-dir=target
-  install -Dm 755 target/release/${pkgname} -t "${pkgdir}/usr/bin"
+  cd "$pkgname-v$pkgver"
+  install -vDm 755 target/release/${pkgname} -t "${pkgdir}/usr/bin"
 }
