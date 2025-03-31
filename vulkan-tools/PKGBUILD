@@ -1,72 +1,57 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Maintainer: Laurent Carlier <lordheavym@gmail.com>
 
 pkgname=vulkan-tools
-pkgver=1.4.303
-pkgrel=2
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url="https://www.khronos.org/vulkan/"
-pkgdesc="Vulkan Utilities and Tools"
-license=('custom')
-depends=('libx11' 'wayland')
-makedepends=('cmake' 'python' 'wayland-protocols' 'vulkan-headers' 'glslang' 'spirv-tools')
-makedepends+=('libx11' 'libxrandr' 'ninja' 'git') # for update_deps.py -- volk dependency
-groups=('vulkan-devel')
-source=("${pkgname}-${pkgver}.tar.gz::https://github.com/KhronosGroup/Vulkan-Tools/archive/v${pkgver}.tar.gz")
-sha256sums=('958b646bbc5ac0a54908342df30da8c183690f579dce7f7130ac93d433d9d3a8')
-
-prepare() {
-  cd "${srcdir}"/Vulkan-Tools*
-
-  rm -rf build{,-wayland} && mkdir build{,-wayland}
-}
+pkgver=1.4.304.1
+pkgrel=1
+pkgdesc="Vulkan tools and utilities"
+url="https://www.vulkan.org/"
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+license=(Apache-2.0)
+depends=(
+  gcc-libs
+  glibc
+  libx11
+  libxcb
+  vulkan-icd-loader
+  wayland
+)
+makedepends=(
+  cmake
+  git
+  glslang
+  libxrandr
+  ninja
+  python
+  spirv-tools
+  volk
+  vulkan-headers
+  wayland-protocols
+)
+groups=(vulkan-devel)
+source=("git+https://github.com/KhronosGroup/Vulkan-Tools#tag=vulkan-sdk-$pkgver")
+b2sums=('859aa98f4a378328031355012d1ffe977c4133c9e436db4d03724a5f78a1d8c0c0764cbc130e52d6ccd194075f31b00b2af12226d489e9b9117a011543b50b92')
 
 build() {
-  cd "${srcdir}"/Vulkan-Tools*/build
+  local cmake_options=(
+    -D BUILD_ICD=OFF
+    -D CMAKE_BUILD_TYPE=Release
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_INSTALL_SYSCONFDIR=/etc
+    -D CMAKE_SKIP_INSTALL_RPATH=ON
+  )
 
-  ../scripts/update_deps.py --config release --generator Ninja
-  cmake -C helper.cmake \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_INSTALL_SYSCONFDIR=/etc \
-    -DCMAKE_INSTALL_DATADIR=/usr/share \
-    -DCMAKE_SKIP_RPATH=True \
-    -DBUILD_WSI_XCB_SUPPORT=On \
-    -DBUILD_WSI_XLIB_SUPPORT=On \
-    -DBUILD_WSI_WAYLAND_SUPPORT=On \
-    -DBUILD_CUBE=ON \
-    -DBUILD_VULKANINFO=ON \
-    -DBUILD_ICD=OFF \
-    -DCMAKE_BUILD_TYPE=Release \
-    ..
-  make
+  cmake -S Vulkan-Tools -B build -G Ninja "${cmake_options[@]}"
+  cmake --build build
+}
 
-  cd "${srcdir}"/Vulkan-Tools*/build-wayland
-
-  ../scripts/update_deps.py --config release --generator Ninja
-  cmake -C helper.cmake \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_INSTALL_SYSCONFDIR=/etc \
-    -DCMAKE_INSTALL_DATADIR=/usr/share \
-    -DCMAKE_SKIP_RPATH=True \
-    -DBUILD_WSI_XCB_SUPPORT=OFF \
-    -DBUILD_WSI_XLIB_SUPPORT=OFF \
-    -DBUILD_WSI_WAYLAND_SUPPORT=On \
-    -DBUILD_CUBE=ON \
-    -DCUBE_WSI_SELECTION=WAYLAND \
-    -DBUILD_VULKANINFO=OFF \
-    -DBUILD_ICD=OFF \
-    -DCMAKE_BUILD_TYPE=Release \
-    ..
-  make
+check() {
+  ctest --test-dir build --output-on-failure --stop-on-failure
 }
 
 package() {
-  cd "${srcdir}"/Vulkan-Tools*/build
-  
-  make DESTDIR="${pkgdir}" install
-
-  install -m755 ../build-wayland/cube/vkcube "${pkgdir}"/usr/bin/vkcube-wayland
-
-  install -dm755 "${pkgdir}"/usr/share/licenses/${pkgname}
-  install -m644 ../LICENSE.txt "${pkgdir}"/usr/share/licenses/${pkgname}/
+  DESTDIR="$pkgdir" cmake --install build
 }
+
+# vim:set sw=2 sts=-1 et:
