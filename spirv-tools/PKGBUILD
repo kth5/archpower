@@ -1,45 +1,55 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Maintainer: Daurnimator <daurnimator@archlinux.org>
 # Maintainer: Laurent Carlier <lordheavym@gmail.com>
 # Maintainer: Robin Candau <antiz@archlinux.org>
 
 pkgname=spirv-tools
-pkgver=2024.4.rc2
-pkgrel=1
+pkgver=1.4.304.1
+pkgrel=2
+epoch=1
 pkgdesc="API and commands for processing SPIR-V modules"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url="https://www.khronos.org/vulkan/"
-license=('Apache-2.0')
+url="https://www.khronos.org/spirv/"
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+license=(Apache-2.0)
+depends=(
+  gcc-libs
+  glibc
+  sh
+)
+makedepends=(
+  cmake
+  git
+  ninja
+  python
+  spirv-headers
+)
 groups=(vulkan-devel)
-depends=('gcc-libs' 'sh')
-makedepends=('cmake' 'python' 'ninja' 'spirv-headers')
-source=("${pkgname}-${pkgver}.tar.gz::https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/v${pkgver}.tar.gz")
-sha256sums=('b63b0ceda2350a4d097f41d52e929eddeadb8cae05b979989da364f1012727b0')
+source=("git+https://github.com/KhronosGroup/SPIRV-Tools#tag=vulkan-sdk-$pkgver")
+b2sums=('66b77b769fcefab029c8d4b94f7e1b2de1433dc7d0d5529f87dcedf73300ff77230692bfa0e5524d5a3b6b62931c20ad363e2e49e098c789255c7338d667d0d8')
 
 build() {
-  cd "SPIRV-Tools-${pkgver}"
+  local cmake_options=(
+    -D BUILD_SHARED_LIBS=ON
+    -D CMAKE_BUILD_TYPE=Release
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_INSTALL_SYSCONFDIR=/etc
+    -D CMAKE_SKIP_INSTALL_RPATH=ON
+    -D SPIRV-Headers_SOURCE_DIR=/usr
+    -D SPIRV_TOOLS_BUILD_STATIC=OFF
+    -D SPIRV_WERROR=OFF
+  )
 
-  cmake \
-      -Bbuild \
-      -GNinja \
-      -DCMAKE_INSTALL_PREFIX=/usr \
-      -DCMAKE_INSTALL_LIBDIR=lib \
-      -DCMAKE_BUILD_TYPE=None \
-      -DSPIRV_WERROR=Off \
-      -DBUILD_SHARED_LIBS=ON \
-      -DSPIRV_TOOLS_BUILD_STATIC=OFF \
-      -DSPIRV-Headers_SOURCE_DIR=/usr
+  cmake -S SPIRV-Tools -B build -G Ninja "${cmake_options[@]}"
   cmake --build build
 }
 
 check() {
-  cd "SPIRV-Tools-${pkgver}"
-
-  ninja -C build test
+  ctest --test-dir build --output-on-failure --stop-on-failure
 }
 
 package() {
-  cd "SPIRV-Tools-${pkgver}"
-
-  DESTDIR="${pkgdir}" cmake --install build
+  DESTDIR="$pkgdir" cmake --install build
 }
+
+# vim:set sw=2 sts=-1 et:
