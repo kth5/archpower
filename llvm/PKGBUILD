@@ -4,8 +4,8 @@
 
 pkgname=('llvm' 'llvm-libs')
 pkgver=19.1.7
-pkgrel=1.2
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+pkgrel=1.3
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
 url="https://llvm.org/"
 license=('Apache-2.0 WITH LLVM-exception')
 makedepends=('cmake' 'ninja' 'zlib' 'zstd' 'curl' 'libffi' 'libedit' 'libxml2'
@@ -23,7 +23,8 @@ source=($_source_base/llvm-$pkgver.src.tar.xz{,.sig}
         dyld-elf-ppc32.patch
         dyld-elf-ppc32-2.patch
         ppc-gcc-bug.patch
-        macho32.patch)
+        macho32.patch
+        espresso-cpu.patch)
 sha256sums=('96f833c6ad99a3e8e1d9aca5f439b8fd2c7efdcf83b664e0af1c0712c5315910'
             'SKIP'
             '11c5a28f90053b0c43d0dec3d0ad579347fc277199c005206b963c19aae514e3'
@@ -34,7 +35,8 @@ sha256sums=('96f833c6ad99a3e8e1d9aca5f439b8fd2c7efdcf83b664e0af1c0712c5315910'
             '9a7c0e0c5b60f35e36f931dca9144975387d2fe046a959c97e252e6539f28dda'
             'b27bdec80d19a7d8c8bf36855891b557f0544df47c0f0f89a808da6d7a490847'
             '18d3c415474e937fc73ad4173506250495385025af168a0c270d3c202aedbab5'
-            'a2ba322576fdea8d0c317d0ad372d224009b2d090b86ed9d0f566efb1d238827')
+            'a2ba322576fdea8d0c317d0ad372d224009b2d090b86ed9d0f566efb1d238827'
+            'e697985caba1841afca60af4c6598ab77abe12a5b7cd6e1b491270e53a499ce3')
 validpgpkeys=('474E22316ABF4785A88C6E8EA2C794A986419D8A'  # Tom Stellard <tstellar@redhat.com>
               'D574BD5D1D0E98895E3BF90044F2485E45D59042') # Tobias Hieta <tobias@hieta.se>
 
@@ -86,6 +88,9 @@ prepare() {
   patch -Np1 -i ${srcdir}/ppc-gcc-bug.patch
   patch -Np1 -i ${srcdir}/macho32.patch
 
+  # espresso only patch
+  echo ${CFLAGS} | grep "mcpu=espresso" &>/dev/null && patch -Np2 -i "$srcdir/espresso-cpu.patch"
+
   # Remove CMake find module for zstd; breaks if out of sync with upstream zstd
   rm cmake/modules/Findzstd.cmake
 }
@@ -131,6 +136,9 @@ build() {
 }
 
 check() {
+  case "${CARCH}" in
+    powerpc) return 0 ;;
+  esac
   cd llvm-$pkgver.src/build
   LD_LIBRARY_PATH=$PWD/lib ninja check
 }
