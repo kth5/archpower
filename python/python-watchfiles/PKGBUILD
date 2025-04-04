@@ -1,12 +1,11 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer:
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 # Contributor: @RubenKelevra <cyrond@gmail.com>
 
 pkgname=python-watchfiles
-_name=${pkgname#python-}
-pkgver=1.0.3
-pkgrel=2
-pkgdesc='Simple, modern and high performance file watching and code reload in python'
+pkgver=1.0.4
+pkgrel=1
+pkgdesc='Simple, modern and high performance file watching and code reload in Python'
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url='https://github.com/samuelcolvin/watchfiles'
 license=(MIT)
@@ -27,37 +26,31 @@ checkdepends=(
   python-pytest-mock
   python-pytest-timeout
 )
-source=($url/archive/v$pkgver/$pkgname-$pkgver.tar.gz)
-b2sums=('d10b8f0a9db435939e08ab700a7b29e08bcc5fb2d7b1ff255d18aaa125b6bfb7474a9737f22de52947d3a281201dd347ff07b9a5f21989f94c14a9470412ebca')
+source=("$url/archive/v$pkgver/$pkgname-$pkgver.tar.gz")
+b2sums=('94155b090a05f8aad33e6492c264dce4e8da20d8a0a48e314ce67566f523040ec7c14b7445331651dc24477defd3b76953ee6f9558c884aa22bf6d62e0ec6564')
 
 prepare() {
-  # remove __init__.py otherwise this prevents tests detecting the watchfiles module anywhere else
-  rm -v $_name-$pkgver/tests/__init__.py
+  cd ${pkgname#python-}-$pkgver
+  # This prevents tests from detecting the watchfiles module.
+  rm -v tests/__init__.py
 }
 
 build() {
-  cd $_name-$pkgver
-
+  cd ${pkgname#python-}-$pkgver
   python -m build --wheel --no-isolation
 }
 
 check() {
-  local pytest_options=(
-    -vv
-    -o addopts=''
-    --deselect tests/test_watch.py::test_awatch_interrupt_raise
-  )
-  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-
-  cd $_name-$pkgver
-  # install to temporary location, as importlib is used
-  python -m installer --destdir=test_dir dist/*.whl
-  export PYTHONPATH="$PWD/test_dir/$site_packages:$PYTHONPATH"
-  pytest "${pytest_options[@]}" .
+  cd ${pkgname#python-}-$pkgver
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer dist/*.whl
+  # Don't add CWD to PYTHONPATH, the watchfiles package in CWD will take
+  # precedence over installed one.
+  test-env/bin/python -Im pytest
 }
 
 package() {
-  cd $_name-$pkgver
+  cd ${pkgname#python-}-$pkgver
   python -m installer --destdir="$pkgdir" dist/*.whl
-  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
 }

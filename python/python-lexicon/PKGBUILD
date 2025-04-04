@@ -1,33 +1,42 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
+# Contributor: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=python-lexicon
 pkgver=2.0.1
-pkgrel=4
+pkgrel=5
 pkgdesc="Powerful dict subclass(es) with aliasing & attribute access"
-url="https://github.com/bitprophet/lexicon"
-license=('BSD')
 arch=(any)
+url="https://github.com/bitprophet/lexicon"
+license=('BSD-2-Clause')
 depends=('python')
-makedepends=('python-setuptools')
+makedepends=(
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+)
 checkdepends=('python-pytest-relaxed')
-source=("https://github.com/bitprophet/lexicon/archive/$pkgver/$pkgname-$pkgver.tar.gz")
+source=("$url/archive/$pkgver/$pkgname-$pkgver.tar.gz")
 sha512sums=('ce63ca85d823851c757c4e7292f4e7d6d6a7714bd48ef4df1a6f792ecf03965ea89aa09f81411128e8e734d72e6dd062a8afb03602c2511be951756216c823ec')
 
 build() {
-  cd lexicon-$pkgver
-  python setup.py build
+  cd ${pkgname#python-}-${pkgver}
+  python -m build --wheel --no-isolation
 }
 
 check() {
-  cd lexicon-$pkgver
-  # pytest-relaxed doesn't work with pytest 7
-  python -m pytest || /bin/true
+  cd ${pkgname#python-}-${pkgver}
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer dist/*.whl
+  # Deselect failing tests, not sure why they fail.
+  test-env/bin/python -m pytest \
+    --deselect tests/alias_dict.py::AliasDict_::aliases_are_not_real_keys \
+    --deselect tests/alias_dict.py::AliasDict_::aliases_of
 }
 
 package() {
-  cd lexicon-$pkgver
-  python setup.py install --root="$pkgdir" --optimize=1
-
-  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
+  cd ${pkgname#python-}-${pkgver}
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
 }

@@ -4,11 +4,8 @@
 # Maintainer: Carl Smedstad <carsme@archlinux.org>
 # Contributor: Felix Yan <felixonmars@archlinux.org>
 
-_name=hypothesis
-_alt_name=$_name-python
 pkgname=python-hypothesis
-pkgver=6.124.7
-_version=$_alt_name-$pkgver
+pkgver=6.129.0
 pkgrel=1
 pkgdesc="Advanced Quickcheck style testing library for Python"
 arch=(any)
@@ -21,6 +18,7 @@ depends=(
   python-sortedcontainers
 )
 makedepends=(
+  git
   python-build
   python-installer
   python-setuptools
@@ -28,8 +26,8 @@ makedepends=(
 )
 checkdepends=(
   python-black
-  python-dpcontracts
   python-django
+  python-dpcontracts
   python-faker
   python-fakeredis
   python-flaky
@@ -41,6 +39,7 @@ checkdepends=(
   python-pytest
   python-pytest-xdist
   python-pytz
+  python-watchdog
 )
 optdepends=(
   'python-black: for CLI and ghostwriter'
@@ -57,34 +56,38 @@ optdepends=(
   'python-pytz: for datetime and django module'
   'python-redis: for redis support'
   'python-rich: for CLI'
+  'python-watchdog: for tracking file system events'
 )
-source=("$_name-$_version.tar.gz::$_url/archive/$_version.tar.gz")
-sha512sums=('c9c699d830082ccfb056c42817592ad3736b3e1c2294bed889d9e581dc8d4b093a86a949b24e3fa842941daf18933c55c6a479cd6768c30cde0cecb94777a620')
-b2sums=('d0160dedfd78443724a7388020fa093ba95e8621403f4fa69f04c324a5be8d49b51c3cae4cca488a86046818b6762a3f9703b1963186ae82daed2c8cdf0f8f70')
+source=("$pkgname::git+$_url#tag=hypothesis-python-$pkgver")
+sha512sums=('98551cba9fadb52b01bc34f8a788c9ff9879ea9edb6a2facc9e4839108d2d5d00943f3cc71103689193abc9296808fd2afc530456de0619c33450e39ee9e80d2')
+b2sums=('25e263d4f0354d5287422099d1a2e3ae9c7fcb5027dc3d704429a0d657daa6ba8b989f95bef536be1271695d79d03a1c529f9aeceeb9625e581c3fa5432b4d7f')
+
+prepare() {
+  cd $pkgname/hypothesis-python
+  # Fix test failing due to trailing space diff
+  sed -i 's/def      /def/' tests/cover/test_reflection.py
+}
 
 build() {
-  cd $_name-$_version/$_alt_name
-  python -m build -nw
+  cd $pkgname/hypothesis-python
+  python -m build --wheel --no-isolation
 }
 
 check() {
+  cd $pkgname/hypothesis-python
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer dist/*.whl
   local pytest_options=(
     -vv
     # Depends on python-hypothesis-crosshair which is not packaged,
     # for some reason --deselect does not work, so ignoring whole file
-    --ignore tests/crosshair/test_crosshair.py
+    --ignore=tests/crosshair/test_crosshair.py
   )
-  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-
-  cd $_name-$_version/$_alt_name
-  # install to temporary location, as importlib is used
-  python -m installer --destdir=test_dir dist/*.whl
-  export PYTHONPATH="$PWD/test_dir/$site_packages"
-  export PATH="$PWD/test_dir/usr/bin:$PATH"
-  pytest "${pytest_options[@]}" tests/
+  PATH="$PWD/test-env/bin:$PATH" test-env/bin/python -m pytest \
+    "${pytest_options[@]}" tests/
 }
 
 package() {
-  cd $_name-$_version/$_alt_name
+  cd $pkgname/hypothesis-python
   python -m installer --destdir="$pkgdir" dist/*.whl
 }
