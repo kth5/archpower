@@ -7,7 +7,7 @@ pkgname=python-$_pipname
 pkgver=1.8.13
 pkgrel=1
 pkgdesc='An implementation of the Debug Adapter Protocol for Python'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
 url='https://aka.ms/debugpy'
 license=(MIT)
 depends=(gcc-libs
@@ -22,6 +22,14 @@ makedepends=(cython
 source=(git+https://github.com/microsoft/debugpy#tag=v$pkgver)
 sha256sums=('3191585a7a39d5c76e3c7bbc936ecad7d4ed3288efdc69ad612021c7622ee671')
 
+case "${CARCH}" in
+  powerpc)     arch=ppc     ;;
+  powerpc64)   arch=ppc64   ;;
+  powerpc64le) arch=ppc64le ;;
+  riscv64)     arch=riscv64 ;;
+  x86_64)      arch=amd64; CXX="g++ -m64" ;;
+esac
+
 build() {
   cd $_pipname
 # Recythonize sources
@@ -32,13 +40,13 @@ build() {
   python -m build --wheel --no-isolation
 # Compile attach libraries
   cd build/lib*/debugpy/_vendored/pydevd/pydevd_attach_to_process
-  g++ ${CXXFLAGS} -m64 -shared -o attach_linux_amd64.so -fPIC -nostartfiles linux_and_mac/attach.cpp ${LDFLAGS}
+  ${CXX} ${CXXFLAGS} -shared -o attach_linux_${arch}.so -fPIC -nostartfiles linux_and_mac/attach.cpp ${LDFLAGS}
 }
 
 package() {
   cd $_pipname
   python -m installer --destdir="$pkgdir" dist/*.whl
-  install -Dm755 build/lib*/debugpy/_vendored/pydevd/pydevd_attach_to_process/attach_linux_amd64.so \
+  install -Dm755 build/lib*/debugpy/_vendored/pydevd/pydevd_attach_to_process/attach_linux_${arch}.so \
     -t "$pkgdir"`python -c "import site; print(site.getsitepackages()[0])"`/debugpy/_vendored/pydevd/pydevd_attach_to_process
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
