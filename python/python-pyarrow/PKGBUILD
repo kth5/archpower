@@ -1,0 +1,93 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Bruno Pagani <archange@archlinux.org>
+# Maintainer: Jakub Klinkovský <lahwaacz at archlinux dot org>
+# Maintainer: Konstantin Gizdov <arch at kge dot pw>
+# Contributor: Caleb Maclennan <caleb@alerque.com>
+# Contributor: Guillaume Horel <guillaume.horel@gmail.com>
+
+_pkg=arrow
+_pkgname=pyarrow
+pkgname=python-$_pkgname
+pkgver=19.0.1
+pkgrel=1
+pkgdesc="Columnar in-memory analytics layer for big data — Python module."
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+url="https://arrow.apache.org"
+license=(Apache-2.0)
+depends=(
+  arrow
+  gcc-libs
+  glibc
+  python
+  python-numpy
+)
+optdepends=(
+  'python-cffi: interact with C code'
+  'python-pandas: Pandas integration'
+  'python-fsspec: Filesystem Spec support'
+)
+makedepends=(
+  cmake
+  cython
+  git
+  ninja
+  python-build
+  python-cffi
+  python-installer
+  python-pandas
+  python-setuptools-scm
+  python-wheel
+)
+checkdepends=(
+  python-hypothesis
+  python-pytest
+  python-pytz
+)
+source=(
+  https://archive.apache.org/dist/$_pkg/$_pkg-$pkgver/apache-$_pkg-$pkgver.tar.gz{,.asc}
+  git+https://github.com/apache/parquet-testing.git
+  git+https://github.com/apache/arrow-testing.git
+)
+sha512sums=('524187c6f12bbb677b5d4a53e1608c69b56c83a5c8667bfe82d5a10232c33f151a8a7b5e6e26af48d1e0ca25a5d3dc885b27d9b5e798c7e07f115df8f0779516'
+            'SKIP'
+            'SKIP'
+            'SKIP')
+validpgpkeys=(265F80AB84FE03127E14F01125BCCA5220D84079  # Krisztian Szucs (apache) <szucs.krisztian@gmail.com>
+              08D3564B7C6A9CAFBFF6A66791D18FCF079F8007  # Kouhei Sutou <kou@cozmixng.org>
+              AF6AADA4C9835B75973FF5DA275C532289DD0F4A) # Raúl Cumplido Domínguez (CODE SIGNING KEY) <raulcd@apache.org>
+
+build() {
+  cd apache-$_pkg-$pkgver/python
+  # Documentation for building from source:
+  # https://github.com/apache/arrow/blob/main/docs/source/developers/python.rst#relevant-components-and-environment-variables
+  # Note that components being disabled or enabled when building PyArrrow is by default based on how Arrow C++ is build.
+  PYARROW_BUILD_TYPE="relwithdebinfo" \
+  PYARROW_CMAKE_GENERATOR=Ninja \
+  PYARROW_CMAKE_OPTIONS="-DARROW_SIMD_LEVEL=NONE -DARROW_RUNTIME_SIMD_LEVEL=MAX" \
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  [ ! "${CARCH}" == 'x86_64' ] && return 0
+
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer apache-$_pkg-$pkgver/python/dist/*.whl
+  PARQUET_TEST_DATA="$srcdir"/parquet-testing/data \
+  ARROW_TEST_DATA="$srcdir"/arrow-testing/data \
+  test-env/bin/python -m pytest -vv --pyargs pyarrow
+}
+
+package() {
+  cd apache-$_pkg-$pkgver/python
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # drop tests from install
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  rm -rfv "$pkgdir$site_packages"/$_pkgname/{conftest.py,tests}
+
+  # move python include files
+  install -vdm 755 "$pkgdir"/usr/include/arrow/
+  mv -v "$pkgdir$site_packages"/$_pkgname/include/arrow/python/ "$pkgdir"/usr/include/arrow/
+  rm -rfv "$pkgdir$site_packages"/$_pkgname/include/
+  ln -sTv /usr/include/arrow/ "$pkgdir$site_packages"/$_pkgname/include
+}
