@@ -1,0 +1,111 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+# Contributor: Jonas Witschel <diabonas@archlinux.org>
+
+pkgname=python-proxy.py
+pkgver=2.4.10
+pkgrel=1
+pkgdesc='Lightweight HTTP, HTTPS, HTTP2 and WebSockets proxy server'
+arch=(any)
+url=https://github.com/abhinavsingh/proxy.py
+license=(BSD-3-Clause)
+depends=(
+  python
+  python-setuptools
+)
+makedepends=(
+  git
+  python-build
+  python-installer
+  python-setuptools-scm
+  python-wheel
+)
+checkdepends=(
+  python-httpx
+  python-pytest
+  python-pytest-asyncio
+  python-pytest-mock
+  python-requests
+)
+optdepends=(
+  'python-httpx: Cloudflare DNS resolver plugin support'
+  'python-paramiko: proxy over SSH tunnel support'
+)
+source=(
+  "$pkgname::git+$url#tag=v$pkgver"
+  remove-entry-points.patch
+)
+sha512sums=('8434077bf5ebacaf90eafaca88a99cc1cb6c82fbee523af27b402d171b05dd652d1a9db0bf60beac32bcd505da2137e23b311d6f5c8402f4718d42f7f912b793'
+            '06bf77c255981ae6b03c711c03fcf206e605d705ec5005709ecd001befcd84a6569ff2eef7eecc7eacb4e87263d3821cc58088082b57658916f3cfd7db9c0246')
+b2sums=('5928cac0292a985310e4884665c6a0f4985d48e78ac1217d18eebb0ceb6e528b7c61dc9475bfc355340b2c27bd3a86b39b8d40134e637468d65c79e5a3b8e0c3'
+        'e27437a6c507d977c24b81fe9b0f35ee5c5eef5896717bd21ed5faa2e9b03026bc79bfe095291c3a01dfe3b24e1f0ecc4b3fe7d511c5af3f77e2840a97daa353')
+
+prepare() {
+  cd "$pkgname"
+
+  # Remove entry point usr/bin/proxy to avoid conflict with libproxy (FS#73325)
+  patch -p1 -i "$srcdir/remove-entry-points.patch"
+}
+
+build() {
+  cd "$pkgname"
+
+  SETUPTOOLS_SCM_PRETEND_VERSION="$pkgver"  python -m build --wheel --no-isolation
+}
+
+check() {
+  [ ! "${CARCH}" == 'x86_64' ] && return 0
+
+  local pytest_options=(
+    -vv
+    -o addopts=''  # we are not interested in coverage
+    --ignore tests/integration  # we are not interested in integration tests using the internet
+    --deselect tests/http/proxy/test_http2.py::TestHttp2WithProxy::test_http2_via_proxy
+    --deselect tests/http/exceptions/test_http_proxy_auth_failed.py::TestHttpProxyAuthFailed::test_proxy_auth_fails_without_cred
+    --deselect tests/http/exceptions/test_http_proxy_auth_failed.py::TestHttpProxyAuthFailed::test_proxy_auth_fails_with_invalid_cred
+    --deselect tests/http/exceptions/test_http_proxy_auth_failed.py::TestHttpProxyAuthFailed::test_proxy_auth_works_with_valid_cred
+    --deselect tests/http/exceptions/test_http_proxy_auth_failed.py::TestHttpProxyAuthFailed::test_proxy_auth_works_with_mixed_case_basic_string
+    --deselect tests/http/proxy/test_http_proxy.py::TestHttpProxyPlugin::test_proxy_plugin_on_and_before_upstream_connection
+    --deselect tests/http/proxy/test_http_proxy.py::TestHttpProxyPlugin::test_proxy_plugin_before_upstream_connection_can_teardown
+    --deselect tests/http/proxy/test_http_proxy_tls_interception.py::TestHttpProxyTlsInterception::test_e2e
+    --deselect tests/http/test_protocol_handler.py::TestHttpProtocolHandlerWithoutServerMock::test_proxy_connection_failed
+    --deselect tests/http/test_protocol_handler.py::TestHttpProtocolHandlerWithoutServerMock::test_proxy_authentication_failed
+    --deselect tests/http/test_protocol_handler.py::TestHttpProtocolHandlerWithoutServerMock::test_proxy_bails_out_for_unknown_schemes
+    --deselect tests/http/test_protocol_handler.py::TestHttpProtocolHandlerWithoutServerMock::test_proxy_bails_out_for_sip_request_lines
+    --deselect tests/http/test_protocol_handler.py::TestHttpProtocolHandler::test_http_get
+    --deselect tests/http/test_protocol_handler.py::TestHttpProtocolHandler::test_http_tunnel
+    --deselect tests/http/test_protocol_handler.py::TestHttpProtocolHandler::test_authenticated_proxy_http_get
+    --deselect tests/http/test_protocol_handler.py::TestHttpProtocolHandler::test_authenticated_proxy_http_tunnel
+    --deselect tests/http/web/test_web_server.py::TestWebServerPluginWithPacFilePlugin::test_pac_file_served_from_disk
+    --deselect tests/http/web/test_web_server.py::TestStaticWebServerPlugin::test_static_web_server_serves
+    --deselect tests/http/web/test_web_server.py::TestStaticWebServerPlugin::test_static_web_server_serves_404
+    --deselect tests/http/web/test_web_server.py::TestWebServerPlugin::test_default_web_server_returns_404
+    --deselect tests/plugin/test_http_proxy_plugins.py::TestHttpProxyPluginExamples::test_modify_post_data_plugin
+    --deselect tests/plugin/test_http_proxy_plugins.py::TestHttpProxyPluginExamples::test_proposed_rest_api_plugin
+    --deselect tests/plugin/test_http_proxy_plugins.py::TestHttpProxyPluginExamples::test_redirect_to_custom_server_plugin
+    --deselect tests/plugin/test_http_proxy_plugins.py::TestHttpProxyPluginExamples::test_redirect_to_custom_server_plugin_skips_https
+    --deselect tests/plugin/test_http_proxy_plugins.py::TestHttpProxyPluginExamples::test_filter_by_upstream_host_plugin
+    --deselect tests/plugin/test_http_proxy_plugins.py::TestHttpProxyPluginExamples::test_man_in_the_middle_plugin
+    --deselect tests/plugin/test_http_proxy_plugins.py::TestHttpProxyPluginExamples::test_filter_by_url_regex_plugin
+    --deselect tests/plugin/test_http_proxy_plugins.py::TestHttpProxyPluginExamples::test_shortlink_plugin
+    --deselect tests/plugin/test_http_proxy_plugins.py::TestHttpProxyPluginExamples::test_shortlink_plugin_unknown
+    --deselect tests/plugin/test_http_proxy_plugins.py::TestHttpProxyPluginExamples::test_shortlink_plugin_external
+    --deselect tests/plugin/test_http_proxy_plugins.py::TestHttpProxyPluginExamples::test_auth_plugin
+    --deselect tests/plugin/test_http_proxy_plugins.py::TestHttpProxyPluginExamples::test_auth_plugin_bypass
+    --deselect tests/plugin/test_http_proxy_plugins_with_tls_interception.py::TestHttpProxyPluginExamplesWithTlsInterception::test_modify_post_data_plugin
+    --deselect tests/plugin/test_http_proxy_plugins_with_tls_interception.py::TestHttpProxyPluginExamplesWithTlsInterception::test_man_in_the_middle_plugin
+  )
+
+  cd "$pkgname"
+
+  pytest "${pytest_options[@]}"
+}
+
+package() {
+  cd "$pkgname"
+
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # license
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
+}
