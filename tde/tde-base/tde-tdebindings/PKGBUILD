@@ -1,0 +1,67 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Michael Manley <mmanley@nasutek.com>
+# Contributor: Pawel 'l0ner' Soltys <pwslts@gmail.com>
+# Contributor: Calvin Morrison <mutantturkey@gmail.com>
+# Contributor: David C. Rankin <drankinatty at gmail dot com>
+
+_mod=tdebindings
+_cat=core/
+_kdemod="${_mod/tde/kde}"
+
+pkgname="tde-${_mod}"
+pkgver=14.1.3
+pkgrel=1
+arch=(i686 x86_64 aarch64 armv7h powerpc64le powerpc64 powerpc riscv64 espresso)
+url="https//scm.trinitydesktop.org/scm/git/${_mod}"
+license=('GPL')
+groups=('tde-base')
+pkgdesc="Trinity Desktop bindings"
+depends=('tde-tdelibs')
+makedepends=('pkgconfig' 'autoconf' 'python3' 'python-setuptools' 'ruby' 'jdk-openjdk')
+options=('staticlibs' 'libtool' '!strip')
+source=("https://mirror.ppa.trinitydesktop.org/trinity/releases/R${pkgver}/main/${_cat}${_mod}-trinity-${pkgver}.tar.xz")
+md5sums=('0cc8882d37b15da37b70be1db8a788d0')
+
+[ -n "$TDEDIR" ] || TDEDIR=/opt/trinity
+[ -n "$TQTDIR" ] || TQTDIR=${TDEDIR}/tqt3
+
+build() {
+  ## Generate config files and update with autoreconf
+  cd ${srcdir}/${pkgname#*-}-trinity-${pkgver}
+
+  msg "Copying system libtool files...."
+  cp -a /usr/share/libtool/build-aux/config.guess ./admin/
+  cp -a /usr/share/libtool/build-aux/config.sub ./admin/
+  cp /usr/share/aclocal/libtool.m4 ./admin/libtool.m4.in
+  cp /usr/share/libtool/build-aux/ltmain.sh ./admin/ltmain.sh
+
+  msg "Running make -f admin/Makefile.common ...."
+  make -f admin/Makefile.common
+
+  export PKG_CONFIG_PATH=${TDEDIR}/lib/pkgconfig:${TQTDIR}/lib/pkgconfig:${PKG_CONFIG_PATH}
+
+  ## configure
+  msg "Configuring - ${pkgname}..."
+  PYTHON=/usr/bin/python3 \
+  ./configure \
+    --prefix=${TDEDIR} \
+    --with-tqt-dir=${TQTDIR} \
+    --with-tqt-includes=${TQTDIR}/include \
+    --with-tqt-libraries=${TQTDIR}/lib \
+    --with-extra-includes="/usr/include/tqt" \
+    --with-extra-libs="${TDEDIR}/lib:${TDEDIR}/lib/trinity" \
+    --with-java=/usr/lib/jvm/default \
+    --sysconfdir=${TDEDIR}/etc \
+    --localstatedir=/var \
+    --enable-closure \
+    DO_NOT_COMPILE='dcopc dcopperl kalyptus qtsharp xparts'
+
+  msg "Building - ${pkgname}..."
+  make $NUMJOBS
+}
+
+package() {
+  msg "Packaging - $pkgname-$pkgver"
+  cd ${srcdir}/${pkgname#*-}-trinity-${pkgver}
+  make -j1 DESTDIR="${pkgdir}" install
+}
