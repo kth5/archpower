@@ -1,0 +1,52 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Michael Manley <mmanley@nasutek.com>
+# Contributor: David C. Rankin <drankinatty at gmail dot com>
+
+_mod=tdeartwork
+_cat=core/
+_kdemod="${_mod/tde/kde}"
+
+pkgname="tde-${_mod}"
+pkgver=14.1.3
+pkgrel=1
+arch=(i686 x86_64 aarch64 armv7h powerpc64le powerpc64 powerpc riscv64 espresso)
+url="https://scm.trinitydesktop.org/scm/git/${_mod}"
+license=('GPL')
+groups=('tde-base')
+pkgdesc="Trinity Desktop Development Ingegration Components - TDE upstream GIT"
+depends=('tde-tdebase' 'xscreensaver' 'libxss')
+makedepends=('tde-cmake-trinity')
+optdepends=()
+provides=("${_mod}")
+conflicts=("trinity-${_mod}" "trinity-${_kdemod}")
+replaces=("trinity-${_mod}")
+options=('staticlibs' 'libtool' '!strip')
+source=("https://mirror.ppa.trinitydesktop.org/trinity/releases/R${pkgver}/main/${_cat}${_mod}-trinity-${pkgver}.tar.xz")
+md5sums=('682bc37eef0b83e44dad25d57d8777c5')
+
+[ -n "$TDEDIR" ] || TDEDIR=/opt/trinity
+
+build() {
+  msg "Creating out-of-source build directory: ${srcdir}/build"
+  mkdir -p ${srcdir}/build
+  cd ${srcdir}/build
+
+  export PKG_CONFIG_PATH=${TDEDIR}/lib/pkgconfig:${PKG_CONFIG_PATH}
+
+  msg "Starting cmake..."
+  cmake ${srcdir}/${pkgname#*-}-trinity-${pkgver} \
+    -GNinja \
+    -DCMAKE_VERBOSE_MAKEFILE=ON \
+    -DCMAKE_INSTALL_PREFIX=${TDEDIR} \
+    -DBUILD_ALL=ON \
+    -DWITH_ALL_OPTIONS=ON
+
+  msg "Building - ${pkgname#*-}..."
+  ninja $NUMJOBS
+}
+
+package() {
+  msg "Packaging - $pkgname-$pkgver"
+  cd ${srcdir}/build
+  DESTDIR="${pkgdir}" ninja -j1 install
+}
