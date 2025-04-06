@@ -1,0 +1,208 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Michael Manley <mmanley@nasutek.com>
+# Contributor: Pawel 'l0ner' Soltys <pwslts@gmail.com>
+# Contributor: Calvin Morrison <MutantTurkey@gmail.com>
+# Contributor: David C. Rankin <drankinatty at gmail dot com>
+
+_mod=tqt3
+_cat=dependencies/
+_kdemod="${_mod/tde/kde}"
+
+pkgbase="tde-${_mod}"
+pkgname=("$pkgbase" "${pkgbase}-docs")
+pkgver=14.1.3
+pkgrel=1
+pkgdesc="The TQt3 gui toolkit - based on TDE upstream Qt3"
+arch=(i686 x86_64 aarch64 armv7h powerpc64le powerpc64 powerpc riscv64 espresso)
+url="https://scm.trinitydesktop.org/scm/git/${_mod}"
+license=('GPL')
+groups=('tde-core')
+options=('staticlibs' 'libtool' '!emptydirs' '!strip')
+makedepends=('libcups'
+        'libxi'
+        'postgresql'
+        'mariadb'
+        'unixodbc'
+        'libmng'
+        'xorg-xrandr'
+        'libxcursor'
+        'libxinerama'
+        'libxft'
+        'libxmu'
+        'glu')
+source=("https://mirror.ppa.trinitydesktop.org/trinity/releases/R${pkgver}/main/${_cat}${_mod}-trinity-${pkgver}.tar.xz")
+md5sums=('10d3c25dbbf3ab2872992844906bab22')
+
+_prefix="/opt/trinity/tqt3"
+
+build() {
+
+  cd ${srcdir}/${_mod}-trinity-${pkgver}
+
+  # These are probably arch-specific. They were present in old qt3
+  # PKGBULD, they were present in kdemod3 PKGBUILD, they are present
+  # here.
+  sed -i 's|-cp -P -f|-cp -L -f|' qmake/Makefile.unix
+  sed -i "s|-O2|$CXXFLAGS|" mkspecs/linux-g++/qmake.conf
+  sed -i "s|-O2|$CXXFLAGS|" mkspecs/linux-g++-32/qmake.conf
+  sed -i "s|-O2|$CXXFLAGS|" mkspecs/linux-g++-64/qmake.conf
+  sed -i "s|-I. |$CXXFLAGS -I. |" qmake/Makefile.unix
+
+  ## Fix commits 4412d295 and 18696899 that broke tqca-tls building
+  # by changing mkspecs/linux-g++-64/qmake.conf to include ../lib64.
+  # Just change all lib64 paths back to lib since Arch doesn't use lib64
+  sed -i 's|lib64|lib|g' mkspecs/linux-g++-64/qmake.conf
+
+  # auto license acceptance
+  sed -i "s|read acceptance|acceptance=yes|" configure
+
+  msg "Setting enviroment variables..."
+  export TQTDIR="${srcdir}/${_mod}-trinity-${pkgver}"
+  export PATH=${TQTDIR}/bin:${PATH}
+  export LD_LIBRARY_PATH=${TQTDIR}/lib:${LD_LIBRARY_PATH}
+  export QMAKESPEC=$TQTDIR/mkspecs/linux-g++
+
+  if [ "$CARCH" = "x86_64" ]; then
+    export ARCH="-64"
+  else unset ARCH
+  fi
+
+  # Remove useless to us mkspecs
+  rm -rf mkspecs/{*aix*,*bsd*,cygwin*,dgux*,darwin*,hpux*,hurd*,irix*,lynxos*,macx*,qnx*,reliant*,sco*,solaris*,tru64*,unixware*,win32*}
+
+  msg "Starting configure..."
+  ./configure \
+    -prefix ${_prefix} \
+    -sysconfdir /etc/tqt \
+    -I/usr/include/mysql \
+    -I/usr/include/postgresql/server \
+    -I/usr/include/libiodbc \
+    -I/usr/include/freetype2 \
+    -I/usr/include/tirpc \
+    -lpq \
+    -lmysqlclient \
+    -L/usr/lib/mysql \
+    -qt-gif \
+    -ipv6 \
+    -sm \
+    -xshape \
+    -xinerama \
+    -xcursor \
+    -xrandr \
+    -xrender \
+    -xft\
+    -tablet \
+    -xkb \
+    -system-zlib \
+    -system-libpng \
+    -system-libjpeg \
+    -system-libmng \
+    -plugin-imgfmt-png \
+    -plugin-imgfmt-jpeg \
+    -plugin-imgfmt-mng \
+    -plugin-sql-mysql \
+    -plugin-sql-psql \
+    -plugin-sql-sqlite \
+    -plugin-sql-odbc \
+    -platform linux-g++${ARCH} \
+    -no-exceptions \
+    -thread \
+    -enable-opengl \
+    -dlopen-opengl \
+    -glibmainloop
+
+  # 64bit fixes pulled from extras/qt3 PKGBUILD
+  # this is Arch-specific
+  # fix /opt/qt/lib path
+  [ "$CARCH" = "x86_64" ] && sed -i "s|/opt/qt/lib64|/opt/qt/lib|g" ${TQTDIR}/src/Makefile
+  [ "$CARCH" = "x86_64" ] && sed -i "s|/opt/qt/lib64|/opt/qt/lib|g" ${TQTDIR}/tools/designer/designer/Makefile
+  [ "$CARCH" = "x86_64" ] && sed -i "s|/opt/qt/lib64|/opt/qt/lib|g" ${TQTDIR}/tools/designer/editor/Makefile
+  [ "$CARCH" = "x86_64" ] && sed -i "s|/opt/qt/lib64|/opt/qt/lib|g" ${TQTDIR}/tools/assistant/lib/Makefile
+  [ "$CARCH" = "x86_64" ] && sed -i "s|/opt/qt/lib64|/opt/qt/lib|g" ${TQTDIR}/tools/designer/uilib/Makefile
+
+  msg "--- \$CARCH is $CARCH ---"
+  msg "Building - $pkgbase..."
+
+  cd "${TQTDIR}"
+
+  # build rest, but without tutorials and examples
+  # of you want them, remove sub-tools
+  make sub-tools
+
+}
+
+## split package for tqt3
+package_tde-tqt3() {
+  pkgdesc="The TQt3 gui toolkit - based on TDE upstream Qt3 - git version"
+  depends=('libjpeg-turbo'
+          'libmng'
+          'libmariadbclient'
+          'libpng'
+          'libxcursor'
+          'libxft'
+          'libxi'
+          'libxinerama'
+          'libxmu'
+          'libxrandr'
+          'mesa'
+          'postgresql')
+  optdepends=('cups: The CUPS Printing System - for printing support'
+          'postgresql: A sophisticated object-relational DBMS - databse support'
+          'unixodbc: ODBC API for linux - databse support'
+          'mariadb: A fast SQL database server - databse support')
+  provides=('qt3' 'tqt3')
+  replaces=('qt3' 'qt3-enhanced' 'trinity-tqt3')
+  options=('staticlibs' 'libtool' '!emptydirs' '!strip')
+  groups=('tde-core')
+  install='tqt3.install'
+
+   msg "Packaging - $pkgname-$pkgver"
+   cd "${TQTDIR}"
+
+   make INSTALL_ROOT="$pkgdir" install
+
+   ## remove doc as it is now in a split package tde-tqt3-doc
+   rm -r "${pkgdir}${_prefix}/doc"
+
+   # install link the apps provided by qt3 so we don't collide with
+   # qt4 and can run them.
+
+   # New links providing old package functionality (however 3rd party packages unlikely to build
+   # unless updated to use new name references. Can drop this if it doesn't work.
+   ln -sf "${_prefix}/bin/tqassistant" "${pkgdir}${_prefix}/bin/assistant"
+   ln -sf "${_prefix}/bin/tqdesigner" "${pkgdir}${_prefix}/bin/designer"
+   ln -sf "${_prefix}/bin/tqlinguist" "${pkgdir}${_prefix}/bin/linguist"
+   ln -sf "${_prefix}/bin/tqlrelease" "${pkgdir}${_prefix}/bin/lrelease"
+   ln -sf "${_prefix}/bin/tqlupdate" "${pkgdir}${_prefix}/bin/lupdate"
+   ln -sf "${_prefix}/bin/tqmoc" "${pkgdir}${_prefix}/bin/moc"
+   ln -sf "${_prefix}/bin/tqmake" "${pkgdir}${_prefix}/bin/qmake"
+   ln -sf "${_prefix}/bin/tqtconfig" "${pkgdir}${_prefix}/bin/qtconfig"
+   ln -sf "${_prefix}/bin/tquic" "${pkgdir}${_prefix}/bin/uic"
+
+   # Build ld.so.conf file
+   install -d -m755 "${pkgdir}/etc/ld.so.conf.d/"
+   echo "${_prefix}/lib" >> "${pkgdir}/etc/ld.so.conf.d/${pkgbase#*-}.conf"
+
+   msg "Cleaning package..."
+
+   # remove any link to the compiled libraries present in
+   # $srcdir, which won't be present in non-building system.
+   sed -i "s|-L${srcdir}/${pkgbase#*-}/lib ||g" "${pkgdir}${_prefix}"/lib/*.prl
+
+   # missing include "qglobal.h" in include/qtimer.h fix
+   sed -i 's/define TQTIMER_H/&\n#include "ntqglobal.h"/' "${pkgdir}${_prefix}/include/ntqtimer.h"
+}
+
+## split package for tqt3 documentation
+package_tde-tqt3-docs() {
+  pkgdesc="TQt3 gui toolkit documentation - based on TDE upstream Qt3 - git version"
+  provides=('tqt3-docs')
+  groups=('tde-docs')
+
+  msg "Packaging - $pkgname-$pkgver"
+
+  ## install doc pages which are missed by make install
+  ## convenient for a split package
+  install -d -m755 "${pkgdir}${_prefix}/doc/"
+  cp -r "${TQTDIR}/doc" "${pkgdir}${_prefix}"
+}
