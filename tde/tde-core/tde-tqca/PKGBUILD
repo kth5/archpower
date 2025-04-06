@@ -1,0 +1,55 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Michael Manley <mmanley@nasutek.com>
+# Contributor: Pawel 'l0ner' Soltys <pwslts@gmail.com>
+# Contributor: Calvin Morrison <mutantturkey@gmail.com>
+# Contributor: David C. Rankin <drankinatty at gmail dot com>
+# Contributor: Slávek Banko <slavek.banko@axis.cz>
+
+_mod=tqca
+_cat=dependencies/
+_kdemod="${_mod/tde/kde}"
+
+pkgname="tde-${_mod}"
+pkgver=14.1.3
+pkgrel=1
+pkgdesc="Trinity SSL/TLS interface for TQt Cryptographic Architecture (TQCA)"
+arch=(i686 x86_64 aarch64 armv7h powerpc64le powerpc64 powerpc riscv64 espresso)
+url="https://scm.trinitydesktop.org/scm/git/${_mod}"
+license=('GPL')
+groups=('tde-core')
+depends=('tde-tqtinterface' 'openssl')
+makedepends=('tde-cmake-trinity')
+provides=(${_mod})
+conflicts=("trinity-${_mod}")
+replaces=("trinity-${_mod}")
+options=('staticlibs' 'libtool' '!strip')
+source=("https://mirror.ppa.trinitydesktop.org/trinity/releases/R${pkgver}/main/${_cat}${_mod}-trinity-${pkgver}.tar.xz")
+md5sums=('0dae21fc01f726765f542911b11e0883')
+
+[ -n "$TDEDIR" ] || TDEDIR=/opt/trinity
+[ -n "$TQTDIR" ] || TQTDIR=${TDEDIR}/tqt3
+
+build() {
+   msg "Creating out-of-source build directory: ${srcdir}/build"
+   mkdir -p ${srcdir}/build
+   cd ${srcdir}/build
+
+   export PKG_CONFIG_PATH=${TQTDIR}/lib/pkgconfig:${PKG_CONFIG_PATH}
+
+   msg "Starting cmake..."
+   cmake ${srcdir}/${pkgname#*-}-trinity-${pkgver}/ \
+      -GNinja \
+      -DCMAKE_INSTALL_PREFIX=$TQTDIR \
+      -DBUILD_ALL=OFF \
+      -DBUILD_TQCA=ON \
+      -DWITH_ALL_OPTIONS=ON
+
+   msg "Building - $pkgname..."
+   ninja $NUMJOBS
+}
+
+package() {
+   msg "Packaging - $pkgname-$pkgver"
+   cd ${srcdir}/build
+   DESTDIR="${pkgdir}" ninja -j1 install
+}
