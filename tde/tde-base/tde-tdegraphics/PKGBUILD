@@ -1,0 +1,65 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Michael Manley <mmanley@nasutek.com>
+# Contributor: e1z0 <marcinkeviciusjustinas at gmail dot com>
+
+_mod=tdegraphics
+_cat=core/
+_kdemod="${_mod/tde/kde}"
+
+pkgname="tde-${_mod}"
+pkgver=14.1.3
+pkgrel=1
+pkgdesc="Trinity Desktop Graphics Components"
+arch=(i686 x86_64 aarch64 armv7h powerpc64le powerpc64 powerpc riscv64 espresso)
+url="https://scm.trinitydesktop.org/scm/git/${_mod}"
+license=('GPL')
+groups=('tde-base')
+depends=('tde-tdelibs' 'fribidi' 'imlib' 'libgphoto2' 'libpaper' 'poppler' 'sane')
+makedepends=('tde-cmake-trinity')
+provides=("${_mod}")
+conflicts=("trinity-${_mod}" "trinity-${_kdemod}")
+replaces=("trinity-${_mod}")
+options=('staticlibs' 'libtool' '!strip')
+source=("https://mirror.ppa.trinitydesktop.org/trinity/releases/R${pkgver}/main/${_cat}${_mod}-trinity-${pkgver}.tar.xz"
+        "${pkgname}-113.patch::https://mirror.git.trinitydesktop.org/gitea/TDE/tdegraphics/pulls/113.patch")
+md5sums=('df7a1ce6de076b536d84864d13344d2b'
+         'fb8d47de6335117e67af7d5925d0faa7')
+# install=''
+
+[ -n "$TDEDIR" ] || TDEDIR=/opt/trinity
+
+prepare() {
+  msg "Apply backported patches"
+  cd ${srcdir}/${pkgname#*-}-trinity-${pkgver} || exit 1
+#  patch -p1 < ${srcdir}/bp000-?.diff
+
+  patch -Np1 -i ${srcdir}/${pkgname}-113.patch
+}
+
+build() {
+   msg "Creating out-of-source build directory: ${srcdir}/build"
+   mkdir -p ${srcdir}/build
+   cd ${srcdir}/build
+
+   export PKG_CONFIG_PATH=${TDEDIR}/lib/pkgconfig:${PKG_CONFIG_PATH}
+
+   msg "Starting cmake..."
+   cmake ${srcdir}/${pkgname#*-}-trinity-${pkgver} \
+     -GNinja \
+     -DCMAKE_VERBOSE_MAKEFILE=ON \
+     -DCMAKE_INSTALL_PREFIX=${TDEDIR} \
+     -DBUILD_ALL=ON \
+     -DWITH_PAPER=ON \
+     -DWITH_TIFF=ON \
+     -DWITH_OPENEXR=ON \
+     -DWITH_PDF=ON
+
+   msg "Building - ${pkgname#*-}..."
+   ninja $NUMJOBS
+}
+
+package() {
+  msg "Packaging - $pkgname-$pkgver"
+  cd ${srcdir}/build
+  DESTDIR="${pkgdir}" ninja -j1 install
+}
