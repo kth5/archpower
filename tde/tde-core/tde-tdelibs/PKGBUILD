@@ -1,0 +1,110 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Michael Manley <mmanley@nasutek.com>
+# Contributor: Pawel 'l0ner' Soltys <pwslts@gmail.com>
+# Contributor: Calvin Morrison <mutantturkey@gmail.com>
+# Contributor: David C. Rankin <drankinatty at gmail dot com>
+
+_mod=tdelibs
+_cat=core/
+_kdemod="${_mod/tde/kde}"
+
+pkgname="tde-${_mod}"
+pkgver=14.1.3
+pkgrel=1
+pkgdesc="Trinity Desktop core libraries and applications"
+arch=(i686 x86_64 aarch64 armv7h powerpc64le powerpc64 powerpc riscv64 espresso)
+url="https://scm.trinitydesktop.org/scm/git/${_mod}"
+license=('GPL')
+groups=('tde-core')
+depends=(
+	'aspell'
+	'cryptsetup'
+	'hspell'
+	'jasper'
+	'libcups'
+	'libidn'
+	'libutempter'
+	'libwebp'
+	'libxcomposite'
+	'libxslt'
+	'libxtst'
+	'openssl'
+	'openexr'
+	'opensc'
+	'pcre2'
+	'pkcs11-helper'
+	'tde-arts'
+	'tde-avahi-tqt'
+	'tde-dbus-1-tqt'
+	'tde-libart-lgpl'
+	'xorg-iceauth'
+	'xorg-xmessage'
+	'xorg-xprop'
+	'xorg-xset'
+	'xorg-xsetroot'
+)
+makedepends=('tde-cmake-trinity')
+provides=("${_mod}")
+conflicts=("trinity-${_kdemod}" "trinity-${_mod}" "kdemod3-${_kdemod}" "${_kdemod}3")
+replaces=("trinity-${_kdemod}" "trinity-${_mod}")
+options=('staticlibs' 'libtool' '!makeflags' '!strip')
+source=("https://mirror.ppa.trinitydesktop.org/trinity/releases/R${pkgver}/main/${_cat}${_mod}-trinity-${pkgver}.tar.xz")
+md5sums=('c7636cd1f8aaf4ae471cf21a5bf7a546')
+
+install="trinity-${_mod}.install"
+
+[ -n "$TDEDIR" ] || TDEDIR=/opt/trinity
+
+build() {
+  msg "Creating out-of-source build directory: ${srcdir}/build"
+  mkdir -p ${srcdir}/build
+  cd ${srcdir}/build
+
+  export PKG_CONFIG_PATH=/usr/lib/openssl-1.0/pkgconfig
+
+  msg "Starting cmake..."
+  cmake ${srcdir}/${pkgname#*-}-trinity-${pkgver}/ \
+    -GNinja \
+    -DCMAKE_INSTALL_PREFIX=${TDEDIR} \
+    -DSYSCONF_INSTALL_DIR=${TDEDIR}/etc \
+    -DCMAKE_VERBOSE_MAKEFILE=ON \
+    -DWITH_ARTS=ON \
+    -DWITH_ALSA=ON \
+    -DWITH_LIBART=ON \
+    -DWITH_LIBIDN=ON \
+    -DWITH_SSL=ON \
+    -DWITH_CUPS=ON \
+    -DWITH_LUA=OFF \
+    -DWITH_TIFF=ON \
+    -DWITH_WEBP=ON \
+    -DWITH_JASPER=ON \
+    -DWITH_OPENEXR=ON \
+    -DWITH_UTEMPTER=ON \
+    -DWITH_AVAHI=ON \
+    -DWITH_PCRE2=ON \
+    -DWITH_GCC_VISIBILITY=ON \
+    -DWITH_TDEHWLIB_DAEMONS=ON \
+    -DWITH_UPOWER=ON \
+    -DWITH_UDISKS2=ON \
+    -DWITH_UDEVIL=ON \
+    -DWITH_PCSC=ON \
+    -DWITH_PKCS=ON \
+    -DWITH_CRYPTSETUP=ON \
+    -DWITH_NETWORK_MANAGER_BACKEND=ON \
+    -DWITH_LZMA=ON \
+    -DWITH_XRANDR=ON \
+    -DWITH_XCOMPOSITE=ON \
+    -DWITH_ASPELL=ON \
+    -DWITH_HSPELL=ON
+
+  msg "Building - $pkgname..."
+  ninja $NUMJOBS
+}
+
+package() {
+  msg "Packaging - $pkgname-$pkgver"
+  cd ${srcdir}/build
+  DESTDIR="$pkgdir" ninja -j1 install
+  msg "Removing conflicting images"
+  rm ${pkgdir}/opt/trinity/share/mimelnk/application/x-mplayer2.desktop
+}
