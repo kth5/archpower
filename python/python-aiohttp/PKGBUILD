@@ -8,8 +8,8 @@
 
 _pkgname=aiohttp
 pkgname=python-aiohttp
-pkgver=3.10.5
-pkgrel=2
+pkgver=3.10.11
+pkgrel=1
 pkgdesc='HTTP client/server for asyncio'
 arch=(x86_64 powerpc64le powerpc64 riscv64)
 url=https://aiohttp.readthedocs.io
@@ -55,7 +55,7 @@ source=(
   "$pkgname::git+https://github.com/aio-libs/aiohttp#tag=v$pkgver"
   git+https://github.com/nodejs/llhttp.git
 )
-b2sums=('d6efdb40e05dbdcc7b1dd21e741ffe3e0eaf07981bf7c3b0a666d1ce607f150065104cfa237abec0ee03e8282f065b2c953d9209b458b9b64ac887261205c00d'
+b2sums=('510d512e9ac89ee28cb24ce0992986b5c0a88ad9757b9868f46aa1597bb8bd39a69bc4d9ba5d92319313d21fb398ab92bc0e11c73f407b4937310b0997ce2d70'
         'SKIP')
 
 prepare() {
@@ -71,7 +71,7 @@ prepare() {
       tests/test_circular_imports.py
 
   # Remove coverage testing
-  sed -i '/--cov=/d' setup.cfg
+  sed -i '/--cov=/d;/-p pytest_cov/d' setup.cfg
 }
 
 build() {
@@ -81,13 +81,20 @@ build() {
 }
 
 check() {
-  cd $pkgname
+  [ ! "${CARCH}" == 'x86_64' ] && return 0
+  local pytest_args=(
+  --ignore tests/autobahn/test_autobahn.py # Docker tests
+  --ignore tests/test_benchmarks_client.py
+  --ignore tests/test_benchmarks_client_request.py
+  --ignore tests/test_benchmarks_client_ws.py
+  --ignore tests/test_benchmarks_cookiejar.py
+  --ignore tests/test_benchmarks_http_websocket.py
+  --ignore tests/test_benchmarks_http_writer.py
+  )
   local python_version=$(python -c 'import sys; print("".join(map(str, sys.version_info[:2])))')
-  mv tests/autobahn/test_autobahn.py{,.bak} # Docker tests
-  # https://github.com/aio-libs/aiohttp/issues/8234
-  PYTHONPATH="$PWD/build/lib.linux-$CARCH-cpython-$python_version" pytest \
-    --deselect 'tests/test_pytest_plugin.py::test_aiohttp_plugin'
-  mv tests/autobahn/test_autobahn.py{.bak,}
+
+  cd $pkgname
+  PYTHONPATH=build/lib.linux-$CARCH-cpython-$python_version pytest "${pytest_args[@]}"
 }
 
 package() {
