@@ -1,0 +1,149 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Contributor: Slávek Banko <slavek.banko@axis.cz>
+
+_mod=tde-i18n
+_cat=core/
+_kdemod="${_mod/tde/kde}"
+
+pkgbase="tde-${_mod/tde-}"
+pkgname=("$pkgbase")
+pkgver=14.1.3
+pkgrel=1
+pkgdesc="Internationalized (i18n) files for TDE"
+arch=('any')
+url="https://scm.trinitydesktop.org/scm/git/${_mod}"
+license=('GPL')
+groups=('tde-base')
+makedepends=('tde-cmake-trinity')
+depends=('tde-tdelibs')
+options=('staticlibs' 'libtool' '!strip')
+source=("https://mirror.ppa.trinitydesktop.org/trinity/releases/R${pkgver}/main/${_cat}${_mod}-trinity-${pkgver}.tar.xz")
+md5sums=('dd2d337d3244c2cb6fd995ed2e689697')
+install=''
+
+_languages=(
+  'af               "Afrikaans"'
+  'ar               "Arabic"'
+  'az               "Azerbaijani"'
+  'be               "Belarusian"'
+  'bg               "Bulgarian"'
+  'bn               "Bengali"'
+  'br               "Breton"'
+  'bs               "Bosnian"'
+  'ca               "Catalan"'
+  'cs               "Czech"'
+  'csb              "Kashubian"'
+  'cy               "Welsh"'
+  'da               "Danish"'
+  'de               "German"'
+  'el               "Greek"'
+  'en_GB            "English (British)"'
+  'eo               "Esperanto"'
+  'es               "Spanish"'
+  'es_AR            "Spanish (Argentina)"'
+  'et               "Estonian"'
+  'eu               "Basque"'
+  'fa               "Persian"'
+  'fi               "Finnish"'
+  'fr               "French"'
+  'fy               "Frisian"'
+  'ga               "Irish"'
+  'gl               "Galician"'
+  'he               "Hebrew"'
+  'hi               "Hindi"'
+  'hr               "Croatian"'
+  'hu               "Hungarian"'
+  'is               "Icelandic"'
+  'it               "Italian"'
+  'ja               "Japanese"'
+  'kk               "Kazakh"'
+  'km               "Khmer"'
+  'ko               "Korean"'
+  'lt               "Lithuanian"'
+  'lv               "Latvian"'
+  'mk               "Macedonian"'
+  'mn               "Mongolian"'
+  'ms               "Malay"'
+  'nb               "Norwegian Bokmål"'
+  'nds              "Low Saxon"'
+  'nl               "Dutch"'
+  'nn               "Norwegian Nynorsk"'
+  'pa               "Punjabi"'
+  'pl               "Polish"'
+  'pt               "Portuguese"'
+  'pt_BR            "Portuguese (Brazil)"'
+  'ro               "Romanian"'
+  'ru               "Russian"'
+  'rw               "Kinyarwanda"'
+  'se               "Northern Sami"'
+  'sk               "Slovak"'
+  'sl               "Slovenian"'
+  'sr               "Serbian"'
+  'sr@Latn          "Serbian Latin"'
+  'ss               "Swati"'
+  'sv               "Swedish"'
+  'ta               "Tamil"'
+  'te               "Telugu"'
+  'tg               "Tajik"'
+  'th               "Thai"'
+  'tr               "Turkish"'
+  'uk               "Ukrainian"'
+  'uz               "Uzbek"'
+  'uz@cyrillic      "Uzbek (Cyrillic)"'
+  'vi               "Vietnamese"'
+  'wa               "Walloon"'
+  'zh_CN            "Chinese (Simplified)"'
+  'zh_TW            "Chinese (Traditional)"'
+)
+
+_pkglangs=()
+for _lang in "${_languages[@]}"; do
+  _locale=${_lang%% *}
+  _pkglang=$(echo ${_locale,,} | tr '[:upper:]' '[:lower:]' | \
+             sed "s|@latn|latin|" | \
+             tr -d "_" | tr -d "@")
+  _pkgname=${pkgbase}-${_pkglang}
+
+  pkgname+=($_pkgname)
+  _pkglangs+=($_pkgname)
+  eval "package_$_pkgname() {
+    _package $_pkglang $_lang
+  }"
+done
+
+_package() {
+  pkgdesc="$3 ($2) internationalized (i18n) files for TDE"
+  provides=("${_mod}-${1}")
+  conflicts=("trinity-${_kdemod}-${1}" "kdemod3-${_kdemod}-${1}")
+  replaces=("trinity-${_mod}-${1}")
+
+  msg "Packaging - $pkgname-$pkgver"
+  cd ${srcdir}/build
+  DESTDIR="${pkgdir}" ninja -j1 install-${2/@/_}
+}
+
+[ -n "$TDEDIR" ] || TDEDIR=/opt/trinity
+
+build() {
+   msg "Creating out-of-source build directory: ${srcdir}/build"
+   mkdir -p ${srcdir}/build
+   cd ${srcdir}/build
+
+   msg "Starting cmake..."
+   cmake ${srcdir}/${pkgname}-trinity-${pkgver} \
+     -GNinja \
+     -DCMAKE_VERBOSE_MAKEFILE=ON \
+     -DCMAKE_INSTALL_PREFIX=${TDEDIR} \
+     -DBUILD_ALL=ON
+
+   msg "Building - ${pkgname#*-}..."
+   ninja $NUMJOBS
+}
+
+package_tde-i18n() {
+  pkgdesc="All languages (all) internationalized (i18n) files for TDE"
+  provides=("${_mod}")
+  conflicts=("trinity-${_kdemod}" "kdemod3-${_kdemod}")
+  replaces=("trinity-${_mod}")
+  depends+=(${_pkglangs[@]})
+}
