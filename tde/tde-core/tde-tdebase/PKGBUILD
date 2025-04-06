@@ -1,0 +1,156 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Michael Manley <mmanley@nasutek.com>
+# Contributor: David C. Rankin <drankinatty at gmail dot com>
+
+_mod=tdebase
+_cat=core/
+_kdemod="${_mod/tde/kde}"
+
+pkgname="tde-${_mod}"
+pkgver=14.1.3
+pkgrel=1
+pkgdesc="Trinity Desktop Enviroment base components"
+arch=(i686 x86_64 aarch64 armv7h powerpc64le powerpc64 powerpc riscv64 espresso)
+url="https://scm.trinitydesktop.org/scm/git/${_mod}"
+license=('GPL')
+provides=("${_mod}")
+groups=('tde-core')
+depends=('htdig'
+         'libraw1394'
+         'libssh'
+         'libxss'
+         'libxtst'
+         'lm_sensors'
+         'openssl'
+         'tde-dbus-1-tqt'
+         'tde-tdelibs'
+         'ttf-dejavu'
+         'ttf-freefont'
+         'xorg-server'
+         'xorg-xinit')
+makedepends=('tde-cmake-trinity'
+         'libxkbfile'
+         'rpcsvc-proto'
+         'smbclient'
+         'systemd-sysvcompat'
+         'xorg-bdftopcf'
+         'xscreensaver')
+optdepends=('desktop-file-utils: Command line utilities for working with desktop entries'
+            'pciutils: PCI bus configuration space access library and tools'
+            'samba: file sharing over SMB'
+            'tde-extra: (meta-package) extra utilities and applications for TDE'
+            'tde-multimedia: (meta-package) multimedia applications, k3b, rosegarden, etc..'
+            'tde-complete: (meta-package) install all of TDE'
+            'tde-avahi-tqt: Trinity Avahi-TQt implementation'
+            'tde-libcaldav: A client library adding support for the CalDAV protocol'
+            'tde-libcarddav: A client library adding support for the CardDAV protocol'
+            'tde-tqca-tls: Trinity SSL/TLS plugin for TQt Cryptographic Architecture (TQCA)'
+            'xorg-fonts-75dpi: X.org 75dpi fonts collection'
+            'xscreensaver: Screen saver and locker for the X Window System')
+conflicts=("trinity-${_kdemod}" "kdemod3-${_kdemod}")
+replaces=("trinity-${_mod}")
+options=('staticlibs' 'libtool' '!strip')
+install="trinity-${_mod}.install"
+
+source=("https://mirror.ppa.trinitydesktop.org/trinity/releases/R${pkgver}/main/${_cat}${_mod}-trinity-${pkgver}.tar.xz"
+        'agent-shutdown.sh'
+        'agent-startup.sh'
+        'tdm-trinity'
+        'trinity.desktop'
+        'tdm.service'
+        'xsession.patch')
+
+md5sums=('669caef42686acd5d9fee779df5817f1'
+         '18e8d01124b19f7df2937c06e177bf7f'
+         'c963ef6e37c9051119972a58c67f05fb'
+         'bb4c25e560fa719e8e8f49ef80bd1c99'
+         '091f4e1045867bbbc15bf323731aae82'
+         'e0ddb96fc86bd081ce691744a68d2f9a'
+         'a761787a4d2f917389ced194552addca')
+
+[ -n "$TDEDIR" ] || TDEDIR=/opt/trinity
+
+build() {
+  msg "Creating out-of-source build directory: ${srcdir}/build"
+  mkdir -p ${srcdir}/build
+  cd ${srcdir}/build
+
+  msg "Starting cmake..."
+
+  cmake ${srcdir}/${pkgname#*-}-trinity-${pkgver}/ \
+    -GNinja \
+    -DCMAKE_INSTALL_PREFIX=${TDEDIR} \
+    -DSYSCONF_INSTALL_DIR=${TDEDIR}/etc \
+    -DWITH_SASL=ON \
+    -DWITH_LDAP=ON \
+    -DWITH_SAMBA=ON \
+    -DWITH_OPENEXR=ON \
+    -DWITH_XCOMPOSITE=ON \
+    -DWITH_XCURSOR=ON \
+    -DWITH_XFIXES=ON \
+    -DWITH_XRANDR=ON \
+    -DWITH_XRENDER=ON \
+    -DWITH_XTEST=ON \
+    -DWITH_OPENGL=ON \
+    -DWITH_XSCREENSAVER=ON \
+    -DWITH_LIBART=ON \
+    -DWITH_LIBRAW1394=ON \
+    -DWITH_PAM=ON \
+    -DWITH_XDMCP=ON \
+    -DWITH_XINERAMA=ON \
+    -DWITH_ARTS=ON \
+    -DWITH_I8K=ON \
+    -DWITH_SENSORS=ON \
+    -DWITH_TDEHWLIB=ON \
+    -DWITH_UPOWER=ON \
+    -DBUILD_ALL=ON \
+    -DWITH_GCC_VISIBILITY=ON \
+    -DKCHECKPASS_PAM_SERVICE=tde-checkpass \
+    -DTDM_PAM_SERVICE=tde \
+    -DTDESCREENSAVER_PAM_SERVICE=tde-screensaver
+
+  ninja $NUMJOBS
+}
+
+package() {
+  msg "Packaging - $pkgname-$pkgver"
+  cd $srcdir/build
+  DESTDIR="$pkgdir" ninja -j1 install
+
+  # install X11 session file /usr/share/xsessions (changed from /etc/X11 sessions)
+  install -d -m755 ${pkgdir}/usr/share/xsessions
+  install -m755 ${srcdir}/trinity.desktop ${pkgdir}/usr/share/xsessions/trinity.desktop
+
+  # update the Xsession file, this resolves problem with kdm dropping back
+  # to the login screen.
+
+  patch -N ${pkgdir}${TDEDIR}/share/config/tdm/Xsession < ${srcdir}/xsession.patch
+
+  ## we will need systemd service files created
+  install -D -m644 "${srcdir}"/tdm.service \
+    "${pkgdir}"/usr/lib/systemd/system/tdm.service
+
+  # create the starttrinity link
+  # do we need this? wouldn't be better to rename startkde script
+  # to starttrinity? (renamed to starttde) Create for compatibility sake.
+  ln -sf $TDEDIR/bin/starttde ${pkgdir}$TDEDIR/bin/starttrinity
+
+  # install mkpamserv script, so we can auto-generate pam.d configs in post_install()
+  install -D -m755 ${srcdir}/${pkgname#*-}-trinity-${pkgver}/mkpamserv ${pkgdir}${TDEDIR}/bin/mkpamserv
+
+  # add startup/shutdown agents for ssh and gpg-agent
+  install -m644 -D $srcdir/agent-startup.sh ${pkgdir}$TDEDIR/env/agent-startup.sh
+  install -m755 -D $srcdir/agent-shutdown.sh ${pkgdir}$TDEDIR/shutdown/agent-shutdown.sh
+
+  # fix kde icons for gnome by creating symlinks
+  mkdir -p ${pkgdir}$TDEDIR/share/icons/gnome/{128x128,64x64,32x32,16x16,48x48,22x22,scalable}
+  mkdir -p ${pkgdir}$TDEDIR/share/icons/crystalsvg/{128x128/apps,64x64/apps,32x32/apps,16x16/apps,48x48/apps,22x22/apps,scalable/apps}
+
+  cd ${pkgdir}$TDEDIR/share/icons/gnome/
+
+  for i in *; do
+    cd $i
+    ln -sf ../../crystalsvg/$i/apps/ apps
+    cd ..
+  done
+}
