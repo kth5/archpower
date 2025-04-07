@@ -1,0 +1,73 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer : Daniel Bermond <dbermond@archlinux.org>
+# Contributor: Eric Bélanger <eric@archlinux.org>
+
+pkgname=xine-lib
+pkgver=1.2.13
+pkgrel=12
+pkgdesc='Multimedia playback engine'
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+url='https://www.xine-project.org'
+license=('GPL-2.0-or-later' 'LGPL-2.0-or-later')
+depends=('ffmpeg' 'libjpeg-turbo' 'libpng' 'libx11' 'libxcb' 'libxext'
+         'libxinerama' 'libxv' 'libxvmc' 'zlib')
+optdepends=('libdvdnav: for dvd plugin'
+            'libdvdread: for spu and dxr3 plugins'
+            'vcdimager: for vcd plugin'
+            'glu: for opengl and vaapi plugins'
+            'sdl: for sdl plugin'
+            'wayland: for egl_wl plugin'
+            'aalib: for aalib plugin'
+            'a52dec: for a52 plugin'
+            'faad2: for faad plugin'
+            'flac: for flac plugin'
+            'libdca: for dts (dca) plugin'
+            'libmad: for mad (mp3) plugin'
+            'libmpcdec: for mpc (musepack) plugin'
+            'libmodplug: for modplug plugin'
+            'wavpack: for wavpack plugin'
+            'gdk-pixbuf2: for gdk_pixbuf plugin'
+            'imagemagick: for imagemagick plugin'
+            'libcaca: for caca plugin'
+            'libmng: for mng plugin'
+            'libnfs: for nfs plugin'
+            'libssh2: for ssh plugin'
+            'smbclient: for samba plugin')
+makedepends=('mercurial' 'mesa' 'libdvdnav' 'libdvdread' 'vcdimager' 'glu' 'sdl'
+             'wayland' 'aalib' 'a52dec' 'faad2' 'flac' 'libdca' 'libmad'
+             'libmodplug'  'libmpcdec' 'wavpack' 'gdk-pixbuf2' 'imagemagick'
+             'libcaca' 'libmng' 'libnfs' 'libnsl' 'smbclient')
+source=("hg+http://hg.code.sf.net/p/xine/xine-lib-${pkgver%.*}#tag=${pkgver}")
+sha256sums=('9d1e3951d945507e960aae670079036e468ac766321dfa481bc106d19ac777d9')
+
+prepare() {
+    # ffmpeg 7.0 support
+    hg --cwd "xine-lib-${pkgver%.*}" graft --rev 771f4ae27e582123ff3500444718fc8f96186d74
+    hg --cwd "xine-lib-${pkgver%.*}" graft --rev 0a786d63bbdb2d780a9231f6772e84e743c72014
+    hg --cwd "xine-lib-${pkgver%.*}" graft --rev 6f1000084f6084f49c95c202d12593e49916f58b
+    hg --cwd "xine-lib-${pkgver%.*}" graft --rev 1e7b184008860c8be2289c3cefd9dee57f06193a
+    hg --cwd "xine-lib-${pkgver%.*}" graft --rev 73b833e7fe356cd2d9490dda4ebc9bfe16fce958
+    
+    # libnfs 6.0 support
+    hg --cwd "xine-lib-${pkgver%.*}" graft --rev ea7071a960a1ca8719422e80e130994c8f549731
+    
+    autoreconf -fi "xine-lib-${pkgver%.*}"
+}
+
+build() {
+    # workaround for detecting xvmc with gcc 14
+    export CFLAGS+=' -Wno-implicit-function-declaration'
+    
+    cd "xine-lib-${pkgver%.*}"
+    ./configure \
+        --prefix='/usr' \
+        --enable-antialiasing \
+        --with-external-dvdnav \
+        --with-wavpack
+    sed -i 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+    make
+}
+
+package() {
+    make -C "xine-lib-${pkgver%.*}" DESTDIR="$pkgdir" install
+}
