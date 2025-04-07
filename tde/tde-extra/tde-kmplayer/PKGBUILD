@@ -1,0 +1,54 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Michael Manley <mmanley@nasutek.com>
+# Contributor: David C. Rankin <drankinatty at gmail dot com>
+
+_mod=kmplayer
+_cat=applications/multimedia/
+_kdemod="${_mod/tde/kde}"
+
+pkgname="tde-${_mod}"
+pkgver=14.1.3
+pkgrel=1
+pkgdesc="TDE KMPlayer"
+arch=(i686 x86_64 aarch64 armv7h powerpc64le powerpc64 powerpc riscv64 espresso)
+url="https://scm.trinitydesktop.org/scm/git/${_mod}"
+license=('GPL')
+groups=('tde-extra')
+depends=('tde-tdebase' 'tde-dbus-tqt' 'dbus-glib')
+makedepends=('tde-cmake-trinity' 'mplayer' 'xine-lib' 'nspr' 'gtk2')
+provides=("${_mod}")
+conflicts=("trinity-${_kdemod}" "kdemod3-${_kdemod}")
+replaces=("trinity-${_mod}")
+options=('staticlibs' 'libtool' '!strip')
+source=("https://mirror.ppa.trinitydesktop.org/trinity/releases/R${pkgver}/main/${_cat}${_mod}-trinity-${pkgver}.tar.xz")
+md5sums=('183cc2a5ca06ca97337b408509a9f7dc')
+install=''
+
+[ -n "$TDEDIR" ] || TDEDIR=/opt/trinity
+
+build() {
+   msg "Creating out-of-source build directory: ${srcdir}/build"
+   mkdir -p ${srcdir}/build
+   cd ${srcdir}/build
+
+   export PKG_CONFIG_PATH=${TDEDIR}/lib/pkgconfig:${PKG_CONFIG_PATH}
+
+   msg "Starting cmake..."
+   cmake ${srcdir}/${pkgname#*-}-trinity-${pkgver} \
+     -GNinja \
+     -DCMAKE_VERBOSE_MAKEFILE=ON \
+     -DCMAKE_INSTALL_PREFIX=${TDEDIR} \
+     -DBUILD_ALL=ON \
+     -DBUILD_KOFFICE_PLUGIN=OFF \
+     -DBUILD_KGSTPLAYER=OFF \
+     -DWITH_ALL_OPTIONS=ON
+
+   msg "Building - ${pkgname#*-}..."
+   ninja $NUMJOBS
+}
+
+package() {
+  msg "Packaging - $pkgname-$pkgver"
+  cd ${srcdir}/build
+  DESTDIR="${pkgdir}" ninja -j1 install
+}
