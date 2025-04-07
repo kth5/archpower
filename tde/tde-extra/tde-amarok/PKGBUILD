@@ -1,0 +1,73 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Contributor: e1z0 <justinas at eofnet dot lt>
+
+_mod=amarok
+_cat=applications/multimedia/
+_kdemod="${_mod/tde/kde}"
+
+pkgname="tde-${_mod}"
+pkgver=14.1.3
+pkgrel=1
+pkgdesc="TDE Amarok"
+arch=(i686 x86_64 aarch64 armv7h powerpc64le powerpc64 powerpc riscv64 espresso)
+url="https://scm.trinitydesktop.org/scm/git/${_mod}"
+license=('GPL')
+groups=('tde-extra')
+depends=('tde-tdebase' 'taglib' 'xine-lib')
+makedepends=('tde-cmake-trinity' 'tde-akode' 'ruby' 'libmtp' 'libvisual' 'sdl')
+provides=("${_mod}")
+conflicts=("trinity-${_mod}" "kdemod3-${_kdemod}")
+replaces=("trinity-${_mod}")
+options=('staticlibs' 'libtool' '!strip')
+source=("https://mirror.ppa.trinitydesktop.org/trinity/releases/R${pkgver}/main/${_cat}${_mod}-trinity-${pkgver}.tar.xz"
+        "${pkgname}-82-taglib-32bit.patch::https://mirror.git.trinitydesktop.org/gitea/TDE/amarok/pulls/82.patch")
+md5sums=('580add936b11632d66123a6fad9cd9a8'
+         '2662343a7eaae9275a6413a1c32277cd')
+install=''
+
+[ -n "$TDEDIR" ] || TDEDIR=/opt/trinity
+
+prepare() {
+  cd ${srcdir}/${pkgname#*-}-trinity-${pkgver}
+  patch -Np1 -i ${srcdir}/${pkgname}-82-taglib-32bit.patch
+}
+
+build() {
+   msg "Creating out-of-source build directory: ${srcdir}/build"
+   mkdir -p ${srcdir}/build
+   cd ${srcdir}/build
+
+   export PKG_CONFIG_PATH=${TDEDIR}/lib/pkgconfig:${PKG_CONFIG_PATH}
+
+   case "${CARCH}" in
+     powerpc)
+       export LDFLAGS+=' -ltag'
+     ;;
+   esac
+
+   msg "Starting cmake..."
+   cmake ${srcdir}/${pkgname#*-}-trinity-${pkgver} \
+     -GNinja \
+     -DCMAKE_VERBOSE_MAKEFILE=ON \
+     -DCMAKE_INSTALL_PREFIX=${TDEDIR} \
+     -DBUILD_ALL=ON \
+     -DWITH_ALL_OPTIONS=ON \
+     -DWITH_YAUAP=OFF \
+     -DWITH_NJB=OFF \
+     -DWITH_IFP=OFF \
+     -DWITH_IPOD=OFF \
+     -DWITH_EMBEDDED_SQLITE=ON \
+     -DWITH_SYSTEM_SQLITE=OFF \
+     -DWITH_MYSQL=OFF \
+     -DWITH_POSTGRESQL=OFF \
+     -DWITH_AMAZON=OFF
+
+   msg "Building - ${pkgname#*-}..."
+   ninja $NUMJOBS
+}
+
+package() {
+  msg "Packaging - $pkgname-$pkgver"
+  cd ${srcdir}/build
+  DESTDIR="${pkgdir}" ninja -j1 install
+}
