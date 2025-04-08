@@ -1,0 +1,61 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Michael Manley <mmanley@nasutek.com>
+# Contributor: David C. Rankin <drankinatty at gmail dot com>
+
+_mod=universal-indent-gui-tqt
+_cat=applications/development/
+_kdemod="${_mod/tde/kde}"
+
+pkgname="tde-${_mod}"
+pkgver=14.1.3
+pkgrel=1
+pkgdesc="GUI frontend for several code beautifiers"
+arch=(i686 x86_64 aarch64 armv7h powerpc64le powerpc64 powerpc riscv64 espresso)
+url="https://scm.trinitydesktop.org/scm/git/${_mod}"
+license=('GPL')
+provides=("${_mod}")
+groups=('tde-complete')
+depends=(
+  'tde-tdelibs'
+  'tde-tqscintilla'
+)
+makedepends=(
+  'tde-cmake-trinity'
+)
+optdepends=()
+conflicts=("trinity-${_mod}" "kdemod3-${_kdemod}")
+replaces=("trinity-${_mod}")
+options=('staticlibs' 'libtool' '!strip')
+install=
+
+source=("https://mirror.ppa.trinitydesktop.org/trinity/releases/R${pkgver}/main/${_cat}${_mod}-trinity-${pkgver}.tar.xz")
+md5sums=('bfbe799ede38819d1887a286ab249d9b')
+
+[ -n "$TDEDIR" ] || TDEDIR=/opt/trinity
+[ -n "$TQTDIR" ] || TQTDIR=${TDEDIR}/tqt3
+
+build() {
+  msg "Creating out-of-source build directory: ${srcdir}/build"
+  mkdir -p "$srcdir/build"
+  cd "$srcdir/build"
+
+  export PKG_CONFIG_PATH=${TQTDIR}/lib/pkgconfig:${PKG_CONFIG_PATH}
+
+  msg "Starting cmake..."
+  cmake ${srcdir}/${_mod}-trinity-${pkgver} \
+    -GNinja \
+    -DCMAKE_VERBOSE_MAKEFILE=ON \
+    -DCMAKE_INSTALL_PREFIX=${TDEDIR} \
+    -DSYSCONF_INSTALL_DIR=${TDEDIR}/etc \
+    -DBUILD_ALL=ON \
+    -DWITH_ALL_OPTIONS=ON
+
+  msg "Building - ${pkgname}..."
+  ninja $NUMJOBS
+}
+
+package() {
+  msg "Packaging - ${pkgname}-${pkgver}"
+  cd "$srcdir/build"
+  DESTDIR="$pkgdir" ninja -j1 install
+}
