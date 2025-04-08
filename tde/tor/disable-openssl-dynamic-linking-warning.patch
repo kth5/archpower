@@ -1,0 +1,58 @@
+From b0b943a1613e2f9b421a663a3bf84fb4bbdbadc5 Mon Sep 17 00:00:00 2001
+From: kpcyrd <git@rxv.cc>
+
+I did some investigation and the warning was [introduced in 2012][0] with no
+documented reason besides them "also doing it for libevent".
+
+[0]: https://gitlab.torproject.org/tpo/core/tor/-/commit/7607ad2becc9634f01ca6dd99a0475ecf276ac93
+
+OpenSSL has a [Policy on API compatibility in minor releases][1] saying:
+
+[1]: https://www.openssl.org/policies/technical/api-compat.html
+
+> Only API additions are allowed in minor releases.
+
+Minor releases are defined as 3.X.0. There's another paragraph referring to the
+ABI that might be slightly confusing to read:
+
+> Although the changes as listed above might be regarded as ABI compatible,
+> they cause various possible breakage when building applications depending on
+> these APIs and thus they are not allowed in minor releases.
+
+This means, on top of ABI incompatible changes being absolutely not allowed,
+they even restrict changes to public interfaces that only exist for programmers
+and compilers.
+
+diff --git a/src/lib/crypt_ops/crypto_openssl_mgt.c b/src/lib/crypt_ops/crypto_openssl_mgt.c
+index ca12a82518..5d6d15c960 100644
+--- a/src/lib/crypt_ops/crypto_openssl_mgt.c
++++ b/src/lib/crypt_ops/crypto_openssl_mgt.c
+@@ -227,28 +227,6 @@ crypto_openssl_early_init(void)
+ 
+     setup_openssl_threading();
+ 
+-    unsigned long version_num = tor_OpenSSL_version_num();
+-    const char *version_str = crypto_openssl_get_version_str();
+-    if (version_num == OPENSSL_VERSION_NUMBER &&
+-        !strcmp(version_str, OPENSSL_VERSION_TEXT)) {
+-      log_info(LD_CRYPTO, "OpenSSL version matches version from headers "
+-                 "(%lx: %s).", version_num, version_str);
+-    } else if ((version_num & 0xffff0000) ==
+-               (OPENSSL_VERSION_NUMBER & 0xffff0000)) {
+-      log_notice(LD_CRYPTO,
+-               "We compiled with OpenSSL %lx: %s and we "
+-               "are running with OpenSSL %lx: %s. "
+-               "These two versions should be binary compatible.",
+-               (unsigned long)OPENSSL_VERSION_NUMBER, OPENSSL_VERSION_TEXT,
+-               version_num, version_str);
+-    } else {
+-      log_warn(LD_CRYPTO, "OpenSSL version from headers does not match the "
+-               "version we're running with. If you get weird crashes, that "
+-               "might be why. (Compiled with %lx: %s; running with %lx: %s).",
+-               (unsigned long)OPENSSL_VERSION_NUMBER, OPENSSL_VERSION_TEXT,
+-               version_num, version_str);
+-    }
+-
+     crypto_force_rand_ssleay();
+ }
+ 
