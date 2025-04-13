@@ -1,25 +1,25 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Bruno Pagani <archange@archlinux.org>
 # Contributor: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=nodejs-lts-hydrogen
-pkgver=18.20.5
+pkgver=18.20.7
 pkgrel=1
 pkgdesc="Evented I/O for V8 javascript (LTS release: Hydrogen)"
-arch=(x86_64 powerpc64le powerpc64 powerpc)
+arch=(x86_64 powerpc64le powerpc64)
 url="https://nodejs.org/"
 license=(MIT)
 # maybe revert back to openssl-1.1 or internal openssl
 # https://github.com/nodejs/node/issues/47852
 depends=(openssl zlib icu libuv c-ares brotli libnghttp2) # http-parser v8)
-makedepends=(python311 python-setuptools procps-ng)
+makedepends=(python python-setuptools procps-ng)
 optdepends=('npm: nodejs package manager')
 options=(!lto)
 provides=("nodejs=$pkgver")
 conflicts=(nodejs)
-source=(${url}dist/v${pkgver}/node-v${pkgver}.tar.xz)
+source=(${url}dist/v${pkgver}/node-v${pkgver}.tar.xz icu-76.patch)
 # https://nodejs.org/download/release/latest-hydrogen/SHASUMS256.txt.asc
-sha256sums=('76037b9bad0ab9396349282dbfcec1b872ff7bd8c8d698853bebd982940858bf')
+sha256sums=('9a89659fad80c1b6da33d29f43f5865483ccb1952ddad434ee22f8193607277f'
+            'c224e1a54e5d0c9164cc9fb4f32f9f25d6bb165f8e60775be53335e010a10505')
 validpgpkeys=(C4F0DFFF4E8C1A8236409D08E73BC641CC11F4C8  # Myles Borins <mylesborins@google.com>
               77984A986EBC2AA786BC0F66B01FBB92821C587A  # Gibson Fahnestock <gibfahn@gmail.com>
               B9AE9905FFD7803F25714661B63B535A4C206CA9  # Evan Lucas <evanlucas@me.com>
@@ -30,17 +30,21 @@ validpgpkeys=(C4F0DFFF4E8C1A8236409D08E73BC641CC11F4C8  # Myles Borins <mylesbor
               74F12602B6F1C4E913FAA37AD3A89613643B6201  # Danielle Adams <adamzdanielle@gmail.com>
               61FC681DFB92A079F1685E77973F295594EC4689) # Juan José Arboleda <soyjuanarbol@gmail.com>
 
+prepare() {
+  cd node-v${pkgver}
+  patch -Np1 -i ${srcdir}/icu-76.patch
+}
+
 build() {
   cd node-v${pkgver}
 
   case "${CARCH}" in
-     powerpc) myarch="ppc"; export CXXFLAGS+=' -Wno-deprecated-declarations';;
-     powerpc64*) myarch="ppc64";;
-     *) myarch="${CARCH}";;
+    powerpc) myarch="ppc"; export CXXFLAGS+=' -Wno-deprecated-declarations';;
+    powerpc64*) myarch="ppc64";;
+    *) myarch="${CARCH}";;
   esac
 
   ./configure \
-    --dest-cpu=${myarch} \
     --prefix=/usr \
     --with-intl=system-icu \
     --without-npm \
@@ -50,7 +54,8 @@ build() {
     --experimental-http-parser \
     --shared-brotli \
     --shared-cares \
-    --shared-nghttp2
+    --shared-nghttp2 \
+    --dest-cpu=${myarch}
     # --shared-v8
     # --shared-http-parser
 
