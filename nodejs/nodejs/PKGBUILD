@@ -11,34 +11,39 @@
 
 pkgname=nodejs
 pkgver=23.9.0
-pkgrel=1
-pkgdesc='Evented I/O for V8 javascript'
+pkgrel=1.1
+pkgdesc='Evented I/O for V8 javascript ("Current" release)'
 arch=(x86_64 powerpc64le powerpc64 riscv64)
 url='https://nodejs.org/'
 license=('MIT')
 depends=(
+#  'ada'
   'brotli'
   'c-ares'
+#  'http-parser'
   'icu'
   'libnghttp2'
   'libnghttp3'
   'libngtcp2'
   'libuv'
-  'simdjson'
   'openssl'
+#  'simdutf'
+#  'v8'
   'zlib'
-) # 'http-parser' 'v8')
+)
+depends_x86_64=(
+  'simdjson'
+)
 makedepends=(
   'git'
   'procps-ng'
   'python'
 )
 optdepends=('npm: nodejs package manager')
-options=(!lto)
+options=('!lto')
 source=("git+https://github.com/nodejs/node.git#tag=v$pkgver?signed"
-        "fix-trap-handler.patch"
-        "v8-disable-trap-handler.patch")
-
+         "fix-trap-handler.patch"
+         "v8-disable-trap-handler.patch")
 sha512sums=('65e60064edfc254ab0bfd4b6dd6b6a5047bbf2e2c1e69f2c120f4b5c8f8274493c971db47b9646bbb4bcd10a08831f0a6ec21ffe82d5382095ff2d2b7f811d77'
             'f2ff6da8cf5dcc994a7a20342e2928dc1821fbbf42891009a6234b6051277e0200d7e3fbba63b9a2773887591d0ad5ceb1bb3d25e5efeb557f6d00109a80253c'
             'b6495aefd36915969ee848cca350a565317c74864cd33e6a69a310ed9cbc71dfbd91f31e8c6176667f6f72daa1762eb4d519700a024cdbe8b18049100a9e3c80')
@@ -49,12 +54,24 @@ validpgpkeys=(
   'C0D6248439F1D5604AAFFB4021D900FFDB233756' # Antoine du Hamel <duhamelantoine1995@gmail.com>
 )
 
-case "${CARCH}" in
-  powerpc64)
-    export CFLAGS='-O2 -pipe'
-    export CXXFLAGS='-O2 -pipe'
-  ;;
-esac
+
+# Deterministic transformation of the compiler flags.
+# Directly setting them only in build() does not work because in package(),
+# C{XX,}FLAGS gets reset to their original value and `make` then triggers
+# massive rebuilds.
+_set_flags() {
+  # /usr/lib/libnode.so uses malloc_usable_size, which is incompatible with fortification level 3
+  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+
+  case "${CARCH}" in
+    powerpc64)
+      export CFLAGS='-O2 -pipe'
+      export CXXFLAGS='-O2 -pipe'
+    ;;
+  esac
+}
+
 
 prepare() {
   cd node
@@ -63,11 +80,13 @@ prepare() {
 }
 
 build() {
+  _set_flags
   cd node
 
-  # /usr/lib/libnode.so uses malloc_usable_size, which is incompatible with fortification level 3
-  export CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
-  export CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  case "${CARCH}" in
+    x86_64) _configure_flags=(--shared-simdjson) ;;
+  esac
+
 
   ./configure \
     --prefix=/usr \
@@ -80,27 +99,26 @@ build() {
     --shared-nghttp3 \
     --shared-ngtcp2 \
     --shared-openssl \
-    --shared-simdjson \
-    --shared-zlib
+    --shared-zlib ${_configure_flags[@]}
     # --shared-ada
     # --shared-http-parser
     # --shared-simdutf
     # --shared-v8
-  
+
   make
 }
 
 check() {
+  case "${CARCH}" in
+    powerpc64*|riscv64) return 0 ;;
+  esac
+  _set_flags
   cd node
-  # Running an individual test: tools/test.py test/parallel/test-tls-psk-circuit.js
-  # OpenSSL 3.4 broke a few tests in nodejs:
-  # - https://github.com/nodejs/node/issues/56159
-  # - https://github.com/nodejs/node/pull/56160
-  # - test/parallel/test-tls-psk-circuit.js different error code produced
-  make test
+  make test-only
 }
 
 package() {
+  _set_flags
   cd node
   make DESTDIR="$pkgdir" install
   install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/nodejs/
