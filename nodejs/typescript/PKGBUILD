@@ -3,9 +3,11 @@
 # Contributor: Felix Yan <felixonmars@archlinux.org>
 # Contributor: Bruno Galeotti <bgaleotti at gmail dot com>
 
+apb_build_hint=riscv64
+
 _name=TypeScript
 pkgname=typescript
-pkgver=5.7.2
+pkgver=5.8.2
 pkgrel=1
 pkgdesc='JavaScript with syntax for types'
 arch=(any)
@@ -17,11 +19,30 @@ makedepends=(
   npm
   rsync
 )
-source=("git+https://github.com/microsoft/$_name.git#tag=v$pkgver")
-b2sums=('c0361e8140820040a5a10adc43dbd2aaf29bff8a1da04993a33c967b11b9ac841b7c3ff2d24764ffff2316ab8f18f66e563fe20f6f70ae7edf86b75b8d4d8938')
+source=("git+https://github.com/microsoft/$_name.git#tag=v$pkgver"
+        0001-Remove-dprint.patch
+        0002-Increase-test-timeout.patch
+        0003-Remove-typescript.d.ts-baseline-check.patch)
+b2sums=('4dca488b389c44058ff7745427817b1f60f41e2fe11363d88f9a14685d3667ea5ee18b7517a2e066c402cc97ff019f422a4176cdbb93600a0f465d9cb874ecbc'
+        'ccdf17199b8e5ea2b0c16750e73666609712d2bb6df2d662a4324e1ce157ec5125a544b2b72ee2532db9feb89df30c046c74fdf3f5e618b95847e0bb3e9aef8c'
+        '1d42d2d94803fcec7665b98a70f502cdd90d0bb89aeb52e516bb1615c6f3d24deb79d05b6821908be408dbf63043ef59c8a34ec1426d80898d2f4f14cd985a13'
+        '8b4542a9bc35bc7927a757ca6653b4a1640424424d94a2fc32bee67984269d7f128550063998211bda3602d3fb9afebee4a1add48dd98d678e384f9e6f4606e6')
 
 prepare() {
   cd $_name
+  # Remove dprint from dependencies and disable formatting when building code
+  # dprint itself requires prebuilt binary available, and some of its plugins uses prebuilts as well
+  # Building dprint from source from NPM package is upstreamed to https://github.com/dprint/dprint/pull/820
+  patch -Np1 -i ../0001-Remove-dprint.patch
+  sed -i -e 's/dprint fmt/:/' -e '/dprint/ d' package.json
+
+  # Increase test timeout from 40s to 4000s
+  patch -Np1 -i ../0002-Increase-test-timeout.patch
+
+  # Disable baseline check for typescript.d.ts
+  # This should not affect functionality since the diffs are solely code format variations
+  patch -Np1 -i ../0003-Remove-typescript.d.ts-baseline-check.patch
+
   npm ci
 }
 
