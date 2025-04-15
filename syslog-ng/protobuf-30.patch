@@ -1,0 +1,137 @@
+From 4d2f490807560c11ec62067718b2acf01cac49ef Mon Sep 17 00:00:00 2001
+From: Christian Heusel <christian@heusel.eu>
+Date: Sat, 15 Mar 2025 14:02:29 +0100
+Subject: [PATCH] otel: Implement protobuf 30.0 compatiblity
+
+Protobuf 30.0 (and above) has exchanged a few of their interface from
+`std::string` to `std::string_view`.
+
+Link: https://protobuf.dev/support/migration/#v30
+Signed-off-by: Christian Heusel <christian@heusel.eu>
+---
+ modules/grpc/otel/filterx/object-otel-array.cpp  | 4 ++--
+ modules/grpc/otel/filterx/object-otel-kvlist.cpp | 4 ++--
+ modules/grpc/otel/filterx/otel-field.cpp         | 6 +++---
+ modules/grpc/otel/filterx/protobuf-field.cpp     | 8 ++++----
+ modules/grpc/otel/filterx/protobuf-field.hpp     | 2 +-
+ 5 files changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/modules/grpc/otel/filterx/object-otel-array.cpp b/modules/grpc/otel/filterx/object-otel-array.cpp
+index ab2b8de7b24..41cb2d55760 100644
+--- a/modules/grpc/otel/filterx/object-otel-array.cpp
++++ b/modules/grpc/otel/filterx/object-otel-array.cpp
+@@ -355,8 +355,8 @@ OtelArrayField::FilterXObjectSetter(google::protobuf::Message *message, ProtoRef
+         return _set_array_field_from_list(message, reflectors, object, assoc_object);
+ 
+       msg_error("otel-array: Failed to convert field, type is unsupported",
+-                evt_tag_str("field", reflectors.fieldDescriptor->name().c_str()),
+-                evt_tag_str("expected_type", reflectors.fieldDescriptor->type_name()),
++                evt_tag_str("field", reflectors.fieldDescriptor->name().data()),
++                evt_tag_str("expected_type", reflectors.fieldDescriptor->type_name().data()),
+                 evt_tag_str("type", object->type->name));
+       return false;
+     }
+diff --git a/modules/grpc/otel/filterx/object-otel-kvlist.cpp b/modules/grpc/otel/filterx/object-otel-kvlist.cpp
+index 20e02d59f79..80f76b48f4a 100644
+--- a/modules/grpc/otel/filterx/object-otel-kvlist.cpp
++++ b/modules/grpc/otel/filterx/object-otel-kvlist.cpp
+@@ -483,8 +483,8 @@ OtelKVListField::FilterXObjectSetter(google::protobuf::Message *message, ProtoRe
+         return _set_kvlist_field_from_dict(message, reflectors, object, assoc_object);
+ 
+       msg_error("otel-kvlist: Failed to convert field, type is unsupported",
+-                evt_tag_str("field", reflectors.fieldDescriptor->name().c_str()),
+-                evt_tag_str("expected_type", reflectors.fieldDescriptor->type_name()),
++                evt_tag_str("field", reflectors.fieldDescriptor->name().data()),
++                evt_tag_str("expected_type", reflectors.fieldDescriptor->type_name().data()),
+                 evt_tag_str("type", object->type->name));
+       return false;
+     }
+diff --git a/modules/grpc/otel/filterx/otel-field.cpp b/modules/grpc/otel/filterx/otel-field.cpp
+index 947bb0538ac..45db957e3d2 100644
+--- a/modules/grpc/otel/filterx/otel-field.cpp
++++ b/modules/grpc/otel/filterx/otel-field.cpp
+@@ -100,7 +100,7 @@ AnyField::FilterXObjectGetter(Message *message, ProtoReflectors reflectors)
+     }
+ 
+   msg_error("otel-field: Unexpected protobuf field type",
+-            evt_tag_str("name", reflectors.fieldDescriptor->name().c_str()),
++            evt_tag_str("name", reflectors.fieldDescriptor->name().data()),
+             evt_tag_int("type", reflectors.fieldType));
+   return nullptr;
+ }
+@@ -258,7 +258,7 @@ class OtelDatetimeConverter : public ProtobufField
+         return true;
+       }
+ 
+-    return protobuf_converter_by_type(reflectors.fieldDescriptor->type())->Set(message, reflectors.fieldDescriptor->name(),
++    return protobuf_converter_by_type(reflectors.fieldDescriptor->type())->Set(message, std::string(reflectors.fieldDescriptor->name()),
+            object, assoc_object);
+   }
+ };
+@@ -313,7 +313,7 @@ ProtobufField *syslogng::grpc::otel::otel_converter_by_type(FieldDescriptor::Typ
+ 
+ ProtobufField *syslogng::grpc::otel::otel_converter_by_field_descriptor(const FieldDescriptor *fd)
+ {
+-  const std::string &fieldName = fd->name();
++  const std::string_view &fieldName = fd->name();
+   if (fieldName.compare("time_unix_nano") == 0 ||
+       fieldName.compare("observed_time_unix_nano") == 0)
+     {
+diff --git a/modules/grpc/otel/filterx/protobuf-field.cpp b/modules/grpc/otel/filterx/protobuf-field.cpp
+index e6bbcd54d98..15b6b4685bf 100644
+--- a/modules/grpc/otel/filterx/protobuf-field.cpp
++++ b/modules/grpc/otel/filterx/protobuf-field.cpp
+@@ -43,8 +43,8 @@ void
+ log_type_error(ProtoReflectors reflectors, const char *type)
+ {
+   msg_error("protobuf-field: Failed to convert field, type is unsupported",
+-            evt_tag_str("field", reflectors.fieldDescriptor->name().c_str()),
+-            evt_tag_str("expected_type", reflectors.fieldDescriptor->type_name()),
++            evt_tag_str("field", reflectors.fieldDescriptor->name().data()),
++            evt_tag_str("expected_type", reflectors.fieldDescriptor->type_name().data()),
+             evt_tag_str("type", type));
+ }
+ 
+@@ -160,7 +160,7 @@ class u64Field : public ProtobufField
+     if (val > INT64_MAX)
+       {
+         msg_error("protobuf-field: exceeding FilterX number value range",
+-                  evt_tag_str("field", reflectors.fieldDescriptor->name().c_str()),
++                  evt_tag_str("field", reflectors.fieldDescriptor->name().data()),
+                   evt_tag_long("range_min", INT64_MIN),
+                   evt_tag_long("range_max", INT64_MAX),
+                   evt_tag_printf("current", "%" G_GUINT64_FORMAT, val));
+@@ -219,7 +219,7 @@ class StringField : public ProtobufField
+         if (!json_literal)
+           {
+             msg_error("protobuf-field: json marshal error",
+-                      evt_tag_str("field", reflectors.fieldDescriptor->name().c_str()));
++                      evt_tag_str("field", reflectors.fieldDescriptor->name().data()));
+             return false;
+           }
+         reflectors.reflection->SetString(message, reflectors.fieldDescriptor, json_literal);
+diff --git a/modules/grpc/otel/filterx/protobuf-field.hpp b/modules/grpc/otel/filterx/protobuf-field.hpp
+index 7bc8c5716e2..70956424550 100644
+--- a/modules/grpc/otel/filterx/protobuf-field.hpp
++++ b/modules/grpc/otel/filterx/protobuf-field.hpp
+@@ -49,7 +49,7 @@ struct ProtoReflectors
+     this->descriptor = message.GetDescriptor();
+     if (!this->reflection || !this->descriptor)
+       {
+-        std::string error_msg = "unable to access reflector for protobuf message: " + message.GetTypeName();
++        std::string error_msg = "unable to access reflector for protobuf message: " + std::string(message.GetTypeName());
+         throw std::invalid_argument(error_msg);
+       }
+     this->fieldDescriptor = this->descriptor->FindFieldByName(fieldName);
+diff -up modules/grpc/bigquery/bigquery-dest.cpp\~ modules/grpc/bigquery/bigquery-dest.cpp
+--- a/modules/grpc/bigquery/bigquery-dest.cpp
++++ b/modules/grpc/bigquery/bigquery-dest.cpp
+@@ -316,7 +316,7 @@ DestinationDriver::load_protobuf_schema(
+ 
+       LogTemplate *value = (LogTemplate *) current_value->data;
+ 
+-      this->fields.push_back(Field{field->name(), (google::protobuf::FieldDescriptorProto::Type) field->type(), value});
++      this->fields.push_back(Field{std::string(field->name()), (google::protobuf::FieldDescriptorProto::Type) field->type(), value});
+       this->fields[i].field_desc = field;
+ 
+       current_value = current_value->next;
