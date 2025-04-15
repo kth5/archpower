@@ -4,28 +4,45 @@
 # Maintainer: Daniel M. Capella <polyzen@archlinux.org>
 
 pkgname=node-gyp
-pkgver=11.0.0
-pkgrel=1
+pkgver=11.1.0
+pkgrel=3
 pkgdesc='Node.js native addon build tool'
 arch=(any)
 url='https://github.com/nodejs/node-gyp'
 license=('MIT')
 depends=('nodejs' 'nodejs-nopt' 'semver')
-makedepends=('npm')
+makedepends=('git' 'jq' 'npm')
+checkdepends=('python')
 optdepends=('gcc: to build C++ modules'
             'make: to build C++ modules'
             'python: to build C++ modules')
-source=("https://registry.npmjs.org/$pkgname/-/$pkgname-$pkgver.tgz")
-noextract=("$pkgname-$pkgver.tgz")
-sha512sums=('cd04bef4c4d37823206341777163f2272445024565b50d6e5e6fb15eefc44ba285802e82ce8d5279bf6f416db0371497d8eac34e2a8bd288ed905c41434ca923')
+options=('!emptydirs')
+source=("git+$url.git#tag=v$pkgver")
+b2sums=('05b8b2de4c7bd190662371d28efc2ceab1ab44f24d55cb886ff84ec504afafc418fef5d0c8a187223c2bd14bd0534cb49883375ef08f9542d19a7b7cf630447e')
+
+prepare() {
+  cd $pkgname
+  npm install
+}
+
+check() {
+  cd $pkgname
+  npm test
+}
 
 package() {
-  npm install -g --prefix "$pkgdir"/usr $pkgname-$pkgver.tgz
+  local mod_dir=/usr/lib/node_modules/$pkgname
+
+  install -d "$pkgdir"/{usr/{bin,share/licenses/$pkgname},$mod_dir}
+  ln -s $mod_dir/bin/$pkgname.js "$pkgdir"/usr/bin/$pkgname
+  ln -s $mod_dir/LICENSE "$pkgdir"/usr/share/licenses/$pkgname
+
+  cd $pkgname
+  npm prune --omit=dev
+
+  mapfile -t mod_files < <(npm pack --dry-run --json | jq -r .[].files.[].path)
+  cp --parents -a "${mod_files[@]}" node_modules "$pkgdir"/$mod_dir
 
   # Experimental dedup
-  rm -r "$pkgdir"/usr/lib/node_modules/$pkgname/node_modules/{,.bin/}nopt
-  rm -r "$pkgdir"/usr/lib/node_modules/$pkgname/node_modules/{,.bin/}semver
-
-  install -d "$pkgdir"/usr/share/licenses/$pkgname
-  ln -s ../../../lib/node_modules/$pkgname/LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  rm -r "$pkgdir"/$mod_dir/node_modules/{,.bin/}{nopt,semver}
 }
