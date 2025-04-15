@@ -3,21 +3,41 @@
 # Maintainer: Daniel M. Capella <polyzen@archlinux.org>
 
 pkgname=semver
-pkgver=7.6.3
+pkgver=7.7.1
 pkgrel=1
 pkgdesc='The semantic version parser used by npm'
 arch=(any)
 url='https://github.com/npm/node-semver'
 license=('ISC')
 depends=('nodejs')
-makedepends=('npm')
-source=(https://registry.npmjs.org/$pkgname/-/$pkgname-$pkgver.tgz)
-noextract=($pkgname-$pkgver.tgz)
-sha512sums=('a157a43f570ab48f824c3bc759815470cb6c2bfd34c260047f2a8a7cd740466f2ed7035585281a5fb03c77852e225508e5ef38884c0e86ced93d8466cd4f54e8')
+makedepends=(
+  'git'
+  'jq'
+  'npm'
+)
+source=("git+$url.git#tag=v$pkgver")
+b2sums=('43c7c7fb81d8941ec8a9c3bd89869ca8be47b64d7c7a897e719350b790a18dd2ae877236ea4c40c00afde398ce3c5be72ccf2cb6f20e563707a686ee1ae0c217')
+
+prepare() {
+  cd node-$pkgname
+  npm install
+}
+
+check() {
+  cd node-$pkgname
+  npm test --ignore-scripts
+}
 
 package() {
-  npm install -g --prefix "$pkgdir"/usr $pkgname-$pkgver.tgz
+  local mod_dir=/usr/lib/node_modules/$pkgname
 
-  install -d "$pkgdir"/usr/share/licenses/$pkgname
-  ln -s ../../../lib/node_modules/$pkgname/LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  install -d "$pkgdir"/{usr/{bin,share/{doc,licenses}/$pkgname},$mod_dir}
+  ln -s $mod_dir/bin/$pkgname.js "$pkgdir"/usr/bin/$pkgname
+  ln -s $mod_dir/README.md "$pkgdir"/usr/share/doc/$pkgname
+  ln -s $mod_dir/LICENSE "$pkgdir"/usr/share/licenses/$pkgname
+
+  cd node-$pkgname
+  # lib/ is not currently packaged
+  readarray -t mod_files < <(jq -r '.files[]' package.json | sed '/lib\//d')
+  cp -r "${mod_files[@]}" LICENSE README.md package.json "$pkgdir"/$mod_dir
 }
