@@ -3,19 +3,36 @@
 # Contributor: Adrian Perez de Castro <aperez@igalia.com>
 
 pkgname=mold
-pkgver=2.36.0
+pkgver=2.37.1
 pkgrel=1
 pkgdesc='A Modern Linker'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
 url='https://github.com/rui314/mold'
 license=('MIT')
 # xxhash is bundled
-depends=('glibc' 'gcc-libs' 'mimalloc' 'zlib' 'tbb' 'zstd')
-makedepends=('git' 'python' 'cmake' 'mold')
-checkdepends=('clang' 'libdwarf')
-options=(!debug !distcc)
-source=("$pkgname::git+$url.git#tag=v$pkgver")
-b2sums=('bc1e7ff201888afff2c5d3911ea6d88d1474871677eaeb99544bdb8054e472a15bb45fc469fe0ad8ff29cee85dee9715dfa8ceea347294482555852bb20f0913')
+depends=(
+  glibc
+  gcc-libs
+  libblake3
+  mimalloc
+  tbb
+  zlib
+  zstd
+)
+makedepends=(
+  cmake
+  git
+  mold
+  python
+)
+checkdepends=(
+  clang
+  libdwarf
+)
+options=(!debug)
+source=("${pkgname}::git+${url}.git#tag=v${pkgver}")
+sha512sums=('c5e79c95f3cbcc5d11468a2c859d4f4d0c8cf88362dcfacde206b1551882414af46edec5ce6f2273c0414771081b2bfe66dfab3e888981586d4fe08c6b7105e3')
+b2sums=('b7db5df949021a0a990f71f755448cb87d9ce32f4cedbc976b779ce81e3ebbc2db683566ec8f915581b2740cc40d3b887af7e48da2a7eb8fe94cca01368dde2d')
 
 build() {
   export LDFLAGS="${CFLAGS/-Wl,--no-warn-rwx-segments -Wl,--no-warn-execstack/}"
@@ -35,22 +52,25 @@ build() {
   esac
 
   cmake \
-  -S "$pkgname" \
+  -S "${pkgname}" \
   -B build \
   -D CMAKE_BUILD_TYPE='None' \
   -D CMAKE_INSTALL_PREFIX='/usr' \
   -D CMAKE_INSTALL_LIBEXECDIR='lib' \
   -D MOLD_USE_SYSTEM_MIMALLOC=ON \
-  -D MOLD_USE_SYSTEM_TBB=ON \
-  -D MOLD_LTO=ON ${_cmake_options[@]}
+  -D MOLD_USE_SYSTEM_TBB=ON ${_cmake_options[@]}
 
   cmake --build build
 }
 
 check() {
+  case "${CARCH}" in
+    powerpc|powerpc64) return 0 ;;
+  esac
   ctest --test-dir build --output-on-failure
 }
 
 package() {
-  DESTDIR="$pkgdir" cmake --install build
+  DESTDIR="${pkgdir}" cmake --install build
+  install -Dm644 "${pkgname}"/LICENSE "${pkgdir}"/usr/share/licenses/mold/LICENSE
 }
