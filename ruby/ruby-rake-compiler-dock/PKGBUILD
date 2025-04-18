@@ -1,0 +1,99 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Andreas 'Segaja' Schleifer <segaja at archlinux dot org>
+
+_gemname='rake-compiler-dock'
+pkgname="ruby-${_gemname}"
+pkgver=1.9.1
+pkgrel=2
+pkgdesc='Easy to use and reliable cross compiler environment for building Windows, Linux, Mac and JRuby binary gems'
+arch=('any')
+url='https://github.com/rake-compiler/rake-compiler-dock'
+license=('MIT')
+options=('!emptydirs')
+depends=(
+  ruby
+)
+makedepends=(
+  ruby-bundler
+  ruby-rake
+  ruby-test-unit
+)
+checkdepends=(
+  ruby-erb
+)
+source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('f8bde29484d1f0530d0d53f42f0f06f3644c666bf7369b4ae70c15e5e137994d721dc0688af98f31e04446bef7894f2761ed75b3128f351ce9e151d7b78f5e74')
+b2sums=('5aff7c76668751b2dcd6bc0e0f189f3a831440fe6267b7b09687573807ac5b0848b4d31df1f706e030656fd9076f5f85e1544544720f0ac190bbe32ca7157d64')
+
+prepare() {
+  cd "${_gemname}-${pkgver}"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
+
+  # we built based on a tar archive, not a git repo
+  sed --in-place 's/git ls-files -z/find -print0/' "${_gemname}.gemspec"
+
+  # remove tests which need docker
+  rm --verbose test/test_environment_variables.rb
+}
+
+build() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unreproducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rake test
+}
+
+package() {
+  cd "${_gemname}-${pkgver}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 LICENSE.txt "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
