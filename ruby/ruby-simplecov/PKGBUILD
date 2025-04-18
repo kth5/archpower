@@ -1,0 +1,94 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Andreas 'Segaja' Schleifer <archlinux at segaja dot de>
+
+_gemname='simplecov'
+pkgname="ruby-${_gemname}"
+pkgver=0.22.0
+pkgrel=4
+pkgdesc='Code coverage for Ruby with a powerful configuration library and automatic merging of coverage across test suites'
+arch=(any)
+url="https://github.com/simplecov-ruby/simplecov"
+license=('MIT')
+depends=(
+  ruby
+  ruby-docile
+  ruby-simplecov-html
+  ruby-simplecov_json_formatter
+)
+makedepends=(
+  ruby-rdoc
+)
+# checkdepends=(
+#   ruby-bundler
+#   ruby-rake
+#   ruby-rspec
+# )
+options=(!emptydirs)
+source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('ba7e1a29a219337c1e00d055408d825b20a7b81ec4768612d9d5e8a18af08d47d86a42cee78c64ae0f431196136b5dd522364882d83e5210366d8aa03d5c54b4')
+
+prepare() {
+  cd "${_gemname}-${pkgver}"
+
+  sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
+
+  rm --verbose Gemfile*
+}
+
+build() {
+  cd "${_gemname}-${pkgver}"
+
+  gem build "${_gemname}.gemspec"
+}
+
+# Disable checks for now as they require a lot more gems and love
+#check() {
+#  cd "${_gemname}-${pkgver}"
+#
+#  rake cucumber
+#  rake spec
+#}
+
+package() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "${pkgdir}/${_gemdir}" \
+    --bindir "${pkgdir}/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "${pkgdir}/${_gemdir}/cache/" \
+    "${pkgdir}/${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "${pkgdir}/${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "${pkgdir}/${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "${pkgdir}/${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+
+  install --verbose -D --mode=644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install --verbose -D --mode=644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
