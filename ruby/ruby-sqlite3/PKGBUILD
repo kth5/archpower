@@ -1,0 +1,115 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Andreas 'Segaja' Schleifer <segaja at archlinux dot org>
+
+_gemname='sqlite3'
+pkgname="ruby-${_gemname}"
+pkgver=2.6.0
+pkgrel=2
+pkgdesc='Ruby bindings for the SQLite3 embedded database'
+url='https://github.com/luislavena/sqlite3-ruby'
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+license=('BSD')
+options=('!emptydirs')
+depends=(
+  ruby
+  ruby-mini_portile2
+  sqlcipher
+  sqlite
+)
+makedepends=(
+  ruby-bundler
+  ruby-rake
+  ruby-rake-compiler
+  ruby-rake-compiler-dock
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-minitest
+)
+source=("https://github.com/sparklemotion/sqlite3-ruby/archive/v${pkgver}/${pkgname}-v${pkgver}.tar.gz")
+sha512sums=('f2ade31c4f179a6a3f7474679e029d98106523d7b27b05ce80d3ee8efa2c9bad0154470c37dc3e95d27ad47a39590f0724c7855ef43c58a380419621b7077453')
+b2sums=('f59eae6d25c6ee6585fb6047805281d30b3e86fe077d9ab0c91486a19eba643bb9096aea711331b3bded0b6237bfb3cbdc8055d3949104309271c4b0c1c42234')
+
+prepare() {
+  cd "${_gemname}-ruby-${pkgver}"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended \
+    --expression 's|~>|>=|g' \
+    "${_gemname}.gemspec"
+
+  # remove rubocop
+  rm --verbose rakelib/format.rake
+
+  sed --in-place --regexp-extended \
+    --expression 's|:rubocop, ||g' \
+    Rakefile
+
+  sed --in-place --regexp-extended \
+    --expression '/rubocop/d' \
+    Gemfile
+}
+
+build() {
+  cd "${_gemname}-ruby-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  rake compile -- --enable-system-libraries --with-sqlcipher
+  rake build
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "pkg/${_gemname}-${pkgver}.gem"
+
+  # remove unreproducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${_gemname}-ruby-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rake test
+}
+
+package() {
+  cd "${_gemname}-ruby-${pkgver}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
+
+# vim: ts=2 sw=2 et:
