@@ -4,49 +4,47 @@
 # Contributor: judd <jvinet@zeroflux.org>
 
 pkgname=gzip
-pkgver=1.13
-pkgrel=4.1
+pkgver=1.14
+pkgrel=1
 pkgdesc='GNU compression utility'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
 url='https://www.gnu.org/software/gzip/'
 license=('GPL-3.0-or-later')
 depends=('glibc' 'bash' 'coreutils' 'sed' 'grep')
-makedepends=('less')
+makedepends=('git' 'less' 'python' 'wget')
 optdepends=('less: zless support'
             'util-linux: zmore support'
-            'diffutils: zdiff/zcmp support'
-           )
+            'diffutils: zdiff/zcmp support')
+options=('!lto')
 validpgpkeys=('155D3FC500C834486D1EEA677FD9FCCB000BEEEE') # Jim Meyering
-source=("https://ftp.gnu.org/pub/gnu/gzip/gzip-$pkgver.tar.xz"{,.sig})
-sha256sums=('7454eb6935db17c6655576c2e1b0fabefd38b4d0936e0f87f48cd062ce91a057'
+source=("git+https://git.savannah.gnu.org/git/gzip.git#tag=v${pkgver}?signed"
+        "git+https://git.savannah.gnu.org/git/gnulib.git")
+sha256sums=('b1c2422ee156ef11e9601d2651f8543dd71f941887cd407fe23584ab95417c93'
             'SKIP')
+
 prepare() {
-  cd $pkgname-$pkgver
-  # apply patch from the source array (should be a pacman feature)
-  local filename
-  for filename in "${source[@]}"; do
-    if [[ "$filename" =~ \.patch$ ]]; then
-      echo "Applying patch ${filename##*/}"
-      patch -p1 -N -i "$srcdir/${filename##*/}"
-    fi
-  done
-  :
+  cd $pkgname
+
+  git submodule init
+  git config submodule.gnulib.url "${srcdir}/gnulib"
+  git -c protocol.file.allow=always submodule update
+
+  sh bootstrap
+  autoreconf -fiv
 }
 
 build() {
-  cd $pkgname-$pkgver
+  cd $pkgname
   ./configure --prefix=/usr
   make
 }
 
 check() {
-  cd $pkgname-$pkgver
+  cd $pkgname
   make check
 }
 
 package() {
-  cd $pkgname-$pkgver
+  cd $pkgname
   make prefix="$pkgdir/usr" install
 }
-
-# vim:set ts=2 sw=2 et:
