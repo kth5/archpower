@@ -6,16 +6,14 @@
 # Contributor: Bartlomiej Piotrowski <nospam@bpiotrowski.pl>
 
 pkgname=pkgconf
-pkgver=2.3.0
+pkgver=2.4.3
 pkgrel=1
-_commit=a88c0d962a987c62d98ede5a738e37ec71005cbd # tags/pkgconf-2.3.0
 pkgdesc="Package compiler and linker metadata toolkit"
-url="https://gitea.treehouse.systems/ariadne/pkgconf"
+url="https://github.com/pkgconf/pkgconf"
 license=(ISC)
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso riscv64)
 depends=(
   glibc
-  sh
 )
 makedepends=(
   git
@@ -28,26 +26,18 @@ provides=(
 )
 conflicts=(pkg-config)
 replaces=(pkg-config)
-source=("git+$url#commit=$_commit"
-        i686-pc-linux-gnu.personality
-        powerpc64{,le}-unknown-linux-gnu.personality
-        powerpc-unknown-linux-gnu.personality
-        powerpc-espresso-linux-gnu.personality
-        riscv64-unknown-linux-gnu.personality
-        x86_64-pc-linux-gnu.personality)
-sha256sums=('a020ebc444405f6b500621ea0879a82112b5f7ba636a058329115bb70d09f21d'
-            '6697c6db7deaae269ea75624a70e80949241f2cf59a537f31ecfcac726d90bc1'
-            '45d8b75fd66705de2bb5e87a29a61b684fbf8fd5e60e22fbb7ab1b2864881005'
-            '481c1d61538943759db67fe80e34d03f681a36bba0eceaa9b0e40c4b6ef36f76'
-            'be1a66bf5a6728fe22a37940f78cdcfc5db6323d821a1d1f3468edd68179b4be'
-            '49839ea0a5fe1d0044b4f373f2abc66e2e7e5d08ee78d49c632c91a17e4eb5f8'
-            'bdcb5b5071233817290b2a3857ab4ab0a1be7b6cf9da74dfc2291756f3216d41'
-            'c8297817ba0b57d003878db247ff34b4c47a7594c9f67dcfe8ff8d6567956cd5')
-
-pkgver() {
-  cd pkgconf 
-  git describe --tags | sed 's/^pkgconf-//;s/[^-]*-g/r&/;s/-/+/g'
-}
+source=(
+  "git+$url#tag=pkgconf-$pkgver"
+  {x86_64,i686}-pc-linux-gnu.personality
+  {powerpc64le,powerpc64,powerpc,riscv64}-unknown-linux-gnu.personality
+)
+b2sums=('54fb510c563818199f1a5161cf5a2ba0fba70b09f4288a31ece936cf42197f5ee9cf2021733a927ae778a9bb1fa3dfbfbcba898826266c01b45b3f3154699db6'
+        'c04583e19149c1035cb7777a59f0fbc4988b672d8e45105e33def3d0f9054464e33a400a3e7c7e8b99b334e4fe06aaa9d7e34662e806096d4374bd6b12d803db'
+        '94c8fd12b5f33611fd6dbeae03b20e72bcf2937e764766e2633b2fd4c14925860d57eee234016c81b0563a47b112ac9ef4a8b3bb9fa3fc0dd266f355bc156c58'
+        '48fff6b9a018708011d2fc474502880b0847cb99294e93148a2ba763ca5fa1798d73398bd0e8d51f3e64f4c5139c3dc769e0fe41f6ae4eb8deffaf8d53b72e56'
+        '20364f2006a573c11e9fc3fd00e1d579a941f8234bc9bf20f3a2965a5e0f49d1d9f8a68f2171d299df7b57c1e7bfb6b0e30198ca5b343059b935c3679887121b'
+        '324b798effe69ae69fc90ff72cd8cf651856733f539e2b03fb07599ad68c014e34520de2fb3f4e7ea62d24704a074900c0e5634f0d423c428e5912902c98b561'
+        'cd7e6db2a8d4c00595bcafbbc2a1314b10853bec2987a35f2e536338d2452f6585cb3d1553d1b56fa2fe8d4c05edf1563642cbe70b418fe4550174cb5929e076')
 
 prepare() {
   cd pkgconf
@@ -69,30 +59,16 @@ check() {
 package() {
   meson install -C build --destdir "$pkgdir"
 
-  case "${CARCH}" in
-    x86_64)
-      install -Dt "$pkgdir/usr/share/pkgconfig/personality.d" -m644 \
-        i686-pc-linux-gnu.personality \
-        x86_64-pc-linux-gnu.personality
-    ;;
-    *)
-      install -Dt "$pkgdir/usr/share/pkgconfig/personality.d" -m644 \
-        ${CHOST}.personality
-    ;;
-  esac
+  local p
+  for p in *.personality; do
+    install -Dm644 "$p" -t "$pkgdir/usr/share/pkgconfig/personality.d"
+    ln -s pkgconf "$pkgdir/usr/bin/${p%.*}-pkg-config"
+  done
 
-  ln -s pkgconf "$pkgdir/usr/bin/i686-pc-linux-gnu-pkg-config"
-  ln -s pkgconf "$pkgdir/usr/bin/powerpc64le-unknown-linux-gnu-pkg-config"
-  ln -s pkgconf "$pkgdir/usr/bin/powerpc64-unknown-linux-gnu-pkg-config"
-  ln -s pkgconf "$pkgdir/usr/bin/powerpc-unknown-linux-gnu-pkg-config"
-  ln -s pkgconf "$pkgdir/usr/bin/powerpc-espresso-linux-gnu-pkg-config"
-  ln -s pkgconf "$pkgdir/usr/bin/riscv64-unknown-linux-gnu-pkg-config"
-  ln -s pkgconf "$pkgdir/usr/bin/x86_64-pc-linux-gnu-pkg-config"
   ln -s pkgconf "$pkgdir/usr/bin/pkg-config"
-
   ln -s pkgconf.1 "$pkgdir/usr/share/man/man1/pkg-config.1"
 
-  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 pkgconf/COPYING
+  install -Dm644 pkgconf/COPYING -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 # vim:set sw=2 sts=-1 et:
