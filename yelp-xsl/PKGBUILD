@@ -3,35 +3,51 @@
 
 pkgname=yelp-xsl
 pkgver=42.1
-pkgrel=2.1
+pkgrel=3
 pkgdesc="Document transformations from Yelp"
 url="https://gitlab.gnome.org/GNOME/yelp-xsl"
 arch=(any)
-license=(GPL)
-makedepends=(itstool git)
-_commit=1658a8eb59a296d9e7b7116fbc79ca778b702e14  # tags/42.1^0
-source=("git+https://gitlab.gnome.org/GNOME/yelp-xsl.git#commit=$_commit")
-sha256sums=('SKIP')
-
-pkgver() {
-  cd yelp-xsl
-  git describe --tags | sed 's/[^-]*-g/r&/;s/-/+/g'
-}
+license=(
+  BSD-3-Clause
+  GPL-2.0-or-later
+  LGPL-2.1-or-later
+)
+makedepends=(
+  git
+  itstool
+)
+source=(
+  "git+$url.git#tag=$pkgver"
+  0001-CVE-2025-3155.patch
+)
+b2sums=('8e6863cf301093c71806a18de2476f835ed35268b543b5d14c0056986c76649f70a17b8f7e69ab3feb53bdfb07ef162389a12229808c23f1c180e10e61b6fba1'
+        '306eb4e92bed04e3d8117bcbd319a7de6ede754b195058629c52d5281d9178e4a402df27787e1250bb0f7152faa655d834d66fbb1f6a8af32b9753f012cf2d6f')
 
 prepare() {
   cd yelp-xsl
+
+  # https://blogs.gnome.org/mcatanzaro/2025/04/15/dangerous-arbitrary-file-read-vulnerability-in-yelp-cve-2025-3155/
+  git apply -3 ../0001-CVE-2025-3155.patch
+
   NOCONFIGURE=1 ./autogen.sh
 }
 
 build() {
+  local configure_options=(
+    --prefix=/usr
+    --sysconfdir=/etc
+    --localstatedir=/var
+  )
+
   cd yelp-xsl
-  ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var
+  ./configure "${configure_options[@]}"
   make
 }
 
 package() {
   cd yelp-xsl
   make DESTDIR="$pkgdir" install
+  install -Dm644 COPYING -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 # vim:set sw=2 sts=-1 et:
