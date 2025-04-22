@@ -1,0 +1,58 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Sébastien Luttringer
+# Contributor: Joel Teichroeb <joel@teichroeb.net>
+
+pkgname=weston
+pkgver=14.0.1
+pkgrel=1
+pkgdesc='Reference implementation of a Wayland compositor'
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+url='https://wayland.freedesktop.org/'
+license=('MIT')
+depends=('fontconfig' 'glibc' 'wayland' 'libxkbcommon' 'libinput' 'libunwind' 'pixman'
+         'libdrm' 'pam' 'systemd-libs' 'cairo' 'libpng' 'libjpeg-turbo' 'libwebp'
+         'mesa' 'libegl' 'libevdev' 'libgles' 'glib2' 'pango' 'lcms2' 'mtdev' 'libx11'
+         'libxcb' 'dbus' 'libva' 'libxcursor' 'colord' 'seatd'
+         'gstreamer' 'gst-plugins-base-libs')
+makedepends=('wayland-protocols' 'meson' 'ninja' 'freerdp2' 'neatvnc' 'libpipewire'
+             'xorg-xwayland' 'xcb-util-cursor' 'libdisplay-info')
+optdepends=('xorg-xwayland: support x11 backend'
+            'libpipewire: support pipewire backend'
+            'freerdp2: support rdp backend'
+            'neatvnc: support vnc backend'
+            'libdisplay-info: support drm backend')
+options=(!lto)
+validpgpkeys=('7032877A3EB1EAE3E4DC9DFBF63412E60947D6EF' # Marius Vlad <marius.vlad@collabora.com>
+              '34FF9526CFEF0E97A340E2E40FDE7BE0E88F5E48' # emersion <contact@emersion.fr>
+              'C7223EBE4EF66513B892598911A30156E0E67611' # Bryce Harrington
+              'C0066D7DB8E9AC6844D728715E54498E697F11D7') # Derek Foreman
+source=("https://gitlab.freedesktop.org/wayland/weston/-/releases/$pkgver/downloads/weston-$pkgver.tar.xz"{,.sig})
+sha256sums=('a8150505b126a59df781fe8c30c8e6f87da7013e179039eb844a5bbbcc7c79b3'
+            'SKIP')
+
+prepare() {
+  cd $pkgname-$pkgver
+  # apply patch from the source array (should be a pacman feature)
+  local src
+  for src in "${source[@]}"; do
+    src="${src%%::*}"
+    src="${src##*/}"
+    [[ $src = *.patch ]] || continue
+    echo "Applying patch $src..."
+    patch -Np1 < "../$src"
+  done
+}
+
+build() {
+  arch-meson $pkgname-$pkgver build \
+    --libexec=lib/weston -D b_lto=false
+  ninja -C build
+}
+
+package() {
+  DESTDIR="$pkgdir" meson install -C build
+  # license
+  install -Dm644 $pkgname-$pkgver/COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}
+
+# vim:set ts=2 sw=2 et:
