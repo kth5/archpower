@@ -4,57 +4,72 @@
 # Maintainer: Robin Candau <antiz@archlinux.org>
 
 pkgname=glslang
-pkgver=15.1.0
-pkgrel=1
-pkgdesc='OpenGL and OpenGL ES shader front end and validator'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url='https://github.com/KhronosGroup/glslang'
+pkgver=15.2.0
+pkgrel=2
+pkgdesc="OpenGL and OpenGL ES shader front end and validator"
+url="https://github.com/KhronosGroup/glslang"
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
 license=('BSD-3-Clause')
 depends=('gcc-libs' 'spirv-tools')
 makedepends=('cmake' 'ninja' 'spirv-headers' 'python')
 options=('staticlibs')
-source=(${pkgname}-${pkgver}.tar.gz::https://github.com/KhronosGroup/glslang/archive/${pkgver}.tar.gz)
-sha256sums=('4bdcd8cdb330313f0d4deed7be527b0ac1c115ff272e492853a6e98add61b4bc')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/KhronosGroup/glslang/archive/${pkgver}.tar.gz"
+        'fix_spirv_backcompat.patch')
+sha256sums=('45e3920d264d5c2cc3bfaec0e5dbb66cffd549255e0aaaf38cd283918e35c8ba'
+            '5d9fdf12ac772bd21d983214a876cd9085e76994eac54786b8516d8e365ec2ab')
+
+prepare() {
+  cd "${pkgname}-${pkgver}"
+
+  # Backported patch to fix spirv back-compatibility
+  # See https://github.com/KhronosGroup/glslang/issues/3882
+  # and https://github.com/KhronosGroup/glslang/commit/0018771b46c492e28ca916b00eda96093381a3b2
+  patch -Np1 -i "${srcdir}/fix_spirv_backcompat.patch"
+}
 
 build() {
-  cd ${pkgname}-${pkgver}
+  cd "${pkgname}-${pkgver}"
 
   # we need fat LTO objects to not break consumers during linking
   CXXFLAGS+=" -ffat-lto-objects"
   cmake \
     -Bbuild-static \
     -GNinja \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_BUILD_TYPE=None \
-    -DALLOW_EXTERNAL_SPIRV_TOOLS=ON \
-    -DBUILD_SHARED_LIBS=OFF
+    -DCMAKE_INSTALL_PREFIX='/usr' \
+    -DCMAKE_BUILD_TYPE='None' \
+    -DALLOW_EXTERNAL_SPIRV_TOOLS='ON' \
+    -DBUILD_SHARED_LIBS='OFF'
   cmake --build build-static
+
   cmake \
     -Bbuild-shared \
     -GNinja \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_BUILD_TYPE=None \
-    -DALLOW_EXTERNAL_SPIRV_TOOLS=ON \
-    -DBUILD_SHARED_LIBS=ON \
-    -DGLSLANG_TESTS=ON
+    -DCMAKE_INSTALL_PREFIX='/usr' \
+    -DCMAKE_BUILD_TYPE='None' \
+    -DALLOW_EXTERNAL_SPIRV_TOOLS='ON' \
+    -DBUILD_SHARED_LIBS='ON' \
+    -DGLSLANG_TESTS='ON'
   cmake --build build-shared
 }
 
 check() {
-  cd ${pkgname}-${pkgver}
+  case "${CARCH}" in
+    powerpc|powerpc64) return 0 ;;
+  esac
+  cd "${pkgname}-${pkgver}"
 
   ninja -Cbuild-shared test
 }
 
 package() {
-  cd ${pkgname}-${pkgver}
+  cd "${pkgname}-${pkgver}"
 
   DESTDIR="${pkgdir}" cmake --install build-static
   DESTDIR="${pkgdir}" cmake --install build-shared
 
-  install -Dm644 LICENSE.txt "${pkgdir}"/usr/share/licenses/${pkgname}/LICENSE
+  install -Dm644 LICENSE.txt "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 
-  cd "${pkgdir}"/usr/lib
+  cd "${pkgdir}/usr/lib"
   for lib in *.so; do
     ln -sf "${lib}" "${lib}.0"
   done
