@@ -1,0 +1,99 @@
+# Maintainer: Andreas 'Segaja' Schleifer <segaja at archlinux dot org>
+
+_gemname='thread_order'
+pkgname="ruby-${_gemname}"
+pkgver=1.1.1
+pkgrel=4
+pkgdesc='Test helper for ordering threaded code'
+arch=('any')
+url="https://github.com/JoshCheek/${_gemname}"
+license=('MIT')
+depends=(
+  ruby
+)
+makedepends=(
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-rspec
+)
+options=('!emptydirs')
+source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('5afe4b5c366b0db8e7a927e3e311c93175874dc31edbff2610817e785baefc3233d49b161207738cfc8643b465a9965d1e7de62bea21060c52bf4e77b0c3e6f2')
+b2sums=('8ac40ceb7842219ff310187595740be530485ac6e55ed64afeaba6c55fcf520f45c8756bd14c73663c757a47508c2bd7f2c49e2ad49db65ae9c8c6f290ca4088')
+
+prepare() {
+  cd "${_gemname}-${pkgver}"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
+
+  # we don't build from a git checkout
+  sed --in-place --regexp-extended 's|git ls-files -- spec/\*|find spec -type f -not -path "*/\.git*"|' "${_gemname}.gemspec"
+  sed --in-place --regexp-extended 's|git ls-files|find . -type f -not -path "*/\.git*"|' "${_gemname}.gemspec"
+
+  # fix tests
+  sed --in-place --regexp-extended '/monitor\.rb/d' spec/thread_order_spec.rb
+}
+
+build() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rspec
+}
+
+package() {
+  cd "${_gemname}-${pkgver}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 License.txt --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
+
+# vim: tabstop=2 shiftwidth=2 expandtab:
