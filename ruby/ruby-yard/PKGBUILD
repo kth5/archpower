@@ -1,0 +1,64 @@
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Contributor: Jerome Leclanche <jerome@leclan.ch>
+
+_gemname=yard
+pkgname=ruby-${_gemname}
+pkgver=0.9.34
+pkgrel=5
+pkgdesc='YARD is a Ruby Documentation tool. The Y stands for "Yay!"'
+url='https://yardoc.org/'
+arch=('any')
+license=('MIT')
+depends=(
+  ruby
+  ruby-rdoc
+  ruby-webrick
+)
+makedepends=(
+  ruby-irb
+  ruby-rake
+  ruby-samus
+)
+options=('!emptydirs')
+source=(https://github.com/lsegal/yard/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz)
+sha512sums=('fb87e3706d2c1408a172e17cdb588aacb2c67b9e7ac8c9b2d2a4d2e8a67a0c571d05938f8a4a88357834f6dac13a38cf1faa086680d58380a65cc2fca93aad8f')
+b2sums=('0e5b96b29efc6b7ab6c52dc34a15d4df9b614eb56698eb76fc7d2dc1f1fcfa5f8883034697f5a3fbd76ff588a9ebf2c7ee164936809bfe4640663c996e9f648a')
+
+prepare() {
+  cd ${_gemname}-${pkgver}
+  sed -r 's|~>|>=|g' -i ${_gemname}.gemspec
+  sed 's|git ls-files|find|' -i ${_gemname}.gemspec
+}
+
+build() {
+  cd ${_gemname}-${pkgver}
+  rake gem
+}
+
+check() {
+  cd ${_gemname}-${pkgver}
+  rake spec
+}
+
+package() {
+  cd ${_gemname}-${pkgver}
+  local _gemdir="$(gem env gemdir)"
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "${pkgdir}/${_gemdir}" \
+    --bindir "${pkgdir}/usr/bin" \
+    ${_gemname}-${pkgver}.gem
+
+  install -Dm 644 README.md CHANGELOG.md -t "${pkgdir}/usr/share/doc/${pkgname}"
+  cp -a docs/* "${pkgdir}/usr/share/doc/${pkgname}"
+  install -Dm 644 LICENSE -t "${pkgdir}/usr/share/licenses/${pkgname}"
+
+  cd "${pkgdir}/${_gemdir}"
+  rm -rf cache gems/${_gemname}-${pkgver}/{ext,lib/*/*.so,man} \
+    extensions/*/*/${_gemname}-${pkgver}/{mkmf.log,gem_make.out}
+}
+
+# vim: ts=2 sw=2 et:
