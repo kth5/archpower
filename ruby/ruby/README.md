@@ -60,6 +60,8 @@ Build the following packages in the given order:
 - ruby-test-unit-ruby-core
 - ruby-erb
 - ruby-power_assert
+- ruby-bigdecimal
+- ruby-csv
 - ruby-test-unit
 - ruby-diff-lcs `--nocheck`
 - ruby-rspec-support `--nocheck`
@@ -70,6 +72,7 @@ Build the following packages in the given order:
 - ruby-thread_order
 - ruby-childprocess
 - ruby-ffi
+- ruby-minitest
 - ruby-rspec-support
 - ruby-diff-lcs
 - ruby-rr `--nocheck`
@@ -78,7 +81,6 @@ Build the following packages in the given order:
 - ruby-debug
 - ruby-tracer
 - ruby-irb
-- ruby-minitest
 - ruby-hoe
 - ruby-kpeg
 - ruby-racc
