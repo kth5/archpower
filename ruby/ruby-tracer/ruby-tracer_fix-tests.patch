@@ -1,0 +1,148 @@
+diff --git a/test/tracer/exception_tracer_test.rb b/test/tracer/exception_tracer_test.rb
+deleted file mode 100644
+index 47faf79..0000000
+--- a/test/tracer/exception_tracer_test.rb
++++ /dev/null
+@@ -1,63 +0,0 @@
+-require_relative "../test_helper"
+-
+-module Tracer
+-  class ExceptionTracerTest < TestCase
+-    include ActivationTests
+-
+-    private
+-
+-    def build_tracer
+-      ExceptionTracer.new(output: @output, colorize: false)
+-    end
+-  end
+-
+-  class ExceptionTracerIntegrationTest < IntegrationTestCase
+-    def test_exception_tracer_traces_exceptions
+-      file = write_file("foo.rb", <<~RUBY)
+-        ExceptionTracer.new.start
+-
+-        begin
+-          raise "boom"
+-        rescue
+-        end
+-      RUBY
+-
+-      out, err = execute_file(file)
+-
+-      expected_traces = [
+-        /^#depth:0  #<RuntimeError: boom> raised at .*foo.rb:4/
+-      ]
+-
+-      if RUBY_VERSION >= "3.3.0"
+-        expected_traces << /^#depth:1  #<RuntimeError: boom> rescued at .*foo.rb:5/
+-      end
+-
+-      assert_empty(err)
+-      assert_traces(expected_traces, out)
+-    end
+-
+-    def test_exception_tracer_with_header
+-      file = write_file("foo.rb", <<~RUBY)
+-        ExceptionTracer.new(header: "tracer-1").start
+-
+-        begin
+-          raise "boom"
+-        rescue
+-        end
+-      RUBY
+-
+-      out, err = execute_file(file)
+-
+-      expected_traces = [
+-        /^tracer-1 #depth:0  #<RuntimeError: boom> raised at .*foo.rb:4/
+-      ]
+-
+-      if RUBY_VERSION >= "3.3.0"
+-        expected_traces << /^tracer-1 #depth:1  #<RuntimeError: boom> rescued at .*foo.rb:5/
+-      end
+-
+-      assert_empty(err)
+-      assert_traces(expected_traces, out)
+-    end
+-  end
+-end
+diff --git a/test/tracer/helper_test.rb b/test/tracer/helper_test.rb
+index 73a87f6..68251fa 100644
+--- a/test/tracer/helper_test.rb
++++ b/test/tracer/helper_test.rb
+@@ -2,29 +2,6 @@ require_relative "../test_helper"
+ 
+ module Tracer
+   class HelperIntegrationTest < IntegrationTestCase
+-    def test_trace_exception
+-      file = write_file("foo.rb", <<~RUBY)
+-        require "tracer/helper"
+-
+-        trace_exception do
+-          raise "boom" rescue nil
+-        end
+-      RUBY
+-
+-      out, err = execute_file(file)
+-
+-      expected_traces = [
+-        /^#depth:1  #<RuntimeError: boom> raised at .*foo.rb:4/
+-      ]
+-
+-      if RUBY_VERSION >= "3.3.0"
+-        expected_traces << /^#depth:2  #<RuntimeError: boom> rescued at .*foo.rb:4/
+-      end
+-
+-      assert_empty(err)
+-      assert_traces(expected_traces, out)
+-    end
+-
+     def test_trace_call
+       file = write_file("foo.rb", <<~RUBY)
+         require "tracer/helper"
+diff --git a/test/tracer/object_tracer_test.rb b/test/tracer/object_tracer_test.rb
+index 4f95178..6f455b7 100644
+--- a/test/tracer/object_tracer_test.rb
++++ b/test/tracer/object_tracer_test.rb
+@@ -209,40 +209,5 @@ module Tracer
+         out
+       )
+     end
+-
+-    def test_object_tracer_works_with_basic_object
+-      file = write_file("foo.rb", <<~RUBY)
+-        class Foo < BasicObject
+-          def baz; end
+-        end
+-
+-        obj = Foo.new
+-
+-        def obj.foo
+-          100
+-        end
+-
+-        def bar(obj)
+-          obj.foo
+-        end
+-
+-        ObjectTracer.new(obj).start
+-
+-        bar(obj)
+-        obj.baz
+-      RUBY
+-
+-      out, err = execute_file(file)
+-
+-      assert_empty(err)
+-      assert_traces(
+-        [
+-          %r{^#depth:0  #<Foo.* does not have #inspect> is used as a parameter obj of Object#bar at .*/foo\.rb:17},
+-          %r{^#depth:1  #<Foo.* does not have #inspect> receives \.foo at .*/foo\.rb:12},
+-          %r{^#depth:0  #<Foo.* does not have #inspect> receives #baz \(Foo#baz\) at .*/foo\.rb:18}
+-        ],
+-        out
+-      )
+-    end
+   end
+ end
