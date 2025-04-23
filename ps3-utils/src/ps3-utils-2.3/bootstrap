@@ -1,0 +1,68 @@
+#! /bin/bash
+# bootstrap -- Use this script to create generated files from a VCS checkout
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+
+version=
+
+if [ "$1" ]; then
+	version=$1
+elif head=$(git rev-parse --short --verify HEAD 2>/dev/null); then
+
+	# If available, use the git commit revision for the package version.
+
+	months="Jan:01 Feb:02 Mar:03 Apr:04 May:05 Jun:06 Jul:07 Aug:08 \
+		Sep:09 Oct:10 Nov:11 Dec:12"
+
+	# Add a date prefix for easy reading.
+
+	date=$(git-log --pretty=format:"%cD" -1 HEAD)
+
+	# date='Fri, 2 Aug 2007 19:36:06 -0700'
+
+	date=${date##*, }
+	date=${date% [0-9][0-9]:*}
+	day=${date%* [A-Z][a-z][a-z] *}
+	year=${date##* [A-Z][a-z][a-z] 20}
+	month=${date##${day} }
+	month=${month%% 20${year}}
+	month=${months##*${month}:}
+	month=${month%% *}
+	[ ! ${day#[0-9][0-9]} ] || day="0$day"
+
+	version=$(printf '%s.%s.%s-%s%s' ${year} ${month} ${day} g ${head})
+
+	# Add a '-dirty' postfix for uncommitted changes.
+
+	if git diff-index HEAD | read dummy; then
+		version=`printf '%s%s' ${version} -dirty`
+	fi
+else
+	# Default to date and time.
+
+	version="dev-$(date +%y.%m.%d-%H.%M.%S)"
+fi
+
+set -x
+
+sed -e s,@version@,${version},g configure.ac.in > configure.ac
+
+aclocal
+libtoolize --force --copy
+autoheader
+automake --foreign --add-missing --copy
+autoconf
+
+pushd lib> /dev/null && ./bootstrap ${version} ; popd > /dev/null

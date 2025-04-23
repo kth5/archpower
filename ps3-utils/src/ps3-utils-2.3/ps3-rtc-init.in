@@ -1,0 +1,108 @@
+#!/bin/sh
+#
+#  Copyright (C) 2008 Sony Computer Entertainment Inc.
+#  Copyright 2008 Sony Corp.
+#
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; version 2 of the License.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software
+#  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+usage() {
+	echo "ps3-init-rtc (@PACKAGE_NAME@) @PACKAGE_VERSION@" >&2
+	echo "DESCRIPTION" >&2
+	echo "     The ps3-rtc-init utility is used to initialize the Linux RTC diff value" >&2
+	echo "     in PS3 flash memory to that currently in use by the Game OS.  The default" >&2
+	echo "     behavior is to not overwrite an existing value." >&2
+	echo "OPTIONS" >&2
+	echo "     -f, --force" >&2
+	echo "             Overwrite any existing Linux RTC diff value in flash memory." >&2
+	echo "     -h, --help" >&2
+	echo "             Print a help message." >&2
+	echo "     -V, -version" >&2
+	echo "             Display the program version number." >&2
+	echo "SEE ALSO" >&2
+	echo "     ps3-flash-util(8)" >&2
+	echo "Send bug reports to @PACKAGE_BUGREPORT@" >&2
+	exit 1
+}
+
+version() {
+	echo "ps3-init-rtc (@PACKAGE_NAME@) @PACKAGE_VERSION@"
+	exit 1
+}
+
+force=
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+    --force | -f)
+	force="y"
+	;;
+    --version | -V)
+	version
+	;;
+    *)
+	usage
+	;;
+    esac
+    shift
+done
+
+game_time=`@prefix@/sbin/ps3-flash-util --game-time`
+
+if [ $? -ne 0 ]; then
+	echo "ERROR: Can't read game-time." >&2;
+	exit 1;
+fi
+
+if [ "${force}" ]; then
+	@prefix@/sbin/ps3-flash-util --db-write-dword 2 1 ${game_time}
+
+	if [ $? -ne 0 ]; then
+		@prefix@/sbin/ps3-flash-util --db-format
+
+		if [ $? -ne 0 ]; then
+			echo "ERROR: Can't format flash." >&2;
+			exit 1;
+		fi
+		@prefix@/sbin/ps3-flash-util --db-write-dword 2 1 ${game_time}
+	fi
+
+	if [ $? -ne 0 ]; then
+		echo "ERROR: Can't set rtc diff." >&2;
+		exit 1;
+	fi
+else
+	other_time=`@prefix@/sbin/ps3-flash-util --db-print 2 1`
+	
+	if [ $? -ne 0 ]; then
+		echo "ERROR: can't read database.  Use -f to re-format." >&2;
+		exit 1;
+	fi
+	
+	if [ ${other_time} ]; then
+		echo "WARNING: rtc diff already set." >&2;
+		exit 1;
+	fi
+
+	@prefix@/sbin/ps3-flash-util --db-write-dword 2 1 ${game_time}
+
+	if [ $? -ne 0 ]; then
+		echo "ERROR: can't read database.  Use -f to re-format." >&2;
+		exit 1;
+	fi
+fi
+
+echo "rtc diff:${game_time}"
+
+exit 0
