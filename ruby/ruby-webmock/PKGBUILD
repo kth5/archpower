@@ -1,0 +1,53 @@
+# Maintainer: Tim Meusel <tim@bastelfreak.de>
+# Contributor: Christian Rebischke <chris.rebischke@archlinux.org>
+
+_gemname='webmock'
+pkgname="ruby-${_gemname}"
+pkgver=3.24.0
+pkgrel=3
+pkgdesc='Allows stubbing HTTP requests and setting expectations on HTTP requests.'
+arch=('any')
+url='https://github.com/bblimke/webmock'
+license=('MIT')
+makedepends=('ruby-rdoc')
+checkdepends=('ruby-rake' 'ruby-minitest' 'ruby-test-unit' 'ruby-rspec')
+depends=('ruby' 'ruby-crack' 'ruby-hashdiff' 'ruby-addressable')
+options=(!emptydirs)
+source=("${url}/archive/v${pkgver}/${pkgname}-v${pkgver}.tar.gz")
+sha512sums=('4fd6e02c4ea4f7031a82f15c2cf222959d6040981440d335f4e186dc8af0b413a14652126c104c384277d78cef718bc05a97dc397dd7d2166ddaafc030efc486')
+
+prepare() {
+  cd "${srcdir}/${_gemname}-${pkgver}"
+
+  # we build based on a tar ball, so `git` won't work
+  sed --in-place 's|git ls-files|find|' "${_gemname}.gemspec" spec/quality_spec.rb
+
+  # disable unneeded dependencies
+  sed --in-place '/bundler/d' Rakefile
+  sed --in-place '/Bundler/d' Rakefile
+}
+
+build() {
+  cd "${srcdir}/${_gemname}-${pkgver}"
+  gem build "${_gemname}.gemspec"
+}
+
+check() {
+  cd "${srcdir}/${_gemname}-${pkgver}"
+  rake minitest
+  rake test
+
+}
+
+package() {
+  cd "${srcdir}/${_gemname}-${pkgver}"
+  local _gemdir="$(gem env gemdir)"
+  gem install --verbose --ignore-dependencies --no-user-install --install-dir "${pkgdir}/${_gemdir}" --bindir "${pkgdir}/usr/bin" "${_gemname}-${pkgver}.gem"
+
+  install -Dm 644 LICENSE -t "${pkgdir}/usr/share/licenses/${pkgname}/"
+
+  rm -rf "${pkgdir}/${_gemdir}/cache"
+  rm -rf "${pkgdir}/${_gemdir}/gems/${_gemname}-${pkgver}/"{test,spec,minitest,.gemtest,.gitignore,.travis.yml}
+}
+
+# vim: ts=2 sw=2 et:
