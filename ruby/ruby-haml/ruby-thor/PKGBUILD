@@ -1,0 +1,64 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Andreas 'Segaja' Schleifer <segaja at archlinux dot org>
+
+_gemname='thor'
+pkgname="ruby-${_gemname}"
+pkgver=1.3.2
+pkgrel=4
+pkgdesc='Toolkit for building powerful command-line interfaces'
+url='https://github.com/erikhuda/thor'
+arch=('any')
+license=('MIT')
+depends=('ruby')
+makedepends=('ruby-rdoc')
+checkdepends=('ruby-bundler' 'ruby-rake' 'ruby-rspec' 'ruby-webmock')
+options=('!emptydirs')
+source=(
+  "${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz"
+  # see https://github.com/rails/thor/pull/887
+  "https://patch-diff.githubusercontent.com/raw/rails/thor/pull/887.patch"
+  tests.patch
+)
+sha512sums=('fb2aff3cf8c14f1a8b38db77579e4b27292f9578c7abf8fb892da888bee7e24412c4bdbf85ce9e43982348f72e038cacc856500268fc204e44fa61f3f9405c32'
+            '952e68b15b853c2ee1e59a7f3d47438841e3a53144b73613a8506b8ac7e52d96ab6e45e99c4f12a9e6609c739fc1b63ca4ee43f9e45019084e57258c0ef6b4d7'
+            '7e07d2561b3f7ae7400b3c4c1747f7488fa5561484b01a4f5d7297ff10e53d45158a5de5b9a5555044721f69dd600b9127a5f677eee7c6a16b8a3b5cc01f396a')
+
+prepare() {
+  cd "${_gemname}-${pkgver}"
+
+  patch --verbose --strip=1 --input="../887.patch"
+
+  # remove unused parts from tests and replace git usages
+  patch --verbose --strip=1 --input=../tests.patch
+
+  # update gemspec to allow newer version of the deps
+  sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
+}
+
+build() {
+  cd "${_gemname}-${pkgver}"
+
+  gem build "${_gemname}.gemspec"
+}
+
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  rspec spec
+}
+
+package() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem install --ignore-dependencies --no-user-install --install-dir "${pkgdir}${_gemdir}" --bindir "${pkgdir}/usr/bin" ${_gemname}-${pkgver}.gem
+
+  install -D --mode=644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+  install -D --mode=644 LICENSE.md "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+
+  rm "${pkgdir}/${_gemdir}/cache/${_gemname}-${pkgver}.gem"
+}
+
+# vim: ts=2 sw=2 et:
