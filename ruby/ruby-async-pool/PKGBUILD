@@ -1,0 +1,83 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-async-pool
+pkgver=0.10.1
+pkgrel=3
+pkgdesc='A singleplex and multiplex resource pool for implementing robust clients'
+arch=(any)
+url='https://github.com/socketry/async-pool'
+license=(MIT)
+depends=(
+  ruby
+  ruby-async
+  ruby-metrics
+  ruby-traces
+)
+makedepends=(
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-bake
+  ruby-bake-test
+  ruby-bake-test-external
+  ruby-bundler
+  ruby-covered
+  ruby-decode
+  ruby-io-event
+  ruby-sus
+  ruby-sus-fixtures-async
+)
+options=(!emptydirs)
+source=(https://github.com/socketry/async-pool/archive/v$pkgver/$pkgname-$pkgver.tar.gz)
+sha512sums=('08fbde18a7544edfaf272e30162b721e0482fe4288d9e503c0d127678a7679dbab722a7f922598bc661717efdaf6d1ca95f92c8a60ac76de284f7d79579edae1')
+b2sums=('01db41859ae949d2935aa1e1d92d1487b85fce08d789c6791188de09f5e10f113267c9a882612b4bbf6c157a4f7589fd9f09ae600a6fb10c7510e5e6d4b55048')
+
+prepare() {
+  cd async-pool-$pkgver
+
+  sed -r -e 's|~>|>=|g' -e '/signing_key/d' -i async-pool.gemspec gems.rb
+
+  sed --in-place \
+    --expression '/group :maintenance/,/end/d' \
+    --expression '/rubocop/d' \
+    gems.rb
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd async-pool-$pkgver
+  gem build async-pool.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    async-pool-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+check() {
+  local _gemdir="$(gem env gemdir)"
+  cd async-pool-$pkgver
+  GEM_HOME="tmp_install/$_gemdir" bake test
+}
+
+package() {
+  cd async-pool-$pkgver
+  cp -a tmp_install/* "$pkgdir"/
+  install -Dm644 license.md -t "$pkgdir"/usr/share/licenses/$pkgname/
+}
