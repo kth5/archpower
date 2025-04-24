@@ -1,0 +1,64 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Andreas 'Segaja' Schleifer <segaja at archlinux dot org>
+
+_gemname=nio4r
+pkgname=ruby-${_gemname}
+pkgver=2.7.4
+pkgrel=3
+pkgdesc='Abstract, cross-platform stateful I/O selector API for Ruby'
+url='https://github.com/celluloid/nio4r'
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+license=('MIT')
+depends=('ruby')
+makedepends=('ruby-rdoc' 'git')
+checkdepends=('ruby-bundler' 'ruby-rake' 'ruby-rake-compiler' 'ruby-rspec')
+options=('!emptydirs')
+source=("https://github.com/celluloid/nio4r/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('5f89cddf3e772f05c10ab2ce7fbffd9b878ac129bc0adb7be5e35a67c7b17748a5722e784a19dace2308006bcbc7eaef70a49f9f58771faa0d97758742703338')
+b2sums=('263b061945dbdd1c36d951ff0bdf6ffe5193a730bd1924933fcff4150c574a5164ba7a59f0a040d71cba108ea08085ac9351635179974c03b5f8731583288e99')
+
+prepare() {
+  cd "${_gemname}-${pkgver}"
+
+  sed --in-place 's|git ls-files|find|' "${_gemname}.gemspec"
+  sed --in-place '/signing_key/d' "${_gemname}.gemspec"
+  sed --in-place '/coveralls/Id' spec/spec_helper.rb
+
+  rm rakelib/rubocop.rake
+}
+
+build() {
+  cd "${_gemname}-${pkgver}"
+
+  rake compile build
+}
+
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  rake spec
+}
+
+package() {
+  cd ${_gemname}-${pkgver}
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem install --ignore-dependencies --no-user-install -i "${pkgdir}/${_gemdir}" \
+    -n "${pkgdir}/usr/bin" "pkg/${_gemname}-${pkgver}.gem"
+
+  install -Dm 644 readme.md changes.md -t "${pkgdir}/usr/share/doc/${pkgname}"
+  install -Dm 644 license.md -t "${pkgdir}/usr/share/licenses/${pkgname}"
+
+  cp -r examples "${pkgdir}/usr/share/doc/${pkgname}"
+
+  cd "${pkgdir}/${_gemdir}"
+  rm -rf cache \
+    "gems/${_gemname}-${pkgver}/tmp/" \
+    "gems/${_gemname}-${pkgver}/ext/${_gemname}/Makefile" \
+    extensions/*/*/${_gemname}-${pkgver}/{mkmf.log,gem_make.out} \
+    "${pkgdir}/${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+}
+
+# vim: ts=2 sw=2 et:
