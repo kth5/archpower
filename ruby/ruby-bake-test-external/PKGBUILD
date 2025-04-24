@@ -1,0 +1,85 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-bake-test-external
+pkgver=0.6.1
+pkgrel=4
+pkgdesc='Run external test suites to check for breakage'
+arch=(any)
+url='https://github.com/ioquatix/bake-test-external'
+license=(MIT)
+depends=(
+  ruby
+  ruby-bake
+)
+makedepends=(
+  git
+  ruby-rdoc
+)
+checkdepends=(
+  git
+  ruby-bake-test
+  ruby-bundler
+  ruby-covered
+  ruby-decode
+  ruby-rspec
+  ruby-sus
+)
+options=(!emptydirs)
+source=(git+https://github.com/ioquatix/bake-test-external.git#tag=v$pkgver)
+sha512sums=('47ab1af74694e2c6805d3a3551d326ca788e6e4773efc64e88b53128c954d31769d72a1d19f7d9c231106e464827a24c1800780507382900cb2c82987f9286f2')
+b2sums=('0dc91b99d6dfd02a101be9981462639bdf506f7fd2ff013c64aa52946635876ab60cdb5bc2c46cc6ab2348179d5ce87dc656579ab7098d0e4c637b4701fe23f4')
+
+prepare() {
+  cd bake-test-external
+  sed -e '/signing_key/d' -i bake-test-external.gemspec
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended 's|~>|>=|g' "bake-test-external.gemspec"
+
+  sed --in-place \
+    --expression '/group :maintenance/,/end/d' \
+    --expression '/rubocop/d' \
+    gems.rb
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd bake-test-external
+  gem build bake-test-external.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    bake-test-external-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+check() {
+  local _gemdir="$(gem env gemdir)"
+  cd bake-test-external
+  # workaoround to avoid adding gems that get installed during tests to the package
+  # see https://github.com/ioquatix/bake-test-external/issues/8#issuecomment-2806905353
+  cp -r tmp_install check_install
+  GEM_HOME="check_install/$_gemdir" bake test
+}
+
+package() {
+  cd bake-test-external
+  cp -a tmp_install/* "$pkgdir"/
+  install -Dm644 license.md -t "$pkgdir"/usr/share/licenses/$pkgname/
+}
