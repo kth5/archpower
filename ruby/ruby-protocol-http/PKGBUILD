@@ -1,0 +1,82 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-protocol-http
+pkgver=0.49.0
+pkgrel=3
+pkgdesc='Provides abstractions to handle HTTP protocols'
+arch=(any)
+url='https://github.com/socketry/protocol-http'
+license=(MIT)
+depends=(
+  ruby
+)
+makedepends=(
+  git
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-bake
+  ruby-bake-test
+  ruby-bake-test-external
+  ruby-bundler
+  ruby-covered
+  ruby-decode
+  ruby-sus
+  ruby-sus-fixtures-async
+)
+options=(!emptydirs)
+source=("git+${url}.git#tag=v${pkgver}")
+sha512sums=('aaa80017c99235c77ed549bf7305f2a710bbdf21f5f049036d822d1e9709aff3404d117e54b1ccfea38bb75dac3366fb46e3c6048612f5bfa70c0e53926db2bd')
+b2sums=('1424014cd5fef286ea453f0e120fd1a866d2cc6a9e3fdd6a0bc53b2c77a750574f7c0016d68d1fefd9bd235c879a933a04891b8f2ba0d622ad4dde60d477a35c')
+
+prepare() {
+  cd protocol-http
+
+  sed -r \
+    -e 's|~>|>=|g' \
+    -e '/signing_key/d' \
+    -i protocol-http.gemspec
+
+  sed --in-place \
+    --expression '/group :maintenance/,/end/d' \
+    --expression '/rubocop/d' \
+    gems.rb
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd protocol-http
+  gem build protocol-http.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    protocol-http-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+check() {
+  local _gemdir="$(gem env gemdir)"
+  cd protocol-http
+  GEM_HOME="tmp_install/$_gemdir" bake test
+}
+
+package() {
+  cd protocol-http
+  cp -a tmp_install/* "$pkgdir"/
+}
