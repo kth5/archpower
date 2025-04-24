@@ -1,0 +1,76 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-parser
+pkgver=3.3.7.3
+pkgrel=2
+pkgdesc='A production-ready Ruby parser written in pure Ruby'
+arch=(any)
+url='https://github.com/whitequark/parser'
+license=(MIT)
+depends=(
+  ruby
+  ruby-ast
+  ruby-racc
+)
+makedepends=(
+  git
+  ragel
+  ruby-bundler
+  ruby-rake
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-erb
+  ruby-minitest
+  ruby-simplecov
+)
+options=(!emptydirs)
+source=(git+https://github.com/whitequark/parser.git#tag=v$pkgver)
+sha512sums=('d07f098348b540c5ce0297fc917b8e47642f59ecf78798ed921aca0233af3b5f8ca62af9d2fbd7855e06b0dc152071c11a89defef14d4c03c4c2b20037119804')
+b2sums=('b6ae5effd76b4814241494b125c061449e6b83ec12587c33bfe71e1726d44f99f4fe9438c2883ea55720cbaec660090e7a141671aa2432145d243beb80a7fb13')
+
+prepare() {
+  cd parser
+  sed 's/~>/>=/' -i parser.gemspec
+  sed -i '/[cC]liver/d' Rakefile
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd parser
+  rake generate
+  gem build parser.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    parser-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+check() {
+  local _gemdir="$(gem env gemdir)"
+  cd parser
+  GEM_HOME="tmp_install/$_gemdir" rake
+}
+
+package() {
+  cd parser
+  cp -a tmp_install/* "$pkgdir"/
+  install -Dm644 LICENSE.txt -t "$pkgdir"/usr/share/licenses/$pkgname/
+}
