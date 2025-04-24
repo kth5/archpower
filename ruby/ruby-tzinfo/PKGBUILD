@@ -1,0 +1,109 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+
+_name=tzinfo
+pkgname=ruby-tzinfo
+pkgver=2.0.6
+pkgrel=5
+pkgdesc='Daylight savings aware transformations between times in different time zones'
+arch=(any)
+url="https://github.com/tzinfo/tzinfo"
+license=(MIT)
+depends=(
+  ruby
+  ruby-concurrent
+)
+makedepends=(
+  ruby-rake
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-minitest
+  ruby-simplecov
+)
+options=(!emptydirs)
+source=(
+  $pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz
+  $pkgname-2.0.5-tests_without_bundler.patch
+  $url/commit/9e04c58ce10920538dc55ba6e547aa15cff39a84.patch
+)
+sha512sums=('88af68b13becc4b6b85b4653df95e19e24d8804ac2b2393ef03cfe551b5eaee827a5aecd2156a56572d554dd5239ae828a65e5c49854671aa1989f5c31ba320d'
+            '3bcb80704452dde5b90cd714c7ede2e539791c032d9fda70aeed5cbba3fd91b95a6cdbe653a30bd47f3147f476b0e8df9df24ebf434c306ee46b4d9a5ce4c981'
+            'ba2341ecd815efb85d779ae9a9fa1b3aac8fe79f37d7280f3990156c9dee921cbe7c0e9afbc50a65f7c7320af7356fd16a5d53df37abf3a81594765f215d66a5')
+b2sums=('8a7918c0edc1e70f3b805dfcdc351d9ec78f42a66973ec7cb0a8bfad31d9ccdadefe93b941aca5c15510ff857bd8282046e8d20d02f308934e087de541c26383'
+        'c55336230e7224c2efd607456a0f34d3a31e517fa0570a8f786d9b5f43447f345794a11a6fb7c6aa1f7e6bb6c6ee818e871cea81a23fb3873fd6f94ab8785bd6'
+        '805abba58bf8f8e1f6d72e846205380bfb386f0ceb1937a1b64e58f7b9e524640ae100b8d73a993e8a95a0ccff74eaa4a5ad7a63cea0c44efdd89c00e6f23c2d')
+
+prepare() {
+  # run tests without bundler by removing explicit check for running with bundler
+  patch -Np1 -d $_name-$pkgver -i ../$pkgname-2.0.5-tests_without_bundler.patch
+  cd $_name-$pkgver
+
+  patch --verbose --strip=1 --input="../9e04c58ce10920538dc55ba6e547aa15cff39a84.patch"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed -i -e 's|~>|>=|g' $_name.gemspec
+}
+
+build() {
+  local gemdir="$(gem env gemdir)"
+  local gem_install_options=(
+    --local
+    --verbose
+    --ignore-dependencies
+    --no-user-install
+    --install-dir tmp_install/$gemdir
+    --bindir tmp_install/usr/bin
+    $_name-$pkgver.gem
+  )
+  local unrepro_files=(
+    tmp_install/$gemdir/cache/
+    tmp_install/$gemdir/gems/$_name-$pkgver/vendor/
+    tmp_install/$gemdir/doc/$_name-$pkgver/ri/ext/
+  )
+
+  cd $_name-$pkgver
+
+  gem build $_name.gemspec
+  gem install "${gem_install_options[@]}"
+
+  # remove unrepreducible files
+  rm -frv "${unrepro_files[@]}"
+
+  find tmp_install/$gemdir/gems/ \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find tmp_install/$gemdir/extensions/ \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  local gemdir="$(gem env gemdir)"
+
+  cd $_name-$pkgver
+
+  GEM_HOME="tmp_install/$gemdir" rake test
+}
+
+package() {
+  cd $_name-$pkgver
+
+  mv -v tmp_install/* "$pkgdir/"
+
+  install -vDm 644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -vDm 644 {CHANGES,README}.md -t "$pkgdir/usr/share/doc/$pkgname/"
+}
