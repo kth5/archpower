@@ -1,0 +1,63 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-protocol-websocket
+pkgver=0.20.1
+pkgrel=4
+pkgdesc='A low level implementation of the WebSocket protocol'
+arch=(any)
+url='https://github.com/socketry/protocol-websocket'
+license=(MIT)
+depends=(
+  ruby
+  ruby-protocol-http
+)
+makedepends=(
+  git
+  ruby-rdoc
+)
+options=(!emptydirs)
+source=("git+${url}.git#tag=v${pkgver}")
+sha512sums=('5163bf83ed78063286983da7e0b01fba0886ddb9d26155d553cceb184279174a1639e75cdd8b8bdb5cec224387dd6d68bc06c71b818967601acf048178531016')
+b2sums=('5c5291e2b07af4bfe5253f28b10222f43886c9c4f356c5b710a0351b98a47940c91833ba295c31967e827bffee9797c651de894c8f6a9d61bb4d956e177c7407')
+
+prepare() {
+  cd protocol-websocket
+  sed -r -e 's|~>|>=|g' -e '/signing_key/d' -i protocol-websocket.gemspec
+  sed --in-place \
+    --expression '/group :maintenance/,/end/d' \
+    --expression '/rubocop/d' \
+    gems.rb
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd protocol-websocket
+  gem build protocol-websocket.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    protocol-websocket-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+package() {
+  cd protocol-websocket
+  cp -a tmp_install/* "$pkgdir"/
+  install -Dm644 license.md -t "$pkgdir"/usr/share/licenses/$pkgname/
+}
