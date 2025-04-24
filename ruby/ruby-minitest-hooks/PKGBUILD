@@ -3,7 +3,7 @@
 
 pkgname=ruby-minitest-hooks
 pkgver=1.5.2
-pkgrel=2
+pkgrel=3
 pkgdesc='Around and before_all/after_all/around_all hooks for Minitest'
 arch=(any)
 url='https://github.com/jeremyevans/minitest-hooks'
