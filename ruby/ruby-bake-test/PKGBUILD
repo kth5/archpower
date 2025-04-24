@@ -1,0 +1,75 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-bake-test
+pkgver=0.3.0
+pkgrel=3
+pkgdesc='Run local test suites without knowing exactly how to run them'
+arch=(any)
+url='https://github.com/ioquatix/bake-test'
+license=(MIT)
+depends=(
+  rake
+  ruby-bake
+)
+makedepends=(
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-bundler
+  ruby-covered
+  ruby-decode
+  ruby-sus
+)
+options=(!emptydirs)
+source=(https://github.com/ioquatix/bake-test/archive/v$pkgver/$pkgname-$pkgver.tar.gz)
+sha512sums=('29ed0b1a8e015306fed495f9f04a6a60b993426ece347afcd01f8ded600d3e3d9c26ed21c26a4b45fa8cade4b9204be12d9e24f15bfaf1b55f1235026ba6bdd2')
+b2sums=('ee8626acf69dd225ee832274c71cfc0722167e8c55cd72f9521e316cdbadc58527f761da96eef0cb2e420f4dd79fbc37e27dad015e3da081875613f1475e9349')
+
+prepare() {
+  cd bake-test-$pkgver
+
+  sed -e '/signing_key/d' -i bake-test.gemspec
+
+  sed --in-place \
+    --expression '/group :maintenance/,/end/d' \
+    --expression '/rubocop/d' \
+    gems.rb
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd bake-test-$pkgver
+  gem build bake-test.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    bake-test-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+check() {
+  local _gemdir="$(gem env gemdir)"
+  cd bake-test-$pkgver
+  GEM_HOME="tmp_install/$_gemdir" bake test
+}
+
+package() {
+  cd bake-test-$pkgver
+  cp -a tmp_install/* "$pkgdir"/
+}
