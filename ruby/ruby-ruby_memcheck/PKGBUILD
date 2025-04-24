@@ -1,0 +1,72 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-ruby_memcheck
+pkgver=1.2.0
+_commit=f4b8fe6140fcd38747a24ea4f99a87f5f56c950a
+pkgrel=6
+pkgdesc='Use Valgrind memcheck without going crazy'
+arch=(any)
+url='https://github.com/Shopify/ruby_memcheck'
+license=(MIT)
+depends=(
+  ruby
+  ruby-nokogiri
+  valgrind
+)
+makedepends=(
+  git
+)
+checkdepends=(
+  ruby-bundler
+  ruby-minitest
+  ruby-racc
+  ruby-rake
+  ruby-rake-compiler
+  ruby-rspec-core
+)
+options=(!emptydirs)
+source=(git+https://github.com/Shopify/ruby_memcheck.git#commit=$_commit)
+sha256sums=('SKIP')
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd ruby_memcheck
+  gem build ruby_memcheck.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    ruby_memcheck-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+check() {
+  case "${CARCH}" in
+    powerpc*|riscv64) return 0 ;;
+  esac
+
+  local _gemdir="$(gem env gemdir)"
+  cd ruby_memcheck
+  GEM_HOME="tmp_install/$_gemdir" rake
+}
+
+package() {
+  cd ruby_memcheck
+  cp -a tmp_install/* "$pkgdir"/
+  install -Dm644 LICENSE.txt -t "$pkgdir"/usr/share/licenses/$pkgname/
+}
