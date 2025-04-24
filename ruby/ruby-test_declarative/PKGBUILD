@@ -1,0 +1,61 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+_name=test_declarative
+pkgname=ruby-test_declarative
+pkgver=0.0.6
+pkgrel=6
+pkgdesc="Simply adds a declarative test method syntax to test/unit"
+arch=('any')
+url="https://github.com/svenfuchs/test_declarative"
+license=('MIT')
+depends=('ruby')
+makedepends=('git' 'ruby-rdoc')
+checkdepends=('ruby-rake' 'ruby-bundler' 'ruby-minitest')
+options=(!emptydirs)
+# can not build from tarball:
+# https://github.com/svenfuchs/test_declarative/issues/19
+# commit pointing to v${pkgver} (no signatures)
+source=(
+  "${_name}::git+${url}#commit=d0c26d1e5bcd9880bd4a758ce462eb8fd31e2928"
+  # https://github.com/svenfuchs/test_declarative/pull/24
+  "${pkgname}_fix_tests.patch::${url}/commit/ef9561b703990a846aa49c0f4d164009b355f0cd.patch"
+)
+sha512sums=('SKIP'
+            '95951e5f1f7738261d088f4726d70123c654a9bd42a07a016914c740e12803c3cd579da65d1998285c3e7adaf018b71fcb035c59cfeaed213cce393572c66e72')
+b2sums=('SKIP'
+        'a5a51d9fe0e04f5b4309e04ef6af4aef00690bf893cbd1371d17661f1a88a260a3d71cf6be0882339b81cd4abcf55151c6e5688b9a815f9493d8c49414e9170f')
+
+prepare() {
+  mv -v "${_name}" "${pkgname}-${pkgver}"
+  cd ${pkgname}-${pkgver}
+
+  patch --verbose --strip=1 --input="../${pkgname}_fix_tests.patch"
+
+  # we don't do version pinning
+  sed -r 's|~>|>=|g' -i "${_name}.gemspec" Gemfile
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  gem build "${_name}.gemspec"
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  BUNDLE_GEMFILE='Gemfile' rake test
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  local _gemdir="$(gem env gemdir)"
+  gem install --ignore-dependencies \
+              --no-user-install \
+              -i "${pkgdir}/${_gemdir}" \
+              -n "${pkgdir}/usr/bin" \
+              ${_name}-${pkgver}.gem
+  install -vDm 644 MIT-LICENSE \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  cd "${pkgdir}/${_gemdir}"
+  rm -rvf cache gems/${_name}-${pkgver}/{ext,lib/*/*.so} \
+    extensions/*/*/${_name}-${pkgver}/{mkmf.log,gem_make.out}
+}
