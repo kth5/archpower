@@ -1,0 +1,428 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jon Rowe <hello@jonrowe.co.uk>
+Date: Sat, 15 Feb 2025 13:56:46 +0000
+Subject: [PATCH] Fix diff-lcs errors
+
+(cherry picked from commit 9ec2670a6abd84cc1b37532e7007825c0eeef50b)
+
+ Conflicts:
+	rspec-mocks/spec/rspec/mocks/diffing_spec.rb
+	rspec-support/spec/rspec/support/differ_spec.rb
+---
+ .../rspec/matchers/built_in/compound_spec.rb  | 115 +++++++++++-------
+ .../rspec/matchers/built_in/include_spec.rb   |   6 +-
+ .../spec/rspec/matchers/dsl_spec.rb           |   4 +-
+ rspec-mocks/spec/rspec/mocks/diffing_spec.rb  |  15 ++-
+ .../lib/rspec/support/spec/diff_helpers.rb    |  16 ++-
+ .../spec/rspec/support/differ_spec.rb         |  20 +--
+ 6 files changed, 113 insertions(+), 63 deletions(-)
+
+diff --git a/rspec-expectations/spec/rspec/matchers/built_in/compound_spec.rb b/rspec-expectations/spec/rspec/matchers/built_in/compound_spec.rb
+index fde567dc1..2f4639626 100644
+--- a/rspec-expectations/spec/rspec/matchers/built_in/compound_spec.rb
++++ b/rspec-expectations/spec/rspec/matchers/built_in/compound_spec.rb
+@@ -1,5 +1,6 @@
+ module RSpec::Matchers::BuiltIn
+   RSpec.describe Compound do
++    include RSpec::Support::Spec::DiffHelpers
+ 
+     let(:matcher_without_diffable) { include("foo") }
+ 
+@@ -426,7 +427,7 @@ module RSpec::Matchers::BuiltIn
+             it 'fails with a message containing a diff for first matcher' do
+               expected_failure = dedent(<<-EOS)
+                 |Diff for (include "foo"):
+-                |@@ -1,2 +1,3 @@
++                |@@ #{::Diff::LCS::VERSION.to_f > 1.5 ? "-1 +1,2": "-1,2 +1,3"} @@
+                 |-foo
+                 |+baz
+                 |+bar
+@@ -469,7 +470,7 @@ module RSpec::Matchers::BuiltIn
+                 |   (compared using ==)
+                 |
+                 |Diff for (include "foo"):
+-                |@@ -1,2 +1,3 @@
++                |@@ #{::Diff::LCS::VERSION.to_f > 1.5 ? "-1 +1,2" : "-1,2 +1,3"} @@
+                 |-foo
+                 |+baz
+                 |+bar
+@@ -519,7 +520,7 @@ module RSpec::Matchers::BuiltIn
+               |
+               |   expected "baz\\nbar" to include "foo"
+               |Diff for (include "foo"):
+-              |@@ -1,2 +1,3 @@
++              |@@ #{::Diff::LCS::VERSION.to_f > 1.5 ? "-1 +1,2" : "-1,2 +1,3"} @@
+               |-foo
+               |+baz
+               |+bar
+@@ -549,13 +550,13 @@ module RSpec::Matchers::BuiltIn
+               |
+               |   expected "baz\\nbug" to include "foo"
+               |Diff for (include "bar"):
+-              |@@ -1,2 +1,3 @@
++              |@@ #{::Diff::LCS::VERSION.to_f > 1.5 ? "-1 +1,2": "-1,2 +1,3"} @@
+               |-bar
+               |+baz
+               |+bug
+               |
+               |Diff for (include "foo"):
+-              |@@ -1,2 +1,3 @@
++              |@@ #{::Diff::LCS::VERSION.to_f > 1.5 ? "-1 +1,2": "-1,2 +1,3"} @@
+               |-foo
+               |+baz
+               |+bug
+@@ -595,14 +596,14 @@ module RSpec::Matchers::BuiltIn
+                     |
+                     |   expected "HELLO\\nWORLD" to eq downcase "hola\\nmon"
+                     |Diff for (eq downcase "bonjour\\nmonde"):
+-                    |@@ -1,3 +1,3 @@
++                    |@@ #{one_line_header(3)} @@
+                     |-bonjour
+                     |-monde
+                     |+hello
+                     |+world
+                     |
+                     |Diff for (eq downcase "hola\\nmon"):
+-                    |@@ -1,3 +1,3 @@
++                    |@@ #{one_line_header(3)} @@
+                     |-hola
+                     |-mon
+                     |+hello
+@@ -638,14 +639,14 @@ module RSpec::Matchers::BuiltIn
+                     |
+                     |   expected "hello\\nworld" to eq downcase "hola\\nmon"
+                     |Diff for (eq downcase "bonjour\\nmonde"):
+-                    |@@ -1,3 +1,3 @@
++                    |@@ #{one_line_header(3)} @@
+                     |-bonjour
+                     |-monde
+                     |+hello
+                     |+world
+                     |
+                     |Diff for (eq downcase "hola\\nmon"):
+-                    |@@ -1,3 +1,3 @@
++                    |@@ #{one_line_header(3)} @@
+                     |-hola
+                     |-mon
+                     |+hello
+@@ -817,7 +818,7 @@ module RSpec::Matchers::BuiltIn
+             |   (compared using ==)
+             |
+             |Diff for (include "foo"):
+-            |@@ -1,2 +1,3 @@
++            |@@ #{::Diff::LCS::VERSION.to_f > 1.5 ? "-1 +1,2": "-1,2 +1,3"} @@
+             |-foo
+             |+baz
+             |+bug
+@@ -850,7 +851,7 @@ module RSpec::Matchers::BuiltIn
+             |
+             |   expected "baz\\nbug" to include "foo"
+             |Diff for (include "foo"):
+-            |@@ -1,2 +1,3 @@
++            |@@ #{::Diff::LCS::VERSION.to_f > 1.5 ? "-1 +1,2": "-1,2 +1,3"} @@
+             |-foo
+             |+baz
+             |+bug
+@@ -880,13 +881,13 @@ module RSpec::Matchers::BuiltIn
+             |
+             |   expected "baz\\nbug" to include "buzz"
+             |Diff for (include "foo"):
+-            |@@ -1,2 +1,3 @@
++            |@@ #{::Diff::LCS::VERSION.to_f > 1.5 ? "-1 +1,2": "-1,2 +1,3"} @@
+             |-foo
+             |+baz
+             |+bug
+             |
+             |Diff for (include "buzz"):
+-            |@@ -1,2 +1,3 @@
++            |@@ #{::Diff::LCS::VERSION.to_f > 1.5 ? "-1 +1,2": "-1,2 +1,3"} @@
+             |-buzz
+             |+baz
+             |+bug
+@@ -926,34 +927,66 @@ module RSpec::Matchers::BuiltIn
+       it 'fails with complete diffs if its matchers are diffable' do
+         matcher = include("bar").and include("buzz").or include("foo")
+ 
+-        expected_failure = dedent(<<-EOS)
+-          |   expected "bug\\nsquash" to include "bar"
+-          |
+-          |...and:
+-          |
+-          |      expected "bug\\nsquash" to include "buzz"
+-          |
+-          |   ...or:
+-          |
+-          |      expected "bug\\nsquash" to include "foo"
+-          |Diff for (include "bar"):
+-          |@@ -1,2 +1,3 @@
+-          |-bar
+-          |+bug
+-          |+squash
+-          |
+-          |Diff for (include "buzz"):
+-          |@@ -1,2 +1,3 @@
+-          |-buzz
+-          |+bug
+-          |+squash
+-          |
+-          |Diff for (include "foo"):
+-          |@@ -1,2 +1,3 @@
+-          |-foo
+-          |+bug
+-          |+squash
+-        EOS
++        expected_failure =
++          if ::Diff::LCS::VERSION.to_f > 1.5
++            dedent(<<-EOS)
++              |   expected "bug\\nsquash" to include "bar"
++              |
++              |...and:
++              |
++              |      expected "bug\\nsquash" to include "buzz"
++              |
++              |   ...or:
++              |
++              |      expected "bug\\nsquash" to include "foo"
++              |Diff for (include "bar"):
++              |@@ -1 +1,2 @@
++              |-bar
++              |+bug
++              |+squash
++              |
++              |Diff for (include "buzz"):
++              |@@ -1 +1,2 @@
++              |-buzz
++              |+bug
++              |+squash
++              |
++              |Diff for (include "foo"):
++              |@@ -1 +1,2 @@
++              |-foo
++              |+bug
++              |+squash
++            EOS
++          else
++            dedent(<<-EOS)
++              |   expected "bug\\nsquash" to include "bar"
++              |
++              |...and:
++              |
++              |      expected "bug\\nsquash" to include "buzz"
++              |
++              |   ...or:
++              |
++              |      expected "bug\\nsquash" to include "foo"
++              |Diff for (include "bar"):
++              |@@ -1,2 +1,3 @@
++              |-bar
++              |+bug
++              |+squash
++              |
++              |Diff for (include "buzz"):
++              |@@ -1,2 +1,3 @@
++              |-buzz
++              |+bug
++              |+squash
++              |
++              |Diff for (include "foo"):
++              |@@ -1,2 +1,3 @@
++              |-foo
++              |+bug
++              |+squash
++            EOS
++          end
+ 
+         expect {
+           expect(dedent(<<-EOS)).to matcher
+diff --git a/rspec-expectations/spec/rspec/matchers/built_in/include_spec.rb b/rspec-expectations/spec/rspec/matchers/built_in/include_spec.rb
+index e4102adf0..8edb235bb 100644
+--- a/rspec-expectations/spec/rspec/matchers/built_in/include_spec.rb
++++ b/rspec-expectations/spec/rspec/matchers/built_in/include_spec.rb
+@@ -104,7 +104,7 @@ RSpec.describe "#include matcher" do
+       failure_string = if use_string_keys_in_failure_message?
+                          dedent(<<-END)
+                            |Diff:
+-                           |@@ -1,3 +1,3 @@
++                           |@@ #{one_line_header(3)} @@
+                            |-:bar => 3,
+                            |-:foo => 1,
+                            |+"bar" => 2,
+@@ -132,7 +132,7 @@ RSpec.describe "#include matcher" do
+       failure_string = if use_string_keys_in_failure_message?
+                          dedent(<<-END)
+                            |Diff:
+-                           |@@ -1,3 +1,3 @@
++                           |@@ #{one_line_header(3)} @@
+                            |-(match /FOO/i) => 1,
+                            |-:bar => 3,
+                            |+"bar" => 2,
+@@ -141,7 +141,7 @@ RSpec.describe "#include matcher" do
+                        else
+                          dedent(<<-END)
+                            |Diff:
+-                           |@@ -1,3 +1,3 @@
++                           |@@ #{one_line_header(3)} @@
+                            |-(match /FOO/i) => 1,
+                            |-:bar => 3,
+                            |+:bar => 2,
+diff --git a/rspec-expectations/spec/rspec/matchers/dsl_spec.rb b/rspec-expectations/spec/rspec/matchers/dsl_spec.rb
+index 4e99b0479..9e504fc30 100644
+--- a/rspec-expectations/spec/rspec/matchers/dsl_spec.rb
++++ b/rspec-expectations/spec/rspec/matchers/dsl_spec.rb
+@@ -515,8 +515,10 @@ module RSpec::Matchers::DSL
+ 
+       if Diff::LCS::VERSION.to_f < 1.4
+         expected_diff = "Diff:\n@@ -1,3 +1,3 @@\n-line1\n+LINE1\nline2\n"
+-      else
++      elsif Diff::LCS::VERSION.to_f < 1.6
+         expected_diff = "Diff:\n@@ -1 +1 @@\n-line1\n+LINE1\n"
++      else
++        expected_diff = "Diff:\n@@ -1,2 +1,2 @@\n-line1\n+LINE1\nline2\n"
+       end
+ 
+       expect(diff).to eq expected_diff
+diff --git a/rspec-mocks/spec/rspec/mocks/diffing_spec.rb b/rspec-mocks/spec/rspec/mocks/diffing_spec.rb
+index 2b07cac78..709ac881d 100644
+--- a/rspec-mocks/spec/rspec/mocks/diffing_spec.rb
++++ b/rspec-mocks/spec/rspec/mocks/diffing_spec.rb
+@@ -48,9 +48,10 @@ RSpec.describe "Diffs printed when arguments don't match" do
+         expect(d).to receive(:foo).with("some string\nline2")
+         expect {
+           d.foo("this other string")
+-        }.to fail_with("#<Double \"double\"> received :foo with unexpected arguments\n" \
+-          "  expected: (\"some string\\nline2\")\n       got: (\"this other string\")\n" \
+-          "Diff:\n@@ -1,3 +1,2 @@\n-some string\n-line2\n+this other string\n")
++        }.to fail_with("#<Double \"double\"> received :foo with unexpected arguments\n  " \
++                       "expected: (\"some string\\nline2\")\n       got: (\"this other string\")\n" \
++                       "Diff:\n@@ #{::Diff::LCS::VERSION.to_f > 1.5 ? "-1,2 +1" : "-1,3 +1,2"} @@\n" \
++                       "-some string\n-line2\n+this other string\n")
+       end
+     end
+ 
+@@ -59,9 +60,11 @@ RSpec.describe "Diffs printed when arguments don't match" do
+         expect(d).to receive(:foo).with("some string\nline2", "some other string")
+         expect {
+           d.foo("this other string")
+-        }.to fail_with("#<Double \"double\"> received :foo with unexpected arguments\n" \
+-          "  expected: (\"some string\\nline2\", \"some other string\")\n" \
+-          "       got: (\"this other string\")\nDiff:\n@@ -1,3 +1,2 @@\n-some string\\nline2\n-some other string\n+this other string\n")
++        }.to fail_with("#<Double \"double\"> received :foo with unexpected arguments\n  " \
++                       "expected: (\"some string\\nline2\", \"some other string\")\n       " \
++                       "got: (\"this other string\")\n" \
++                       "Diff:\n@@ #{::Diff::LCS::VERSION.to_f > 1.5 ? "-1,2 +1" : "-1,3 +1,2"} @@\n" \
++                       "-some string\\nline2\n-some other string\n+this other string\n")
+       end
+     end
+ 
+diff --git a/rspec-support/lib/rspec/support/spec/diff_helpers.rb b/rspec-support/lib/rspec/support/spec/diff_helpers.rb
+index e7cf006ab..58e0712f1 100644
+--- a/rspec-support/lib/rspec/support/spec/diff_helpers.rb
++++ b/rspec-support/lib/rspec/support/spec/diff_helpers.rb
+@@ -12,13 +12,25 @@ module RSpec
+           def one_line_header(line_number=2)
+             "-1,#{line_number} +1,#{line_number}"
+           end
+-        else
++        elsif ::Diff::LCS::VERSION.to_f < 1.6
+           def one_line_header(_=2)
+             "-1 +1"
+           end
++        else
++          def one_line_header(line_number=2)
++            if line_number - 1 == 1
++              "-1 +1"
++            else
++              "-1,#{line_number - 1} +1,#{line_number - 1}"
++            end
++          end
+         end
+ 
+-        if Diff::LCS::VERSION.to_f < 1.4 || Diff::LCS::VERSION >= "1.4.4"
++        if ::Diff::LCS::VERSION.to_f > 1.5
++          def removing_two_line_header
++            "-1,2 +0,0"
++          end
++        elsif Diff::LCS::VERSION.to_f < 1.4 || Diff::LCS::VERSION >= "1.4.4"
+           def removing_two_line_header
+             "-1,3 +1"
+           end
+diff --git a/rspec-support/spec/rspec/support/differ_spec.rb b/rspec-support/spec/rspec/support/differ_spec.rb
+index fa27961fe..ce11261cb 100644
+--- a/rspec-support/spec/rspec/support/differ_spec.rb
++++ b/rspec-support/spec/rspec/support/differ_spec.rb
+@@ -17,7 +17,7 @@ module RSpec
+           actual   = "foo\nbar\nzap\nthis\nis\nsoo\nvery\nvery\nequal\ninsert\na\nline\n"
+ 
+           if Diff::LCS::VERSION.to_f < 1.4 || Diff::LCS::VERSION >= "1.4.4"
+-            expected_diff = dedent(<<-'EOD')
++            expected_diff = dedent(<<-"EOD")
+               |
+               |
+               |@@ -1,6 +1,6 @@
+@@ -28,7 +28,7 @@ module RSpec
+               | this
+               | is
+               | soo
+-              |@@ -9,6 +9,5 @@
++              |@@ #{::Diff::LCS::VERSION.to_f > 1.5 ? "-9,5 +9,4" : "-9,6 +9,5"} @@
+               | equal
+               | insert
+               | a
+@@ -66,7 +66,7 @@ module RSpec
+           actual   = "foo\nbar\nzap\nthis\nis\nsoo\nvery\nvery\nequal\ninsert\na\nline\n"
+ 
+           if Diff::LCS::VERSION.to_f < 1.4 || Diff::LCS::VERSION >= "1.4.4"
+-            expected_diff = dedent(<<-'EOS')
++            expected_diff = dedent(<<-"EOS")
+               |
+               |
+               |@@ -1,6 +1,6 @@
+@@ -77,7 +77,7 @@ module RSpec
+               | this
+               | is
+               | soo
+-              |@@ -9,6 +9,5 @@
++              |@@ #{::Diff::LCS::VERSION.to_f > 1.5 ? "-9,5 +9,4" : "-9,6 +9,5"} @@
+               | equal
+               | insert
+               | a
+@@ -198,9 +198,9 @@ module RSpec
+           expected = animal_class.new "bob", "giraffe"
+           actual   = animal_class.new "bob", "tortoise"
+ 
+-          expected_diff = dedent(<<-'EOD')
++          expected_diff = dedent(<<-"EOD")
+             |
+-            |@@ -1,5 +1,5 @@
++            |@@ #{one_line_header(5)} @@
+             | <Animal
+             |   name=bob,
+             |-  species=tortoise
+@@ -217,10 +217,10 @@ module RSpec
+           expected = [ :foo, 'bar', :baz, 'quux', :metasyntactic, 'variable', :delta, 'charlie', :width, 'quite wide' ]
+           actual   = [ :foo, 'bar', :baz, 'quux', :metasyntactic, 'variable', :delta, 'tango'  , :width, 'very wide'  ]
+ 
+-          expected_diff = dedent(<<-'EOD')
++          expected_diff = dedent(<<-"EOD")
+             |
+             |
+-            |@@ -5,7 +5,7 @@
++            |@@ #{::Diff::LCS::VERSION.to_f > 1.5 ? "-5,6 +5,6" : "-5,7 +5,7"} @@
+             |  :metasyntactic,
+             |  "variable",
+             |  :delta,
+@@ -425,9 +425,9 @@ module RSpec
+           expected = "this is:\n  one string"
+           actual   = "this is:\n  another string"
+ 
+-          expected_diff = dedent(<<-'EOD')
++          expected_diff = dedent(<<-"EOD")
+             |
+-            |@@ -1,3 +1,3 @@
++            |@@ #{one_line_header(3)} @@
+             | this is:
+             |-  another string
+             |+  one string
+-- 
+2.48.1
+
