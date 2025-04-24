@@ -1,0 +1,95 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Andreas 'Segaja' Schleifer <segaja at archlinux dot org>
+
+_gemname='erubi'
+pkgname="ruby-${_gemname}"
+pkgver=1.13.1
+pkgrel=3
+pkgdesc='Small ERB Implementation'
+arch=('any')
+url="https://github.com/jeremyevans/erubi"
+license=('MIT')
+depends=(
+  ruby
+)
+makedepends=(
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-minitest
+  ruby-minitest-global_expectations
+  ruby-rake
+)
+options=(!emptydirs)
+source=("${url}/archive/${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('3c3fe28dde52570f4ea5d820ab8ae0b2dd37d3c1f4c19b3e567b79ccf18110f42686bb0986b4b16afa3213c733c353db88e08c1006e5379dede44aa60b763e6f')
+b2sums=('a4a247f74f6a729339fac13e94bba319b32122030afaba2677ff3a3dd662f78004467f4cd7fe54b37044d0a7434140bc91c66a452116a4c66691eec167702588')
+
+prepare() {
+  cd "${_gemname}-${pkgver}"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
+}
+
+build() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rake spec
+}
+
+package() {
+  cd "${_gemname}-${pkgver}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 MIT-LICENSE --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.rdoc --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
+
+# vim: tabstop=2 shiftwidth=2 expandtab:
