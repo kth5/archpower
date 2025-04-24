@@ -1,0 +1,95 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Andreas 'Segaja' Schleifer <segaja at archlinux dot org>
+
+_gemname='temple'
+pkgname="ruby-${_gemname}"
+pkgver=0.10.3
+pkgrel=5
+pkgdesc='Template compilation framework in Ruby'
+arch=('any')
+url="https://github.com/judofyr/${_gemname}"
+license=('MIT')
+depends=(
+  ruby
+)
+makedepends=(
+  git
+)
+checkdepends=(
+  ruby-bundler
+  ruby-erubi
+  ruby-rake
+  ruby-rspec
+  ruby-tilt
+)
+options=('!emptydirs')
+source=("${pkgname}::git+${url}.git#tag=v${pkgver}")
+sha512sums=('8741adebafcb3301498f2666902661dca356cd7a89476bc54c5c21409a6b389680b1262f82714c2c465477ef021df09b5174f654b58df9813ce32532f444d01c')
+b2sums=('1727c6fd378337f2f3948906198cb2be04fb3826cdd0d799250b32679a64b83469fd486ead09287cd0b256b78ec925521644019118a335649fd32621561e3b9c')
+
+prepare() {
+  cd "${pkgname}"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended 's|~>|>=|g' "${_gemname}.gemspec"
+}
+
+build() {
+  cd "${pkgname}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install/${_gemdir}/cache/" \
+    "tmp_install/${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install/${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install/${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install/${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${pkgname}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install/${_gemdir}" rake spec
+}
+
+package() {
+  cd "${pkgname}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 LICENSE* --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 CHANGES *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
