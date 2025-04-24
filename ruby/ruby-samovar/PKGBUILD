@@ -1,0 +1,76 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-samovar
+pkgver=2.3.0
+pkgrel=6
+pkgdesc='A flexible option parser excellent support for sub-commands and help documentation'
+arch=(any)
+url='https://github.com/ioquatix/samovar'
+license=(MIT)
+depends=(
+  ruby
+  ruby-console
+  ruby-mapping
+)
+makedepends=(
+  git
+  ruby-bundler
+  ruby-rake
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-bake
+  ruby-bake-test
+  ruby-bake-test-external
+  ruby-covered
+  ruby-sus
+)
+options=(!emptydirs)
+source=(git+https://github.com/ioquatix/samovar.git#tag=v$pkgver)
+sha512sums=('cb1a2c1002729832c41195a1042f50b1ed24552b6fc87ae56218ee48796264273c5c55f73db07a79487bd611483ea364a2dbc9f4d03e76ea3865604c1caa4343')
+b2sums=('6a9fe1932359ab0a346dd83dae89fe0f67fb81d8f0099114bdaa3f8524906fbccac5f5fbffc74ab39943c2c24ff9aad8e3a2b41f224b15b995ebfa11e9a0f98d')
+
+prepare() {
+  cd samovar
+
+  sed -i '/release\.pem/d' samovar.gemspec
+  sed -i '/group :maintenance/,/end/d' gems.rb
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd samovar
+  gem build --verbose samovar.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    samovar-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+check() {
+  local _gemdir="$(gem env gemdir)"
+  cd samovar
+  GEM_HOME="tmp_install/$_gemdir" bake test
+}
+
+package() {
+  cd samovar
+  cp -a tmp_install/* "$pkgdir"/
+}
