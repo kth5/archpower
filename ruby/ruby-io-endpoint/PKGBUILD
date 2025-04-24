@@ -1,0 +1,116 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Andreas 'Segaja' Schleifer <segaja at archlinux dot org>
+
+_gemname='io-endpoint'
+pkgname="ruby-${_gemname}"
+pkgver=0.15.2
+pkgrel=3
+pkgdesc='Provides a separation of concerns interface for IO endpoints'
+arch=('any')
+url="https://github.com/socketry/${_gemname}"
+license=('MIT')
+depends=(
+  ruby
+)
+makedepends=(
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-bake
+  ruby-bake-test
+  ruby-bake-test-external
+  ruby-bundler
+  ruby-covered
+  ruby-decode
+  ruby-sus
+  ruby-sus-fixtures-async
+  ruby-sus-fixtures-openssl
+)
+options=('!emptydirs')
+source=(
+  "${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz"
+  "${pkgname}_fix_tests.patch"
+)
+sha512sums=('50d37fa51b585f962c9485aed1f8cf167ca815ea82f7a06f287c8d059d05b2cd8e49806be5ad59074ea79dcb337dc65039abf3dadc9ebdb03853937191c49ae0'
+            '6f3f41b9facda424a4c4cad9ce1be0a1164383bead72352ab1c17b7042d230671d551e48f35011bedbf7e8236f0df6896477bedc524bb667d211007389506226')
+b2sums=('e5444a5c4b5bc9b559d1a81774d6b610bd33de2f64be0b2ea1e2e2338a47f65f8829c0d8c5a4fa22215c7c2e75f862af7818295008bd923721d8153735e3dacf'
+        '36619dfcbfce6b5bdd533ead12cdf5b7be535351f5b47b4c82a12201930a4ce900dfcb168b39c4878af5fe41f0ac65b8a0ac027bba2354048fa277828c7a0461')
+
+prepare() {
+  cd "${_gemname}-${pkgver}"
+
+  patch --verbose --strip=1 --input="../${pkgname}_fix_tests.patch"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended \
+    --expression 's|~>|>=|g' \
+    --expression '/signing_key/d' \
+    "${_gemname}.gemspec"
+
+  sed --in-place \
+    --expression '/group :maintenance/,/end/d' \
+    --expression '/rubocop/d' \
+    gems.rb
+}
+
+build() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" bake test
+}
+
+package() {
+  cd "${_gemname}-${pkgver}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 license* --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
+
+# vim: tabstop=2 shiftwidth=2 expandtab:
