@@ -1,31 +1,32 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: AndyRTR <andyrtr@archlinux.org>
 
-pkgbase=ghostscript
-pkgname=(ghostscript ghostxps ghostpcl)
+pkgname=ghostscript
 pkgver=10.05.0
-pkgrel=1
+pkgrel=3
 pkgdesc="An interpreter for the PostScript language"
 url="https://www.ghostscript.com/"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
 license=('AGPL-3.0-or-later')
 depends=('libxt' 'libcups' 'fontconfig' 'zlib' 'libpng' 'libjpeg-turbo' 'jbig2dec'
          'libtiff' 'lcms2' 'libpaper' 'ijs' 'openjpeg2' 'libidn' 'poppler-data'
-         'cairo' 'glibc' 'libx11' 'gdk-pixbuf2' 'glib2')
+         'cairo' 'glibc' 'libx11' 'gdk-pixbuf2' 'glib2' 'sh')
+optdepends=('gtk3:              needed for gsx')
 makedepends=('gtk3' 'gnutls' 'glu' 'freeglut')
+replaces=('ghostpcl' 'ghostxps')
+conflicts=('ghostpcl' 'ghostxps')
 # https://github.com/ArtifexSoftware/ghostpdl-downloads/releases
-source=(https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs${pkgver//./}/ghostpdl-${pkgver}.tar.xz
-        #https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/ghostpdl-${pkgver/.0//}/ghostpdl-${pkgver}.tar.xz
+source=(https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs${pkgver//./}/ghostscript-${pkgver}.tar.xz
         2010_add_build_timestamp_setting.patch)
-# https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10031/SHA512SUMS
-sha512sums=('01d59cd7e062f4653095f31d4648226a4d40627a99d3eae44f8f67a3cb586f013e9d37550a3485cd204beecddff1026307d3329f9025a9cd536fb54bfc37ba74'
+# https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10051/SHA512SUMS
+sha512sums=('5a8695726ea2c70fd153bac47696c9e9046e9f74eccf8eea500794f79f09d5d2be70597c9d85c0b51b71d46d7974f50c5c9e3b0e242816bb84e64f1098a306a6'
             'cd7794ee4f28b11177021b950196385200b610127ed6cb94a45e3202b690b721a0dfcc0276ff39448d4dab64c1b31a76e6c323696a8315aad9edc22077f18a3d')
 
 ### update jbig2dec first! ###
 
 
 prepare() {
-  cd ghostpdl-${pkgver}
+  cd ghostscript-${pkgver}
 
   # *** remove after final decision ***
   # new in 9.54.0: 
@@ -48,7 +49,7 @@ prepare() {
   # ^ this one doesn't affect package size - so let's keep it
 
   # force it to use system-libs
-  rm -r cups/libs expat ijs jbig2dec jpeg lcms2mt libpng openjpeg tiff zlib
+  rm -r cups/libs ijs jbig2dec jpeg lcms2mt libpng openjpeg tiff zlib
   # using tree freetype because of https://bugs.archlinux.org/task/56849
   # lcms2mt is the new lcms2 fork aimed to replace lcms2 in a thread safe way
   
@@ -64,7 +65,7 @@ prepare() {
 }
 
 build() {
-  cd ghostpdl-${pkgver}
+  cd ghostscript-${pkgver}
 
   # gcc14 buildfix
   export CFLAGS+=" -Wno-incompatible-pointer-types -Wno-int-conversion"
@@ -86,14 +87,9 @@ build() {
   make so
 }
 
-package_ghostscript() {
-  optdepends=('gtk3:              needed for gsx')
-
-  cd ghostpdl-${pkgver}
+package() {
+  cd ghostscript-${pkgver}
   make -j1 DESTDIR="${pkgdir}" soinstall
-  # split pkg cleanup
-  rm -v "${pkgdir}"/usr/bin/{gpcl6*,gxps*}
-  rm -v "${pkgdir}"/usr/lib/{libgpcl6*,libgxps.so*}
 
   # gsc collides with gambit gambit-c
   mv "${pkgdir}"/usr/bin/{gsc,gs}
@@ -104,32 +100,8 @@ package_ghostscript() {
   rm -rv "${pkgdir}"/usr/bin/{lprsetup.sh,unix-lpr.sh}
 
   # install the CMaps from poppler-data
+  # mkdir "${pkgdir}"/usr/share/ghostscript/Resource
   ln -s /usr/share/poppler/cMap "${pkgdir}"/usr/share/ghostscript/Resource/CMap
-
-  install -Dt "${pkgdir}"/usr/share/licenses/${pkgname} -m644 LICENSE
-}
-
-package_ghostxps() {
-  pkgdesc="${pkgdesc/PostScript/XPS document}"
-  depends=("ghostscript=${pkgver}-${pkgrel}")
-
-  cd ghostpdl-${pkgver}
-  make DESTDIR="${pkgdir}" install-gxps install-so-gxps
-  rm -r "${pkgdir}"/usr/include
-
-  # fix file conflict - FS#70238
-  rm -r "${pkgdir}"/usr/lib/libgxps.so
-  
-  install -Dt "${pkgdir}"/usr/share/licenses/${pkgname} -m644 LICENSE
-}
-
-package_ghostpcl() {
-  pkgdesc="${pkgdesc/PostScript/PCL 6}"
-  depends=("ghostscript=${pkgver}-${pkgrel}")
-
-  cd ghostpdl-${pkgver}
-  make DESTDIR="${pkgdir}" install-gpcl6 install-so-gpcl6
-  rm -r "${pkgdir}"/usr/include
 
   install -Dt "${pkgdir}"/usr/share/licenses/${pkgname} -m644 LICENSE
 }
