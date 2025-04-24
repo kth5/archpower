@@ -1,0 +1,100 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+_gemname=async-http-cache
+pkgname="ruby-${_gemname}"
+pkgver=0.4.5
+pkgrel=3
+pkgdesc='Standard-compliant cache for async-http'
+arch=(any)
+url='https://github.com/socketry/async-http-cache'
+license=(MIT)
+depends=(
+  ruby
+  ruby-async-http
+)
+checkdepends=(
+  ruby-bake
+  ruby-bake-test
+  ruby-bake-test-external
+  ruby-bundler
+  ruby-covered
+  ruby-decode
+  ruby-sus
+  ruby-sus-fixtures-async-http
+  ruby-sus-fixtures-console
+)
+options=(!emptydirs)
+source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('05c7d312e18de11ec54f48207730c29439980857da85b5bf16d43946cfc595df09e8085bbc15b98ad5b32585d15fbe053dd00d59e895fc6d52d62edc6e7b72c1')
+b2sums=('0dc95ddd866d72c690dfa86da57102e97f7457dc585054c77a9267341c0efad75c5313c2ba86d12a4fa2531a9ee70df2a8fda1886fc916bb9586a8388982fca3')
+
+prepare() {
+  cd async-http-cache-$pkgver
+
+  sed -r -e 's|~>|>=|g' -e '/signing_key/d' -i async-http-cache.gemspec
+  sed --in-place \
+    --expression '/group :maintenance/,/end/d' \
+    --expression '/rubocop/d' \
+    gems.rb
+}
+
+build() {
+  cd async-http-cache-$pkgver
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unreproducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd async-http-cache-$pkgver
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install/$_gemdir" bake test
+}
+
+package() {
+  cd async-http-cache-$pkgver
+
+  cp --archive --verbose tmp_install/* "$pkgdir"/
+
+  install --verbose -D --mode=0644 license* --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
