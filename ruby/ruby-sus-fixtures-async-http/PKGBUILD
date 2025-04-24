@@ -1,0 +1,83 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-sus-fixtures-async-http
+pkgver=0.10.0
+pkgrel=4
+pkgdesc='Test fixtures for running in Async::HTTP'
+arch=(any)
+url='https://github.com/socketry/sus-fixtures-async-http'
+license=(MIT)
+depends=(
+  ruby
+  ruby-async-http
+  ruby-sus
+  ruby-sus-fixtures-async
+)
+makedepends=(
+  git
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-bake
+  ruby-bake-test
+  ruby-bake-test-external
+  ruby-bundler
+  ruby-covered
+  ruby-decode
+)
+options=(!emptydirs)
+source=("git+${url}.git#tag=v${pkgver}")
+sha256sums=('610bc24719758aaff699faf5d7a78b474e3a3b185e63753296d72695c13c4508')
+
+prepare() {
+  cd sus-fixtures-async-http
+
+  sed -r \
+    -e 's|~>|>=|g' \
+    -e '/signing_key/d' \
+    -i sus-fixtures-async-http.gemspec
+
+  sed -i \
+    -e '/group :maintenance/,/end/d' \
+    -e '/rubocop/d' \
+    gems.rb
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd sus-fixtures-async-http
+  gem build sus-fixtures-async-http.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    sus-fixtures-async-http-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+check() {
+  local _gemdir="$(gem env gemdir)"
+  cd sus-fixtures-async-http
+  GEM_HOME="tmp_install/$_gemdir" bake test
+}
+
+package() {
+  cd sus-fixtures-async-http
+  cp -a tmp_install/* "$pkgdir"/
+  install -Dm644 license.md -t "$pkgdir"/usr/share/licenses/$pkgname/
+}
