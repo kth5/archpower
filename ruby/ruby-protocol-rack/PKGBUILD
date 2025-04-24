@@ -1,0 +1,84 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-protocol-rack
+pkgver=0.11.1
+pkgrel=3
+pkgdesc='An implementation of the Rack protocol/specification'
+arch=(any)
+url='https://github.com/socketry/protocol-rack'
+license=(MIT)
+depends=(
+  ruby
+  ruby-protocol-http
+  ruby-rack
+)
+makedepends=(
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-async-http
+  ruby-bake-test
+  ruby-bake-test-external
+  ruby-bundler
+  ruby-covered
+  ruby-decode
+  ruby-sus
+  ruby-sus-fixtures-async-http
+)
+options=(!emptydirs)
+source=(https://github.com/socketry/protocol-rack/archive/v$pkgver/$pkgname-$pkgver.tar.gz)
+sha512sums=('aaf41929db62b41e80a8bca8e95efa77fd3fb7d67f77116d933b733efb83495e7038e22b32344b191db3ede69b62a33e2e70af2448756894ab926fc05c1c5b4e')
+b2sums=('274d280df179c6ec924ae99bd549233c412e2f00290f6cfb3e6223639f8838d9fabf15d2112c4805fd6f2067b8ff70f06d1e2b4c8d5fe67ea7e594ec003d0f0e')
+
+prepare() {
+  cd protocol-rack-$pkgver
+
+  sed -r \
+    -e 's|~>|>=|g' \
+    -e '/signing_key/d' \
+    -i protocol-rack.gemspec
+
+  sed --in-place \
+    --expression '/group :maintenance/,/end/d' \
+    --expression '/rubocop/d' \
+    gems.rb
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd protocol-rack-$pkgver
+  gem build protocol-rack.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    protocol-rack-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+check() {
+  local _gemdir="$(gem env gemdir)"
+  cd protocol-rack-$pkgver
+  GEM_HOME="tmp_install/$_gemdir" bake test
+}
+
+package() {
+  cd protocol-rack-$pkgver
+  cp -a tmp_install/* "$pkgdir"/
+  install -Dm644 license.md -t "$pkgdir"/usr/share/licenses/$pkgname/
+}
