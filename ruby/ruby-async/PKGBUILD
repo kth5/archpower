@@ -1,0 +1,120 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Andreas 'Segaja' Schleifer <segaja at archlinux dot org>
+
+_gemname=async
+pkgname=ruby-${_gemname}
+pkgver=2.23.0
+pkgrel=4
+pkgdesc='Composable asynchronous I/O'
+url='https://github.com/socketry/async'
+arch=(any)
+license=('MIT')
+depends=(
+  ruby
+  ruby-console
+  ruby-fiber-annotation
+  ruby-io-event
+  ruby-metrics
+  ruby-traces
+)
+makedepends=(
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-bake
+  ruby-bake-test
+  ruby-bake-test-external
+  ruby-bundler
+  ruby-decode
+  ruby-sus
+  ruby-sus-fixtures-async
+  ruby-sus-fixtures-console
+  ruby-sus-fixtures-time
+)
+options=('!emptydirs')
+source=("https://github.com/socketry/async/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('dc24ddd9f5fe40532e2132f208031e1b17ae480793086a6bc7dae8d78fc361221130e861e9c531e6b40e63c3dd6f2e7547dfab5df98a88ca912e06c80778ca9d')
+b2sums=('43ca4452dc1c76d2a7b14a5cc33f44e5ee22105940894c9376e371dda01c83dbda0fcc27068a04ac525fc9292c1fef984f0a2847dfade0ef93a7f0cda9dfd054')
+
+prepare() {
+  cd ${_gemname}-${pkgver}
+
+  sed -r \
+    -e 's|~>|>=|g' \
+    -e '/signing_key/d' \
+    -i "${_gemname}.gemspec"
+
+  sed --in-place \
+    --expression '/group :maintenance/,/end/d' \
+    --expression '/benchmark-ips/d' \
+    --expression '/covered/d' \
+    --expression '/rubocop/d' \
+    gems.rb
+  sed --in-place \
+    --expression '/benchmark/d' \
+    test/async/reactor.rb
+  rm config/sus.rb
+}
+
+build() {
+  cd ${_gemname}-${pkgver}
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd ${_gemname}-${pkgver}
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" bake test
+}
+
+package() {
+  cd ${_gemname}-${pkgver}
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 license.md --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 readme.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
+
+# vim: ts=2 sw=2 et:
