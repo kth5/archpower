@@ -1,0 +1,83 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-protocol-http1
+pkgver=0.34.0
+pkgrel=2
+pkgdesc='A low level implementation of the HTTP/1 protocol'
+arch=(any)
+url='https://github.com/socketry/protocol-http1'
+license=(MIT)
+depends=(
+  ruby
+  ruby-protocol-http
+)
+makedepends=(
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-bake
+  ruby-bake-test
+  ruby-bake-test-external
+  ruby-bundler
+  ruby-covered
+  ruby-decode
+  ruby-sus
+)
+options=(!emptydirs)
+source=(https://github.com/socketry/protocol-http1/archive/v$pkgver/$pkgname-$pkgver.tar.gz)
+sha512sums=('7a79ce7c7d2589b74147223c2bd246cecd21976904b8dc65202b7aeeb2aed0a6297fc7f74109544f52a8c4b1b8fa911f336ea400bb56a94615d2bbfcd97e0481')
+b2sums=('24d9a8aa2482eb6e8aff5d221db2c03282b9ae30aaa087cc142e1905b28b13b4739c2fe83f6ed98d908aa54941bda97cd9f2c79b58976853701224f5f7235218')
+
+prepare() {
+  cd protocol-http1-$pkgver
+
+  sed -i -r \
+    -e 's|~>|>=|g' \
+    -e '/signing_key/d' \
+    protocol-http1.gemspec \
+    gems.rb
+
+  sed --in-place \
+    --expression '/group :maintenance/,/end/d' \
+    --expression '/rubocop/d' \
+    gems.rb
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd protocol-http1-$pkgver
+  gem build protocol-http1.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    protocol-http1-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+check() {
+  local _gemdir="$(gem env gemdir)"
+  cd protocol-http1-$pkgver
+  GEM_HOME="tmp_install/$_gemdir" bake test
+}
+
+package() {
+  cd protocol-http1-$pkgver
+  cp -a tmp_install/* "$pkgdir"/
+  install -Dm644 license.md -t "$pkgdir"/usr/share/licenses/$pkgname/
+}
