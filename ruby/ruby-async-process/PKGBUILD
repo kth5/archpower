@@ -1,0 +1,76 @@
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-async-process
+pkgver=1.4.0
+pkgrel=4
+pkgdesc='Asynchronous process spawning'
+arch=(any)
+url='https://github.com/socketry/async-process'
+license=(MIT)
+depends=(
+  ruby
+  ruby-async
+)
+checkdepends=(
+  ruby-bake
+  ruby-bake-test
+  ruby-bake-test-external
+  ruby-bundler
+  ruby-covered
+  ruby-decode
+  ruby-sus-fixtures-async
+)
+options=(!emptydirs)
+source=(https://github.com/socketry/async-process/archive/v$pkgver/$pkgname-$pkgver.tar.gz)
+sha256sums=('15f4ff6599155e87f9e66c4e709afb104a9ab1518d91699ca511b8a663a832a9')
+
+prepare() {
+  cd async-process-$pkgver
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended \
+    --expression 's|~>|>=|g' \
+    --expression '/signing_key/d' async-process.gemspec
+
+  sed --in-place \
+    --expression '/group :maintenance/,/end/d' \
+    --expression '/rubocop/d' \
+    gems.rb
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd async-process-$pkgver
+  gem build async-process.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    async-process-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+check() {
+  local _gemdir="$(gem env gemdir)"
+  cd async-process-$pkgver
+  GEM_HOME="tmp_install/$_gemdir" bake test
+}
+
+package() {
+  cd async-process-$pkgver
+  cp -a tmp_install/* "$pkgdir"/
+}
