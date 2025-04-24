@@ -1,0 +1,59 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Thore Bödecker <foxxx0@archlinux.org>
+# Maintainer: Tim Meusel <tim@bastelfreak.de>
+
+_gemname=msgpack
+pkgname="ruby-${_gemname}"
+pkgver=1.8.0
+pkgrel=2
+pkgdesc='MessagePack implementation for Ruby'
+url='https://github.com/msgpack/msgpack-ruby'
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+license=('Apache')
+depends=('ruby')
+makedepends=('ruby-rdoc' 'ruby-rake' 'ruby-rake-compiler' 'ruby-yard' 'ruby-rspec' 'ruby-bundler' 'ruby-webrick' 'ruby-ruby_memcheck')
+options=('!emptydirs')
+source=("${url}/archive/v${pkgver}/${pkgname}-v${pkgver}.tar.gz")
+sha512sums=('69400b6c9df9b080479659b0025db67e09579ed0b06ec772c5f1aa401533ed212f96b616535d5237fe1f8b53989ec4815c4571e57f06c0c493b35eb129f4e29d')
+b2sums=('1f39d6a03e16f48606d3f3bbf088c079d1d5cc9adbd651815defb3bf6e2570a7078cfca3b567fb1f38318de34dcb86b9bf9cb9e191634bff266fb9c9689c82a5')
+
+prepare() {
+  cd "${_gemname}-ruby-${pkgver}"
+  sed 's|git ls-files -z|find -print0|' -i "${_gemname}.gemspec"
+  sed 's|~>|>=|g' -i Gemfile
+}
+
+build() {
+  cd "${_gemname}-ruby-${pkgver}"
+  rake compile
+  rake build
+  rake clean
+}
+
+check() {
+  cd "${_gemname}-ruby-${pkgver}"
+  rake spec
+}
+
+package() {
+  cd "${_gemname}-ruby-${pkgver}"
+  local _gemdir="$(gem env gemdir)"
+  gem install \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "${pkgdir}/${_gemdir}" \
+    --bindir "${pkgdir}/usr/bin"  \
+    "pkg/${_gemname}-${pkgver}.gem"
+
+  install -Dm 644 README.md -t "${pkgdir}/usr/share/doc/${pkgname}"
+  install -Dm 644 LICENSE -t "${pkgdir}/usr/share/licenses/${pkgname}"
+
+  rm -rf "${pkgdir}/${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext"
+
+  cd "${pkgdir}/${_gemdir}"
+  rm -r cache gems/"${_gemname}-${pkgver}"/{ext,tmp,lib/*/*.so} \
+    extensions/*/*/"${_gemname}-${pkgver}"/{mkmf.log,gem_make.out}
+}
+
+# vim: ts=2 sw=2 et:
