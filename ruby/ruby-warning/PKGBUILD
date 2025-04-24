@@ -1,0 +1,96 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+
+_name=warning
+pkgname=ruby-warning
+pkgver=1.5.0
+pkgrel=2
+pkgdesc="Add custom processing for warnings"
+arch=(any)
+url="https://github.com/jeremyevans/ruby-warning"
+license=(MIT)
+depends=(
+  ruby
+)
+makedepends=(
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-bundler
+  ruby-minitest-global_expectations
+  ruby-rake
+)
+options=(!emptydirs)
+source=($pkgname-$pkgver.tar.gz::$url/archive/refs/tags/$pkgver.tar.gz)
+sha512sums=('2b11487b7d137679ea8a8aac409952fca50fc5d6e63442ff98e0b6c05778a943e5d5b6aa07639390a9772ad2e49facde41521f8b08c9d2ef7de5230c48735622')
+b2sums=('81db55934eaeb477846e3e2ecc836f5b7bc152f51316dadd49ebd63a88f77209b168440bf2e28693965c2fa94157d26a54b06ea2f059d1a92d4edf72154c9d68')
+
+prepare() {
+  cd $pkgname-$pkgver
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed -i -e 's|~>|>=|g' $_name.gemspec
+}
+
+build() {
+  local gemdir="$(gem env gemdir)"
+  local gem_install_options=(
+    --local
+    --verbose
+    --ignore-dependencies
+    --no-user-install
+    --install-dir tmp_install/$gemdir
+    --bindir tmp_install/usr/bin
+    $_name-$pkgver.gem
+  )
+  local unrepro_files=(
+    tmp_install/$gemdir/cache/
+    tmp_install/$gemdir/gems/$_name-$pkgver/vendor/
+    tmp_install/$gemdir/doc/$_name-$pkgver/ri/ext/
+  )
+
+  cd $pkgname-$pkgver
+
+  gem build $_name.gemspec
+  gem install "${gem_install_options[@]}"
+
+  # remove unrepreducible files
+  rm -frv "${unrepro_files[@]}"
+
+  find tmp_install/$gemdir/gems/ \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find tmp_install/$gemdir/extensions/ \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  local gemdir="$(gem env gemdir)"
+
+  cd $pkgname-$pkgver
+
+  GEM_HOME="tmp_install/$gemdir" rake test
+}
+
+package() {
+  cd $pkgname-$pkgver
+
+  mv -v tmp_install/* "$pkgdir/"
+
+  install -vDm 644 MIT-LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -vDm 644 {CHANGELOG,README.rdoc} -t "$pkgdir/usr/share/doc/$pkgname/"
+}
