@@ -1,0 +1,59 @@
+diff -Naur a/arch/powerpc/include/asm/spu.h b/arch/powerpc/include/asm/spu.h
+--- a/arch/powerpc/include/asm/spu.h	2024-03-17 19:51:47.000830703 +0700
++++ b/arch/powerpc/include/asm/spu.h	2024-03-17 19:51:49.784770503 +0700
+@@ -185,6 +185,8 @@
+ 	atomic_t reserved_spus;
+ };
+ 
++extern int spu_enum_shared(void);
++
+ extern struct cbe_spu_info cbe_spu_info[];
+ 
+ void spu_init_channels(struct spu *spu);
+diff -Naur a/arch/powerpc/platforms/cell/spu_base.c b/arch/powerpc/platforms/cell/spu_base.c
+--- a/arch/powerpc/platforms/cell/spu_base.c	2024-03-17 19:51:47.028830098 +0700
++++ b/arch/powerpc/platforms/cell/spu_base.c	2024-03-17 19:51:49.784770503 +0700
+@@ -11,6 +11,7 @@
+ 
+ #include <linux/interrupt.h>
+ #include <linux/list.h>
++#include <linux/module.h>
+ #include <linux/init.h>
+ #include <linux/ptrace.h>
+ #include <linux/slab.h>
+@@ -26,6 +27,10 @@
+ #include <asm/xmon.h>
+ #include <asm/kexec.h>
+ 
++static int enum_shared = 0;
++module_param(enum_shared, int, S_IRUGO);
++MODULE_PARM_DESC(enum_shared, "Enumerate shared SPUs");
++
+ const struct spu_management_ops *spu_management_ops;
+ EXPORT_SYMBOL_GPL(spu_management_ops);
+ 
+@@ -430,6 +435,12 @@
+ 		free_irq(spu->irqs[2], spu);
+ }
+ 
++int spu_enum_shared(void)
++{
++	return (enum_shared);
++}
++EXPORT_SYMBOL_GPL(spu_enum_shared);
++
+ void spu_init_channels(struct spu *spu)
+ {
+ 	static const struct {
+diff -Naur a/arch/powerpc/platforms/ps3/spu.c b/arch/powerpc/platforms/ps3/spu.c
+--- a/arch/powerpc/platforms/ps3/spu.c	2024-03-17 19:51:47.035829946 +0700
++++ b/arch/powerpc/platforms/ps3/spu.c	2024-03-17 19:51:49.784770503 +0700
+@@ -404,7 +404,7 @@
+ 		if (result)
+ 			break;
+ 
+-		if (resource_type == PS3_SPU_RESOURCE_TYPE_EXCLUSIVE) {
++		if (resource_type == PS3_SPU_RESOURCE_TYPE_EXCLUSIVE || spu_enum_shared()) {
+ 			result = fn((void*)(unsigned long)resource_id);
+ 
+ 			if (result)
