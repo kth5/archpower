@@ -1,0 +1,70 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-process-metrics
+pkgver=0.2.1
+_commit=54ea346c4ad0a02c911c801987111e215986a03b
+pkgrel=6
+pkgdesc='Provide detailed OS-specific process metrics'
+arch=(any)
+url='https://github.com/socketry/process-metrics'
+license=(MIT)
+depends=(
+  procps-ng
+  ruby
+  ruby-console
+  ruby-samovar
+)
+makedepends=(
+  git
+  ruby-bundler
+  ruby-covered
+  ruby-rake
+  ruby-rspec
+)
+options=(!emptydirs)
+source=(git+https://github.com/socketry/process-metrics.git#commit=$_commit)
+sha256sums=('SKIP')
+
+prepare() {
+  cd process-metrics
+  sed -r -e 's|~>|>=|g' -i process-metrics.gemspec
+  sed -i '/bundler/d' spec/spec_helper.rb
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd process-metrics
+  gem build process-metrics.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    process-metrics-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+check() {
+  local _gemdir="$(gem env gemdir)"
+  cd process-metrics
+  GEM_HOME="tmp_install/$_gemdir" rake
+}
+
+package() {
+  cd process-metrics
+  cp -a tmp_install/* "$pkgdir"/
+}
