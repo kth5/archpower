@@ -1,0 +1,77 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-sus-fixtures-async
+pkgver=0.2.0
+pkgrel=3
+pkgdesc='Test fixtures for running in Async'
+arch=(any)
+url='https://github.com/socketry/sus-fixtures-async'
+license=(MIT)
+depends=(
+  ruby
+  ruby-async
+  ruby-sus
+)
+makedepends=(
+  git
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-bake
+  ruby-bake-test
+  ruby-bundler
+  ruby-covered
+  ruby-decode
+)
+options=(!emptydirs)
+source=(git+https://github.com/socketry/sus-fixtures-async.git#tag=v$pkgver)
+sha256sums=('6f2687e532ee54d0c99194fd546cb8cf5720eab3cacd5c986a2cc65870794a11')
+
+prepare() {
+  cd sus-fixtures-async
+  sed -r -e 's|~>|>=|g' -e '/signing_key/d' -i sus-fixtures-async.gemspec
+
+  sed --in-place \
+    --expression '/group :maintenance/,/end/d' \
+    --expression '/rubocop/d' \
+    gems.rb
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd sus-fixtures-async
+  gem build sus-fixtures-async.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    sus-fixtures-async-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+check() {
+  local _gemdir="$(gem env gemdir)"
+  cd sus-fixtures-async
+  GEM_HOME="tmp_install/$_gemdir" bake test
+}
+
+package() {
+  cd sus-fixtures-async
+  cp -a tmp_install/* "$pkgdir"/
+  install -Dm644 license.md -t "$pkgdir"/usr/share/licenses/$pkgname/
+}
