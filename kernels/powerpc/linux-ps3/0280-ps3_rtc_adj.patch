@@ -1,0 +1,66 @@
+diff -Naur a/arch/powerpc/platforms/ps3/setup.c b/arch/powerpc/platforms/ps3/setup.c
+--- a/arch/powerpc/platforms/ps3/setup.c	2024-03-17 19:54:17.254656400 +0700
++++ b/arch/powerpc/platforms/ps3/setup.c	2024-03-17 19:54:20.220595133 +0700
+@@ -172,6 +172,21 @@
+ #define prealloc_ps3flash_bounce_buffer()	do { } while (0)
+ #endif
+ 
++long long RTCAdj = 0LL;
++EXPORT_SYMBOL_GPL(RTCAdj);
++static int __init early_parse_ps3_rtc_adj(char *p)
++{
++        int result;
++        if (!p)
++                return 1;
++
++        result = kstrtoll(p, 0, &RTCAdj);  /*printk(KERN_INFO "PS3 RTC:%lld\n", ps3_rtc_adj); */
++
++        return 0;
++}
++early_param("RTCAdj", early_parse_ps3_rtc_adj);
++
++
+ static int ps3_set_dabr(unsigned long dabr, unsigned long dabrx)
+ {
+ 	/* Have to set at least one bit in the DABRX */
+diff -Naur a/arch/powerpc/platforms/ps3/time.c b/arch/powerpc/platforms/ps3/time.c
+--- a/arch/powerpc/platforms/ps3/time.c	2024-03-17 19:54:17.254656400 +0700
++++ b/arch/powerpc/platforms/ps3/time.c	2024-03-17 19:54:20.220595133 +0700
+@@ -16,6 +16,8 @@
+ 
+ #include "platform.h"
+ 
++extern long long  RTCAdj;
++
+ void __init ps3_calibrate_decr(void)
+ {
+ 	int result;
+@@ -37,7 +39,7 @@
+ 	result = lv1_get_rtc(&rtc_val, &tb_val);
+ 	BUG_ON(result);
+ 
+-	return rtc_val;
++	return rtc_val + RTCAdj;
+ }
+ 
+ time64_t __init ps3_get_boot_time(void)
+diff -Naur a/drivers/rtc/rtc-ps3.c b/drivers/rtc/rtc-ps3.c
+--- a/drivers/rtc/rtc-ps3.c	2024-03-17 19:54:19.088618510 +0700
++++ b/drivers/rtc/rtc-ps3.c	2024-03-17 19:54:20.220595133 +0700
+@@ -13,6 +13,7 @@
+ #include <asm/lv1call.h>
+ #include <asm/ps3.h>
+ 
++extern long long  RTCAdj;
+ 
+ static u64 read_rtc(void)
+ {
+@@ -23,7 +24,7 @@
+ 	result = lv1_get_rtc(&rtc_val, &tb_val);
+ 	BUG_ON(result);
+ 
+-	return rtc_val;
++	return rtc_val + RTCAdj;
+ }
+ 
+ static int ps3_get_time(struct device *dev, struct rtc_time *tm)
