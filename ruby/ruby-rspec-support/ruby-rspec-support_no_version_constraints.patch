@@ -1,32 +1,59 @@
 diff --git a/Gemfile b/Gemfile
-index 847643a..8560af9 100644
+index e9aa7f3b8..208abadd2 100644
 --- a/Gemfile
 +++ b/Gemfile
-@@ -3,19 +3,10 @@ source 'https://rubygems.org'
- # Specify your gem's dependencies in rspec-support.gemspec
- gemspec
+@@ -1,19 +1,9 @@
+ source "https://rubygems.org"
  
--branch = File.read(File.expand_path("../maintenance-branch", __FILE__)).chomp
--%w[rspec rspec-core rspec-expectations rspec-mocks].each do |lib|
--  library_path = File.expand_path("../../#{lib}", __FILE__)
--  if File.exist?(library_path) && !ENV['USE_GIT_REPOS']
--    gem lib, :path => library_path
--  else
--    if lib == 'rspec'
--      gem 'rspec', :git => "https://github.com/rspec/rspec-metagem.git", :branch => branch
--    else
--      gem lib, :git => "https://github.com/rspec/#{lib}.git", :branch => branch
--    end
--  end
+-%w[rspec rspec-core rspec-expectations rspec-mocks rspec-support].each do |lib|
+-  gem lib, :path => File.expand_path("../#{lib}", __FILE__)
+-end
+-
+-group :coverage do
+-  gem 'simplecov'
+-end
+-
+-### deps for rdoc.info
+-group :documentation do
+-  gem 'github-markup', :platform => :mri
+-  gem 'redcarpet', :platform => :mri
+-  gem 'yard', '~> 0.9.24', :require => false
 -end
 +gem 'rspec'
 +gem 'rspec-core'
 +gem 'rspec-expectations'
 +gem 'rspec-mocks'
  
- if RUBY_VERSION < '1.9.3'
-   gem 'rake', '< 11.0.0' # rake 11 requires Ruby 1.9.3 or later
-@@ -28,12 +19,15 @@ end
+ platforms :jruby do
+   if RUBY_VERSION < '1.9.0'
+@@ -24,17 +14,9 @@ platforms :jruby do
+   end
+ end
+ 
+-if RUBY_VERSION.to_f >= 2.4
+-  gem "aruba", ">= 1.1.0", "< 3.0.0"
+-else
+-  gem "aruba", "~> 0.14.10"
+-end
+-
+ # This is being extracted in Ruby 3.4 and issues a warning on 3.3
+ gem 'bigdecimal', :require => false if RUBY_VERSION >= '3.3.0'
+ 
+-gem 'coderay' # for syntax highlighting
+-
+ gem 'contracts', '< 0.16' if RUBY_VERSION < '1.9.2'
+ 
+ gem 'drb' if RUBY_VERSION >= '3.3'
+@@ -49,16 +31,10 @@ else
+   gem "childprocess", ">= 3.0.0"
+ end
+ 
+-if RUBY_VERSION < '2.0.0'
+-  gem 'cucumber', "<= 1.3.22"
+-else
+-  gem 'cucumber', ">= 1.3"
+-end
+-
  if ENV['DIFF_LCS_VERSION']
    gem 'diff-lcs', ENV['DIFF_LCS_VERSION']
  else
@@ -34,59 +61,68 @@ index 847643a..8560af9 100644
 +  gem 'diff-lcs', '>= 1.4', '>= 1.4.3'
  end
  
- if RUBY_VERSION >= '3.3.0'
-   # This is being extracted in Ruby 3.4 and issues a warning on 3.3
-   gem 'bigdecimal', :require => false
-+
-+  # This is being extracted in Ruby 3.5 and issues a warning on 3.3
-+  gem 'ostruct', :require => false
- end
- 
- if RUBY_VERSION < '2.3.0' && !!(RbConfig::CONFIG['host_os'] =~ /cygwin|mswin|mingw|bccwin|wince|emx/)
-@@ -46,11 +40,6 @@ else
-   gem "childprocess", ">= 3.0.0"
- end
- 
--group :coverage do
--  ### dep for ci/coverage
--  gem 'simplecov', '~> 0.8'
--end
--
- if RUBY_VERSION < '2.0.0' || RUBY_ENGINE == 'java'
-   gem 'json', '< 2.0.0' # is a dependency of simplecov
- else
-@@ -65,14 +54,9 @@ elsif RUBY_VERSION < '2.0'
-   # ffi dropped Ruby 1.8 support in 1.9.19 and Ruby 1.9 support in 1.11.0
-   gem 'ffi', '< 1.9.19'
+ if RUBY_VERSION < '2.2.0' && !!(RbConfig::CONFIG['host_os'] =~ /cygwin|mswin|mingw|bccwin|wince|emx/)
+@@ -68,15 +44,13 @@ elsif RUBY_VERSION < '2.4.0' && !!(RbConfig::CONFIG['host_os'] =~ /cygwin|mswin|
+ elsif RUBY_VERSION < '2.0'
+   gem 'ffi', '< 1.9.19' # ffi dropped Ruby 1.8 support in 1.9.19
  elsif RUBY_VERSION < '2.3.0'
 -  gem 'ffi', '~> 1.12.0'
 +  gem 'ffi', '>= 1.12.0'
+ elsif RUBY_VERSION < '2.6.0'
+-  gem 'ffi', '~> 1.15.0'
++  gem 'ffi', '>= 1.15.0'
  else
--  gem 'ffi', '~> 1.13.0'
--end
--
--# No need to run rubocop on earlier versions
--if RUBY_VERSION >= '2.4' && RUBY_ENGINE == 'ruby'
--  gem 'rubocop', "~> 1.0", "< 1.12"
-+  gem 'ffi', '>= 1.13.0'
+-  gem 'ffi', '~> 1.17.0'
++  gem 'ffi', '>= 1.17.0'
  end
  
- eval File.read('Gemfile-custom') if File.exist?('Gemfile-custom')
-diff --git a/rspec-support.gemspec b/rspec-support.gemspec
-index c32cd57..3fef536 100644
---- a/rspec-support.gemspec
-+++ b/rspec-support.gemspec
-@@ -21,8 +21,7 @@ Gem::Specification.new do |spec|
-     'source_code_uri'   => 'https://github.com/rspec/rspec-support',
-   }
+-gem "flexmock", "~> 0.9.0"
+-
+ if RUBY_VERSION < '2.0.0' || RUBY_ENGINE == 'java'
+   gem 'json', '< 2.0.0'
+ else
+@@ -87,11 +61,9 @@ end
+ if RUBY_VERSION < '2.4.0'
+   gem 'minitest', '< 5.12.0'
+ else
+-  gem 'minitest', '~> 5.12.0'
++  gem 'minitest', '>= 5.12.0'
+ end
  
--  spec.files         = `git ls-files -- lib/*`.split("\n")
--  spec.files         += %w[README.md LICENSE.md Changelog.md]
-+  spec.files         = Dir.glob(['{lib}/**/*', '*.md'])
-   spec.test_files    = []
-   spec.rdoc_options  = ["--charset=UTF-8"]
-   spec.require_paths = ["lib"]
-@@ -35,6 +34,6 @@ Gem::Specification.new do |spec|
+-gem "mocha", "~> 0.13.0"
+-
+ if RUBY_VERSION < '1.9.3'
+   gem 'rake', '< 11.0.0' # rake 11 requires Ruby 1.9.3 or later
+ elsif RUBY_VERSION < '2.0.0'
+@@ -102,21 +74,8 @@ else
+   gem 'rake', '>= 13.0.0'
+ end
+ 
+-gem "rr", "~> 1.0.4"
++gem 'test-unit', '>= 3.0' if RUBY_VERSION.to_f >= 2.2
+ 
+-# No need to run rubocop on earlier versions
+-if RUBY_VERSION >= '3.3' && RUBY_ENGINE == 'ruby'
+-  gem "rubocop", "~> 1.69"
+-end
+-
+-gem 'test-unit', '~> 3.0' if RUBY_VERSION.to_f >= 2.2
+-
+-gem "thread_order", "~> 1.1.0"
+-
+-if RUBY_VERSION < '2.0.0'
+-  gem 'thor', '< 1.0.0'
+-else
+-  gem 'thor', '> 1.0.0'
+-end
++gem "thread_order", ">= 1.1.0"
+ 
+ eval File.read('Gemfile-custom') if File.exist?('Gemfile-custom')
+diff --git a/rspec-support/rspec-support.gemspec b/rspec-support/rspec-support.gemspec
+index 6dab0a8ef..4cc4bf2cd 100644
+--- a/rspec-support/rspec-support.gemspec
++++ b/rspec-support/rspec-support.gemspec
+@@ -35,6 +35,6 @@ Gem::Specification.new do |spec|
  
    spec.required_ruby_version = '>= 1.8.7'
  
