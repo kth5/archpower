@@ -1,0 +1,59 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-fiber-local
+pkgver=1.1.0
+pkgrel=6
+pkgdesc='Provides a class-level mixin to make fiber local state easy'
+arch=(any)
+url='https://github.com/socketry/fiber-local'
+license=(MIT)
+depends=(
+  ruby
+  ruby-fiber-storage
+)
+makedepends=(
+  ruby-rdoc
+)
+options=(!emptydirs)
+source=("https://github.com/socketry/fiber-local/archive/v$pkgver/$pkgname-$pkgver.tar.gz")
+sha512sums=('764b77783db4b60f8ae99d41f0ae07111af9aa1e3d11f0dae39c4bd2de49686b806afd2f7218ae3b79240769e98229e37b955d3c0adedf03277f3c43d423e4f5')
+b2sums=('9ee12bfb21448a34055c89cf25d1702dcd763420dc885b8f23af7acf8a7cdcfbf00af754069c2e21a72a3f63b66b9b3a860170e3260d3a32eec0bcf0739ff9aa')
+
+prepare() {
+  cd fiber-local-$pkgver
+  sed -r -e 's|~>|>=|g' -e '/signing_key/d' -i fiber-local.gemspec
+
+  sed --in-place '/group :maintenance/,/end/d' gems.rb
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd fiber-local-$pkgver
+  gem build fiber-local.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    fiber-local-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+package() {
+  cd fiber-local-$pkgver
+  cp -a tmp_install/* "$pkgdir"/
+}
