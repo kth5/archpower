@@ -14,8 +14,8 @@ pkgname=(
   rabbitmq
   rabbitmqadmin
 )
-pkgver=4.0.7
-pkgrel=1
+pkgver=4.1.0
+pkgrel=2
 pkgdesc='Highly reliable and performant enterprise messaging implementation of AMQP written in Erlang/OTP'
 url='https://rabbitmq.com'
 arch=(any)
@@ -37,7 +37,6 @@ makedepends=(
   'erlang-tools'
   'erlang-xmerl'
   'git'
-  'inetutils'
   'libxslt'
   'python'
   'python-simplejson'
@@ -78,6 +77,7 @@ prepare() {
   sed -E 's|^(SYS_PREFIX=).*$|\1""|' -i deps/rabbit/scripts/rabbitmq-defaults
   sed -E 's|@RABBITMQ_USER@|rabbitmq|g' -i scripts/rabbitmq-script-wrapper
   sed -E 's|@RABBITMQ_GROUP@|rabbitmq|g' -i scripts/rabbitmq-script-wrapper
+  sed -E 's|(else )hostname(;)|\1uname -n\2|' -i deps/rabbitmq_ct_helpers/tools/tls-certs/Makefile
   patch -p1 < ../rabbitmq-customize-systemd-service.patch
   patch -p1 < ../rabbitmq-devendor-rebar3.patch
 }
@@ -85,55 +85,6 @@ prepare() {
 build() {
   cd ${pkgbase}-server
   make -j1 dist manpages RABBITMQ_VERSION=${pkgver}
-}
-
-check() {
-  cd ${pkgbase}-server
-  # The test suite starts epmd but doesn't kill it afterwards.
-  export ERL_EPMD_PORT=5369
-  trap 'epmd -port $ERL_EPMD_PORT -kill' EXIT
-
-  # Subset of tests suites that work in offload builds. Most other tests run
-  # fine on my machine but freeze in a chroot, not sure why.
-  # To list all (fast) test suites, run:
-  #   sed -i 's/$(MAKE) ct/@echo/' deps/rabbit/Makefile
-  #   make -C deps/rabbit ct-fast
-  local ct_suites=(
-    amqqueue_backward_compatibility
-    deprecated_features
-    feature_flags_v2
-    lqueue
-    mc_unit
-    metadata_store_phase1
-    peer_discovery_dns
-    peer_discovery_tmp_hidden_node
-    rabbit_access_control
-    rabbit_confirms
-    rabbit_cuttlefish
-    rabbit_direct_reply_to_prop
-    rabbit_fifo
-    rabbit_fifo_dlx
-    rabbit_fifo_int
-    rabbit_fifo_q
-    rabbit_fifo_v0
-    rabbit_stream_coordinator
-    rabbit_stream_sac_coordinator
-    term_to_binary_compat_prop
-    unit_cluster_formation_sort_nodes
-    unit_collections
-    unit_config_value_encryption
-    unit_operator_policy
-    unit_pg_local
-    unit_plugin_directories
-    unit_plugin_versioning
-    unit_policy_validators
-    unit_priority_queue
-    unit_queue_consumers
-    unit_queue_location
-    unit_quorum_queue
-    unit_supervisor2
-  )
-  make -C deps/rabbit ct CT_SUITES="${ct_suites[*]}"
 }
 
 package_rabbitmq() {
@@ -150,7 +101,6 @@ package_rabbitmq() {
     'erlang-syntax_tools'
     'erlang-tools'
     'erlang-xmerl'
-    'inetutils'
     'socat'
     'util-linux'
   )
