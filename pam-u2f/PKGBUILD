@@ -7,40 +7,37 @@
 
 pkgname=pam-u2f
 _name="${pkgname/-/_}"
-pkgver=1.3.2
+pkgver=1.4.0
 pkgrel=1
 pkgdesc="Universal 2nd Factor (U2F) PAM authentication module from Yubico"
 url="https://developers.yubico.com/pam-u2f"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
 license=('BSD-2-Clause')
-replaces=("${_name}")
 depends=('libfido2' 'openssl' 'pam')
-makedepends=('asciidoc' 'git')
+makedepends=('asciidoc' 'cmake' 'git')
+replaces=("${_name}")
 source=("git+https://github.com/Yubico/pam-u2f.git#tag=${_name}-${pkgver}?signed")
-b2sums=('0def50826827165f948552162ed401ca1fc9e12cee7a9d758f95d55e71ddb9b126c5632ad7325ae447a393ec24e02f852d9dc166e1f35de528b1e78a3ffd4a39')
-validpgpkeys=('B70D62AA6A31AD6B9E4F9F4BDC8888925D25CA7A' # Alessio Di Mauro <alessio@yubico.com>
-              '78D997D53E9C0A2A205392ED14A19784723C9988') # Ludvig Michaelsson <ludvig.michaelsson@yubico.com>
-
-prepare() {
-	cd "${pkgname}"
-	autoreconf --install
-}
+b2sums=('f6111e61a59c6ed656a77281a4d6dbe3b07e8018ab433e41a3e1427a83cb3a6e28221b517eea36b1807ced7179932fcdeac381adf8361220ee4bdc988f47cfe5')
+# Yubico code signing keys are listed at <https://developers.yubico.com/Software_Projects/Software_Signing.html>
+# This is how upstream is establishing trust paths
+validpgpkeys=('B70D62AA6A31AD6B9E4F9F4BDC8888925D25CA7A'  # Alessio Di Mauro <alessio@yubico.com>
+              '78D997D53E9C0A2A205392ED14A19784723C9988'  # Ludvig Michaelsson <ludvig.michaelsson@yubico.com>
+              'F475928225229F58460640EAD91777C175533EE5') # Giovanni Simoni <giovanni.simoni@yubico.com>
 
 build() {
-	cd "${pkgname}"
-	./configure \
-	    --prefix='/usr' \
-	    --with-pam-dir='/usr/lib/security'
-	make
+	cmake -B build -S "${pkgname}" \
+		-DCMAKE_INSTALL_PREFIX='/usr' \
+		-DCMAKE_BUILD_TYPE='None' \
+		-DPAM_DIR='/usr/lib/security' \
+		-Wno-dev
+	cmake --build build
 }
 
 check() {
-	cd "${pkgname}"
-	make check
+	ctest --test-dir build --output-on-failure
 }
 
 package() {
-	cd "${pkgname}"
-	make DESTDIR="${pkgdir}" install
-	install -Dm 644 COPYING "${pkgdir}/usr/share/licenses/${pkgname}/COPYING" 
+	DESTDIR="${pkgdir}" cmake --install build
+	install -Dm 644 "${pkgname}/COPYING" "${pkgdir}/usr/share/licenses/${pkgname}/COPYING"
 }
