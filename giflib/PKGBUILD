@@ -1,49 +1,57 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
-# Maintainer: Jan de Groot <jgc@archlinux.org>
+# Contributor: Jan de Groot <jgc@archlinux.org>
 # Contributor: Baptiste Daroussin <baptiste.daroussin@gmail.com>
 # Contributor: Grigorios Bouzakis <grbzks[at]gmail[dot]com>
 # Contributor: mightyjaym <jm.ambrosino@free.fr>
 
 pkgname=giflib
 pkgver=5.2.2
-pkgrel=1.1
+pkgrel=2
 pkgdesc='Library for reading and writing gif images'
 url='http://giflib.sourceforge.net/'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
 license=('MIT')
 depends=('glibc')
 provides=('libgif.so')
-makedepends=('xmlto' 'docbook-xml' 'docbook-xsl' 'imagemagick')
-source=(https://downloads.sourceforge.net/project/giflib/${pkgname}-${pkgver}.tar.gz
+makedepends=('git' 'xmlto' 'docbook-xml' 'docbook-xsl' 'imagemagick')
+source=(${pkgname}::git+https://git.code.sf.net/p/giflib/code#tag=${pkgver}
+        giflib-5.2.2-CVE-2025-31344.patch
         giflib-5.1.9-fix-missing-quantize-API-symbols.patch
         giflib-5.1.9-make-flags.patch)
-sha512sums=('0865ab2b1904fa14640c655fdb14bb54244ad18a66e358565c00287875d00912343f9be8bfac7658cc0146200d626f7ec9160d7a339f20ba3be6b9941d73975f'
+sha512sums=('c20555e2997b9cb410a8454036779f733311870afcdec4e852f03f90da668f84b37f999d6d4be8213319b184cb7060279fc658193ce0b23d44ea945cc226412d'
+            'b7539de202f5e4a21e79eeb2b7d52cc0aa421fd3a6fd272246f64ba5e1dcb9a5ec5690cf0699b72200a1edc6cef960d2327ec342912607dee6074395dea7e588'
             '5de1e8724f5221fa3637b4e6a482f650f7608673e2c9200233290018ec8a0bf1beea049b3979b5f57dbf2b2a5fda409324e636e9af10582fd01c71d92d4de3b3'
             '8b8d6f483a18467bf6ad169fec04f9ef61534d3e25e1714d39231620142e64672dc336b347b02c8f74172b30e94b104edc83619b8e156ad18a4af521f65d1e31')
 options=(!zipman)
 
 prepare() {
-  cd ${pkgname}-${pkgver}
+  cd ${pkgname}
   patch -Np1 < ../giflib-5.1.9-fix-missing-quantize-API-symbols.patch
   patch -Np1 < ../giflib-5.1.9-make-flags.patch
-  sed -e 's|giflib.xml|giflib.7|' -re 's|doc/(.*).xml|doc/\1.1|g' -i Makefile # Install the actual man pages instead of the sources
+  # https://seclists.org/oss-sec/2025/q2/21
+  patch -Np1 < ../giflib-5.2.2-CVE-2025-31344.patch
+  # Install the actual man pages instead of the sources
+  sed -e 's|giflib.xml|giflib.7|' \
+      -re 's|doc/(.*).xml|doc/\1.1|g' \
+      -i Makefile
 }
 
 build() {
-  cd ${pkgname}-${pkgver}
+  cd ${pkgname}
+  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
   make
 }
 
 check() {
-  cd ${pkgname}-${pkgver}
+  cd ${pkgname}
   make check
 }
 
 package() {
-  cd ${pkgname}-${pkgver}
+  cd ${pkgname}
   make PREFIX=/usr DESTDIR="${pkgdir}" install
-# Fix giflib man page installation
+  # Fix giflib man page installation
   install -d "$pkgdir"/usr/share/man/man7
   mv "$pkgdir"/usr/share/man/man{1/giflib.7,7} 
   install -Dm 644 COPYING -t "${pkgdir}/usr/share/licenses/${pkgname}"
