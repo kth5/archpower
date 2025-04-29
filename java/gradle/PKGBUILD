@@ -6,7 +6,7 @@
 
 pkgbase=gradle
 pkgname=('gradle' 'gradle-doc' 'gradle-src')
-pkgver=8.10.2
+pkgver=8.13
 pkgrel=1
 pkgdesc='Powerful build system for the JVM'
 url='https://gradle.org/'
@@ -24,32 +24,26 @@ makedepends=(
   'asciidoc'
   'git'
   'groovy'
-  'java-environment=11'
+  'java-environment=8'
+  'java-environment=17'
   'xmlto'
 )
 source=(https://services.gradle.org/distributions/${pkgbase}-${pkgver}-src.zip
         https://services.gradle.org/distributions/${pkgbase}-${pkgver}-all.zip
         ${pkgbase}.sh)
-sha256sums=('6eed32fc9ad06d4dc1beafa706103da5ffdb870c2dc21b28b00492b55c93bdeb'
-            '2ab88d6de2c23e6adae7363ae6e29cbdd2a709e992929b48b6530fd0c7133bd6'
-            '6f3472486278252417af49196847ba465b56819d286658fcdf918687f89ee032')
-sha512sums=('f6b7e52ff88a4757ded82da1b3f80aefe5fd7fb22374426cae759efad7b960ea7ba3769f0472c587fe613ec051c313a959bfbaa1a8decdc55b21ffe16f1b9193'
-            'b2fbf57701e7d8f02b425988afe3fcad7a22814823b4748db68ea4c1c7f3027110b3d3b5f6797eded037cc28356b630b1bd6b24e0169107b85abdc860184ee53'
-            'a50b6cf8281b56b80f55a20ac9316e1eed6887da1d191ad575dec140c9819711644d7077c4dc693b8cb0f1b08ceba0033ba88b5ad138d33ffb73b786c0d4bf81')
+sha256sums=('21414d6e543139c962ea95a4c61a585eb77b7a8fd45aa16f281234ae4b02c661'
+            'fba8464465835e74f7270bbf43d6d8a8d7709ab0a43ce1aa3323f73e9aa0c612'
+            '4728dbdbe9fe416b82977cb7e456457e3ff0b88129291ee28e0d874ce8cc4891')
+sha512sums=('f0eeae2ecdafddc170f41ec60d5c2162ab9313a0c5cb473727e29ec410f353e9cb418fcd2d2dede829dda2a85215495c843beb58dc008359190f10c78631010d'
+            '46a581360d36024789eb6f0fd93261abadbd86550f003e7435b8e05c8d1370833ec8e4bcfea9da8e33e24505cf6b836e401a4470fd17bf46237a82e6c312f58e'
+            '9054a13f13a0d04bffefb2e5c1bcabfcd7b11e4d83d9180f65e0a09eeb8fea407d8c4e1e1e9b79191ba99e4eb372dbbb3189dd30833170c64cdb4484ca559441')
 
 prepare() {
   cd ${pkgbase}-${pkgver}
-  # remove ADOPTIUM contraint from all build related files
-  sed -i '/JvmVendorSpec.ADOPTIUM/d' \
-    build-logic-settings/build-environment/build.gradle.kts \
-    build-logic-commons/module-identity/build.gradle.kts \
-    build-logic-commons/gradle-plugin/build.gradle.kts \
-    build-logic/jvm/src/main/kotlin/gradlebuild.unittest-and-compile.gradle.kts \
-    build-logic-commons/gradle-plugin/src/main/kotlin/gradlebuild/commons/JavaPluginExtensions.kt \
-    build-logic-commons/code-quality-rules/build.gradle.kts \
-    build-logic-commons/basics/build.gradle.kts \
-    platforms/documentation/docs/src/snippets/java/toolchain-filters/kotlin/build.gradle.kts \
-    platforms/jvm/language-java/src/integTest/groovy/org/gradle/jvm/toolchain/JavaToolchainDownloadIntegrationTest.groovy
+  # remove adoptium references because we want to use our java implementation
+  grep -lr "vendor = JvmVendorSpec.ADOPTIUM" | xargs sed -i "/JvmVendorSpec.ADOPTIUM/d"
+  sed -i '/toolchainVendor=adoptium/d' \
+    gradle/gradle-daemon-jvm.properties
 
   # inhibit automatic download of binary gradle
   sed -i "s#distributionUrl=.*#distributionUrl=file\:${srcdir}/${pkgbase}-${pkgver}-all.zip#" \
@@ -58,9 +52,9 @@ prepare() {
 
 build() {
   cd ${pkgbase}-${pkgver}
-  # requires java language level 6, which >=13 has dropped
-  export PATH="/usr/lib/jvm/java-11-openjdk/bin:${PATH}"
   ./gradlew installAll \
+    --info \
+    -Porg.gradle.java.installations.paths=/usr/lib/jvm/java-17-openjdk \
     -Porg.gradle.java.installations.auto-download=false \
     -PfinalRelease=true \
     -Pgradle_installPath="$(pwd)/dist" \
@@ -75,7 +69,7 @@ package_gradle() {
   )
 
   # install profile.d script
-  install -Dm 755 "${srcdir}"/${pkgbase}.sh "${pkgdir}"/etc/profile.d/${pkgbase}.sh
+  install -Dm 644 "${srcdir}"/${pkgbase}.sh "${pkgdir}"/etc/profile.d/${pkgbase}.sh
 
   # create the necessary directory structure
   install -d "${pkgdir}"/usr/share/java/${pkgname}/bin
