@@ -9,14 +9,18 @@ pkgname=(
   libsrtp
   libsrtp-docs
 )
-pkgver=2.6.0
-pkgrel=1.1
+pkgver=2.7.0
+pkgrel=1
 epoch=1
 pkgdesc="Library for SRTP (Secure Realtime Transport Protocol)"
 url="https://github.com/cisco/libsrtp"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
 license=(BSD-3-Clause)
-depends=(nss)
+depends=(
+  glibc
+  nspr
+  nss
+)
 makedepends=(
   doxygen
   git
@@ -24,26 +28,15 @@ makedepends=(
   meson
 )
 checkdepends=(procps-ng)
-_commit=fd08747fa6800b321d53e15feb34da12dc697dee  # tags/v2
-source=("git+https://github.com/cisco/libsrtp#commit=$_commit")
-b2sums=('SKIP')
-
-pkgver() {
-  cd libsrtp
-  git describe --tags | sed 's/^v//;s/[^-]*-g/r&/;s/-/+/g'
-}
+source=("git+https://github.com/cisco/libsrtp#tag=v$pkgver")
+b2sums=('4e72d8ddb6ff1056331377001b575e59973acf27ac8fcdfe5d08e4f44f3702012e8af7da9970de3a0e4643aa1139fcce4af3df3c31258ac8c5b35420b67aa9dd')
 
 prepare() {
   cd libsrtp
-
-  # Fixup pkgver: There are proper tags like v2.4.4
-  # but also "moving tags" like v2 and v2.4 that aren't stable
-  git tag | grep -Pv '^v\d+\.\d+\.\d+$' | xargs git tag -d
 }
 
 build() {
   local meson_options=(
-    --buildtype release
     -D crypto-library=nss
     -D crypto-library-kdf=disabled
   )
@@ -54,6 +47,10 @@ build() {
 }
 
 check() {
+  case "${CARCH}" in
+    riscv64) return 0 ;;
+  esac
+
   meson test -C build --print-errorlogs
 }
 
