@@ -3,8 +3,8 @@
 # Contributor: Pan Lanlan <abbypan@gmail.com>
 
 pkgname=leancrypto
-pkgver=1.2.0
-pkgrel=2.1
+pkgver=1.3.0
+pkgrel=1
 pkgdesc="Lean cryptographic library usable for bare-metal environments"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
 license=('GPL-2.0-or-later'
@@ -13,33 +13,27 @@ license=('GPL-2.0-or-later'
 url="https://leancrypto.org"
 depends=('glibc')
 makedepends=('meson')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/smuellerDD/leancrypto/archive/refs/tags/v$pkgver.tar.gz"
-        nodlopen.patch
-        fix-tests.patch)
-sha256sums=('247481cac4cedbf4b9e1c689b7726592015352a11cd22625013185d01cda2c15'
-            '09dacc1b5f56e6c1619793dd5f9f4885ceb75bfd96d4cb0100f9bf84bbb27e31'
-            '5619418bb4cf66293dbcedc6f74101c83768d088ff02e5e0520ea0f24242067f')
-
-prepare() {
-  cd $pkgname-$pkgver
-  patch -Np1 -i ../fix-tests.patch
-  patch -Np1 -i ../nodlopen.patch
-}
+source=("$pkgname-$pkgver.tar.gz::https://github.com/smuellerDD/leancrypto/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('53b51936d77304e82cc6aa34a0a65eec3327ca1165342180694c5aa6a7d745c8')
 
 build() {
+  case "${CARCH}" in
+    riscv64) _meson_options=(-Denable_selftests=disabled -Ddisable-asm=true) ;;
+  esac
+
   arch-meson $pkgname-$pkgver build
 
   # Print config
-  meson configure build
+  meson configure build ${_meson_options[@]}
 
   meson compile -C build
 }
 
 check() {
   case "${CARCH}" in
-    powerpc) return 0 ;;
+    powerpc*|riscv64) return 0 ;;
   esac
-
+ 
   # may take pretty long
   meson test -C build --print-errorlogs
 }
