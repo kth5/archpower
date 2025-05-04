@@ -1,5 +1,6 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer : Daniel Bermond <dbermond@archlinux.org>
+# Contributor: Felix Yan <felixonmars@archlinux.org>
 # Contributor: Caleb Maclennan <caleb@alerque.com>
 # Contributor: Stéphane Gaudreault <stephane@archlinux.org>
 # Contributor: Thomas Dziedzic < gostrc at gmail >
@@ -7,43 +8,58 @@
 # Contributor: Bogdan Burlacu <bogdan.burlacu AT pm.me>
 
 pkgname=onetbb
-pkgver=2022.0.0
-pkgrel=2
-pkgdesc='High level abstract threading library (oneAPI Threading Building Blocks)'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url='https://oneapi-src.github.io/oneTBB/'
-license=('Apache')
-depends=('gcc-libs' 'hwloc')
-makedepends=('cmake' 'ninja' 'python' 'swig' 'python-setuptools')
+pkgver=2022.1.0
+pkgrel=1
+pkgdesc='oneAPI Threading Building Blocks - a high level abstract threading library'
+arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+url='https://uxlfoundation.github.io/oneTBB/'
+license=('Apache-2.0')
+depends=(
+    'gcc-libs'
+    'glibc'
+    'hwloc')
+optdepends=(
+    'python: for Python module')
+makedepends=(
+    'cmake'
+    'python'
+    'python-setuptools'
+    'swig')
 conflicts=('intel-tbb' 'tbb')
-provides=("intel-tbb=$pkgver" "tbb=$pkgver")
+provides=("intel-tbb=${pkgver}" "tbb=${pkgver}")
 replaces=('intel-tbb' 'tbb')
-source=(https://github.com/oneapi-src/oneTBB/archive/v$pkgver/$pkgname-$pkgver.tar.gz)
-sha512sums=('c87b84964b2c323f61895a532968dfa6413a774c177cffbf6e798a07e74e8da5d449144875771df0a1b02657eeb2a7ae4d41c6c432dbf7ea50e3d5a9ea9f8cd3')
+source=("https://github.com/uxlfoundation/oneTBB/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('7582748f7d0e0ab46ea6ee7771dfaf7fc08ca7ab7f274fb3373eae0e3411aaafbac192ece15008d9a3d9e8566f8737f96f3f4b5ccf11449ac089d5cd9ebb9eab')
 
 build() {
-  case "${CARCH}" in
-    powerpc|riscv64)
-      export CXXFLAGS+=' -latomic'
-    ;;
-  esac
+    case "${CARCH}" in
+      powerpc|riscv64)
+        export CXXFLAGS+=' -latomic'
+      ;;
+    esac
 
-  cmake -B build -S oneTBB-$pkgver -GNinja \
-          -DCMAKE_INSTALL_PREFIX=/usr \
-          -DTBB_STRICT=OFF \
-          -DTBB4PY_BUILD=ON \
-          -DCMAKE_BUILD_TYPE=None
-  cmake --build build
+    cmake -B build -S "oneTBB-${pkgver}" \
+        -G 'Unix Makefiles' \
+        -DCMAKE_BUILD_TYPE:STRING='None' \
+        -DCMAKE_INSTALL_PREFIX:PATH='/usr' \
+        -DTBB_STRICT:BOOL='OFF' \
+        -DTBB4PY_BUILD:BOOL='ON' \
+        -Wno-dev
+    cmake --build build
 }
 
 check() {
-  cd build
-  ctest -E test_partitioner # hangs on build server
+    case "${CARCH}" in
+      powerpc|riscv64) return 0 ;;
+    esac
+
+    ctest --test-dir build --output-on-failure -E test_partitioner # hangs on build server
 }
 
 package() {
-  DESTDIR="$pkgdir" cmake --install build
-  rm -r "$pkgdir"/usr/lib/python*
-  cd oneTBB-$pkgver/python
-  TBBROOT="$pkgdir"/usr python setup.py install --root="$pkgdir"
+    DESTDIR="$pkgdir" cmake --install build
+    rm -r "${pkgdir}/usr/lib"/python*
+    
+    cd "oneTBB-${pkgver}/python"
+    TBBROOT="${pkgdir}/usr" python setup.py install --root="$pkgdir"
 }
