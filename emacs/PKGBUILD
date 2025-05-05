@@ -5,19 +5,19 @@
 # Contributor: Renchi Raju <renchi@green.tam.uiuc.edu>
 
 pkgbase=emacs
-pkgname=(emacs emacs-nativecomp emacs-nox emacs-wayland)
-pkgver=29.4
-pkgrel=3.2
+pkgname=(emacs emacs-nox emacs-wayland)
+pkgver=30.1
+pkgrel=4
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
 url='https://www.gnu.org/software/emacs/emacs.html'
 license=('GPL3')
 depends=(
   gmp
   gnutls
-  jansson
   lcms2
   libacl.so
   libasound.so
+  libgccjit
   libdbus-1.so
   libfontconfig.so
   libfreetype.so
@@ -50,65 +50,67 @@ depends=(
   zlib
 )
 makedepends=(libgccjit)
-source=(https://ftp.gnu.org/gnu/emacs/${pkgname}-${pkgver}.tar.xz{,.sig})
-b2sums=('825fd2665b6427dbc3cb618b40df2f71fa6b08883bdd07be6d8acf0039df2aeebd294e679e98f4c64a9dd9bdad93589fc7c176cf3860d4fb823fce23f7f2b3cd'
-        'SKIP')
+source=(
+  https://ftp.gnu.org/gnu/emacs/${pkgname}-${pkgver}.tar.xz{,.sig}
+  fix-compile.patch::https://github.com/emacs-mirror/emacs/commit/53a5dada413662389a17c551a00d215e51f5049f.patch
+)
+b2sums=('ad502a2e15a04618f4766ec6e285739cb5bb6f19c5065c3aed03b3e50df590cee382a0331f382de6f13523f1362a4355f65961ce45504f7d33419ea6d04e326f'
+        'SKIP'
+        'b38ad198ed8975963a05201e2124b8cf2947c6ddb792aaef618d1968d7b0329241235f4ccc69ac62ee43189e20aa70a28254f6c787fa38359c1aae22286df9d1')
 validpgpkeys=('17E90D521672C04631B1183EE78DAE0F3115E06B'  # Eli Zaretskii <eliz@gnu.org>
               'CEA1DE21AB108493CC9C65742E82323B8F4353EE') # Stefan Kangas <stefankangas@gmail.com>
 
-case "${CARCH}" in
-  powerpc) options=(!lto) ;;
-esac
-
 prepare() {
-  cp --reflink=auto -ar ${pkgname}-${pkgver} ${pkgbase}-${pkgver}-nativecomp
+  patch -d ${pkgname}-${pkgver} -Np1 < fix-compile.patch
+
   cp --reflink=auto -ar ${pkgname}-${pkgver} ${pkgbase}-${pkgver}-nox
   cp --reflink=auto -ar ${pkgname}-${pkgver} ${pkgbase}-${pkgver}-wayland
 }
 
 build() {
-  local _confflags="--sysconfdir=/etc \
-    --prefix=/usr \
-    --libexecdir=/usr/lib \
-    --with-tree-sitter \
-    --localstatedir=/var \
-    --with-cairo \
-    --disable-build-details \
-    --with-harfbuzz \
-    --with-libsystemd \
-    --with-modules"
+  local _confflags=(
+    --sysconfdir=/etc
+    --prefix=/usr
+    --libexecdir=/usr/lib
+    --localstatedir=/var
+    --disable-build-details
+    --with-cairo
+    --with-harfbuzz
+    --with-libsystemd
+    --with-modules
+    --with-tree-sitter
+  )
+
+  case "${CARCH}" in
+    powerpc) echo ":: No nativecomp support" ;;
+    *) _confflags+=(--with-native-compilation=aot)
+  esac
 
   export ac_cv_lib_gif_EGifPutExtensionLast=yes
 
   cd ${pkgname}-${pkgver}
-  ./configure $_confflags \
-    --with-x-toolkit=gtk3
-  make
-
-  cd ../${pkgbase}-${pkgver}-nativecomp
   ./configure \
     --with-x-toolkit=gtk3 \
-    --with-native-compilation=aot \
-    $_confflags
-  make bootstrap
+    "${_confflags[@]}"
+  make
 
   cd ../${pkgbase}-${pkgver}-nox
   ./configure \
     --without-x \
     --without-sound \
-    $_confflags
+    "${_confflags[@]}"
   make
 
   cd ../${pkgbase}-${pkgver}-wayland
   ./configure \
     --with-pgtk \
-    --with-native-compilation=aot \
-    $_confflags
+    "${_confflags[@]}"
   make bootstrap
 }
 
 package_emacs() {
   pkgdesc='The extensible, customizable, self-documenting real-time display editor'
+  replaces=(emacs-nativecomp)
 
   cd ${pkgname}-${pkgver}
   make DESTDIR="${pkgdir}" install
@@ -118,24 +120,7 @@ package_emacs() {
   mv "${pkgdir}"/usr/share/man/man1/{ctags.1.gz,ctags.emacs.1}
 
   # fix user/root permissions on usr/share files
-  find "${pkgdir}"/usr/share/emacs/${pkgver} -exec chown root:root {} \;
-}
-
-package_emacs-nativecomp() {
-  pkgdesc='The extensible, customizable, self-documenting real-time display editor with native compilation enabled'
-  depends+=(libgccjit)
-  provides=(emacs)
-  conflicts=(emacs)
-
-  cd ${pkgbase}-${pkgver}-nativecomp
-  make DESTDIR="${pkgdir}" install
-
-  # remove conflict with ctags package
-  mv "${pkgdir}"/usr/bin/{ctags,ctags.emacs}
-  mv "${pkgdir}"/usr/share/man/man1/{ctags.1.gz,ctags.emacs.1}
-
-  # fix user/root permissions on usr/share files
-  find "${pkgdir}"/usr/share/emacs/${pkgver} -exec chown root:root {} \;
+  chown -R root:root "${pkgdir}/usr/share/emacs/${pkgver}"
 }
 
 package_emacs-nox() {
@@ -144,10 +129,10 @@ package_emacs-nox() {
     gmp
     gnutls
     hicolor-icon-theme
-    jansson
     lcms2
     libacl.so
     libdbus-1.so
+    libgccjit
     libgpm.so
     libncursesw.so
     libsystemd.so
@@ -166,12 +151,11 @@ package_emacs-nox() {
   mv "${pkgdir}"/usr/share/man/man1/{ctags.1.gz,ctags.emacs.1}
 
   # fix user/root permissions on usr/share files
-  find "${pkgdir}"/usr/share/emacs/${pkgver} -exec chown root:root {} \;
+  chown -R root:root "${pkgdir}/usr/share/emacs/${pkgver}"
 }
 
 package_emacs-wayland() {
-  pkgdesc='The extensible, customizable, self-documenting real-time display editor with native compilation and PGTK enabled'
-  depends+=(libgccjit)
+  pkgdesc='The extensible, customizable, self-documenting real-time display editor with PGTK enabled'
   provides=(emacs)
   conflicts=(emacs)
 
@@ -183,5 +167,5 @@ package_emacs-wayland() {
   mv "${pkgdir}"/usr/share/man/man1/{ctags.1.gz,ctags.emacs.1}
 
   # fix user/root permissions on usr/share files
-  find "${pkgdir}"/usr/share/emacs/${pkgver} -exec chown root:root {} \;
+  chown -R root:root "${pkgdir}/usr/share/emacs/${pkgver}"
 }
