@@ -1,9 +1,10 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: David Runge <dvzrv@archlinux.org>
+# Maintainer: Robin Candau <antiz@archlinux.org>
 
 pkgname=apparmor
-pkgver=4.0.3
-pkgrel=3.1
+pkgver=4.1.0
+pkgrel=4
 pkgdesc="Mandatory Access Control (MAC) using Linux Security Module (LSM)"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
 url="https://gitlab.com/apparmor/apparmor"
@@ -24,6 +25,7 @@ depends=(
 makedepends=(
   apache
   autoconf-archive
+  git
   libxcrypt
   python-setuptools
   ruby
@@ -32,14 +34,20 @@ makedepends=(
 checkdepends=(
   dejagnu
   perl-locale-gettext
+  python-gobject
   python-notify2
   python-psutil
+  sqlite
+  tk
 )
 optdepends=(
   'perl: for perl bindings'
+  'python-gobject: for aa-notify'
   'python-notify2: for aa-notify'
   'python-psutil: for aa-notify'
   'ruby: for ruby bindings'
+  'sqlite: for aa-notify'
+  'tk: for aa-notify'
 )
 provides=(libapparmor.so)
 backup=(
@@ -50,34 +58,17 @@ backup=(
   etc/apparmor/severity.db
 )
 source=(
-  https://launchpad.net/$pkgname/${pkgver%.[0-9]}/$pkgver/+download/$pkgname-$pkgver.tar.gz{,.asc}
-  fix-tests-python-3-13.patch
-  fix_php-fpm_profiles.patch
+  git+$url.git#tag=v$pkgver?signed
 )
-sha512sums=('8b1240ec56fe4f987edcda9380de685e36f4ac931772e980a8f3655dfbfd7e337a4b15227c7ceecb87d9a2bb592e466ec39912ef8f2fa59f8802464d72df8da2'
-            'SKIP'
-            '92edba450ed33c1b726581c983d17e4437fe70c7ea07b5baa90168f469a52cb4c560c7ff3d74005456f676a393700a346ffd2058576e63788fe7659b705f7b10'
-            'a70bd317a14eae6dacf1a264fac8c1a990895597f087693834ef7427db358ee616ac9ef34d4477ab945b857175db91986b4e61d2f1b615b563bb244a3e047499')
-b2sums=('715391a1fc0fb57b820a8bcebdc76ae96e436a29546b9c47019f10f4d22942431ba5c878d92bb61b47ff17012e026195b8d7d78a329cc1cc182a31bc3b512e63'
-        'SKIP'
-        'c8bb529d96ed3f00c7599fbb1d9314d2f2c8c5b15055457cd1450881aa8a5d9468d388da8965f13e6402c391918876358b93f544aeadd5caa75f58a30a1167f0'
-        'ec17a429fa6f3207bb84b132b884e75653f4100404c6b03673aad7fd268c628e3ede4d1a9dec3b00c7d35d7c4ea09e0553b65cc763fcbc9827b449f4d7122e84')
-validpgpkeys=('3ECDCBA5FB34D254961CC53F6689E64E3D3664BB') # AppArmor Development Team (AppArmor signing key) <apparmor@lists.ubuntu.com>
+sha512sums=('90ca4a4b1e8db9006b54ca9faa9c749f80cc79e895ad7dc9b31fd9bfdc7868c7683ebeaacff63bcc0bb2fb57069f51128d965689990920509e4767d19ce72db9')
+b2sums=('47ffb0e150f264d7701b6b82871ef718dbb399c0dcb3ac6c010dcf34cf1a2eb18234e727e44652d1cc7096c9e9a25d29eb8ebdea37b170f3bfc3a88a197d63fa')
+validpgpkeys=('3ECDCBA5FB34D254961CC53F6689E64E3D3664BB'  # AppArmor Development Team (AppArmor signing key) <apparmor@lists.ubuntu.com>
+              'EDC4830FBD39AB6AC51047FB052F367018D5C3D8') # John Johansen <john@jjmx.net> <john.johansen@canonical.com>
 _core_perl="/usr/bin/core_perl"
 
 prepare() {
-  cd $pkgname-$pkgver
+  cd $pkgname/libraries/libapparmor/
 
-  # Fix tests with python 3.13
-  patch -Np1 -i ../fix-tests-python-3-13.patch
-
-  # Temporary patch to fix paths of the php-fpm and php-fpm-legacy
-  # binaries in the related profiles
-  # See https://gitlab.com/apparmor/apparmor/-/commit/20839945138b7e200ec86ca96fe4f5e4b5c77dc6
-  # and https://gitlab.com/apparmor/apparmor/-/commit/6a5432b2b09bf3c08f276ab6bd78b471b1aa35da
-  patch -Np1 -i ../fix_php-fpm_profiles.patch
-
-  cd libraries/libapparmor/
   autoreconf -fiv
 }
 
@@ -90,7 +81,7 @@ build() {
     --with-ruby
   )
 
-  cd $pkgname-$pkgver
+  cd $pkgname
 
   # export required perl executable locations
   export MAKEFLAGS+=" POD2MAN=$_core_perl/pod2man"
@@ -113,11 +104,11 @@ build() {
   # copy to test location as some tests render the resulting python bytecode
   # unreproducible: https://gitlab.com/apparmor/apparmor/-/issues/184
   cd ..
-  cp -av $pkgname-$pkgver $pkgname-$pkgver-test
+  cp -av $pkgname $pkgname-test
 }
 
 check() {
-  cd $pkgname-$pkgver-test
+  cd $pkgname-test
   echo "INFO: Running check: libraries/libapparmor"
   make -C libraries/libapparmor check
   echo "INFO: Running check binutils"
@@ -140,7 +131,7 @@ check() {
 }
 
 package() {
-  cd $pkgname-$pkgver
+  cd $pkgname
   make -C libraries/libapparmor DESTDIR="$pkgdir" install
   make -C changehat/pam_apparmor DESTDIR="$pkgdir/usr" install
   make -C changehat/mod_apparmor DESTDIR="$pkgdir" install
