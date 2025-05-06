@@ -3,7 +3,7 @@
 
 pkgname=ruby-sequel
 pkgver=5.90.0
-pkgrel=1
+pkgrel=2
 pkgdesc='Sequel: The Database Toolkit for Ruby'
 arch=(any)
 url='https://github.com/jeremyevans/sequel'
