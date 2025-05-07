@@ -1,4 +1,3 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Contributor: Jan de Groot <jgc@archlinux.org>
 
@@ -26,12 +25,14 @@ pkgname=(
   gst-python
   gstreamer-docs
 )
-[ "${CARCH}" == 'x86_64' ] && pkgname+=(gst-plugin-msdk gst-plugin-qsv gst-plugin-onnx)
-pkgver=1.24.12
-pkgrel=4
+case "${CARCH}" in
+  x86_64) pkgname+=(gst-plugin-msdk gst-plugin-qsv gst-plugin-onnx) ;;
+esac
+pkgver=1.26.0
+pkgrel=3
 pkgdesc="Multimedia graph framework"
 url="https://gstreamer.freedesktop.org/"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(LGPL-2.1-or-later)
 makedepends=(
   a52dec
@@ -197,70 +198,73 @@ makedepends=(
   zvbi
   zxing-cpp
 )
-makedepends_x86_64=(
-  libvpl
-  nasm
-  onnxruntime
-  svt-hevc
-)
+case "${CARCH}" in
+  x86_64) makedepends_x86_64=(nasm) ;;
+esac
 checkdepends=(xorg-server-xvfb)
 source=(
   "git+https://gitlab.freedesktop.org/gstreamer/gstreamer.git?signed#tag=$pkgver"
   "https://gstreamer.freedesktop.org/src/gstreamer-docs/gstreamer-docs-$pkgver.tar.xz"{,.asc}
   0001-HACK-meson-Disable-broken-tests.patch
   0002-x265enc-Unbreak-build-with-x265-4.0.patch
-  0003-svtav1enc-update-to-use-SVT-AV1-3.0.0-API-changes.patch
+  "${pkgname}-${pkgver}-atomic.patch::https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8637.patch"
 )
-b2sums=('e11c560e33db0292075a8c3043eef959c6b68c2c54e55a62d41acbfce544b198ff0a948682ff2e9d90ec2773674e614378399b1411588eae7757176ce157dd4e'
-        '21a0c3fd42af3870efb38fdd595298d0596d8c90801dc27bd693aaa8436e7f2e2cffd2019dba6188f89cafda1ac3e42958f152e945a9102020bd55f1f66ccfb7'
+b2sums=('8c90fe57ae67c5097cf427bca73cb687bc5087256444ec9227f4a294b2889d2042643ed4230414c151ecbae8490984e2b8c52cfea494e4f10f79866a26326029'
+        '5ee163d6f0dd14457740cbc2e131bdc3499517b0c6d57153a6ff3ef5af4ab2f5502e3131c7045f1d0829d0f6d5d1ed599b803d7396155e34a3ad99c0f2f3974a'
         'SKIP'
-        '9e277b0373c024d9ec0175e7a036f85152ce145b40d62105e660ca4f466ee0a2d70c68c11c4e6929e46117380482c70957e08e3bf6b5aca1ea0e2c7d4360f317'
+        'd10fcc937c53bca4007ea047540dce2d75a811b2f901efdc7ca0f03889ddba5477539526cc625d939481d84d557f51d0d2866d594ac1a20b4d033dea0ce21a31'
         '94250c1317ce1e3444c2e0effc190ab544eca21c177e43143c3f3a8690c541cbe068604c6ff6401072a6b09f54683eac03128c918a2a16c7013622c24da11348'
-        '97189387749cbcbf66bb378c49dea3bedd2bbd9c181c489f466e61e8d3981d99d578e38e7bc8303d941180ed96bbeefeb01782a6068b89d7030a2234cdd1bdb5')
+        'b7baae961f69229075e3e366532003f37e71db19c65635f2f492f613fe83991c28e512098ea5939c78e8a8f2d680be26d1373e8ccadb70a3b2d4f2e1ed90a541')
 validpgpkeys=(
   D637032E45B8C6585B9456565D2EEE6F6F349D7C # Tim Müller <tim@gstreamer-foundation.org>
 )
 
 prepare() {
   cd gstreamer
+
   # Disable broken tests
   git apply -3 ../0001-HACK-meson-Disable-broken-tests.patch
 
   # Fix build with x265 4.0
   git apply -3 ../0002-x265enc-Unbreak-build-with-x265-4.0.patch
 
-  # Fix build with svt-av1 3.0.0
-  git apply -3 ../0003-svtav1enc-update-to-use-SVT-AV1-3.0.0-API-changes.patch
+  # Fix linking atomic where needed
+  git apply -3 ../${pkgname}-${pkgver}-atomic.patch
 }
 
 build() {
   local meson_options=(
+    -D benchmarks=disabled
     -D examples=disabled
-    -D gobject-cast-checks=disabled
+    -D glib_debug=disabled
     -D gpl=enabled
     -D gst-devtools:debug_viewer=enabled
     -D gst-examples=disabled
     -D gst-plugins-bad:aja=disabled
     -D gst-plugins-bad:amfcodec=disabled
+    -D gst-plugins-bad:androidmedia=disabled
+    -D gst-plugins-bad:cuda-nvmm=disabled
     -D gst-plugins-bad:directfb=disabled
     -D gst-plugins-bad:directshow=disabled
-    -D gst-plugins-bad:directsound=disabled
     -D gst-plugins-bad:flite=disabled
     -D gst-plugins-bad:gs=disabled
     -D gst-plugins-bad:iqa=disabled
     -D gst-plugins-bad:isac=disabled
+    -D gst-plugins-bad:lcevcdecoder=disabled
+    -D gst-plugins-bad:lcevcencoder=disabled
     -D gst-plugins-bad:magicleap=disabled
     -D gst-plugins-bad:mfx_api=oneVPL
+    -D gst-plugins-bad:nvcomp=disabled
+    -D gst-plugins-bad:nvdswrapper=disabled
     -D gst-plugins-bad:openni2=disabled
     -D gst-plugins-bad:opensles=disabled
     -D gst-plugins-bad:qt6d3d11=disabled
+    -D gst-plugins-bad:svtjpegxs=disabled
     -D gst-plugins-bad:tinyalsa=disabled
     -D gst-plugins-bad:voaacenc=disabled
     -D gst-plugins-bad:voamrwbenc=disabled
     -D gst-plugins-bad:wasapi2=disabled
     -D gst-plugins-bad:wasapi=disabled
-    -D gst-plugins-bad:wic=disabled
-    -D gst-plugins-bad:win32ipc=disabled
     -D gst-plugins-base:libvisual=disabled
     -D gst-plugins-base:tremor=disabled
     -D gst-plugins-good:rpicamsrc=disabled
@@ -276,7 +280,7 @@ build() {
 
   case "${CARCH}" in
     x86_64) meson_options+=(-D gst-plugins-bad:msdk=enabled) ;;
-    powerpc64le|riscv64)
+    powerpc64le)
        meson_options+=(
          -D gst-plugins-bad:msdk=disabled
          -D gst-plugins-bad:qsv=disabled
@@ -291,14 +295,22 @@ build() {
        ) ;;
   esac
 
+
   # https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3197
   export GI_SCANNER_DISABLE_CACHE=1
+
+  # Cargo sub-build: Use debug and LTO
+  export CARGO_PROFILE_RELEASE_DEBUG=2
+  export CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
 
   arch-meson gstreamer build "${meson_options[@]}"
   meson compile -C build
 }
 
 check() (
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
   export XDG_RUNTIME_DIR="$PWD/runtime-dir"
   mkdir -p -m 700 "$XDG_RUNTIME_DIR"
 
@@ -359,6 +371,7 @@ package_gstreamer() {
     usr/share/gstreamer-1.0/gdb/gst_gdb.py
 
     usr/share/aclocal/gst-element-check-1.0.m4
+    usr/share/cmake/FindGStreamer.cmake
   ); _install
 }
 
@@ -466,6 +479,7 @@ package_gst-plugins-bad-libs() {
     usr/lib/gstreamer-1.0/libgstspeed.so
     usr/lib/gstreamer-1.0/libgstsubenc.so
     usr/lib/gstreamer-1.0/libgstswitchbin.so
+    usr/lib/gstreamer-1.0/libgsttensordecoders.so
     usr/lib/gstreamer-1.0/libgsttranscode.so
     usr/lib/gstreamer-1.0/libgstunixfd.so
     usr/lib/gstreamer-1.0/libgstuvcgadget.so
@@ -495,10 +509,13 @@ package_gst-plugins-base-libs() {
     "gstreamer=$pkgver-$pkgrel"
     glib2
     glibc
+    graphene
     iso-codes
     libdrm
     libglvnd
     libgudev
+    libjpeg-turbo
+    libpng
     libx11
     libxcb
     libxext
@@ -531,6 +548,7 @@ package_gst-plugins-base-libs() {
     usr/lib/gstreamer-1.0/libgstdsd.so
     usr/lib/gstreamer-1.0/libgstencoding.so
     usr/lib/gstreamer-1.0/libgstgio.so
+    usr/lib/gstreamer-1.0/libgstopengl.so
     usr/lib/gstreamer-1.0/libgstoverlaycomposition.so
     usr/lib/gstreamer-1.0/libgstpbtypes.so
     usr/lib/gstreamer-1.0/libgstplayback.so
@@ -564,13 +582,9 @@ package_gst-plugins-base() {
     cdparanoia
     glib2
     glibc
-    graphene
-    libjpeg-turbo
     libogg
-    libpng
     libtheora
     libvorbis
-    libx11
     opus
     pango
   )
@@ -579,7 +593,6 @@ package_gst-plugins-base() {
     usr/lib/gstreamer-1.0/libgstalsa.so
     usr/lib/gstreamer-1.0/libgstcdparanoia.so
     usr/lib/gstreamer-1.0/libgstogg.so
-    usr/lib/gstreamer-1.0/libgstopengl.so
     usr/lib/gstreamer-1.0/libgstopus.so
     usr/lib/gstreamer-1.0/libgstpango.so
     usr/lib/gstreamer-1.0/libgsttheora.so
@@ -854,7 +867,7 @@ package_gst-plugins-bad() {
     usr/lib/gstreamer-1.0/libgstx265.so
     usr/lib/gstreamer-1.0/libgstzbar.so
     usr/lib/gstreamer-1.0/libgstzxing.so
-  )
+  );
 
   case "${CARCH}" in
     x86_64)
@@ -1142,6 +1155,8 @@ package_gst-devtools() {
     usr/share/gst-debug-viewer
     usr/share/icons/hicolor/*/apps/gst-debug-viewer.*
     usr/share/metainfo/org.freedesktop.GstDebugViewer.appdata.xml
+
+    usr/bin/gst-dots-viewer
   ); _install
 }
 
