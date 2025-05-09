@@ -7,11 +7,11 @@ pkgname=(
   webkit2gtk-4.1
   webkit2gtk-4.1-docs
 )
-pkgver=2.46.6
-pkgrel=2
+pkgver=2.48.1
+pkgrel=1
 pkgdesc="Web content engine for GTK"
 url="https://webkitgtk.org"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(
   # :sort ui /\v^\s*['"]?/
   'AFL-2.0 OR GPL-2.0-or-later'
@@ -45,6 +45,7 @@ depends=(
   bubblewrap
   cairo
   enchant
+  expat
   fontconfig
   freetype2
   gcc-libs
@@ -90,12 +91,14 @@ depends=(
   zlib
 )
 makedepends=(
+  clang
   cmake
   gi-docgen
   glib2-devel
   gobject-introspection
   gperf
   gst-plugins-bad
+  lld
   ninja
   python
   ruby
@@ -104,28 +107,19 @@ makedepends=(
   unifdef
   wayland-protocols
 )
-makedepends_x86_64=(
-  clang
-  lld
-)
-options=(
-  # https://gitlab.archlinux.org/archlinux/packaging/packages/webkit2gtk-4.1/-/issues/1
-  # https://bugs.webkit.org/show_bug.cgi?id=278090
-  !lto
-)
 source=(
   $url/releases/webkitgtk-$pkgver.tar.xz{,.asc}
+  fix-typo-denormaldisabler.patch
   reduce-memory-overheads.patch
-  fix-ftbfs-riscv64.patch
 )
-sha256sums=('f2b31de693220ba9bab76ce6ddfe5b0bfab2515cb2b0a70f3c54d4050766c32b'
+sha256sums=('98efdf21c4cdca0fe0b73ab5a8cb52093b5aa52d9b1b016a93f71dbfa1eb258f'
             'SKIP'
-            '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864'
-            'b42d36c275e5fbd6da8e0761381d9eac13b2d103a366a61d9d450421948385a3')
-b2sums=('9428b17c4dd605667ba189da1587f6114eb175b319155f9c6e55c71f2b6a638778434dd0b5b32a5ee8320d1f69b622a5b0aac530d6e75ee3c17ba406ebfab7da'
+            '08a5fc35ed0d65f1c47a00f2bcf0e6c335321ee5db7f2eb1ad4cbfb1a563a36c'
+            '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864')
+b2sums=('d0723ded65230915954a66366c82d0d8c45b423c55cc5d6dabed72378a9f8cf498e8a525729e964daa3e8dd93e06fde30b6f02b103c5e88b3c29cc175026f668'
         'SKIP'
-        'cc16462ce22df999b47ef477d4272ef3df2fbbfe5cdc585f3ce47e56cde65a1d7dd1105e6e7bbff41695f79b6394bc3e403e53a669bb7f456c733ed216372c9b'
-        'cd80efecf12982e9e9335032a433e094614c8b95edce7114d37c6d651ee1f5bb3e331c3911d7901055cd59ca3ed5de38d14e15fab5488d3248bf5899623b2f8c')
+        '9320fb1e591d1254c8ccafa2d3b14aa2aa802eb90aaf2f564933003f4051dca834c35e059b6740a81d98aa19c1654e6dcbc77433933c1b9ca40e4cf5fec4adc1'
+        'cc16462ce22df999b47ef477d4272ef3df2fbbfe5cdc585f3ce47e56cde65a1d7dd1105e6e7bbff41695f79b6394bc3e403e53a669bb7f456c733ed216372c9b')
 validpgpkeys=(
   # https://www.webkitgtk.org/verifying.html
   5AA3BC334FD7E3369E7C77B291C559DBE4C9123B # Adrián Pérez de Castro <aperez@igalia.com>
@@ -134,44 +128,48 @@ validpgpkeys=(
 
 prepare() {
   cd webkitgtk-$pkgver
-  patch -Np1 -i ../reduce-memory-overheads.patch
-  patch -Np1 -i ../fix-ftbfs-riscv64.patch
+
+  patch -Np1 -i ${srcdir}/fix-typo-denormaldisabler.patch
+  patch -Np1 -i ${srcdir}/reduce-memory-overheads.patch
 }
 
 build() {
   local cmake_options=(
-    -DPORT=GTK
-    -DCMAKE_BUILD_TYPE=Release
-    -DCMAKE_INSTALL_PREFIX=/usr
-    -DCMAKE_INSTALL_LIBDIR=lib
-    -DCMAKE_INSTALL_LIBEXECDIR=lib
-    -DCMAKE_SKIP_RPATH=ON
-    -DUSE_GTK4=OFF
-    -DUSE_LIBBACKTRACE=OFF
-    -DUSE_SOUP2=OFF
-    -DENABLE_DOCUMENTATION=ON
-    -DENABLE_MINIBROWSER=ON
+    -D CMAKE_BUILD_TYPE=Release
+    -D CMAKE_INSTALL_LIBDIR=lib
+    -D CMAKE_INSTALL_LIBEXECDIR=lib
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_SKIP_RPATH=ON
+    -D ENABLE_DOCUMENTATION=ON
+    -D ENABLE_MINIBROWSER=ON
+    -D ENABLE_SPEECH_SYNTHESIS=OFF
+    -D PORT=GTK
+    -D USE_FLITE=OFF
+    -D USE_GTK4=OFF
+    -D USE_LIBBACKTRACE=OFF
+    -D USE_SOUP2=OFF
   )
 
   case "${CARCH}" in
-    powerpc64*)
-      CFLAGS+=' -mminimal-toc'
-      CXXFLAGS+=' -mminimal-toc'
+    powerpc64le)
+      export CFLAGS+=' -mminimal-toc'
+      export CXXFLAGS+=' -mminimal-toc'
+      export LDFLAGS+=' -Wl,--no-keep-memory'
     ;;
-    powerpc) 
+    powerpc64)
+      export CFLAGS+=' -mminimal-toc'
+      export CXXFLAGS+=' -mminimal-toc'
+      export LDFLAGS+=' -Wl,--no-keep-memory'
+    ;;
+    powerpc)
       cmake_options+=(
         -DENABLE_WEBGL=OFF
-        -DFORCE_32BIT=ON
       )
       export LDFLAGS+=" -Wl,--no-keep-memory"
     ;;
     x86_64)
-      # GCC with LTO fails to link libjavascriptcoregtk
-      #     /usr/bin/ld: /tmp/ccXxyWZV.ltrans0.ltrans.o: in function `ipint_table_size_validate':
-      #     <artificial>:(.text+0x49f0f): undefined reference to `ipint_extern_table_size'
-      #     /usr/bin/ld: /tmp/ccXxyWZV.ltrans0.ltrans.o: in function `ipint_table_fill_validate':
-      #     <artificial>:(.text+0x4a019): undefined reference to `ipint_extern_table_fill'
-      #     collect2: error: ld returned 1 exit status
+      # Upstream prefers Clang
+      # https://gitlab.archlinux.org/archlinux/packaging/packages/webkitgtk-6.0/-/issues/4
       export CC=clang CXX=clang++
       LDFLAGS+=" -fuse-ld=lld"
 
