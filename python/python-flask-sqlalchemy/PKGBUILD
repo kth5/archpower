@@ -1,53 +1,70 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 # Contributor: Serge Victor <arch@random.re>
 # Contributor: Kevin Azzam <aur@azz.am>
 
-_pyname=flask-sqlalchemy
 pkgname=python-flask-sqlalchemy
 pkgver=3.1.1
-pkgrel=4
+pkgrel=5
 pkgdesc='Adds SQLAlchemy support to your Flask application'
-url='http://flask-sqlalchemy.pocoo.org/'
+url='https://github.com/pallets-eco/flask-sqlalchemy'
 arch=(any)
 license=('BSD-3-Clause')
-depends=('python' 'python-flask' 'python-sqlalchemy')
-makedepends=('python-build' 'python-installer' 'python-flit-core' 'python-sphinx' 'python-pallets-sphinx-themes' 'python-sphinx-issues')
-checkdepends=('python-pytest' 'python-blinker')
-source=(
-  ${pkgname}-${pkgver}.tar.gz::https://github.com/pallets-eco/flask-sqlalchemy/archive/${pkgver}.tar.gz
+depends=(
+  'python'
+  'python-flask'
+  'python-sqlalchemy'
 )
+makedepends=(
+  'python-build'
+  'python-flit-core'
+  'python-installer'
+  'python-pallets-sphinx-themes'
+  'python-sphinx'
+  'python-sphinx-issues'
+)
+checkdepends=(
+  'python-blinker'
+  'python-pytest'
+)
+source=("$url/archive/$pkgver/${pkgname#python-}-$pkgver.tar.gz")
 sha512sums=('67d78b5109b0397f95308d74f6926aa418a4dd7f3a52f91a3e159396fbd71bd048e4403a65182113cc0c0f1e348e2fd8d765ca46de5cae10af204dcf1101563a')
 
 prepare() {
-  sed -r "s|(release =)|\\1 '${pkgver}'  #|" -i ${_pyname}-${pkgver}/docs/conf.py
+  sed -r "s|(release =)|\\1 '${pkgver}'  #|" -i ${pkgname#python-}-${pkgver}/docs/conf.py
 }
 
 build() {
-  cd ${_pyname}-${pkgver}
+  cd ${pkgname#python-}-${pkgver}
   python -m build --wheel --no-isolation
-  python -m installer --destdir=tmp_install dist/*.whl
-  local python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-  PYTHONPATH="$PWD"/tmp_install/`python -c "import site; print(site.getsitepackages()[0])"` \
-  #make -j1 -C docs man text SPHINXBUILD=sphinx-build
+  python -m venv --system-site-packages doc-env
+  doc-env/bin/python -m installer dist/*.whl
+  local site_packages=$(doc-env/bin/python -c "import site; print(site.getsitepackages()[0])")
+  PYTHONPATH="$site_packages" make -j1 -C docs man text SPHINXBUILD=sphinx-build
 }
 
 check() {
-  cd ${_pyname}-${pkgver}
-  # Disable broken test.
+  cd ${pkgname#python-}-${pkgver}
+  # Disable broken tests.
   # https://github.com/sqlalchemy/sqlalchemy/issues/11973
   # https://github.com/sqlalchemy/sqlalchemy/commit/6ae7f2378971b16f024eb5ab851cc4533bc4e61a
-  PYTHONPATH="$PWD"/tmp_install/`python -c "import site; print(site.getsitepackages()[0])"` \
-  py.test -vs -Wignore --disable-pytest-warnings -k 'not test_explicit_table[db2] and not test_explicit_table[db4]'
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer dist/*.whl
+  test-env/bin/python -m pytest \
+    --deselect tests/test_model.py::test_abstractmodel \
+    --deselect tests/test_model.py::test_mixinmodel \
+    --deselect tests/test_model_bind.py::test_explicit_table \
+    -W=ignore::pytest.PytestUnraisableExceptionWarning
 }
 
 package() {
-  cd ${_pyname}-${pkgver}
+  cd ${pkgname#python-}-${pkgver}
   python -m installer --destdir="$pkgdir" dist/*.whl
-  install -Dm 644 LICENSE.rst -t "${pkgdir}/usr/share/licenses/${pkgname}"
-  install -Dm 644 CHANGES.rst README.rst  -t "${pkgdir}/usr/share/doc/${pkgname}"
-  #cp -r docs/_build/text "${pkgdir}/usr/share/doc/${pkgname}/text"
-  #install -Dm 644 docs/_build/man/${_pyname}.1 "${pkgdir}/usr/share/man/man1/${pkgname}.1"
+  install -vDm 644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE.rst
+  install -vDm 644 -t "$pkgdir/usr/share/doc/$pkgname" CHANGES.rst README.rst
+  cp -vr -t "$pkgdir/usr/share/doc/$pkgname" docs/_build/text
+  install -vDm 644 docs/_build/man/flask-sqlalchemy.1 "$pkgdir/usr/share/man/man1/$pkgname.1"
 }
 
 # vim: ts=2 sw=2 et:
