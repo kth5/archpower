@@ -4,46 +4,43 @@
 # Contributor: judd <jvinet@zeroflux.org>
 
 pkgname=grep
-pkgver=3.11
-pkgrel=1.1
+pkgver=3.12
+pkgrel=1
 pkgdesc='A string search utility'
-arch=(x86_64 powerpc64le powerpc64 powerpc espresso riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=('GPL3')
 url='https://www.gnu.org/software/grep/'
 depends=('glibc' 'pcre2')
-makedepends=('texinfo')
+makedepends=('gperf' 'git' 'python' 'texinfo' 'wget')
+options=('!lto')
 validpgpkeys=('155D3FC500C834486D1EEA677FD9FCCB000BEEEE') # Jim Meyering
-source=("https://ftp.gnu.org/gnu/$pkgname/$pkgname-$pkgver.tar.xz"{,.sig})
-sha256sums=('1db2aedde89d0dea42b16d9528f894c8d15dae4e190b59aecc78f5a951276eab'
+source=("git+https://git.savannah.gnu.org/git/grep.git#tag=v${pkgver}?signed"
+        "git+https://git.savannah.gnu.org/git/gnulib.git")
+sha256sums=('9543190d9ca2201ea46fddaeb39031a0acde1f6aa4351a72f33ef3455e6dd41e'
             'SKIP')
 
 prepare() {
-  cd $pkgname-$pkgver
-  # apply patch from the source array (should be a pacman feature)
-  local src
-  for src in "${source[@]}"; do
-    src="${src%%::*}"
-    src="${src##*/}"
-    [[ $src = *.patch ]] || continue
-    msg2 "Applying patch $src..."
-    patch -Np1 < "../$src"
-  done
+  cd $pkgname
+
+  git submodule init
+  git config submodule.gnulib.url "${srcdir}/gnulib"
+  git -c protocol.file.allow=always submodule update
+
+  sh bootstrap
 }
 
 build() {
-  cd $pkgname-$pkgver
-  # configure option --without-included-regex removed in 3.7
-  # see: https://lists.gnu.org/archive/html/bug-grep/2021-08/msg00028.html
+  cd $pkgname
   ./configure --prefix=/usr
   make
 }
 
 check() {
-  cd $pkgname-$pkgver
+  cd $pkgname
   make check
 }
 
 package() {
-  cd $pkgname-$pkgver
+  cd $pkgname
   make DESTDIR="$pkgdir" install
 }
