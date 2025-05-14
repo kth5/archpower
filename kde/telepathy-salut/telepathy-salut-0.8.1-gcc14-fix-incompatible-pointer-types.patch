@@ -1,0 +1,68 @@
+From 02ef230c86146bf9fcafdad963884c27df0727f8 Mon Sep 17 00:00:00 2001
+From: Mamoru TASAKA <mtasaka@fedoraproject.org>
+Date: Sat, 28 Dec 2024 14:17:12 +0900
+Subject: [PATCH] Fix compilation with gcc14 -Werror=incompatible-pointer-types
+
+gcc14 defaults to -Werror=incompatible-pointer-types ,
+fix compilation with this flag.
+
+ext/wocky/wocky/wocky-meta-porter.c : cast type properly
+src/contact-manager.c : likewise
+ext/wocky/wocky/wocky-xmpp-reader.c : fix constness
+---
+ lib/ext/wocky/wocky/wocky-meta-porter.c | 2 +-
+ lib/ext/wocky/wocky/wocky-xmpp-reader.c | 4 ++--
+ src/contact-manager.c                   | 2 +-
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/lib/ext/wocky/wocky/wocky-meta-porter.c b/lib/ext/wocky/wocky/wocky-meta-porter.c
+index 492a301..da3759d 100644
+--- a/lib/ext/wocky/wocky/wocky-meta-porter.c
++++ b/lib/ext/wocky/wocky/wocky-meta-porter.c
+@@ -1268,7 +1268,7 @@ stanza_handler_new (WockyMetaPorter *self,
+   out->porters = g_hash_table_new (NULL, NULL);
+ 
+   if (contact != NULL)
+-    out->contact = g_object_ref (contact);
++    out->contact = WOCKY_CONTACT (g_object_ref (contact));
+ 
+   out->type = type;
+   out->sub_type = sub_type;
+diff --git a/lib/ext/wocky/wocky/wocky-xmpp-reader.c b/lib/ext/wocky/wocky/wocky-xmpp-reader.c
+index 7e2a452..b59a2aa 100644
+--- a/lib/ext/wocky/wocky/wocky-xmpp-reader.c
++++ b/lib/ext/wocky/wocky/wocky-xmpp-reader.c
+@@ -67,7 +67,7 @@ static void _end_element_ns (void *user_data, const xmlChar *localname,
+ 
+ static void _characters (void *user_data, const xmlChar *ch, int len);
+ 
+-static void _error (void *user_data, xmlErrorPtr error);
++static void _error (void *user_data, const xmlError * error);
+ 
+ static xmlSAXHandler parser_handler = {
+   /* internalSubset         */ NULL,
+@@ -617,7 +617,7 @@ _end_element_ns (void *user_data, const xmlChar *localname,
+ }
+ 
+ static void
+-_error (void *user_data, xmlErrorPtr error)
++_error (void *user_data, const xmlError * error)
+ {
+   WockyXmppReader *self = WOCKY_XMPP_READER (user_data);
+   WockyXmppReaderPrivate *priv = self->priv;
+diff --git a/src/contact-manager.c b/src/contact-manager.c
+index 8aeac5b..fa688fb 100644
+--- a/src/contact-manager.c
++++ b/src/contact-manager.c
+@@ -177,7 +177,7 @@ salut_contact_manager_constructed (GObject *obj)
+ 
+   base_connection = tp_base_contact_list_get_connection (
+       (TpBaseContactList *) self, NULL);
+-  self->connection = g_object_ref (base_connection);
++  self->connection = SALUT_CONNECTION (g_object_ref (base_connection));
+ 
+   contact_repo = tp_base_connection_get_handles (base_connection,
+       TP_HANDLE_TYPE_CONTACT);
+-- 
+2.47.1
+
