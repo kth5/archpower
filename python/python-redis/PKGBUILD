@@ -7,7 +7,7 @@
 
 pkgname=python-redis
 pkgver=5.2.1
-pkgrel=2
+pkgrel=4
 pkgdesc='The Python interface to the Redis key-value store'
 arch=(any)
 url='https://github.com/redis/redis-py'
@@ -31,7 +31,7 @@ checkdepends=(
   'python-pytest'
   'python-pytest-asyncio'
   'python-requests'
-  'redis'
+  'valkey'
 )
 optdepends=(
   'python-cryptography: OCSP certificate validation'
@@ -55,7 +55,9 @@ build() {
 }
 
 check() {
-  [ ! "${CARCH}" == 'x86_64' ] && return 0
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
 
   cd "$pkgname"
   # shellcheck disable=SC2317
@@ -93,6 +95,11 @@ check() {
       --port "$port"
     popd
   done
+
+  # This is bad form but it makes the tests much more reliable. This could be a proper "wait for
+  # port" loop but it seems excessive for a PKGBUILD.
+  sleep 0.1
+
   yes yes | redis-cli --cluster create \
     127.0.0.1:16379 \
     127.0.0.1:16380 \
@@ -134,6 +141,16 @@ check() {
     # This seems to be an issue occuring in multiple packages since the Python
     # 3.13 migration.
     --ignore=tests/test_asyncio/test_cluster.py
+
+    # Tests that fail with Valkey, that work fine with Redis
+    --deselect=tests/test_asyncio/test_commands.py::TestRedisCommands::test_readonly_invalid_cluster_state
+    --deselect=tests/test_asyncio/test_monitor.py::TestMonitor::test_command_with_quoted_key
+    --deselect=tests/test_asyncio/test_monitor.py::TestMonitor::test_command_with_escaped_data
+    --deselect=tests/test_commands.py::TestRedisCommands::test_readonly_invalid_cluster_state
+    --deselect=tests/test_monitor.py::TestMonitor::test_command_with_quoted_key
+    --deselect=tests/test_monitor.py::TestMonitor::test_command_with_escaped_data
+    --deselect=tests/test_cluster.py::TestClusterMonitor::test_command_with_quoted_key
+    --deselect=tests/test_cluster.py::TestClusterMonitor::test_command_with_escaped_data
   )
 
   # Run standalone test suite - targets the Redis server running :6379 and the
