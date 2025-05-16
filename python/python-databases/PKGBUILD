@@ -1,0 +1,68 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
+# Contributor: Filipe Laíns (FFY00) <lains@archlinux.org>
+
+pkgname=python-databases
+_pkgname=${pkgname#python-}
+pkgver=0.9.0
+pkgrel=3
+pkgdesc="Async database support for Python"
+arch=(any)
+url="https://github.com/encode/databases"
+license=(BSD-3-Clause)
+depends=(
+  python
+  python-sqlalchemy
+)
+makedepends=(
+  python-build
+  python-installer
+  python-setuptools
+  python-wheel
+)
+checkdepends=(
+  # postgresql
+  # python-aiomysql
+  # python-aiopg
+  # python-asyncpg
+  # python-psycopg
+  # python-pymysql
+  python-aiosqlite
+  python-httpx
+  python-pytest
+  python-requests
+  python-starlette
+)
+optdepends=(
+  # 'python-asyncmy: mysql + asyncmy support' # Not yet packaged
+  'python-aiomysql: mysql support'
+  'python-aiopg: postgresql + aiopg support'
+  'python-aiosqlite: sqlite support'
+  'python-asyncpg: postgresql support'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/$pkgver.tar.gz")
+sha256sums=('4dc05d1810ae683930b150c1325ec2e35854fc5838ed91d3bfe94ff7dadb59e5')
+
+build() {
+  cd "$_pkgname-$pkgver"
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "$_pkgname-$pkgver"
+  export TEST_DATABASE_URLS=" \
+    sqlite:///testsuite, \
+    sqlite+aiosqlite:///testsuite \
+  "
+  python -m installer --destdir=tmp_install dist/*.whl
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  export PYTHONPATH="$PWD/tmp_install/$site_packages:$PWD"
+  # Fails to collect if python-asyncmy not installed.
+  pytest --ignore tests/test_connection_options.py
+}
+
+package() {
+  cd "$_pkgname-$pkgver"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE.md
+}
