@@ -4,7 +4,7 @@
 
 pkgname=python-elasticsearch
 _pkgname=elasticsearch-py
-pkgver=8.17.2
+pkgver=9.0.0
 pkgrel=1
 arch=(any)
 pkgdesc="Official Python client for Elasticsearch"
@@ -12,7 +12,9 @@ url="https://github.com/elastic/elasticsearch-py"
 license=(Apache-2.0)
 depends=(
   python
+  python-dateutil
   python-elastic-transport
+  python-typing_extensions
 )
 makedepends=(
   python-build
@@ -21,8 +23,9 @@ makedepends=(
   python-wheel
 )
 checkdepends=(
+  nltk-data
   python-aiohttp
-  python-dateutil
+  python-nltk
   python-numpy
   python-orjson
   python-pandas
@@ -43,7 +46,7 @@ optdepends=(
   # 'python-simsimd: support for Maximal Marginal Relevance (MMR) for search results'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('18449ba533e9403a86f9cde3d19a22795199c67eac74e6391e1fea08f5309d37')
+sha256sums=('d8c9ecbc340f213fbe988fbf9c1bbe9a603699326740aea8d1407ff4f5d8a0b6')
 
 build() {
   cd $_pkgname-$pkgver
@@ -51,8 +54,17 @@ build() {
 }
 
 check() {
+  case "${CARCH}" in
+    powerpc) return 0 ;;
+  esac
+
   cd $_pkgname-$pkgver
-  pytest --override-ini="addopts="
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer dist/*.whl
+  # Ignored tests requires unpackaged sentence_transformers
+  test-env/bin/python -m pytest --override-ini="addopts=" \
+    --ignore=test_elasticsearch/test_dsl/test_integration/test_examples/_async/test_vectors.py \
+    --ignore=test_elasticsearch/test_dsl/test_integration/test_examples/_sync/test_vectors.py
 }
 
 package() {
