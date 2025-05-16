@@ -1,0 +1,91 @@
+--- telepathy-gabble-0.18.4/configure.ac.soup	2016-11-15 19:13:51.000000000 +0900
++++ telepathy-gabble-0.18.4/configure.ac	2024-01-29 23:19:01.060347572 +0900
+@@ -385,7 +385,7 @@ if test x$enable_google_relay = xyes; th
+   AC_DEFINE(ENABLE_GOOGLE_RELAY, [], [Enable Google Jingle relay support])
+ 
+   dnl Check for libsoup
+-  PKG_CHECK_MODULES(SOUP, libsoup-2.4)
++  PKG_CHECK_MODULES(SOUP, libsoup-3.0)
+ else
+   SOUP_CFLAGS=
+   SOUP_LIBS=
+--- telepathy-gabble-0.18.4/lib/ext/wocky/configure.ac.soup	2016-11-15 18:06:13.000000000 +0900
++++ telepathy-gabble-0.18.4/lib/ext/wocky/configure.ac	2024-01-29 23:19:01.061347573 +0900
+@@ -251,7 +251,7 @@ if test x$enable_google_relay = xyes; th
+   AC_DEFINE(ENABLE_GOOGLE_RELAY, [], [Enable Google Jingle relay support])
+ 
+   dnl Check for libsoup
+-  PKG_CHECK_MODULES(SOUP, libsoup-2.4 >= 2.42)
++  PKG_CHECK_MODULES(SOUP, libsoup-3.0 >= 3.0)
+ fi
+ AM_CONDITIONAL([ENABLE_GOOGLE_RELAY], [test "x$enable_google_relay" = xyes])
+ 
+--- telepathy-gabble-0.18.4/lib/ext/wocky/wocky/wocky-google-relay.c.soup	2016-11-15 18:06:13.000000000 +0900
++++ telepathy-gabble-0.18.4/lib/ext/wocky/wocky/wocky-google-relay.c	2024-01-30 00:21:44.722011608 +0900
+@@ -134,16 +134,20 @@ translate_relay_info (GPtrArray *relays,
+ }
+ 
+ static void
+-on_http_response (SoupSession *soup,
+-    SoupMessage *msg,
++on_http_response (GObject *source,
++    GAsyncResult *res,
+     gpointer user_data)
+ {
+   RelaySessionData *rsd = user_data;
+ 
+-  if (msg->status_code != 200)
++  SoupSession *session = SOUP_SESSION (source);
++  SoupMessage *msg = soup_session_get_async_result_message (session, res);
++  SoupStatus status_code = soup_message_get_status (msg);
++  if (status_code != 200)
+     {
++      const char *reason_phrase = soup_message_get_reason_phrase (msg);
+       DEBUG ("Google session creation failed, relaying not used: %d %s",
+-          msg->status_code, msg->reason_phrase);
++          status_code, reason_phrase);
+     }
+   else
+     {
+@@ -160,11 +164,18 @@ on_http_response (SoupSession *soup,
+       const gchar *password;
+       gchar *escaped_str;
+ 
+-      escaped_str = g_strescape (msg->response_body->data, "\r\n");
++      gchar *data;
++      g_autoptr(GBytes) response = NULL;
++      g_autoptr(GError) error = NULL;
++      gsize length = 0;
++      response = soup_session_send_and_read_finish (session, res, &error);
++      data = g_bytes_get_data (response, &length);
++
++      escaped_str = g_strescape (data, "\r\n");
+       DEBUG ("Response from Google:\n====\n%s\n====", escaped_str);
+       g_free (escaped_str);
+ 
+-      lines = g_strsplit (msg->response_body->data, "\n", 0);
++      lines = g_strsplit (data, "\n", 0);
+ 
+       if (lines != NULL)
+         {
+@@ -300,16 +311,17 @@ wocky_google_relay_resolver_resolve (Woc
+   for (i = 0; i < components; i++)
+     {
+       SoupMessage *msg = soup_message_new ("GET", url);
++      SoupMessageHeaders *request_headers = soup_message_get_request_headers(msg);
+ 
+       DEBUG ("Trying to create a new relay session on %s", url);
+ 
+       /* libjingle sets both headers, so shall we */
+-      soup_message_headers_append (msg->request_headers,
++      soup_message_headers_append (request_headers,
+           "X-Talk-Google-Relay-Auth", token);
+-      soup_message_headers_append (msg->request_headers,
++      soup_message_headers_append (request_headers,
+           "X-Google-Relay-Auth", token);
+ 
+-      soup_session_queue_message (self->soup, msg, on_http_response, rsd);
++      soup_session_send_and_read_async (self->soup, msg,  G_PRIORITY_DEFAULT, NULL, on_http_response, rsd);
+     }
+ 
+   g_free (url);
