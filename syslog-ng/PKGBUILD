@@ -5,9 +5,9 @@
 
 pkgname=syslog-ng
 pkgver=4.8.1
-pkgrel=9
+pkgrel=11
 pkgdesc="Next-generation syslogd with advanced networking and filtering capabilities"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://github.com/syslog-ng/syslog-ng"
 license=(
   GPL-2.0-or-later
@@ -21,6 +21,7 @@ depends=(
   gcc-libs
   glib2
   glibc
+  gperf
   grpc
   json-c
   libcap
@@ -34,7 +35,6 @@ makedepends=(
   autoconf-archive
   docbook-xsl
   git
-  gperf
   hiredis
   libdbi
   libesmtp
@@ -109,7 +109,7 @@ source=(
   "$pkgname-systemd-integration.patch"
   "$pkgname-do-not-install-python-venv.patch"
   "$pkgname-config.patch"
-  protobuf-30.patch
+  "syslog-ng-fix-protobuf-30.0-compatibility.patch"
 )
 sha256sums=('7e8568185e4e2380417ac0db8ab3773721bcfb117d378776ef9f1953bc4faf25'
             'SKIP'
@@ -119,7 +119,7 @@ sha256sums=('7e8568185e4e2380417ac0db8ab3773721bcfb117d378776ef9f1953bc4faf25'
             '12e7d38ca2b79aae9417207a7b3a777f8f7646cc23bddfd383a6a6e9b7014d6e'
             '7ca7f0d9fb203b3814fe2f609904af84df346b84591eeeb171bb2e5eb6393990'
             '1039550b091df1a50e8d30b624d52a7fd56c29d0ceec596b4b029a7cc92a3825'
-            'bae51092d9f8886efc58c7f2f8ece89855411a2e089dcc5729931584bcc10e07')
+            'f2ebdf8c85edeacbd392e7e7b7fee337ed9d919bdb7b633dabf9613e33d5a9f1')
 
 prepare() {
   cd $pkgname
@@ -132,8 +132,7 @@ prepare() {
   patch -Np1 -i "$srcdir/$pkgname-systemd-integration.patch"        # Fix paths for systemd integration.
   patch -Np1 -i "$srcdir/$pkgname-do-not-install-python-venv.patch" # Don't install Python venv using pip.
   patch -Np1 -i "$srcdir/$pkgname-config.patch"                     # Add further distribution examples, disable default log file.
-
-  patch -Np1 -i "$srcdir/protobuf-30.patch"
+  patch -Np1 -i "$srcdir/syslog-ng-fix-protobuf-30.0-compatibility.patch"
 
   # Remove tests failing in a chroot but not on host. Not sure why.
   sed -i '/include lib\/secret-storage\/tests\/Makefile.am/d' lib/secret-storage/Makefile.am
@@ -174,11 +173,11 @@ build() {
 
 check() {
   case "${CARCH}" in
-    x86_64)
-      cd $pkgname
-      make check
-    ;;
+    powerpc*) return 0 ;;
   esac
+
+  cd $pkgname
+  make check
 }
 
 package() {

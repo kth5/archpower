@@ -1,23 +1,18 @@
-From 4d2f490807560c11ec62067718b2acf01cac49ef Mon Sep 17 00:00:00 2001
-From: Christian Heusel <christian@heusel.eu>
-Date: Sat, 15 Mar 2025 14:02:29 +0100
-Subject: [PATCH] otel: Implement protobuf 30.0 compatiblity
-
-Protobuf 30.0 (and above) has exchanged a few of their interface from
-`std::string` to `std::string_view`.
-
-Link: https://protobuf.dev/support/migration/#v30
-Signed-off-by: Christian Heusel <christian@heusel.eu>
----
- modules/grpc/otel/filterx/object-otel-array.cpp  | 4 ++--
- modules/grpc/otel/filterx/object-otel-kvlist.cpp | 4 ++--
- modules/grpc/otel/filterx/otel-field.cpp         | 6 +++---
- modules/grpc/otel/filterx/protobuf-field.cpp     | 8 ++++----
- modules/grpc/otel/filterx/protobuf-field.hpp     | 2 +-
- 5 files changed, 12 insertions(+), 12 deletions(-)
-
+diff --git a/modules/grpc/bigquery/bigquery-dest.cpp b/modules/grpc/bigquery/bigquery-dest.cpp
+index d3745e4c7..e206e5efe 100644
+--- a/modules/grpc/bigquery/bigquery-dest.cpp
++++ b/modules/grpc/bigquery/bigquery-dest.cpp
+@@ -316,7 +316,7 @@ DestinationDriver::load_protobuf_schema()
+ 
+       LogTemplate *value = (LogTemplate *) current_value->data;
+ 
+-      this->fields.push_back(Field{field->name(), (google::protobuf::FieldDescriptorProto::Type) field->type(), value});
++      this->fields.push_back(Field{std::string(field->name()), (google::protobuf::FieldDescriptorProto::Type) field->type(), value});
+       this->fields[i].field_desc = field;
+ 
+       current_value = current_value->next;
 diff --git a/modules/grpc/otel/filterx/object-otel-array.cpp b/modules/grpc/otel/filterx/object-otel-array.cpp
-index ab2b8de7b24..41cb2d55760 100644
+index ab2b8de7b..41cb2d557 100644
 --- a/modules/grpc/otel/filterx/object-otel-array.cpp
 +++ b/modules/grpc/otel/filterx/object-otel-array.cpp
 @@ -355,8 +355,8 @@ OtelArrayField::FilterXObjectSetter(google::protobuf::Message *message, ProtoRef
@@ -32,7 +27,7 @@ index ab2b8de7b24..41cb2d55760 100644
        return false;
      }
 diff --git a/modules/grpc/otel/filterx/object-otel-kvlist.cpp b/modules/grpc/otel/filterx/object-otel-kvlist.cpp
-index 20e02d59f79..80f76b48f4a 100644
+index 20e02d59f..80f76b48f 100644
 --- a/modules/grpc/otel/filterx/object-otel-kvlist.cpp
 +++ b/modules/grpc/otel/filterx/object-otel-kvlist.cpp
 @@ -483,8 +483,8 @@ OtelKVListField::FilterXObjectSetter(google::protobuf::Message *message, ProtoRe
@@ -47,7 +42,7 @@ index 20e02d59f79..80f76b48f4a 100644
        return false;
      }
 diff --git a/modules/grpc/otel/filterx/otel-field.cpp b/modules/grpc/otel/filterx/otel-field.cpp
-index 947bb0538ac..45db957e3d2 100644
+index 947bb0538..45db957e3 100644
 --- a/modules/grpc/otel/filterx/otel-field.cpp
 +++ b/modules/grpc/otel/filterx/otel-field.cpp
 @@ -100,7 +100,7 @@ AnyField::FilterXObjectGetter(Message *message, ProtoReflectors reflectors)
@@ -59,7 +54,7 @@ index 947bb0538ac..45db957e3d2 100644
              evt_tag_int("type", reflectors.fieldType));
    return nullptr;
  }
-@@ -258,7 +258,7 @@ class OtelDatetimeConverter : public ProtobufField
+@@ -258,7 +258,7 @@ public:
          return true;
        }
  
@@ -78,7 +73,7 @@ index 947bb0538ac..45db957e3d2 100644
        fieldName.compare("observed_time_unix_nano") == 0)
      {
 diff --git a/modules/grpc/otel/filterx/protobuf-field.cpp b/modules/grpc/otel/filterx/protobuf-field.cpp
-index e6bbcd54d98..15b6b4685bf 100644
+index e6bbcd54d..15b6b4685 100644
 --- a/modules/grpc/otel/filterx/protobuf-field.cpp
 +++ b/modules/grpc/otel/filterx/protobuf-field.cpp
 @@ -43,8 +43,8 @@ void
@@ -92,7 +87,7 @@ index e6bbcd54d98..15b6b4685bf 100644
              evt_tag_str("type", type));
  }
  
-@@ -160,7 +160,7 @@ class u64Field : public ProtobufField
+@@ -160,7 +160,7 @@ public:
      if (val > INT64_MAX)
        {
          msg_error("protobuf-field: exceeding FilterX number value range",
@@ -101,7 +96,7 @@ index e6bbcd54d98..15b6b4685bf 100644
                    evt_tag_long("range_min", INT64_MIN),
                    evt_tag_long("range_max", INT64_MAX),
                    evt_tag_printf("current", "%" G_GUINT64_FORMAT, val));
-@@ -219,7 +219,7 @@ class StringField : public ProtobufField
+@@ -219,7 +219,7 @@ public:
          if (!json_literal)
            {
              msg_error("protobuf-field: json marshal error",
@@ -111,7 +106,7 @@ index e6bbcd54d98..15b6b4685bf 100644
            }
          reflectors.reflection->SetString(message, reflectors.fieldDescriptor, json_literal);
 diff --git a/modules/grpc/otel/filterx/protobuf-field.hpp b/modules/grpc/otel/filterx/protobuf-field.hpp
-index 7bc8c5716e2..70956424550 100644
+index 7bc8c5716..709564245 100644
 --- a/modules/grpc/otel/filterx/protobuf-field.hpp
 +++ b/modules/grpc/otel/filterx/protobuf-field.hpp
 @@ -49,7 +49,7 @@ struct ProtoReflectors
@@ -123,15 +118,3 @@ index 7bc8c5716e2..70956424550 100644
          throw std::invalid_argument(error_msg);
        }
      this->fieldDescriptor = this->descriptor->FindFieldByName(fieldName);
-diff -up modules/grpc/bigquery/bigquery-dest.cpp\~ modules/grpc/bigquery/bigquery-dest.cpp
---- a/modules/grpc/bigquery/bigquery-dest.cpp
-+++ b/modules/grpc/bigquery/bigquery-dest.cpp
-@@ -316,7 +316,7 @@ DestinationDriver::load_protobuf_schema(
- 
-       LogTemplate *value = (LogTemplate *) current_value->data;
- 
--      this->fields.push_back(Field{field->name(), (google::protobuf::FieldDescriptorProto::Type) field->type(), value});
-+      this->fields.push_back(Field{std::string(field->name()), (google::protobuf::FieldDescriptorProto::Type) field->type(), value});
-       this->fields[i].field_desc = field;
- 
-       current_value = current_value->next;
