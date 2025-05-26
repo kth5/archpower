@@ -8,10 +8,10 @@
 # Contributor: Gustavo Alvarez <sl1pkn07@gmail.com>
 
 pkgname=mlt
-pkgver=7.30.0
+pkgver=7.32.0
 pkgrel=1
 pkgdesc='An open source multimedia framework'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://www.mltframework.org'
 license=(LGPL-2.1-only)
 depends=(gcc-libs
@@ -32,6 +32,7 @@ optdepends=('ffmpeg: ffmpeg plugin'
             'libvorbis: vorbis plugin'
             'libx11: SDL1 plugin'
             'libxml2: XML plugin'
+            'movit: opengl plugin'
             'opencv: openCV plugin'
             'qt5-base: QT5 plugins'
             'qt5-svg: Qt5 plugins'
@@ -60,6 +61,7 @@ makedepends=(cmake
              libdv
              libexif
              libsamplerate
+             movit
              opencv
              pango
              python
@@ -72,29 +74,38 @@ makedepends=(cmake
              sdl_image
              swig
              vid.stab)
-#FIXME: movit on powerpc64
-#FIXME: rtaudio 6.0.0 breaking API
-optdepends_powerpc=('movit: opengl plugin')
-optdepends_powerpc64le=('movit: opengl plugin')
-optdepends_riscv64=('movit: opengl plugin')
-optdepends_x86_64=('movit: opengl plugin')
-makedepends_powerpc=(movit)
-makedepends_powerpc64le=(movit)
-makedepends_riscv64=(movit)
-makedepends_x86_64=(movit)
 source=(git+https://github.com/mltframework/mlt#tag=v$pkgver
-        git+https://gitlab.com/mattbas/glaxnimate.git)
-sha256sums=('c56e36bb6311dace74f8051e3c6ee9a0b494ca4a8cffcf16a399312c4d23a1b1'
-            'SKIP')
+        git+https://gitlab.com/mattbas/glaxnimate.git
+        mlt-6.10.0-swig-underlinking.patch
+        mlt-6.22.1-no_lua_bdepend.patch
+        mlt-7.0.1-cmake-symlink.patch)
+sha256sums=('279dba94bd4a36607ea7facbad797a6dfd36277d99835a1e361d34d96d092eb4'
+            'SKIP'
+            '645cec6a98e657765e436c164b6c4b03154a38cd9df66f253b4e3d8eae8ba14e'
+            'cc88ed631442eef9305eac18e00b3f4213b231baed01ac178ceb2b64ba5784c4'
+            'f652bf33ea9390ca73a65edb933c096f92462620143f0444c626107a3803a683')
 
 prepare() {
   cd $pkgname
   git submodule init
   git submodule set-url src/modules/glaxnimate/glaxnimate "$srcdir"/glaxnimate
   git -c protocol.file.allow=always submodule update
+
+  patch -Np1 -i ${srcdir}/mlt-6.10.0-swig-underlinking.patch
+  patch -Np1 -i ${srcdir}/mlt-6.22.1-no_lua_bdepend.patch
+  patch -Np1 -i ${srcdir}/mlt-7.0.1-cmake-symlink.patch
+
+  sed -i "/mlt.so/s/ -lmlt++ /& ${CFLAGS} ${LDFLAGS} /" src/swig/python/build
 }
 
 build() {
+  case "${CARCH}" in
+    powerpc64)
+      export CFLAGS="-O2 -pipe"
+      export CXXFLAGS="-O2 -pipe"
+    ;;
+  esac
+
   cmake -B build -S $pkgname \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DMOD_OPENCV=ON \
