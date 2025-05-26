@@ -1,0 +1,54 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+# Contributor: Alexander F. Rødseth <xyproto@archlinux.org>
+# Contributor: Gaetan Bisson <bisson@archlinux.org>
+# Contributor: Simon Perry <aur [at] sanxion [dot] net>
+# Contributor: Jonas Nyrén <jonas.nyren*mindkiller.com>
+
+pkgname=libsidplayfp
+pkgver=2.14.0
+pkgrel=1
+pkgdesc='Library to play Commodore 64 music'
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url='https://github.com/libsidplayfp/libsidplayfp'
+license=('GPL-2.0-only')
+depends=('glibc' 'gcc-libs' 'libgcrypt')
+makedepends=('git' 'vice' 'xa')
+optdepends=('vice: better SID support')
+source=(
+  "$pkgname::git+$url#tag=v$pkgver"
+  'github.com-libsidplayfp-exsid-driver::git+https://github.com/libsidplayfp/exsid-driver'
+  'github.com-libsidplayfp-resid::git+https://github.com/libsidplayfp/resid'
+)
+sha512sums=('641b0289aa72f76927a224b2c12a94d077252511639c838b33eb8602d731c3f6239de4c0e4de8fe7339c96b03bdc183882a4ef0cfc8086a7110ccbc949c09af4'
+            'SKIP'
+            'SKIP')
+b2sums=('6e1a1f695c1a82c768d8cc6f366e1a2574b79efcf9b48d877b2a47f71afa5587a64be9c24c586807a6c535dbd2a7d3c1ab2c48c2bbcd20b4c8e50aa519fd399c'
+        'SKIP'
+        'SKIP')
+
+prepare() {
+  cd "$pkgname"
+
+  # prepare git submodule(s)
+  git submodule init
+  git config submodule.src/builders/exsid-builder/driver.url "$srcdir/github.com-libsidplayfp-exsid-driver"
+  git config submodule.src/builders/resid-builder/resid.url "$srcdir/github.com-libsidplayfp-resid"
+  git -c protocol.file.allow=always submodule update
+}
+
+build() {
+  cd "$pkgname"
+
+  autoreconf -vfi
+
+  ./configure --prefix=/usr
+
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+
+  make
+}
+
+package() {
+  DESTDIR="$pkgdir" make -C "$pkgname" install
+}
