@@ -6,52 +6,50 @@
 # Contributor: Jeff Mickey <jeff@archlinux.org>
 
 pkgname=icmake
-pkgver=10.03.03
-pkgrel=2.1
+pkgver=13.00.02
+pkgrel=1
 pkgdesc='A program maintenance (make) utility using a C-like grammar'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://fbb-git.gitlab.io/icmake/'
-license=('AGPL-3.0-or-later')
+license=('GPL-3.0-or-later')
 source=("https://gitlab.com/fbb-git/${pkgname}/-/archive/${pkgver}/${pkgname}-${pkgver}.tar.gz"
-        'disable-clear-screen.patch'
-        'icmake-10.03.03-1-cstdint.patch')
-b2sums=('4711dee5d66882afeeb6e7206b97341690e2e1c0e511fcf9f43d41ec04bec2ecf5fee10113bba47475b3166dc8dc53f7b236c42dcf0969582a59bbf30b7ca618'
-        '6689ce74a985742e079f95bfaa22dcee22ad667f45cf21f79d4c3d2271f925f53bcd6729ca762a7cfa6a63af9b0fd48c2b9c024bd35ca580e83a6a54758a7bed'
-        '8c80ee554855f3466ad89006a6d5f73413f069c456be47cf40bd50586de95bbb3a0f253a0aca99953e58cd27f1be5f076ecc3c9778d2f56997bdba8cc83591a5')
-makedepends=('icmake' 'yodl')
-depends=('libbobcat' 'libunwind')
+        icmake-13.02.00-restore-IFS.patch
+        icmake-13.02.00-missing-CXXFLAGS.patch)
+b2sums=('625dfc3bde3d822fa4e763296beded3703d6cb1860cade87c60c4724d387360802538f39b2328e26d8918654a04fb3387e10295dbd8603706927000ec17f8ed4'
+        '8bfcd05bed40ec8c7da79f11160a768e30c870d0a72d64e03bad6c6d794131eb2d4f8ef71b21695f774ec261e70f7098d54a33144d7e9dc46ee048c0a44131d8'
+        '7a8e26e68ab22f24d7e16bd1435d960005b23efbe3f05f2cad0e8c88156eefc2f7d1d0a38fc18b2be642cd922a1dc6004e43aece6b0cfa5335cced268a9cf933')
+depends=('libunwind')
 
 prepare() {
     cd "${srcdir}/${pkgname}-${pkgver}"
 
-    patch -Np1 -i "${srcdir}/disable-clear-screen.patch"
-    patch -Np1 -i "${srcdir}/icmake-10.03.03-1-cstdint.patch"
+    # https://gitlab.com/fbb-git/icmake/-/issues/9
+    # Restore IFS to stop LDFLAGS being treated as a single option
+    patch -Np1 -i ../icmake-13.02.00-restore-IFS.patch
+    # https://gitlab.com/fbb-git/icmake/-/issues/12
+    # Add CXXFLAGS missing from two g++ invocations
+    patch -Np1 -i ../icmake-13.02.00-missing-CXXFLAGS.patch
 
     # fix paths
     sed -i 's|usr/libexec/icmake|usr/lib/icmake|' icmake/INSTALL.im
 
-    # for some reason we have to do this
-    sed -e '/verbinclude(\/home\/frank\/.icmake\/AUTHOR)/d' -i icmake/doc/manpage/icmconf.yo
-    export AUTHOR="Frank B. Brokken (f.b.brokken@rug.nl)"
-    echo "${AUTHOR}" > AUTHOR
+    # https://gitlab.com/fbb-git/icmake/-/issues/10
+    # broken custom LIBDDIR support in ./install
+    sed -i 's|tmp${LIBDIR}|tmp/usr/libexec/icmake|' icmake/install
 }
 
 build() {
-    cd "${srcdir}/${pkgname}-${pkgver}"
-    # when upgrading to new SONAME, remove ./manpages from HOME variable
-    # to allow compiling the package without invoiking icmake itself
-    HOME=./ ./manpages
-
     cd "${srcdir}/${pkgname}-${pkgver}/${pkgname}"
 
-    export CXXFLAGS="${CXXFLAGS} -Wp,-U_GLIBCXX_ASSERTIONS -std=c++20"
+    CXXFLAGS="${CXXFLAGS/ -Wp,-D_GLIBCXX_ASSERTIONS/} -std=c++26"
 
-    ./icm_prepare /
-    ./icm_bootstrap /
+    ./prepare /
+    ./buildlib /
+    ICMAKE_CPPSTD="-std=c++26" ./build all
 }
 
 package() {
     cd "${srcdir}/${pkgname}-${pkgver}/${pkgname}"
 
-    ./icm_install all "${pkgdir}"
+    ./install all "${pkgdir}"
 }
