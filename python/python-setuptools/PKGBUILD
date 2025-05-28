@@ -8,7 +8,7 @@ _bootstrap=0
 _bootstrap_version=3.13.0
 pkgname=python-setuptools
 _name=${pkgname#python-}
-pkgver=78.1.0
+pkgver=80.8.0
 pkgrel=1
 epoch=1
 pkgdesc="Easily download, build, install, upgrade, and uninstall Python packages"
@@ -62,7 +62,7 @@ if (( _bootstrap == 0 )); then
   )
 else
   source=(
-    python-bootstrap::git+https://gitlab.archlinux.org/archlinux/python-bootstrap.git#tag=$_bootstrap_version
+    "python-bootstrap::git+https://gitlab.archlinux.org/archlinux/python-bootstrap.git#tag=$_bootstrap_version"
     python-build::git+https://github.com/pypa/build.git
     python-flit::git+https://github.com/pypa/flit.git
     python-installer::git+https://github.com/pypa/installer.git
@@ -72,13 +72,16 @@ else
     python-setuptools::git+https://github.com/pypa/setuptools.git
   )
 fi
-b2sums=('572451a3160d9c0c99e499af5c2e7c5bf094b5d591983ecb85c3d929f9a4ee84505bf7f2abfd864a8b7ab887c41a6ea5d3eb13e6ea54bf74687c8fcbe35082cb'
+b2sums=('7aafba0d1e7d5ac23ad8d23765f270eb14b7a7fbdaaeab71cd5ef0cab1859403f89bf6a947c9e62511436ae45d956ab434688e3a869e665d8948224051754a0a'
         'ff0caf384def8ba8aa1c7fbb29077f2bc14c42935f7f81b6c4993ebe835053207b6773865158ad3143147234b311b95033b266f9b4c34a78a67f0b7e83bb5537')
 #validpgpkeys=('CE380CF3044959B8F377DA03708E6CB181B4C47E') # Jason R. Coombs <jaraco@jaraco.com>
 
 prepare() {
   if (( _bootstrap == 0 )); then
     cd "$_name"
+    # Revert MIT license deletion
+    git revert --no-commit 9a81db3c77bc106017dcd4b0853a5a94f43ae33c
+
     # Populate dependencies list for devendored deps
     sed '/^core =/,/]/!d' pyproject.toml > ../requirements.txt
     sed -i '1d;$d' ../requirements.txt
@@ -87,9 +90,6 @@ prepare() {
   s/^core =/dependencies =/
   }' pyproject.toml
 
-    # Keep validate-pyproject as it also includes the generated validations
-    rm -r "$_name"/_vendor
-
     # Fix tests invoking python-build
     patch -p1 -i ../build-no-isolation.patch
 
@@ -97,6 +97,9 @@ prepare() {
     sed -e '/tag_build = .post/d' \
         -e '/tag_date = 1/d' \
         -i setup.cfg
+
+    # validate-pyproject is still vendored for its pregenerated validations
+    rm -r "$_name"/_vendor
   else
     cd python-bootstrap
     git submodule init
@@ -145,7 +148,7 @@ check() { (
     --deselect "$_name"/tests/test_virtualenv.py::test_pip_upgrade_from_source
   )
 
-  PYTHONPATH=$(pwd)/build/lib python -m pytest "${pytest_args[@]}"
+  PYTHONPATH="$PWD/build/lib" python -m pytest "${pytest_args[@]}"
 )}
 
 package() {
@@ -154,11 +157,11 @@ package() {
   if (( _bootstrap == 0 )); then
     cd "$_name"
     python setup.py install --prefix=/usr --root="$pkgdir" --optimize=1 --skip-build
-    install -vDm 644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+    install -Dm644 -t "$pkgdir"/usr/share/licenses/$pkgname LICENSE
   else
     cd python-bootstrap
-    python -m bootstrap.install dist/$_name-*-py3-none-any.whl -d "$pkgdir"
-    install -vDm 644 external/$_name/LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+    python -m bootstrap.install dist/"$_name"-*-py3-none-any.whl -d "$pkgdir"
+    install -Dm644 -t "$pkgdir"/usr/share/licenses/$pkgname external/"$_name"/LICENSE
   fi
 
   rm "$pkgdir/$site_packages/$_name"/*.exe
