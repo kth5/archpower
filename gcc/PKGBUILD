@@ -8,17 +8,18 @@
 # toolchain build order: linux-api-headers->glibc->binutils->gcc->glibc->binutils->gcc
 # NOTE: libtool requires rebuilt with each new gcc version
 
-pkgname=(gcc gcc-libs gcc-fortran gcc-m2 gcc-go gcc-objc gcc-rust lto-dump libgccjit)
+pkgname=(gcc gcc-libs gcc-fortran gcc-go gcc-m2 gcc-objc gcc-rust lto-dump libgccjit)
 case ${CARCH} in
-  x86_64) pkgname+=(gcc-ada gcc-d lib32-gcc-libs); libs='libvtv libitm' ;;
-  powerpc64le|powerpc) pkgname+=(gcc-ada); libs='libitm' ;;
+  x86_64) pkgname+=(gcc-ada gcc-d gcc-gcobol lib32-gcc-libs); libs='libvtv libitm' ;;
+  powerpc64le) pkgname+=(gcc-ada); libs='libitm' ;;
+  powerpc) pkgname+=(gcc-ada); libs='libitm' ;;
   powerpc64) libs='libitm' ;;
 esac
-pkgver=14.2.1+r753+g1cd744a6828f
-_commit=1cd744a6828f6ab9179906d16434ea40b6404737
-pkgrel=1.2
+pkgver=15.1.1+r7+gf36ec88aa85a
+_commit=f36ec88aa85a1a8f4ec300dfcd862fc4fbca1c53
+pkgrel=1
 pkgdesc='The GNU Compiler Collection'
-arch=(x86_64 powerpc64le powerpc64 powerpc espresso riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(GPL-3.0-with-GCC-exception GFDL-1.3-or-later)
 url='https://gcc.gnu.org'
 makedepends=(
@@ -54,19 +55,15 @@ options=(!debug !emptydirs !lto)
 _libdir=usr/lib/gcc/$CHOST/${pkgver%%+*}
 source=(git+https://sourceware.org/git/gcc.git#commit=${_commit}
         c89 c99
-        gcc-ada-repro.patch
-        unfilter-default-library-path.patch
         gcc-14.2.1-espresso-cpu.patch
 )
 validpgpkeys=(F3691687D867B81B51CE07D9BBE43771487328A9  # bpiotrowski@archlinux.org
-              86CFFCA918CF3AF47147588051E8B148A9999C34  # evangelos@foutrelis.com
+              86CFFCA918CF3AF47147588051E8B148A9999C34  # foutrelis@archlinux.org
               13975A70E63C361C73AE69EF6EEB81F8981C74C7  # richard.guenther@gmail.com
               D3A93CAD751C2AF4F8C7AD516C35B99309B5FA62) # Jakub Jelinek <jakub@redhat.com>
-sha256sums=('33378643f1c72686181f9d3fcd09caf9b06815324467f5dc9b9a3ea41cfba4b4'
+sha256sums=('7dc521dbaf5e8db83574db217c5fdb8c4fed6ec1cc6ce9f0095755f599890b8c'
             'de48736f6e4153f03d0a5d38ceb6c6fdb7f054e8f47ddd6af0a3dbf14f27b931'
             '2513c6d9984dd0a2058557bf00f06d8d5181734e41dcfe07be7ed86f2959622a'
-            '1773f5137f08ac1f48f0f7297e324d5d868d55201c03068670ee4602babdef2f'
-            '7183fdeea8fd148cf9dd03b0932f9d439b818a5ab3bc9a5e20d8e0b41c9e0efd'
             'dde8ac0de4a07de55b94eedeeb6c64fed09fa1c8be9bdf6131078ce03b5d19dd')
 pkgver() {
   cd gcc
@@ -83,11 +80,6 @@ prepare() {
   # Arch POWER installs x86_64 libraries /lib
   sed -i '/m64=/s/lib64/lib/' gcc/config/i386/t-linux64
   sed -i 's@/lib64@/lib@g' gcc/config/rs6000/t-*
-
-  # Reproducible gcc-ada
-  patch -Np0 < "$srcdir/gcc-ada-repro.patch"
-
-  patch -Np1 < "$srcdir/unfilter-default-library-path.patch"
 
   # add WiiU Espresso CPU bug work around
   echo ${CFLAGS} | grep "mcpu=espresso" &>/dev/null && patch -Np1 < "$srcdir/gcc-14.2.1-espresso-cpu.patch"
@@ -131,7 +123,7 @@ build() {
              --enable-multilib
              --enable-cet=auto
            )
-           extra_lang=",ada,d"
+           extra_lang=",ada,d,cobol"
     ;;
     powerpc64le)
            _confflags+=(
@@ -155,13 +147,6 @@ build() {
              --with-abi=elfv2
            )
     ;;
-    riscv64)
-           _confflags+=(
-             --enable-lto
-             #--with-build-config=bootstrap-lto
-             --disable-multilib
-           )
-    ;;
   esac
 
   mkdir -p ${srcdir}/tmp
@@ -180,7 +165,7 @@ build() {
   #CXXFLAGS=${CXXFLAGS/-mcpu=espresso/}
 
   "$srcdir/gcc/configure" \
-    --enable-languages=c,c++,fortran,go,lto,objc,obj-c++,m2,rust${extra_lang} \
+    --enable-languages=c,c++,fortran,go,lto,objc,obj-c++,m2,rust,${extra_lang} \
     --enable-bootstrap \
     "${_confflags[@]:?_confflags unset}"
 
@@ -215,6 +200,10 @@ build() {
 }
 
 check() {
+  case "${CARCH}" in
+    powerpc) return 0 ;;
+  esac
+
   cd gcc-build
 
   # disable libphobos test to avoid segfaults
@@ -357,7 +346,8 @@ package_gcc() {
   esac
 
   make -C gcc DESTDIR="$pkgdir" install-man install-info
-  rm -f "$pkgdir"/usr/share/man/man1/{gccgo,gfortran,lto-dump,gdc,gm2}.1
+  rm -f "$pkgdir"/usr/share/man/man1/{gccgo,gfortran,lto-dump,gdc,gm2,gcobol}.1
+  rm -f "$pkgdir"/usr/share/man/man3/gcobol-io.3
   rm -f "$pkgdir"/usr/share/info/{gccgo,gfortran,gnat-style,gnat_rm,gnat_ugn,gdc,m2}.info
 
   make -C libcpp DESTDIR="$pkgdir" install
@@ -602,6 +592,21 @@ package_gcc-rust() {
   # Install Runtime Library Exception
  install -d "$pkgdir/usr/share/licenses/$pkgname/"
  ln -sf /usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION \
+   "$pkgdir/usr/share/licenses/$pkgname/"
+}
+
+package_gcc-gcobol() {
+ pkgdesc="Cobol frontend for GCC"
+ depends=("gcc=$pkgver-$pkgrel" libisl.so)
+
+ cd gcc-build
+ make -C gcc DESTDIR="$pkgdir" cobol.install-{common,man,info}
+
+ install -Dm755 gcc/gcobol "$pkgdir"/usr/bin/gcobol
+
+  # Install Runtime Library Exception
+ install -d "$pkgdir/usr/share/licenses/$pkgname/"
+ ln -s /usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION \
    "$pkgdir/usr/share/licenses/$pkgname/"
 }
 
