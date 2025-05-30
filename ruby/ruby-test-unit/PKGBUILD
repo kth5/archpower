@@ -7,8 +7,8 @@
 
 _gemname=test-unit
 pkgname="ruby-${_gemname}"
-pkgver=3.6.7
-pkgrel=3.1
+pkgver=3.6.8
+pkgrel=1
 pkgdesc='An xUnit family unit testing framework for Ruby'
 arch=(any)
 url="https://github.com/${_gemname}/${_gemname}"
@@ -26,33 +26,76 @@ checkdepends=(
 )
 options=('!emptydirs')
 source=("${url}/archive/${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('b6132d49f26797a5da31a041cc0e3e0ce3b31a9f71dc0be3150b1e983f7c7c6acc5d4fe58eee9f7ff75ea4edbc97008a93b736236babec5e8c9dd56a634cc720')
+sha512sums=('e53a441441b6447eb47a5629ab2d463ef346428ed88bf1fa65a3215ca8f9960c12ad8be1ef9f56943653797be6dbab685d7410d63890b94cf22ec4f54a827d35')
+b2sums=('74639f9ffab7a90d93601e51029f3cf6e9140d13158f7a010946e1104d2b69928c139fcabea03228eefa74b927f320add74df39fa707a1372b7698d21a378474')
 
-# fix wrong license identifier to match the official ones from https://spdx.org/licenses/
 prepare() {
   cd "${_gemname}-${pkgver}"
-  sed --in-place 's/spec.licenses.*/spec.licenses = ["BSD-2-Clause", "PSF-2.0", "Ruby"]/' "${_gemname}.gemspec"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended \
+    --expression 's|~>|>=|g' \
+    "${_gemname}.gemspec"
 }
 
 build() {
- cd "${_gemname}-${pkgver}"
- gem build "${_gemname}.gemspec"
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unreproducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
 }
 
 check() {
   cd "${_gemname}-${pkgver}"
-  ruby test/run-test.rb
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" ruby test/run.rb
 }
 
 package() {
   cd "${_gemname}-${pkgver}"
-  local _gemdir="$(gem env gemdir)"
-  gem install --verbose --ignore-dependencies --no-user-install --install-dir "${pkgdir}/${_gemdir}" --bindir "${pkgdir}/usr/bin" "${_gemname}-${pkgver}.gem"
 
-  rm -rf "${pkgdir}/${_gemdir}/cache"
+  cp --archive --verbose tmp_install/* "${pkgdir}"
 
-  install -Dm 644 README.md doc/text/* -t "${pkgdir}/usr/share/doc/${pkgname}"
-  install -Dm 644 BSDL COPYING PSFL -t "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 BSDL COPYING PSFL --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.md doc/text/*.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
 }
 
-# vim: ts=2 sw=2 et:
+# vim: tabstop=2 shiftwidth=2 expandtab:
