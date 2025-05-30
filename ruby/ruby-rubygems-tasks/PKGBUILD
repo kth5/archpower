@@ -1,0 +1,63 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-rubygems-tasks
+pkgver=0.2.6
+_commit=d25aebe54b96786fde7226c88d9e158948c9d84a
+pkgrel=5
+pkgdesc='Agnostic and unobtrusive Rake tasks for managing and releasing Ruby Gems'
+arch=(any)
+url='https://github.com/postmodern/rubygems-tasks'
+license=(MIT)
+depends=(ruby-irb ruby-rake)
+makedepends=(git ruby-yard)
+checkdepends=(ruby-rspec)
+options=(!emptydirs)
+source=(git+https://github.com/postmodern/rubygems-tasks.git#commit=$_commit)
+sha256sums=('SKIP')
+
+prepare() {
+  cd rubygems-tasks
+  sed -r 's|~> (.*)|">= \1"|g' -i gemspec.yml
+  git config user.email "pony@arch"
+  git config user.name "Lucky Pony"
+  git commit gemspec.yml -m "Relax version constraints"
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd rubygems-tasks
+  rake build
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    pkg/rubygems-tasks-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+check() {
+  local _gemdir="$(gem env gemdir)"
+  cd rubygems-tasks
+  GEM_HOME="tmp_install/$_gemdir" rake spec
+}
+
+package() {
+  cd rubygems-tasks
+  cp -a tmp_install/* "$pkgdir"/
+  install -Dm644 LICENSE.txt -t "$pkgdir"/usr/share/licenses/$pkgname/
+}
