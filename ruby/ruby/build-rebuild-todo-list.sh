@@ -15,9 +15,9 @@ echo
 echo "Generating ${todo_list_filename} ..."
 
 {
-  pacman -Fx ".*/ruby/(${ruby_version_long}|gems/${ruby_version_long}|vendor_ruby/${ruby_version_short}|vendor_ruby/${ruby_version_long})/*" |sed -ne 's,^.*\(core\|extra\|multilib\)/\(.*\) .*$,\2,p'
+  pacman -Fx ".*/ruby/(${ruby_version_long}|gems/${ruby_version_long}|vendor_ruby/${ruby_version_short}|vendor_ruby/${ruby_version_long})/*" |sed -ne 's,^.*\(base\|testing\)/\(.*\) .*$,\2,p'
 
-  sogrep extra libruby.so
-  sogrep extra "libruby.so.${ruby_version_short}"
+  sogrep base libruby.so
+  sogrep base "libruby.so.${ruby_version_short}"
   echo "vim"
 } | sort -u > "${todo_list_filename}"
