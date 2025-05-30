@@ -7,12 +7,15 @@
 
 _name=backends
 pkgname=sane
-pkgver=1.2.1
-pkgrel=4.1
+pkgver=1.4.0
+pkgrel=1
 pkgdesc="Scanner Access Now Easy"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url="http://www.sane-project.org/"
-license=(GPL2)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url="https://gitlab.com/sane-project/backends"
+license=(
+  GPL-2.0-or-later
+  LicenseRef-GPL-2.0-or-later-with-linking-exception
+)
 depends=(
   bash
   cairo
@@ -38,26 +41,32 @@ makedepends=(
   systemd
   texlive-latexextra
 )
+optdepends=(
+  'sane-airscan: for scanners working in driverless mode'
+)
 provides=(libsane.so)
 source=(
-  https://gitlab.com/sane-project/$_name/-/archive/$pkgver/$_name-$pkgver.tar.gz
+  $url/-/archive/$pkgver/$_name-$pkgver.tar.gz
   66-${pkgname}d.rules
   $pkgname.sysusers
   ${pkgname}d.service
   ${pkgname}d.socket
 )
-sha512sums=('b3b803162066b563d9bafaedb7a6c8c1e9be736bb787f2e412f3f71402a42721123bc32882ae9dc39cbf12bc2c423f8841ed06f525f325857f4273186b7f3a16'
+sha512sums=('69adc9e4a7c7252ff677c510c4112096c3c4b00525113795d5d2ecd0efe8716a556c6c403df685d0e360eae72546ad55ff9dd27b3fde5c5b1b9d13dbcd735465'
             'd0d1b6bd6fbb04d610e7186e26d04c2233a620cc7c731ca3acd7fb860dd033fbe99d8974ffa1dd59c8affcc4aa2664d76ab3dfd6f7b2a734b31d7e3832359c41'
-            'd8cd194b57eff2249df2b8d540a892e518aa3e3bba6387211ed21230dc235e98c49b71f262f0b1007e8c859c59776410840376244e0aec1f06363881b2c81fd8'
+            '12eb44f94464f79f7cff05d769685e724efd79a45ec646bf72941f482d4b63d17c4098df30558a533f7ba725ef397f46e34053fc96e40f46f89196d5721cf05b'
             'baf2cf2fdff689f776973ac4f69ea02b131f2a1a754a8d52a8e8ad33b0e559ba286649a891723a7ad94b2bcb01ec88155d43c36eaeb35e47fbc8ea80c49c5d47'
             'a23ceeeb02bd9e214702003a3165886858ecbdd93df89cd37ad5f00581745454548ccda0ab656f2dc0acbf2896a8781568c786797e64a07014be003d6140a093')
-b2sums=('b12a629bab6e79d9027d9e90cfa5851ee172a7a1eb6303666c294e2a3d881e2afbef9a3cf3d3156063885a28ec64294216d0dec83c25d212af257f83bbc33721'
+b2sums=('1bb766d311ec8672f630f7ef10209de030bb7efee565e878f9bf64505f93fbccd668872babe49631cd11e9c5cdee8e1dfb53e69c2577739323fc5daaa08510e2'
         'c9c6ba224b9b27f4ecc6b1ded6621a8abb52b1ded2d9078e4cad31177290b788e286fad74545a5cb09e1f6726515adc22003988eb646dc986e87f1a8061a0e27'
-        '2a4ddc9849562e3a0adcaec1859391e3f37a63f25c27dbc140cabd697bd65b89a0fc812c4516cbdfb36d1f30844df34934b3c1c59650101f54fc1ac0acb3f5d9'
+        '14711932fa106dab7464b75f1c9fd96a5bfa34fd2727486c382ffcd8af5e6d7b327d8c1b29a2ff7d45c6f810b04394e6aa17afacad0e733d9f0162e40fe9ac32'
         '272b4860dbd3f2b69eedfed4532cf8a388629c003c9a0e0ee98defbc2023e07edc26275a17f56ea9fd4d90e9b3b6532c5b10d1e2b91e6ab4df242ac44101d802'
         '5e9f0350a1553fc75aea88ce355fb68b881e3b2194ac0e3c6f3cecdae79111fb1db1cfe3b4933eca15af5f985fc6b89e4d9af3844b6e9cfd542828b6b9e57ed9')
 
 prepare() {
+  # extract custom license exception
+  sed '1,41p' $_name-$pkgver/backend/dll.c > LicenseRef-GPL-2.0-or-later-with-linking-exception.txt
+
   cd $_name-$pkgver
   # copy translation files so they become reproducible: https://gitlab.com/sane-project/backends/-/issues/647
   cp -v po/en{_GB,@quot}.po
@@ -101,6 +110,7 @@ package() {
     curl libcurl.so
     glib2 libgobject-2.0.so
     libgphoto2 libgphoto2.so libgphoto2_port.so
+    libjpeg-turbo libjpeg.so
     libtiff libtiff.so
     libusb libusb-1.0.so
     libxml2 libxml2.so
@@ -111,6 +121,9 @@ package() {
   cd $_name-$pkgver
 
   make DESTDIR="$pkgdir" install
+
+  # install custom license
+  install -vDm 644 ../LicenseRef-GPL-2.0-or-later-with-linking-exception.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
 
   # generate udev udev+hwdb
   install -vdm 755 "$pkgdir/usr/lib/udev/rules.d/"
