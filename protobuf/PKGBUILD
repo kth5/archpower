@@ -11,10 +11,10 @@
 
 pkgbase='protobuf'
 pkgname=('protobuf' 'python-protobuf' 'ruby-google-protobuf')
-pkgver=30.1
-pkgrel=3
+pkgver=31.0
+pkgrel=2
 pkgdesc="Protocol Buffers - Google's data interchange format"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://developers.google.com/protocol-buffers/'
 license=('BSD-3-Clause')
 depends=(
@@ -32,6 +32,7 @@ makedepends=(
   'python-setuptools'
   'python-wheel'
   'ruby'
+  'ruby-ffi-compiler'
   'ruby-rake'
   'ruby-rake-compiler'
 )
@@ -44,13 +45,12 @@ source=(
   protobuf-fix-build-type-none.patch
   # https://github.com/protocolbuffers/protobuf/issues/11935
   $pkgbase-25.3-ruby-disable-LTO.patch
-  protobuf-reenable-private-headers.patch
   "$pkgbase-$pkgver-python.tar.gz::https://files.pythonhosted.org/packages/source/${pkgbase::1}/${pkgbase//-/_}/${pkgbase//-/_}-6.30.1.tar.gz"
+
 )
-sha512sums=('264cf8b3e5f716c2ddd4538fe11ec3305ddc7719573aa47a4bfacb963c2db5bbc4ae4319f35aa03dd464fa0d56cb49c3302954060d85af140ace22b6c5f99ec1'
+sha512sums=('f3e58172d823e83a880e0e6aa600aa689cfd53e9199c3e676d6665c64cab606fc2f0569bca7b96a85087bbf13a4410decc397f2ccc7aa6d7653f4d357cbc54e8'
             '18bc71031bbcbc3810a9985fa670465040f06a6c104ab8079b56bdfc499bb6cec40805a0cefd455031142490a576dc60aa8000523877ac0353b93558e9beabbd'
             '1ebdea4e533ee0f71baf1b3fe2623ca723b36a08c6b97475ea5996b10aeb6873cf94d9120596ddd1216bd2f6feb991f8c33078e8104008a5078ace5be5431efd'
-            '3a52e9d9ed6e9b1a2dc9fffbeae6388d819e7baf1de571ffa61d8b86d71048d3c8653a3a1aea540e3f1247e6a22975ce86b83d00976cb6fe628052fdf7969294'
             '7572504714eaf19cba3e4b13e4cbbd8ea92e3a3efb92571fb03f2aa175a91626109c505277c80c1f142519b4d63ee06fac81fa8007f22c7e427b3c09746d68c1')
 
 options=(!lto)
@@ -61,19 +61,18 @@ prepare() {
   cd "$pkgname"
   patch -p1 < ../protobuf-fix-build-type-none.patch # Fix cmake config compatibility mode
   patch -p1 < ../$pkgbase-25.3-ruby-disable-LTO.patch
-  patch -p1 < ../protobuf-reenable-private-headers.patch
 }
 
 build() {
   case "${CARCH}" in
-    powerpc|riscv64) CXXFLAGS+=' -latomic' ;;
+    powerpc) CXXFLAGS+=' -latomic' ;;
   esac
 
   local cmake_options=(
     -B build
     -D CMAKE_BUILD_TYPE=None
     -D CMAKE_INSTALL_PREFIX=/usr
-    -D CMAKE_C_FLAGS="$CFLAGS -ffat-lto-objects" 
+    -D CMAKE_C_FLAGS="$CFLAGS -ffat-lto-objects"
     -D CMAKE_CXX_FLAGS="$CXXFLAGS -ffat-lto-objects"
     -D protobuf_BUILD_SHARED_LIBS=ON
     -D protobuf_USE_EXTERNAL_GTEST=ON
@@ -85,15 +84,13 @@ build() {
   cmake "${cmake_options[@]}"
   cmake --build build --verbose
 
-  cd ${srcdir}/${pkgbase}/ruby
+  cd "$srcdir/$pkgbase/ruby"
   local _gemdir="$(gem env gemdir)"
   local _gemver=4.$pkgver
 
   PROTOC="$srcdir"/build/protoc \
-  rake genproto
-  rake copy_third_party
-
-  gem build --verbose "${_gemname}.gemspec"
+  rake
+  rake gem
 
   gem install \
     --local \
@@ -102,7 +99,10 @@ build() {
     --no-user-install \
     --install-dir "tmp_install${_gemdir}" \
     --bindir "tmp_install/usr/bin" \
-    "${_gemname}-${_gemver}.gem"
+    "pkg/${_gemname}-${_gemver}.gem"
+
+  install -D lib/google/protobuf_c.so \
+    "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}"/lib/google/$(ruby -e 'require "rbconfig"; puts RbConfig::CONFIG["RUBY_API_VERSION"]')/protobuf_c.so
 
   # remove unrepreducible files
   rm --force --recursive --verbose \
@@ -115,7 +115,6 @@ build() {
     \( \
       -iname "*.o" -o \
       -iname "*.c" -o \
-      -iname "*.so" -o \
       -iname "*.time" -o \
       -iname "gem.build_complete" -o \
       -iname "Makefile" \
@@ -133,7 +132,6 @@ build() {
   pushd "${srcdir}/$pkgbase-6.30.1"
   python -m build --wheel --no-isolation
   popd
-
 }
 
 check() {
@@ -169,6 +167,7 @@ package_ruby-google-protobuf() {
   pkgdesc='Ruby bindings for Google Protocol Buffers'
   depends=(
     'ruby'
+    'ruby-bigdecimal'
   )
 
   cp -a $pkgbase/ruby/tmp_install/* "$pkgdir"
