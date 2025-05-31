@@ -5,16 +5,16 @@
 
 pkgname=autogen
 pkgver=5.18.16
-pkgrel=5.2
+pkgrel=6
 pkgdesc="A tool designed to simplify the creation and maintenance of programs that contain large amounts of repetitious text"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://www.gnu.org/software/autogen/"
 license=('GPL3')
 depends=('guile' 'libxml2' 'perl')
-makedepends=('chrpath')
+makedepends=('autogen' 'chrpath')
 source=(https://ftp.gnu.org/gnu/${pkgname}/rel${pkgver}/${pkgname}-${pkgver}.tar.xz{,.sig}
-        guile-3.0.patch
-        10_libopts_tarball_perms.diff)
+        0001-guile-3.0.patch
+        0002-libopts_tarball_perms.patch)
 validpgpkeys=('44A088E295C3A722C450590EC9EF76DEB74EE762'
               '3EEE51D1355B8EC40D9F3122495143D05D0712D1') # Bruce Korb <bkorb@gnu.org>
 sha512sums=('5f12c982dbe27873f5649a96049bf019ff183c90cc0c8a9196556b0ca02e72940cd422f6d6601f68cc7d8763b1124f2765c3b1a6335fc92ba07f84b03d2a53a1'
@@ -24,17 +24,18 @@ sha512sums=('5f12c982dbe27873f5649a96049bf019ff183c90cc0c8a9196556b0ca02e72940cd
 
 prepare() {
   cd $pkgname-$pkgver
-  patch -Np1 -i ${srcdir}/guile-3.0.patch
+  patch -Np1 -i ${srcdir}/0001-guile-3.0.patch
   # Reproducible man page generation
   export MAN_PAGE_DATE=$(LC_ALL=C date -u -d '@$(SOURCE_DATE_EPOCH)' +%Y-%m-%d)
-  patch -Np1 -i ${srcdir}/10_libopts_tarball_perms.diff
+  patch -Np1 -i ${srcdir}/0002-libopts_tarball_perms.patch
   autoreconf -fiv
   sed -i 's/ -Werror / /' configure
 }
 
 build() {
   cd "${srcdir}/${pkgname}-${pkgver}"
-  ./configure --prefix=/usr --disable-dependency-tracking
+  export CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  ./configure --prefix=/usr
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
 }
