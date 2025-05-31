@@ -1,0 +1,51 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+# Contributor: Adrián Pérez de Castro <aperez@igalia.com>
+
+pkgname=lowdown
+pkgver=1.4.0
+pkgrel=1
+pkgdesc='A simple Markdown translator'
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url='https://kristaps.bsd.lv/lowdown'
+license=('ISC')
+depends=('glibc' 'libmd')
+makedepends=('git')
+provides=('liblowdown.so')
+source=("$pkgname::git+https://github.com/kristapsdz/lowdown#tag=$(echo $pkgver | sed -e 's/^/VERSION_/' -e 's/\./_/g')")
+sha512sums=('1fe2490b265968a134a2b535e5324c46fc2fc5d7c72468eb3260b665a1f9c8b52a747c0ff97854b8caab06e3f85a522f282555337c55f0db2351bb11684db680')
+b2sums=('94c0880d4af1ea62d113feeaf3679487626aafa32c7ae6ef5d29695af2ffecb408faf29402a2624c766c43450740712e19ee3f58436d150caadeca8fd3dc5a6d')
+
+build () {
+  cd "$pkgname"
+
+	./configure \
+    PREFIX=/usr \
+    MANDIR=/usr/share/man
+
+  # ensure LDFLAGS is passed correctly
+  sed -i "s/^LDFLAGS.*/LDFLAGS = $LDFLAGS/" Makefile.configure
+
+	make
+}
+
+check () {
+	make -C "$pkgname" regress
+}
+
+package () {
+  cd "$pkgname"
+
+  # package
+	make DESTDIR="$pkgdir" \
+    install \
+    install_lib_common \
+    install_shared
+
+  # symlink unversioned to versioned shared library
+  local LIBVER=$(grep "^LIBVER" Makefile | sed "s/.*= //")
+  ln -sf "/usr/lib/liblowdown.so.$LIBVER" "$pkgdir/usr/lib/liblowdown.so"
+
+  # license
+	install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE.md
+}
