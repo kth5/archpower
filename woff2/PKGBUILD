@@ -3,29 +3,48 @@
 
 pkgname=woff2
 pkgver=1.0.2
-pkgrel=5.1
+pkgrel=6
 pkgdesc="Web Open Font Format 2 reference implementation"
 url="https://github.com/google/woff2"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(MIT)
-depends=(brotli gcc-libs)
-makedepends=(git cmake ninja)
+depends=(
+  brotli
+  gcc-libs
+  glibc
+)
+makedepends=(
+  cmake
+  git
+  ninja
+)
 provides=(libwoff2{common,dec,enc}.so)
-source=("git+$url#tag=v$pkgver")
-sha512sums=('759e2345f304ea2fa463daeb8988668f0c09ef57865e178ea1dc3c7ade79bfd2b95b7dcd83a87343aa33d662f667ff71130043d786f2f390df99507e117847bc')
+source=(
+  "git+$url#tag=v$pkgver"
+  0001-HACK-Install-binaries.patch
+)
+b2sums=('b25360f1627b64465715b4a3efc616ee592f0f329e6e25f00320c127d7bd3a040251a44e68673608ae67656c5b64a48d13ec20fb8f06d125be41c326c186109e'
+        'b42fba4cd444210eae198cca9a9dc537e3b8698b2cd8657d10d7ffcecebc642657cd615fbd9656b16229497cd7b9b5ee3f4a12dd9fa88ff70ea31bda281b46a4')
 
 prepare() {
   cd woff2
 
+  # Fix build with GCC 15+
+  git cherry-pick -n 08ece7871775c0d7bf4fdff64b961cdc256adf6c
+
   # Install binaries
-  sed -i 's/NOT BUILD_SHARED_LIBS/TRUE/' CMakeLists.txt
+  git apply -3 ../0001-HACK-Install-binaries.patch
 }
 
 build() {
-  cmake -S woff2 -B build -G Ninja \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_INSTALL_LIBDIR=/usr/lib \
-    -DCMAKE_BUILD_TYPE=None
+  local cmake_options=(
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_LIBDIR=/usr/lib
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_POLICY_VERSION_MINIMUM=3.5
+  )
+
+  cmake -S woff2 -B build -G Ninja "${cmake_options[@]}"
   cmake --build build
 }
 
@@ -33,3 +52,5 @@ package() {
   DESTDIR="$pkgdir" cmake --install build
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 woff2/LICENSE
 }
+
+# vim:set sw=2 sts=-1 et:
