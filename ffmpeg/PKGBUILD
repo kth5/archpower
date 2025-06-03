@@ -6,11 +6,11 @@
 # Contributor: Paul Mattal <paul@archlinux.org>
 
 pkgname=ffmpeg
-pkgver=7.1
-pkgrel=9
+pkgver=7.1.1
+pkgrel=3
 epoch=2
 pkgdesc='Complete solution to record, convert and stream audio and video'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url=https://ffmpeg.org
 license=(GPL-3.0-only)
 depends=(
@@ -105,8 +105,10 @@ makedepends_x86_64=(
 optdepends=(
   'avisynthplus: AviSynthPlus support'
   'frei0r-plugins: Frei0r video effects support'
-  'intel-media-sdk: Intel QuickSync support (legacy)'
   'ladspa: LADSPA filters'
+)
+optdepends_x86_64=(
+  'intel-media-sdk: Intel QuickSync support (legacy)'
   'nvidia-utils: Nvidia NVDEC/NVENC support'
   'onevpl-intel-gpu: Intel QuickSync support'
 )
@@ -123,35 +125,36 @@ provides=(
 options=(
   debug
 )
-_tag=507a51fbe9732f0f6f12f43ce12431e8faa834b7
+_tag=a1328e68877e12ab5a6e5d92a84aefa566783ea5
 source=(
   git+https://git.ffmpeg.org/ffmpeg.git?signed#tag=${_tag}
-  add-av_stream_get_first_dts-for-chromium.patch
-  fix_build_with_texinfo-7.2.patch
-  fix_build_with_svt-av1-3.0.patch
+  0001-Add-av_stream_get_first_dts-for-Chromium.patch
+  0002-avcodec-libsvtav1-unbreak-build-with-latest-svtav1.patch
+  fix_build_with_v4l2_1.30.patch
 )
-b2sums=('c7ec6b1db61608195117b79f3f0c8f6323c3abeb39721359da0f10e7d739da8301e04ff5fa83c022f86fc760f66e00066f9a50d97b771f797ccc679f9d912c40'
-        '555274228e09a233d92beb365d413ff5c718a782008075552cafb2130a3783cf976b51dfe4513c15777fb6e8397a34122d475080f2c4483e8feea5c0d878e6de'
-        '7b33e9527322604532f2b26b5c78680c54d7e50c07ff6acaddd4d17e031724ae91474f46cb034d9d02fb0cf370d6477e1d4f5b04c4dddab5e8b319f03c0fc9b9'
-        'a71d0c0092ae64b9cef38efb4a585b415e74842a173796b63778cd2c570c3216179c5ac59346d51388cc874cc37a32adb93f038ab26747d8e3fc0c984ce116ff')
+b2sums=('c7b1a56593f123de8e18b3b93c81dca4aff439f5701935cc1fe6316543e8c3256acd7f95b4a533eb7ba30e346fa13bf0ad5bff54b7822c088ef3939882416a7c'
+        'e5f7b79f7731be9ee5a7280a9221fb531ac5a2d9820fc5870b68b0eabea667dfbe8f39f41c1e1763a4c84982896afaa54c81ff57847d203b70afafd726689e5d'
+        'a32aeff68032a78d661011654bbdba138002833f7d17d23bba6f95479ca22bef5697eb9e7e4cb9e0b5140fc23eab3aab16fc60962d62809c3c02f890599a8332'
+        'a713b3a4243cc5de3867f7c210172c094f50bd614c0c8be2c99d6161b06d43d9183ae9c442ac3056bfe06c28419e276d129b1235471466eedd340bf0c4780acb')
 validpgpkeys=(DD1EC9E8DE085C629B3E1846B18E8928B3948D64) # Michael Niedermayer <michael@niedermayer.cc>
 
 prepare() {
   cd ffmpeg
-  patch -Np1 -i ../add-av_stream_get_first_dts-for-chromium.patch # https://crbug.com/1251779
+
+  # Fix build with v4l2 >= 1.30
+  # https://trac.ffmpeg.org/ticket/11570
+  patch -Np1 -i "${srcdir}/fix_build_with_v4l2_1.30.patch"
+
+  # https://crbug.com/1251779
+  git apply -3 ../0001-Add-av_stream_get_first_dts-for-Chromium.patch
+
+  # Fix for svt-av1
+  # Taken from https://github.com/FFmpeg/FFmpeg/commit/d1ed5c06e3edc5f2b5f3664c80121fa55b0baa95.patch
+  git apply -3 ../0002-avcodec-libsvtav1-unbreak-build-with-latest-svtav1.patch
 
   # VAAPI HEVC encode alignment fix
   git cherry-pick -n bcfbf2bac8f9eeeedc407b40596f5c7aaa0d5b47
   git cherry-pick -n d0facac679faf45d3356dff2e2cb382580d7a521
-
-  # Fix build with texinfo-7.2
-  # See https://www.linuxquestions.org/questions/slackware-14/texinfo-7-2-looks-to-have-broken-texinfo-convert-html-4175745581/
-  # Patch taken from LSF: https://www.linuxfromscratch.org/patches/blfs/svn/ffmpeg-7.1-texinfo_fix-1.patch
-  patch -Np1 -i ../fix_build_with_texinfo-7.2.patch
-
-  # Fix for svt-av1
-  # Taken from https://github.com/FFmpeg/FFmpeg/commit/d1ed5c06e3edc5f2b5f3664c80121fa55b0baa95.patch
-  patch -Np1 -i ../fix_build_with_svt-av1-3.0.patch
 }
 
 pkgver() {
@@ -163,24 +166,22 @@ build() {
   export PKG_CONFIG_PATH='/usr/lib/mbedtls2/pkgconfig'
   cd ffmpeg
 
-   case "${CARCH}" in
-     powerpc|powerpc64) _configure_flags=(
-                --disable-asm
-                --disable-altivec # altivec support on 32/64be is broken
-                --disable-power8  # buildbot may be a power9
-                --disable-vsx     # later SIMD, disable them forcefully
-             )
-     ;;
-     x86_64) _configure_flags=(
-                --enable-cuda-llvm
-                --enable-nvdec
-                --enable-nvenc
-                --enable-libvpl
-             )
-     ;;
-   esac
-
-   [[ "${CARCH}" == 'powerpc' ]] && _configure_flags+=(--disable-ffplay)
+  case "${CARCH}" in
+    powerpc|powerpc64) _configure_flags=(
+               --disable-asm
+               --disable-altivec # altivec support on 32/64be is broken
+               --disable-power8  # buildbot may be a power9
+               --disable-vsx     # later SIMD, disable them forcefully
+            )
+    ;;
+    x86_64) _configure_flags=(
+               --enable-cuda-llvm
+               --enable-nvdec
+               --enable-nvenc
+               --enable-libvpl
+            )
+    ;;
+  esac
 
   ./configure \
     --prefix=/usr \
