@@ -12,7 +12,6 @@ pkgname=(
   gst-plugins-ugly
   gst-libav
   gst-plugin-gtk
-  gst-plugin-opencv
   gst-plugin-qml6
   gst-plugin-qmlgl
   gst-plugin-va
@@ -26,10 +25,10 @@ pkgname=(
   gstreamer-docs
 )
 case "${CARCH}" in
-  x86_64) pkgname+=(gst-plugin-msdk gst-plugin-qsv gst-plugin-onnx) ;;
+  x86_64) pkgname+=(gst-plugin-msdk gst-plugin-qsv gst-plugin-onnx gst-plugin-opencv) ;;
 esac
-pkgver=1.26.0
-pkgrel=3
+pkgver=1.26.1
+pkgrel=1
 pkgdesc="Multimedia graph framework"
 url="https://gstreamer.freedesktop.org/"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
@@ -140,7 +139,6 @@ makedepends=(
   nettle
   openal
   opencore-amr
-  opencv
   openexr
   openh264
   openjpeg2
@@ -199,7 +197,7 @@ makedepends=(
   zxing-cpp
 )
 case "${CARCH}" in
-  x86_64) makedepends_x86_64=(nasm) ;;
+  x86_64) makedepends_x86_64=(nasm opencv) ;;
 esac
 checkdepends=(xorg-server-xvfb)
 source=(
@@ -207,29 +205,23 @@ source=(
   "https://gstreamer.freedesktop.org/src/gstreamer-docs/gstreamer-docs-$pkgver.tar.xz"{,.asc}
   0001-HACK-meson-Disable-broken-tests.patch
   0002-x265enc-Unbreak-build-with-x265-4.0.patch
-  "${pkgname}-${pkgver}-atomic.patch::https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8637.patch"
 )
-b2sums=('8c90fe57ae67c5097cf427bca73cb687bc5087256444ec9227f4a294b2889d2042643ed4230414c151ecbae8490984e2b8c52cfea494e4f10f79866a26326029'
-        '5ee163d6f0dd14457740cbc2e131bdc3499517b0c6d57153a6ff3ef5af4ab2f5502e3131c7045f1d0829d0f6d5d1ed599b803d7396155e34a3ad99c0f2f3974a'
+b2sums=('b744af094589dcd4abcb643784757b1adad721334b91a4fa7f2c828bd2b14d1e3f02fc95ec1527345516a6a4ee683cb4b30841f783971299f1aaada733209a67'
+        '0e3f0a336de4d78740b5e6a8fad2e66e9e2b51e896fb2f5c4dee47790615c92fd10813f4bad562daa1e669711a4be47dc99507963a22fb90935ef01d320a86ee'
         'SKIP'
         'd10fcc937c53bca4007ea047540dce2d75a811b2f901efdc7ca0f03889ddba5477539526cc625d939481d84d557f51d0d2866d594ac1a20b4d033dea0ce21a31'
-        '94250c1317ce1e3444c2e0effc190ab544eca21c177e43143c3f3a8690c541cbe068604c6ff6401072a6b09f54683eac03128c918a2a16c7013622c24da11348'
-        'b7baae961f69229075e3e366532003f37e71db19c65635f2f492f613fe83991c28e512098ea5939c78e8a8f2d680be26d1373e8ccadb70a3b2d4f2e1ed90a541')
+        '94250c1317ce1e3444c2e0effc190ab544eca21c177e43143c3f3a8690c541cbe068604c6ff6401072a6b09f54683eac03128c918a2a16c7013622c24da11348')
 validpgpkeys=(
   D637032E45B8C6585B9456565D2EEE6F6F349D7C # Tim Müller <tim@gstreamer-foundation.org>
 )
 
 prepare() {
   cd gstreamer
-
   # Disable broken tests
   git apply -3 ../0001-HACK-meson-Disable-broken-tests.patch
 
   # Fix build with x265 4.0
   git apply -3 ../0002-x265enc-Unbreak-build-with-x265-4.0.patch
-
-  # Fix linking atomic where needed
-  git apply -3 ../${pkgname}-${pkgver}-atomic.patch
 }
 
 build() {
@@ -256,6 +248,7 @@ build() {
     -D gst-plugins-bad:mfx_api=oneVPL
     -D gst-plugins-bad:nvcomp=disabled
     -D gst-plugins-bad:nvdswrapper=disabled
+    -D gst-plugins-bad:opencv=disabled
     -D gst-plugins-bad:openni2=disabled
     -D gst-plugins-bad:opensles=disabled
     -D gst-plugins-bad:qt6d3d11=disabled
@@ -280,13 +273,6 @@ build() {
 
   case "${CARCH}" in
     x86_64) meson_options+=(-D gst-plugins-bad:msdk=enabled) ;;
-    powerpc64le)
-       meson_options+=(
-         -D gst-plugins-bad:msdk=disabled
-         -D gst-plugins-bad:qsv=disabled
-         -D gst-plugins-bad:svthevcenc=disabled
-         -D gst-plugins-bad:onnx=disabled
-       ) ;;
     *) meson_options+=(
          -D gst-plugins-bad:msdk=disabled
          -D gst-plugins-bad:qsv=disabled
