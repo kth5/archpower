@@ -4,75 +4,101 @@
 # Contributor: Jeremy Cowgar <jeremy@cowgar.com>
 
 pkgbase=check
-pkgname=(check check-docs)
+pkgname=(
+  check
+  check-docs
+)
 pkgver=0.15.2
-pkgrel=2.1
-pkgdesc="A unit testing framework for C"
+pkgrel=3
+pkgdesc="Unit testing framework for C"
 url="https://libcheck.github.io/check/"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=(LGPL)
-makedepends=(git texlive-bin texi2html doxygen awk cmake)
-_commit=11970a7e112dfe243a2e68773f014687df2900e8  # tags/0.15.2
-source=("git+https://github.com/libcheck/check#commit=$_commit"
-        no-static.diff)
-sha256sums=('SKIP'
-            '1151c40e5bfb08e77175f30f79daadc8c07021c980589a6b33c6f1cf224e48df')
-
-pkgver() {
-  cd check
-  git describe --tags | sed 's/-/+/g'
-}
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+license=(LGPL-2.1-or-later)
+depends=(
+  awk
+  gcc-libs
+  glibc
+)
+makedepends=(
+  cmake
+  doxygen
+  git
+  ninja
+  texi2html
+  texlive-bin
+)
+source=(
+  "git+https://github.com/libcheck/check#tag=$pkgver"
+  0001-Avoid-static-library.patch
+  0002-Fix-texinfo-errors-and-warnings.patch
+  0003-HACK-Fix-tests-in-the-presence-of-ffile-prefix-map.patch
+)
+b2sums=('ac9849195b44cf15f89526c83183ff8bc828976f4efcda409d2e9a1472271998b5dc05db0cf369153ef9d8c9007ef84fc876a0488c4edc4c7340a65e373cf9bc'
+        '87635d087cd52d8dd6406830d794075c74614f543326c807ded39dccdce3b1a432f9accb3c2a993d661acd29d295b13760b9f617d763bf578185a470b8191193'
+        'c352cdbd7be83000fd2ae1b715bf1ded99b489677a572f4b38d1f9618f78e8140ea626543ef622878e392032cf5614759cd20c30b0ed08c7c74e4c0cb62a0178'
+        '1825d05f1f99a5adffbfd957985649e183598cbd875f4e268643ed9853a611aba269a3aa23a8a22587d6dbe41eca3a474225f7c095d990ce20834efb4a12cee3')
 
 prepare() {
   cd check
 
   # https://bugs.archlinux.org/task/68076
-  patch -Np1 -i ../no-static.diff
+  git apply -3 ../0001-Avoid-static-library.patch
+
+  # Fix build with texinfo 7.2
+  # https://gitlab.archlinux.org/archlinux/packaging/packages/check/-/issues/1
+  git apply -3 ../0002-Fix-texinfo-errors-and-warnings.patch
+
+  # Fix tests with debug enabled
+  git apply -3 ../0003-HACK-Fix-tests-in-the-presence-of-ffile-prefix-map.patch
 
   autoreconf -fvi
 }
 
 build() {
+  local cmake_options=(
+    -D AWK_GSUB_DBL_BSLASH='\\\\'
+    -D CHECK_ENABLE_TIMEOUT_TESTS=OFF
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_PREFIX=/usr
+  )
+
   CFLAGS+=" -Wno-format-extra-args"
 
-  cmake -Hcheck -Bcmake \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_BUILD_TYPE=None \
-    -DCHECK_ENABLE_TIMEOUT_TESTS=OFF \
-    -DAWK_GSUB_DBL_BSLASH='\\\\'
+  cmake -S check -B cmake -G Ninja "${cmake_options[@]}"
   cmake --build cmake
 
   cd check
   ./configure --prefix=/usr --disable-timeout-tests
   make all doc/doxygen doc/check_html
+  make install DESTDIR="$srcdir/fakeinstall"
 }
 
-check() {
-  CTEST_OUTPUT_ON_FAILURE=1 cmake --build cmake --target test
+check() (
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
 
-  cd check
-  make check
-}
+  # Set SRCDIR as expected by tests, modified by -ffile-prefix-map
+  SRCDIR=/usr/src/debug/check/check/tests/ ctest --test-dir cmake --output-on-failure --stop-on-failure
+  SRCDIR= make -C check check
+)
 
 package_check() {
-  depends=(awk)
   optdepends=('check-docs: Documentation')
   provides=(libcheck.so)
 
   DESTDIR="$pkgdir" cmake --build cmake --target install
-
-  DESTDIR="$srcdir/tmp" make -C check install
-  mv tmp/usr/share/{aclocal,info} "$pkgdir/usr/share"
-  mv tmp/usr/share/doc .
-  rm -rv tmp
+  cp -a fakeinstall/usr/share/{aclocal,info} -t "$pkgdir/usr/share"
 }
 
 package_check-docs() {
   pkgdesc+=" (documentation)"
-
-  cp -a check/doc/doxygen/html doc/check/doxygen
-  cp -a check/doc/check_html   doc/check/manual
+  depends=()
 
   mkdir -p "$pkgdir/usr/share"
-  mv doc "$pkgdir/usr/share"
+  cp -a fakeinstall/usr/share/doc -t "$pkgdir/usr/share"
+  cp -a check/doc/doxygen/html "$pkgdir/usr/share/doc/check/doxygen"
+  cp -a check/doc/check_html "$pkgdir/usr/share/doc/check/manual"
 }
+
+# vim:set sw=2 sts=-1 et:
