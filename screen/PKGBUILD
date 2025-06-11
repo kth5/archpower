@@ -5,11 +5,11 @@
 # Committer: dorphell <dorphell@gmx.net>
 
 pkgname=screen
-pkgver=5.0.0
+pkgver=5.0.1
 pkgrel=2
 pkgdesc='Full-screen window manager that multiplexes a physical terminal'
 url='https://www.gnu.org/software/screen/'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=('GPL-3.0-or-later')
 depends=(
     'libcrypt.so'
@@ -17,26 +17,30 @@ depends=(
     'libpam.so'
     'libutempter'
 )
-source=("https://ftp.gnu.org/gnu/screen/screen-${pkgver}.tar.gz"
+makedepends=(
+    'git'
+)
+source=("git+https://git.savannah.gnu.org/git/screen.git#tag=v.${pkgver}"
         'tmpfiles.d'
         'pam.d')
-sha256sums=('f04a39d00a0e5c7c86a55338808903082ad5df4d73df1a2fd3425976aed94971'
+sha256sums=('ab8109790f3b0f9719cb8f8b51ffd9c7a3f0cbcca426c9abf0a8185d637e9eef'
             '1f33ce4faca7bd05dd80403411af31e682d5d23e79558e884ae5a35f1dd96223'
             '971c25929ea97422c09e10679ab98e9e6c59295aae1a4a9970909d2206e23090')
-
 backup=('etc/screenrc' 'etc/pam.d/screen')
 options=('!makeflags')
 
 _ptygroup=5 #the UID of our PTY/TTY group
 
 prepare() {
-  cd ${pkgname}-${pkgver}
-  NOCONFIGURE=1 ./autogen.sh
+  cd ${pkgname}/src
+  autoreconf -fiv
 }
 
 build() {
-  cd ${pkgname}-${pkgver}
+  cd ${pkgname}/src
 
+  # PTY mode set to 0620 explicitly:
+  # https://security.opensuse.org/2025/05/12/screen-security-issues.html#3c-screen-by-default-creates-world-writable-ptys-cve-2025-46803
   ./configure \
     --prefix=/usr \
     --mandir=/usr/share/man \
@@ -47,17 +51,18 @@ build() {
     --enable-utmp \
     --enable-telnet \
     --with-pty-group=$_ptygroup \
+    --with-pty-mode=0620 \
     --with-socket-dir=/run/screens \
     --with-sys-screenrc=/etc/screenrc \
   make
 }
 
 package() {
-  cd ${pkgname}-${pkgver}
+  cd ${pkgname}/src
   make DESTDIR="${pkgdir}" install
 
-  install -Dm644 ../pam.d "${pkgdir}"/etc/pam.d/screen
-  install -Dm644 ../tmpfiles.d "${pkgdir}"/usr/lib/tmpfiles.d/screen.conf
+  install -Dm644 ../../pam.d "${pkgdir}"/etc/pam.d/screen
+  install -Dm644 ../../tmpfiles.d "${pkgdir}"/usr/lib/tmpfiles.d/screen.conf
 
   install -Dm644 etc/etcscreenrc "${pkgdir}"/etc/screenrc
   install -Dm644 etc/screenrc "${pkgdir}"/etc/skel/.screenrc
