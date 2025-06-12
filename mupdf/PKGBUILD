@@ -1,6 +1,6 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Christian Hesse <mail@eworm.de>
 # Maintainer: Robin Candau <antiz@archlinux.org>
+# Contributor: Christian Hesse <mail@eworm.de>
 # Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 # Contributor: Brad Fanella <bradfanella@archlinux.us>
 # Contributor: Stefan Husmann <stefan-husmann@t-online.de>
@@ -8,52 +8,26 @@
 # Contributor: xduugu
 
 pkgbase=mupdf
-pkgname=(libmupdf mupdf mupdf-gl mupdf-tools python-mupdf)
-pkgver=1.25.6
+pkgname=('libmupdf' 'mupdf' 'mupdf-gl' 'mupdf-tools' 'python-mupdf')
+pkgver=1.26.1
 pkgrel=1
-pkgdesc='Lightweight PDF and XPS viewer'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
-url='https://mupdf.com/'
+pkgdesc="Lightweight PDF and XPS viewer"
+url="https://mupdf.com"
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=('AGPL-3.0-or-later')
-makedepends=(
-  'clang'
-  'curl'
-  'desktop-file-utils'
-  'freeglut'
-  'freetype2'
-  'git'
-  'glu'
-  'gumbo-parser'
-  'harfbuzz'
-  'jbig2dec'
-  # 'lcms2'  # requires fork (not the version we are packaging)
-  'leptonica'
-  'libjpeg-turbo'
-  'libx11'
-  'libxext'
-  'mesa-libgl'
-  # 'mujs'  # is hardcoded and needs a patch to debundle
-  'openjpeg2'
-  'openssl'
-  'python'
-  'swig'
-  'tesseract'
-  'unzip'
-  'zlib'
-)
+makedepends=('brotli' 'clang' 'curl' 'desktop-file-utils' 'freeglut' 'freetype2' 'git' 'glu' 'gumbo-parser' 'harfbuzz' 'jbig2dec' 'leptonica'
+             'libjpeg-turbo' 'libx11' 'libxext' 'mesa-libgl' 'openjpeg2' 'openssl' 'python' 'swig' 'tesseract' 'unzip' 'zint' 'zlib' 'zxing-cpp')
 options=('staticlibs')
-source=(
-  git+https://github.com/ArtifexSoftware/mupdf.git#tag=$pkgver
-  git+https://github.com/ArtifexSoftware/mujs.git
-  git+https://github.com/ArtifexSoftware/thirdparty-lcms2.git
-  git+https://github.com/ArtifexSoftware/extract.git
-  $pkgbase.desktop
-  $pkgbase.xpm
-  $pkgbase.pc
-  $pkgbase-1.23.9-cpp_ldflags.patch
-  $pkgbase-1.23.9-install_targets.patch
-)
-sha256sums=('96131288f49256734a99646c0d7a10a9904ece5dbf645263fdb163df7a592b22'
+source=("git+https://github.com/ArtifexSoftware/mupdf.git#tag=${pkgver}"
+        'git+https://github.com/ArtifexSoftware/mujs.git'
+        'git+https://github.com/ArtifexSoftware/thirdparty-lcms2.git'
+        'git+https://github.com/ArtifexSoftware/extract.git'
+        "${pkgbase}.desktop"
+        "${pkgbase}.xpm"
+        "${pkgbase}.pc"
+        "${pkgbase}-1.23.9-cpp_ldflags.patch"
+        "${pkgbase}-1.23.9-install_targets.patch")
+sha256sums=('8fec95d66d524cd63a084cd406297556965549f051999a0f776b307406ad9ec6'
             'SKIP'
             'SKIP'
             'SKIP'
@@ -61,160 +35,127 @@ sha256sums=('96131288f49256734a99646c0d7a10a9904ece5dbf645263fdb163df7a592b22'
             'a435f44425f5432c074dee745d8fbaeb879038ec1f1ec64f037c74662f09aca8'
             'bb797ac84edc9856fa828f87e9be684714b7ab2c8bca3372a81fbfa0da018ac4'
             '782745085168ebb7f06bf6330ff49897dbeae7d20a9e242fe98bf434f7eb82f0'
-            'ceb2b16a12bf193d514969f995dfca4c2d12d489c2690928db2db4afe09f6c8c')
+            '16a193a735e44fefca7d7fbea97823840cfead6b9123898e7ee486c7e08f1528')
 
 prepare() {
-  # upstream does not provide a pkg-config integration
-  sed -e "s/VERSION/$pkgver/" -i $pkgbase.pc
+	# Upstream does not provide a pkg-config integration
+	sed -e "s/VERSION/${pkgver}/" -i "${pkgbase}.pc"
 
-  cd $pkgbase
+	cd "${pkgbase}"
+	# Use our LDFLAGS when building the C++ bindings to have full RELRO
+	patch -Np1 -i "${srcdir}/${pkgbase}-1.23.9-cpp_ldflags.patch"
+	# Alter install-shared-* targets to not call one another (which fails on installing headers twice) and install libmupdfcpp.so
+	# with soname postfix
+	patch -Np1 -i "${srcdir}/${pkgbase}-1.23.9-install_targets.patch"
 
-  # use our LDFLAGS when building the C++ bindings to have full RELRO
-  patch -Np1 -i ../$pkgbase-1.23.9-cpp_ldflags.patch
-  # alter install-shared-* targets to not call one another (which fails on installing headers twice) and install libmupdfcpp.so with soname postfix
-  patch -Np1 -i ../$pkgbase-1.23.9-install_targets.patch
+	# Init submodules and disable the ones we don't need, we want our system libraries instead
+	git submodule init
+	rm -rvf thirdparty/{brotli,curl,freeglut,freetype,gumbo-parser,harfbuzz,jbig2dec,leptonica,libjpeg,openjpeg,tesseract,zint,zlib,zxing-cpp}
+	git submodule deinit thirdparty/brotli
+	git submodule deinit thirdparty/curl
+	git submodule deinit thirdparty/freeglut
+	git submodule deinit thirdparty/freetype
+	git submodule deinit thirdparty/gumbo-parser
+	git submodule deinit thirdparty/harfbuzz
+	git submodule deinit thirdparty/jbig2dec
+	git submodule deinit thirdparty/leptonica
+	git submodule deinit thirdparty/libjpeg
+	git submodule deinit thirdparty/openjpeg
+	git submodule deinit thirdparty/tesseract
+	git submodule deinit thirdparty/zint
+	git submodule deinit thirdparty/zlib
+	git submodule deinit thirdparty/zxing-cpp
+	# Update required third party libraries
+	git config submodule.thirdparty/mujs.url "${srcdir}/mujs" # is hardcoded and needs a patch to debundle
+	git config submodule.thirdparty/lcms2.url "${srcdir}/thirdparty-lcms2" # requires a fork (not the version we are packaging)
+	git config submodule.thirdparty/extract.url "${srcdir}/extract" # we do not package this one
 
-  # init submodules and disable the ones we don't need, we want our system libraries instead
-  git submodule init
-  rm -rvf thirdparty/{curl,freeglut,freetype,gumbo-parser,harfbuzz,jbig2dec,leptonica,libjpeg,openjpeg,tesseract,zlib}
-  git submodule deinit thirdparty/curl
-  git submodule deinit thirdparty/freeglut
-  git submodule deinit thirdparty/freetype
-  git submodule deinit thirdparty/gumbo-parser
-  git submodule deinit thirdparty/harfbuzz
-  git submodule deinit thirdparty/jbig2dec
-  git submodule deinit thirdparty/leptonica
-  git submodule deinit thirdparty/libjpeg
-  git submodule deinit thirdparty/openjpeg
-  git submodule deinit thirdparty/tesseract
-  git submodule deinit thirdparty/zlib
-  # update required third party libraries
-  git config submodule.thirdparty/mujs.url "$srcdir/mujs" # is hardcoded and needs a patch to debundle
-  git config submodule.thirdparty/lcms2.url "$srcdir/thirdparty-lcms2" # requires fork (not the version we are packaging)
-  git config submodule.thirdparty/extract.url "$srcdir/extract" # we do not package this one
-  git -c protocol.file.allow=always submodule update
+	git -c protocol.file.allow=always submodule update
 
-  {
-    printf "LINUX_OR_OPENBSD := yes\n"  # required so that Makefile sets soname symlink
-    printf "USE_SYSTEM_CURL := yes\n"
-    printf "USE_SYSTEM_FREETYPE := yes\n"
-    printf "USE_SYSTEM_GLUT := yes\n"
-    printf "USE_SYSTEM_GUMBO := yes\n"
-    printf "USE_SYSTEM_HARFBUZZ := yes\n"
-    printf "USE_SYSTEM_JBIG2DEC := yes\n"
-    printf "USE_SYSTEM_JPEGXR := yes\n"  # not used without HAVE_JPEGXR
-    printf "USE_SYSTEM_LCMS2 := no\n"  # need lcms2-art fork
-    printf "USE_SYSTEM_LEPTONICA := yes\n"
-    printf "USE_SYSTEM_LIBJPEG := yes\n"
-    printf "USE_SYSTEM_LIBS := yes\n"
-    printf "USE_SYSTEM_MUJS := no\n"  # needs patch to debundle
-    printf "USE_SYSTEM_OPENJPEG := yes\n"
-    printf "USE_SYSTEM_TESSERACT := yes\n"
-    printf "USE_SYSTEM_ZLIB := yes\n"
-    printf "USE_TESSERACT := yes\n"
-  } > user.make
+	{
+	  printf "LINUX_OR_OPENBSD := yes\n"  # required so that Makefile sets soname symlink
+	  printf "USE_SYSTEM_CURL := yes\n"
+	  printf "USE_SYSTEM_FREETYPE := yes\n"
+	  printf "USE_SYSTEM_GLUT := yes\n"
+	  printf "USE_SYSTEM_GUMBO := yes\n"
+	  printf "USE_SYSTEM_HARFBUZZ := yes\n"
+	  printf "USE_SYSTEM_JBIG2DEC := yes\n"
+	  printf "USE_SYSTEM_JPEGXR := yes\n"  # not used without HAVE_JPEGXR
+	  printf "USE_SYSTEM_LCMS2 := no\n"  # need lcms2-art fork
+	  printf "USE_SYSTEM_LEPTONICA := yes\n"
+	  printf "USE_SYSTEM_LIBJPEG := yes\n"
+	  printf "USE_SYSTEM_LIBS := yes\n"
+	  printf "USE_SYSTEM_MUJS := no\n"  # needs patch to debundle
+	  printf "USE_SYSTEM_OPENJPEG := yes\n"
+	  printf "USE_SYSTEM_TESSERACT := yes\n"
+	  printf "USE_SYSTEM_ZLIB := yes\n"
+	  printf "USE_TESSERACT := yes\n"
+	} > user.make
 }
 
 build() {
-  cd $pkgbase
-  # Enforce -j1 to avoid concurrency issue during build
-  make -j1 VENV_FLAG= shared=yes build=release libs apps c++ python
+	cd "${pkgbase}"
+	# Enforce -j1 to avoid concurrency issue during build
+	make -j1 VENV_FLAG= shared=yes build=release libs apps extra-apps c++ python
 }
 
 package_libmupdf() {
-  pkgdesc='Library for Lightweight PDF and XPS viewer'
-  depends=(
-    'freetype2'
-    'gcc-libs'
-    'glibc'
-    'gumbo-parser'
-    'harfbuzz'
-    'jbig2dec'
-    'leptonica'
-    'libjpeg-turbo'
-    'openjpeg2'
-    'tesseract'
-    'zlib'
-  )
+	pkgdesc="Library for Lightweight PDF and XPS viewer"
+	depends=('brotli' 'freetype2' 'gcc-libs' 'glibc' 'gumbo-parser' 'harfbuzz' 'jbig2dec' 'leptonica' 'libjpeg-turbo' 'openjpeg2' 'tesseract' 'zlib')
 
-  cd $pkgbase
-  make prefix=/usr DESTDIR="$pkgdir" SO_INSTALL_MODE=755 install-shared-c install-shared-c++
-  install -vDm 0644 ../$pkgbase.pc -t "$pkgdir"/usr/lib/pkgconfig/
+	cd "${pkgbase}"
+	make prefix=/usr DESTDIR="${pkgdir}" SO_INSTALL_MODE=755 install-shared-c install-shared-c++
+	install -Dm 644 "${srcdir}/${pkgbase}.pc" "${pkgdir}/usr/lib/pkgconfig/${pkgbase}.pc"
 }
 
 package_python-mupdf() {
-  pkgdesc='Library for Lightweight PDF and XPS viewer - Python bindings'
-  depends=(
-    'gcc-libs'
-    'glibc'
-    'libmupdf'
-    'python'
-  )
+	pkgdesc="Library for Lightweight PDF and XPS viewer - Python bindings"
+	depends=('gcc-libs' 'glibc' 'libmupdf' 'python')
 
-  cd $pkgbase
-  make prefix=/usr DESTDIR="$pkgdir" SO_INSTALL_MODE=755 install-shared-python
+	cd "${pkgbase}"
+	make prefix=/usr DESTDIR="${pkgdir}" SO_INSTALL_MODE=755 install-shared-python
 }
 
 package_mupdf() {
-  pkgdesc='Lightweight PDF and XPS viewer'
-  depends=(
-    'desktop-file-utils'
-    'glibc'
-    'libmupdf'
-    'libx11'
-    'libxext'
-  )
+	pkgdesc="Lightweight PDF and XPS viewer"
+	depends=('desktop-file-utils' 'glibc' 'libmupdf' 'libx11' 'libxext')
 
-  cd $pkgbase
-
-  install -vDm 0755 build/shared-release/$pkgbase-x11 "$pkgdir"/usr/bin/$pkgbase
-
-  install -vDm 0644 docs/man/$pkgbase.1 -t "$pkgdir"/usr/share/man/man1/
-
-  install -vDm 0644 README COPYING CHANGES -t "$pkgdir"/usr/share/doc/$pkgbase/
-
-  install -vDm 0644 ../$pkgbase.desktop -t "$pkgdir"/usr/share/applications/
-  install -vDm 0644 ../$pkgbase.xpm -t "$pkgdir"/usr/share/pixmaps/
+	cd "${pkgbase}"
+	install -Dm 755 "build/shared-release/${pkgbase}-x11" "${pkgdir}/usr/bin/${pkgbase}"
+	install -Dm 644 "docs/man/${pkgbase}.1" "${pkgdir}/usr/share/man/man1/${pkgbase}.1"
+	install -Dm 644 README "${pkgdir}/usr/share/doc/${pkgbase}/README"
+	install -Dm 644 CHANGES "${pkgdir}/usr/share/doc/${pkgbase}/CHANGES"
+	install -Dm 644 COPYING "${pkgdir}/usr/share/doc/${pkgbase}/COPYING"
+	install -Dm 644 "${srcdir}/${pkgbase}.desktop" "${pkgdir}/usr/share/applications/${pkgbase}.desktop"
+	install -Dm 644 "${srcdir}/${pkgbase}.xpm" "${pkgdir}/usr/share/pixmaps/${pkgbase}.xpm"
 }
 
 package_mupdf-gl() {
-  pkgdesc='Lightweight PDF and XPS viewer with OpenGL backend'
-  conflicts=('mupdf')
-  provides=("mupdf=${pkgver}")
-  depends=(
-    'desktop-file-utils'
-    'glibc'
-    'glut'
-    'libgl'
-    'libmupdf'
-    'openssl'
-  )
+	pkgdesc="Lightweight PDF and XPS viewer with OpenGL backend"
+	conflicts=('mupdf')
+	provides=("mupdf=${pkgver}")
+	depends=('desktop-file-utils' 'glibc' 'glut' 'libgl' 'libmupdf' 'openssl')
 
-  cd $pkgbase
-
-  install -vDm 0755 build/shared-release/$pkgbase-gl "$pkgdir"/usr/bin/$pkgbase
-
-  install -vDm 0644 docs/man/$pkgbase.1 -t "$pkgdir"/usr/share/man/man1/
-
-  install -vDm 0644 README COPYING CHANGES -t "$pkgdir"/usr/share/doc/$pkgbase/
-
-  install -vDm 0644 ../$pkgbase.desktop -t "$pkgdir"/usr/share/applications/
-  install -vDm 0644 ../$pkgbase.xpm -t "$pkgdir"/usr/share/pixmaps/
+	cd "${pkgbase}"
+	install -Dm 755 "build/shared-release/${pkgbase}-gl" "${pkgdir}/usr/bin/${pkgbase}"
+	install -Dm 644 "docs/man/${pkgbase}.1" "${pkgdir}/usr/share/man/man1/${pkgbase}.1"
+	install -Dm 644 README "${pkgdir}/usr/share/doc/${pkgbase}/README"
+	install -Dm 644 CHANGES "${pkgdir}/usr/share/doc/${pkgbase}/CHANGES"
+	install -Dm 644 COPYING "${pkgdir}/usr/share/doc/${pkgbase}/COPYING"
+	install -Dm 644 "${srcdir}/${pkgbase}.desktop" "${pkgdir}/usr/share/applications/${pkgbase}.desktop"
+	install -Dm 644 "${srcdir}/${pkgbase}.xpm" "${pkgdir}/usr/share/pixmaps/${pkgbase}.xpm"
 }
 
 package_mupdf-tools() {
-  pkgdesc='Tools for Lightweight PDF and XPS viewer'
-  depends=(
-    'glibc'
-    'libmupdf'
-    'openssl'
-  )
+	pkgdesc="Tools for Lightweight PDF and XPS viewer"
+	depends=('glibc' 'libmupdf' 'libxext' 'libx11' 'openssl')
 
-  cd $pkgbase
-
-  install -vDm 0755 build/shared-release/{mutool,muraster} -t "$pkgdir"/usr/bin/
-
-  install -vDm 0644 docs/man/mutool.1 -t "$pkgdir"/usr/share/man/man1/
-
-  install -vDm 0644 README COPYING CHANGES -t "$pkgdir"/usr/share/doc/$pkgname/
+	cd "${pkgbase}"
+	install -Dm 755 "build/shared-release/${pkgbase}-x11-curl" "${pkgdir}/usr/bin/${pkgbase}-x11-curl"
+	install -Dm 755 build/shared-release/mutool "${pkgdir}/usr/bin/mutool"
+	install -Dm 755 build/shared-release/muraster "${pkgdir}/usr/bin/muraster"
+	install -Dm 644 docs/man/mutool.1 "${pkgdir}/usr/share/man/man1/mutool.1"
+	install -Dm 644 README "${pkgdir}/usr/share/doc/${pkgname}/README"
+	install -Dm 644 CHANGES "${pkgdir}/usr/share/doc/${pkgname}/CHANGES"
+	install -Dm 644 COPYING "${pkgdir}/usr/share/doc/${pkgname}/COPYING"
 }
