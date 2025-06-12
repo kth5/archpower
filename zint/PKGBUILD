@@ -1,0 +1,52 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Balló György <ballogyor+arch at gmail dot com>
+
+pkgbase=zint
+pkgname=(zint zint-qt)
+pkgver=2.15.0
+pkgrel=1
+pkgdesc='Barcode encoding library supporting over 50 symbologies'
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url='http://zint.org.uk/'
+license=('GPL3')
+makedepends=('cmake' 'ninja' 'qt6-tools' 'qt6-svg')
+source=("https://downloads.sourceforge.net/$pkgbase/$pkgbase-$pkgver-src.tar.gz"
+        'zint-qt.appdata.xml'
+        'fix-build.patch')
+sha256sums=('bce37d9b86e6127cac63c8b6267ac421116d4ac086519d726eb724f5462d98c7'
+            '4286c7f56f0ea8fcf8dfa164b3a3fea08a02ad3b5111c6ac63c4d55134b67564'
+            '516f37fd183ce99a1e57c3ba4dd93a8b8865d34425273e63818e9237be6fe0a7')
+
+prepare() {
+  patch -d $pkgbase-$pkgver-src -p1 < fix-build.patch # Add missing include
+}
+
+build() {
+  # Hack to force Qt6
+  CMAKE_PREFIX_PATH="6.0.0" \
+  cmake -S $pkgbase-$pkgver-src -B build -G Ninja -DCMAKE_INSTALL_PREFIX=/usr -DUSE_QT6=ON \
+    -DCMAKE_CXX_FLAGS="$CXXFLAGS -ffat-lto-objects"
+  cmake --build build
+}
+
+package_zint() {
+  depends=('libpng')
+
+  DESTDIR="$pkgdir" cmake --install build
+
+  rm "$pkgdir/usr/bin/zint-qt" \
+     "$pkgdir/usr/include/qzint.h" \
+     "$pkgdir/usr/lib/libQZint"*
+}
+
+package_zint-qt() {
+  pkgdesc='Zint Barcode Studio GUI'
+  depends=('hicolor-icon-theme' 'qt6-tools' 'zint')
+
+  DESTDIR="$pkgdir" cmake --install build/backend_qt
+  DESTDIR="$pkgdir" cmake --install build/frontend_qt
+
+  install -Dm644 $pkgbase-$pkgver-src/zint-qt.png "$pkgdir/usr/share/icons/hicolor/48x48/apps/zint-qt.png"
+  install -Dm644 $pkgbase-$pkgver-src/zint-qt.desktop "$pkgdir/usr/share/applications/zint-qt.desktop"
+  install -Dm644 zint-qt.appdata.xml "$pkgdir/usr/share/metainfo/zint-qt.appdata.xml"
+}
