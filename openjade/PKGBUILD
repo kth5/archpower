@@ -3,40 +3,43 @@
 
 pkgname=openjade
 pkgver=1.3.2
-pkgrel=8.1
-_debpatch=13
+pkgrel=9
 pkgdesc="Implementation of the DSSSL language"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://openjade.sourceforge.net/"
 license=('LicenseRef-openjade')
 depends=('opensp' 'sgml-common' 'gcc-libs' 'glibc')
-makedepends=('perl-perl4-corelibs')
+makedepends=('perl')
 install=${pkgname}.install
 conflicts=('jade')
 provides=('jade')
 source=(https://downloads.sourceforge.net/project/${pkgname}/${pkgname}/${pkgver}/${pkgname}-${pkgver}.tar.gz
         openjade-nola.patch
+        openjade-getoptperl.patch
 )
 sha256sums=('1d2d7996cc94f9b87d0c51cf0e028070ac177c4123ecbfd7ac1cb8d0b7d322d1'
-            'd177f5e18970561ff500c42759f82e91ef245dda5559459091b875b7560b5688')
+            'd177f5e18970561ff500c42759f82e91ef245dda5559459091b875b7560b5688'
+            'cfe8908ad70d6ca46fd386212cae8a5958c922024efc226e5d6b798534044cd4')
 
 prepare() {
   cd ${pkgname}-$pkgver
-  patch -Np1 -i $srcdir/openjade-nola.patch
-  # https://bugs.archlinux.org/task/55331 / https://gcc.gnu.org/bugzilla/show_bug.cgi?id=69534#c9
-  export CXXFLAGS+=' -fno-lifetime-dse'
+  patch -Np1 -i "$srcdir"/openjade-nola.patch
+  # Patch from Fedora
+  patch -Np1 -i "$srcdir"/openjade-getoptperl.patch
 }
 
 build() {
   cd ${pkgname}-$pkgver
-  ./configure --prefix=/usr \
-    --build=${CHOST} \
+  # https://bugs.archlinux.org/task/55331 / https://gcc.gnu.org/bugzilla/show_bug.cgi?id=69534#c9
+  CXXFLAGS+=' -fno-lifetime-dse'
+  LINKFLAGS="$LDFLAGS" ./configure --prefix=/usr \
     --mandir=/usr/share/man \
     --enable-default-catalog=/etc/sgml/catalog \
     --datadir=/usr/share/sgml/openjade-${pkgver} \
     --enable-html \
     --enable-http \
-    --enable-mif
+    --enable-mif \
+    --build=${CHOST}
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
 }
