@@ -1,0 +1,283 @@
+From 4826b6eabc6102e49562c48effcabb7b87ceb041 Mon Sep 17 00:00:00 2001
+From: Hugo Devillers <hugo@xol.io>
+Date: Sat, 1 Jul 2023 11:33:17 +0200
+Subject: [PATCH 1/6] remove dead code dealing with operand endianness
+
+---
+ source/binary.cpp | 21 ++++++---------------
+ 1 file changed, 6 insertions(+), 15 deletions(-)
+
+diff --git a/source/binary.cpp b/source/binary.cpp
+index 207d4a9b37..b1e1922445 100644
+--- a/source/binary.cpp
++++ b/source/binary.cpp
+@@ -440,10 +440,6 @@ spv_result_t Parser::parseOperand(size_t inst_offset,
+ 
+   const uint32_t word = peek();
+ 
+-  // Do the words in this operand have to be converted to native endianness?
+-  // True for all but literal strings.
+-  bool convert_operand_endianness = true;
+-
+   switch (type) {
+     case SPV_OPERAND_TYPE_TYPE_ID:
+       if (!word)
+@@ -752,17 +748,12 @@ spv_result_t Parser::parseOperand(size_t inst_offset,
+ 
+   if (_.requires_endian_conversion) {
+     // Copy instruction words.  Translate to native endianness as needed.
+-    if (convert_operand_endianness) {
+-      const spv_endianness_t endianness = _.endian;
+-      std::transform(_.words + _.word_index, _.words + index_after_operand,
+-                     std::back_inserter(*words),
+-                     [endianness](const uint32_t raw_word) {
+-                       return spvFixWord(raw_word, endianness);
+-                     });
+-    } else {
+-      words->insert(words->end(), _.words + _.word_index,
+-                    _.words + index_after_operand);
+-    }
++    const spv_endianness_t endianness = _.endian;
++    std::transform(_.words + _.word_index, _.words + index_after_operand,
++                   std::back_inserter(*words),
++                   [endianness](const uint32_t raw_word) {
++                     return spvFixWord(raw_word, endianness);
++                   });
+   }
+ 
+   // Advance past the operand.
+
+From 39a63f822f0d1d93cabba4f4f3d980bc6ec1737b Mon Sep 17 00:00:00 2001
+From: Hugo Devillers <hugo@xol.io>
+Date: Sat, 1 Jul 2023 11:50:03 +0200
+Subject: [PATCH 2/6] perform endianness conversion eagerly
+
+---
+ source/binary.cpp | 13 +++++++------
+ 1 file changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/source/binary.cpp b/source/binary.cpp
+index b1e1922445..d46dbc1d9e 100644
+--- a/source/binary.cpp
++++ b/source/binary.cpp
+@@ -207,6 +207,10 @@ class Parser {
+       operands.reserve(25);
+       endian_converted_words.reserve(25);
+       expected_operands.reserve(25);
++
++      native_words = std::make_unique<uint32_t[]>(num_words);
++      for (size_t i = 0; i < num_words; i++)
++        native_words[i] = spvFixWord(words[i], endian);
+     }
+     State() : State(0, 0, nullptr) {}
+     const uint32_t* words;       // Words in the binary SPIR-V module.
+@@ -218,6 +222,7 @@ class Parser {
+     // Is the SPIR-V binary in a different endianness from the host native
+     // endianness?
+     bool requires_endian_conversion;
++    std::unique_ptr<uint32_t[]> native_words;
+ 
+     // Maps a result ID to its type ID.  By convention:
+     //  - a result ID that is a type definition maps to itself.
+@@ -748,12 +753,8 @@ spv_result_t Parser::parseOperand(size_t inst_offset,
+ 
+   if (_.requires_endian_conversion) {
+     // Copy instruction words.  Translate to native endianness as needed.
+-    const spv_endianness_t endianness = _.endian;
+-    std::transform(_.words + _.word_index, _.words + index_after_operand,
+-                   std::back_inserter(*words),
+-                   [endianness](const uint32_t raw_word) {
+-                     return spvFixWord(raw_word, endianness);
+-                   });
++      words->insert(words->end(), _.native_words.get() + _.word_index,
++                    _.native_words.get() + index_after_operand);
+   }
+ 
+   // Advance past the operand.
+
+From e6005633e64f4dac33aa2c4de42fe6bd3fb648ca Mon Sep 17 00:00:00 2001
+From: Hugo Devillers <hugo@xol.io>
+Date: Sat, 1 Jul 2023 11:51:37 +0200
+Subject: [PATCH 3/6] fix string literals when file has non-native endianness
+
+---
+ source/binary.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/source/binary.cpp b/source/binary.cpp
+index d46dbc1d9e..34cb608abe 100644
+--- a/source/binary.cpp
++++ b/source/binary.cpp
+@@ -591,7 +591,7 @@ spv_result_t Parser::parseOperand(size_t inst_offset,
+     case SPV_OPERAND_TYPE_OPTIONAL_LITERAL_STRING: {
+       const size_t max_words = _.num_words - _.word_index;
+       std::string string =
+-          spvtools::utils::MakeString(_.words + _.word_index, max_words, false);
++          spvtools::utils::MakeString(_.native_words.get() + _.word_index, max_words, false);
+ 
+       if (string.length() == max_words * 4)
+         return exhaustedInputDiagnostic(inst_offset, opcode, type);
+
+From 3ccc744e814609fe63b755e37240e03cf07e2f2b Mon Sep 17 00:00:00 2001
+From: Hugo Devillers <hugo@xol.io>
+Date: Sat, 1 Jul 2023 12:24:16 +0200
+Subject: [PATCH 4/6] don't convert endianness if not required
+
+---
+ source/binary.cpp | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/source/binary.cpp b/source/binary.cpp
+index 34cb608abe..69bd082598 100644
+--- a/source/binary.cpp
++++ b/source/binary.cpp
+@@ -207,10 +207,6 @@ class Parser {
+       operands.reserve(25);
+       endian_converted_words.reserve(25);
+       expected_operands.reserve(25);
+-
+-      native_words = std::make_unique<uint32_t[]>(num_words);
+-      for (size_t i = 0; i < num_words; i++)
+-        native_words[i] = spvFixWord(words[i], endian);
+     }
+     State() : State(0, 0, nullptr) {}
+     const uint32_t* words;       // Words in the binary SPIR-V module.
+@@ -267,6 +263,9 @@ spv_result_t Parser::parseModule() {
+                         << _.words[0] << "'.";
+   }
+   _.requires_endian_conversion = !spvIsHostEndian(_.endian);
++  _.native_words = std::make_unique<uint32_t[]>(_.num_words);
++  for (size_t i = 0; i < _.num_words; i++)
++    _.native_words[i] = _.requires_endian_conversion ? spvFixWord(_.words[i], _.endian) : _.words[i];
+ 
+   // Process the header.
+   spv_header_t header;
+
+From 74df3cf1b49c9ae296ebbb16cf8e2e7b45584454 Mon Sep 17 00:00:00 2001
+From: Hugo Devillers <hugo@xol.io>
+Date: Sat, 1 Jul 2023 12:42:04 +0200
+Subject: [PATCH 5/6] use native_words as a cache for spvFixWord
+
+---
+ source/binary.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/source/binary.cpp b/source/binary.cpp
+index 69bd082598..01322be0af 100644
+--- a/source/binary.cpp
++++ b/source/binary.cpp
+@@ -173,7 +173,7 @@ class Parser {
+   // Returns the endian-corrected word at the given position.
+   uint32_t peekAt(size_t index) const {
+     assert(index < _.num_words);
+-    return spvFixWord(_.words[index], _.endian);
++    return _.native_words[index];
+   }
+ 
+   // Data members
+
+From 458eb86f866b489e93d17eee12f76207b93dd60d Mon Sep 17 00:00:00 2001
+From: Hugo Devillers <hugo@xol.io>
+Date: Sat, 1 Jul 2023 16:59:06 +0200
+Subject: [PATCH 6/6] simplify and fix mismatched endian string parsing for
+ extract_source.cpp
+
+---
+ tools/objdump/extract_source.cpp | 58 ++++----------------------------
+ 1 file changed, 7 insertions(+), 51 deletions(-)
+
+diff --git a/tools/objdump/extract_source.cpp b/tools/objdump/extract_source.cpp
+index 02959525c6..a179c722a0 100644
+--- a/tools/objdump/extract_source.cpp
++++ b/tools/objdump/extract_source.cpp
+@@ -23,45 +23,12 @@
+ #include "spirv-tools/libspirv.hpp"
+ #include "spirv/unified1/spirv.hpp"
+ #include "tools/util/cli_consumer.h"
++#include "source/binary.h"
+ 
+ namespace {
+ 
+ constexpr auto kDefaultEnvironment = SPV_ENV_UNIVERSAL_1_6;
+ 
+-// Extract a string literal from a given range.
+-// Copies all the characters from `begin` to the first '\0' it encounters, while
+-// removing escape patterns.
+-// Not finding a '\0' before reaching `end` fails the extraction.
+-//
+-// Returns `true` if the extraction succeeded.
+-// `output` value is undefined if false is returned.
+-spv_result_t ExtractStringLiteral(const spv_position_t& loc, const char* begin,
+-                                  const char* end, std::string* output) {
+-  size_t sourceLength = std::distance(begin, end);
+-  std::string escapedString;
+-  escapedString.resize(sourceLength);
+-
+-  size_t writeIndex = 0;
+-  size_t readIndex = 0;
+-  for (; readIndex < sourceLength; writeIndex++, readIndex++) {
+-    const char read = begin[readIndex];
+-    if (read == '\0') {
+-      escapedString.resize(writeIndex);
+-      output->append(escapedString);
+-      return SPV_SUCCESS;
+-    }
+-
+-    if (read == '\\') {
+-      ++readIndex;
+-    }
+-    escapedString[writeIndex] = begin[readIndex];
+-  }
+-
+-  spvtools::Error(spvtools::utils::CLIMessageConsumer, "", loc,
+-                  "Missing NULL terminator for literal string.");
+-  return SPV_ERROR_INVALID_BINARY;
+-}
+-
+ spv_result_t extractOpString(const spv_position_t& loc,
+                              const spv_parsed_instruction_t& instruction,
+                              std::string* output) {
+@@ -73,12 +40,8 @@ spv_result_t extractOpString(const spv_position_t& loc,
+     return SPV_ERROR_INVALID_BINARY;
+   }
+ 
+-  const auto& operand = instruction.operands[1];
+-  const char* stringBegin =
+-      reinterpret_cast<const char*>(instruction.words + operand.offset);
+-  const char* stringEnd = reinterpret_cast<const char*>(
+-      instruction.words + operand.offset + operand.num_words);
+-  return ExtractStringLiteral(loc, stringBegin, stringEnd, output);
++  *output = spvDecodeLiteralStringOperand(instruction, 1);
++  return SPV_SUCCESS;
+ }
+ 
+ spv_result_t extractOpSourceContinued(
+@@ -92,12 +55,8 @@ spv_result_t extractOpSourceContinued(
+     return SPV_ERROR_INVALID_BINARY;
+   }
+ 
+-  const auto& operand = instruction.operands[0];
+-  const char* stringBegin =
+-      reinterpret_cast<const char*>(instruction.words + operand.offset);
+-  const char* stringEnd = reinterpret_cast<const char*>(
+-      instruction.words + operand.offset + operand.num_words);
+-  return ExtractStringLiteral(loc, stringBegin, stringEnd, output);
++  *output = *output + spvDecodeLiteralStringOperand(instruction, 0);
++  return SPV_SUCCESS;
+ }
+ 
+ spv_result_t extractOpSource(const spv_position_t& loc,
+@@ -123,11 +82,8 @@ spv_result_t extractOpSource(const spv_position_t& loc,
+     return SPV_SUCCESS;
+   }
+ 
+-  const char* stringBegin =
+-      reinterpret_cast<const char*>(instruction.words + 4);
+-  const char* stringEnd =
+-      reinterpret_cast<const char*>(instruction.words + instruction.num_words);
+-  return ExtractStringLiteral(loc, stringBegin, stringEnd, code);
++  *code = spvDecodeLiteralStringOperand(instruction, 3);
++  return SPV_SUCCESS;
+ }
+ 
+ }  // namespace
