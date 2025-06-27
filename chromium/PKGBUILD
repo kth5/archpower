@@ -1,317 +1,426 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Evangelos Foutras <foutrelis@archlinux.org>
-# Contributor: Pierre Schmitz <pierre@archlinux.de>
-# Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
-# Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
+# Maintainer: Your Name <your.email@example.com>
+# Based on Debian Chromium Team packaging
 
-pkgname=chromium
-pkgver=133.0.6943.126
+pkgbase=chromium
+pkgname=(chromium chromium-common chromium-sandbox chromium-shell chromium-headless-shell chromium-driver)
+pkgver=137.0.7151.68
 pkgrel=1
-_launcher_ver=8
-_manual_clone=0
-_system_clang=1
-pkgdesc="A web browser built for speed, simplicity, and security"
-arch=(x86_64 powerpc64le riscv64)
-url="https://www.chromium.org/Home"
+pkgdesc="Web browser that aims to build a safer, faster, and more stable internet browsing experience"
+arch=(powerpc64le)
+url="https://www.chromium.org/"
 license=('BSD-3-Clause')
 depends=('gtk3' 'nss' 'alsa-lib' 'xdg-utils' 'libxss' 'libcups' 'libgcrypt'
          'ttf-liberation' 'systemd' 'dbus' 'libpulse' 'pciutils' 'libva'
-         'libffi' 'openjpeg2' 'desktop-file-utils' 'hicolor-icon-theme')
-makedepends=('python' 'gn' 'ninja' 'clang' 'lld' 'gperf' 'nodejs' 'pipewire'
-             'rust' 'rust-bindgen' 'qt5-base' 'qt6-base' 'java-runtime-headless'
-             'git' 'quilt' 'rollup')
+         'desktop-file-utils' 'hicolor-icon-theme')
+makedepends=('clang' 'lld' 'llvm' 'rust' 'rust-bindgen' 'python' 'gn' 'ninja' 'nodejs' 'npm'
+             'java-runtime-headless' 'git' 'libva' 'pipewire' 'qt6-base'
+             'harfbuzz-icu' 'python-jinja' 'python-ply' 'gperf' 'yasm'
+             'mesa' 'libelf' 'libxrandr' 'libxss' 'libcups' 'libxcomposite'
+             'libxcursor' 'libxdamage' 'libxfixes' 'libxi' 'libxtst' 'at-spi2-core'
+             'libdrm' 'libxkbcommon' 'wayland' 'vulkan-headers' 'vulkan-icd-loader'
+             'pkgconf' 'xcb-proto' 'dav1d>=1.4.0' 'openh264' 'rollup')
+makedepends_x86_64=('nasm')
+checkdepends=('xorg-server-xvfb')
 optdepends=('pipewire: WebRTC desktop sharing under Wayland'
             'kdialog: support for native dialogs in Plasma'
             'gtk4: for --gtk-version=4 (GTK4 IME might work better on Wayland)'
             'org.freedesktop.secrets: password storage backend on GNOME / Xfce'
-            'kwallet: support for storing passwords in KWallet on Plasma'
-            'upower: Battery Status API support')
-options=('!debug' '!lto') # Chromium adds its own flags for ThinLTO
-source=(https://commondatastorage.googleapis.com/chromium-browser-official/chromium-$pkgver.tar.xz
-        https://github.com/foutrelis/chromium-launcher/archive/v$_launcher_ver/chromium-launcher-$_launcher_ver.tar.gz
-        compiler-rt-adjust-paths.patch
-        increase-fortify-level.patch
-        use-oauth2-client-switches-as-default.patch
-        bindgen.patch
-        memory-allocator-dcheck-assert-fix.patch
-        clang-rust-target.patch
-        clang19.patch
-        third-party-cookies.patch
-        disable-tests.patch
-        disable-tests-swiftshader.patch
-        swiftshader-use-llvm-16.patch
-blink-attrib.patch
-constexpr.patch
-constflatset.patch
-libxml-parseerr.patch
-traitors.patch
-font-gc-asan.patch
-ps-print.patch
-rust-clanglib.patch
-        "chromium-openpower-patches::git+http://gitlab.raptorengineering.com/raptor-engineering-public/chromium/openpower-patches.git")
-sha256sums=('bb99b5d8a4ec2374f58d3b6c694bffde91af1b80db5c46783166dd51beada024'
-            '213e50f48b67feb4441078d50b0fd431df34323be15be97c55302d3fdac4483a'
-            'b3de01b7df227478687d7517f61a777450dca765756002c80c4915f271e2d961'
-            'd634d2ce1fc63da7ac41f432b1e84c59b7cceabf19d510848a7cff40c8025342'
-            '6de648d449159dd579e42db304aca0a36243f2ac1538f8d030473afbbc8ff475'
-            '7283347d00e17a927c97a4edc15d396b771f9119f74c3ee4aa0842462df324e7'
-            'a2c498cbce5a67213a970bdd7625800e2546ba72091a3e8f44cf65828e75b87d'
-            'aefb7ef68ba56d0e8c528e18c46ce0d086f804977684188de96cbd5027daddc2'
-            '76249079581d1aca53e9cd5bcc63a6b50bae31daa77fe1cc183c0d34e3190443'
-            '367c08580d84256b43752c1ea52fd7c53d70bae08be42452038df81fb04b224d'
-            'SKIP')
+            'kwallet: support for storing passwords in KWallet on KDE')
 
-if (( _manual_clone )); then
-  source[0]=fetch-chromium-release
-  makedepends+=('python-httplib2' 'python-pyparsing' 'python-six' 'npm' 'rsync')
-fi
+# Source URLs
+source=("https://github.com/chromium-linux-tarballs/chromium-tarballs/releases/download/${pkgver}/chromium-${pkgver}-linux.tar.xz"
+        "chromium.desktop")
 
-# Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
-# Keys are the names in the above script; values are the dependencies in Arch
-declare -gA _system_libs=(
-  [brotli]=brotli
-  #[dav1d]=dav1d
-  #[ffmpeg]=ffmpeg    # YouTube playback stopped working in Chromium 120
-  [flac]=flac
-  [fontconfig]=fontconfig
-  [freetype]=freetype2
-  [harfbuzz-ng]=harfbuzz
-  #[icu]=icu
-  #[jsoncpp]=jsoncpp  # needs libstdc++
-  #[libaom]=aom
-  #[libavif]=libavif  # needs -DAVIF_ENABLE_EXPERIMENTAL_GAIN_MAP=ON
-  [libjpeg]=libjpeg-turbo
-  [libpng]=libpng
-  #[libvpx]=libvpx
-  [libwebp]=libwebp
-  [libxml]=libxml2
-  [libxslt]=libxslt
-  [opus]=opus
-  #[re2]=re2          # needs libstdc++
-  #[snappy]=snappy    # needs libstdc++
-  #[woff2]=woff2      # needs libstdc++
-  #[zlib]=minizip
+# Patch list extracted from debian/patches/series (in correct order)
+_patches=(
+    # Fixes
+    "fixes-ps-print.patch"
+    "fixes-widevine-locations.patch"
+    "fixes-rust-clanglib.patch"
+    "fixes-material-utils.patch"
+    "fixes-strlcpy.patch"
+    "fixes-bindgen.patch"
+    "fixes-memory-allocator-dcheck-assert-fix.patch"
+    "fixes-predictor-denial-of-service.patch"
+    "fixes-fix-assert-in-vnc-sessions.patch"
+    "fixes-armhf-timespec.patch"
+    "fixes-updater-test.patch"
+    #"fixes-absl-optional.patch"
+    "fixes-font-gc-asan.patch"
+    "fixes-libsync-rk3588-panthor.patch"
+    "fixes-headless-gn.patch"
+    "fixes-stdatomic.patch"
+    "fixes-make-pair.patch"
+    "fixes-media-cstdint.patch"
+    "fixes-armhf-no-thumb.patch"
+    
+    # Upstream patches
+    "upstream-arm32-crel.patch"
+    "upstream-cross-build-target.patch"
+    "upstream-span-fwd.patch"
+    "upstream-mojo-optional.patch"
+    "upstream-opener-heur.patch"
+    "upstream-allowed-state.patch"
+    "upstream-pdfium-libpng.patch"
+    "upstream-safety-hub-set.patch"
+    
+    # Disable features
+    "disable-tests.patch"
+    "disable-tests-swiftshader.patch"
+    "disable-signin.patch"
+    "disable-android.patch"
+    "disable-catapult.patch"
+    "disable-font-tests.patch"
+    "disable-google-api-warning.patch"
+    "disable-third-party-cookies.patch"
+    "disable-driver-chrome-path.patch"
+    "disable-widevine-cdm-cu.patch"
+    "disable-clang-version-check.patch"
+    "disable-screen-ai-blob.patch"
+    "disable-buildtools-libc.patch"
+    "disable-node-version-ck.patch"
+    
+    # System library patches
+    "system-icu-shim.patch"
+    "system-jpeg.patch"
+    "system-openjpeg.patch"
+    "system-opus.patch"
+    "system-eu-strip.patch"
+    "system-rapidjson.patch"
+    #"system-rollup.patch"
+    
+    # Bookworm/Bullseye compatibility
+    "bookworm-dq-forward-iterator.patch"
+    "bookworm-gn-revert-path-exists.patch"
+    "bookworm-clang19.patch"
+    "bookworm-constflatset.patch"
+    "bookworm-libxml-parseerr.patch"
+    "bookworm-gn-allowlist.patch"
+    #"bookworm-adler1.patch"
+    "bookworm-freetype-COLRV1.patch"
+    "bookworm-gn-funcs.patch"
+    "bookworm-gn-absl.patch"
+    "bookworm-partially-deployed-mseal-syscall.patch"
+    "bookworm-constexpr.patch"
+    "bookworm-constexpr2.patch"
+    "bookworm-constexpr3.patch"
+    "bookworm-bubble-contents.patch"
+    "bookworm-rust-visibility.patch"
+    "bookworm-less-void.patch"
+    "bookworm-stdarch-arm.patch"
+    "bookworm-modff.patch"
+    "bookworm-foreach.patch"
+    "bookworm-eslint.patch"
+    "bookworm-crabbyav1f.patch"
+    "bookworm-node18-import.patch"
+    "bookworm-rust-is-none-or.patch"
+    "bookworm-fmodf.patch"
+    "bookworm-dav1d-extern.patch"
+    "bookworm-toktrie-utf8chunks.patch"
+    "bookworm-derivre-create.patch"
+    "bullseye-av1-vaapi.patch"    
+
+    # i386 support
+    "i386-support-i386.patch"
+    
+    # PowerPC64LE support - Core sandbox patches
+    "ppc64le-sandbox-0001-linux-seccomp-bpf-ppc64-glibc-workaround-in-SIGSYS-h.patch"
+    "ppc64le-sandbox-0001-sandbox-Enable-seccomp_bpf-for-ppc64.patch"
+    "ppc64le-sandbox-0001-services-service_manager-sandbox-linux-Fix-TCGETS-de.patch"
+    "ppc64le-sandbox-0001-sandbox-linux-bpf_dsl-Update-syscall-ranges-for-ppc6.patch"
+    "ppc64le-sandbox-0001-sandbox-linux-Implement-partial-support-for-ppc64-sy.patch"
+    "ppc64le-sandbox-0001-sandbox-linux-Update-IsSyscallAllowed-in-broker_proc.patch"
+    "ppc64le-sandbox-0001-sandbox-linux-Update-syscall-helpers-lists-for-ppc64.patch"
+    "ppc64le-sandbox-0002-sandbox-linux-bpf_dsl-Modify-seccomp_macros-to-add-s.patch"
+    "ppc64le-sandbox-0003-sandbox-linux-system_headers-Update-linux-seccomp-he.patch"
+    "ppc64le-sandbox-0004-sandbox-linux-system_headers-Update-linux-signal-hea.patch"
+    "ppc64le-sandbox-0005-sandbox-linux-seccomp-bpf-Add-ppc64-syscall-stub.patch"
+    "ppc64le-sandbox-0005-sandbox-linux-update-unit-test-for-ppc64.patch"
+    "ppc64le-sandbox-0006-sandbox-linux-disable-timedwait-time64-ppc64.patch"
+    "ppc64le-sandbox-0007-sandbox-linux-add-ppc64-stat.patch"
+    "ppc64le-sandbox-Sandbox-linux-services-credentials.cc-PPC.patch"
+    "ppc64le-sandbox-0008-sandbox-fix-ppc64le-glibc234.patch"
+    
+    # PowerPC64LE - Third party library support
+    "ppc64le-third_party-0001-third_party-angle-Include-missing-header-cstddef-in-.patch"
+    "ppc64le-third_party-0001-Add-PPC64-support-for-boringssl.patch"
+    "ppc64le-third_party-0001-third_party-libvpx-Properly-generate-gni-on-ppc64.patch"
+    "ppc64le-third_party-0001-third_party-pffft-Include-altivec.h-on-ppc64-with-SI.patch"
+    "ppc64le-third_party-0001-swiftshader-fix-build.patch"
+    "ppc64le-third_party-0001-third-party-hwy-wrong-include.patch"
+    "ppc64le-third_party-0002-Add-PPC64-generated-files-for-boringssl.patch"
+    "ppc64le-third_party-0002-third_party-lss-kernel-structs.patch"
+    "ppc64le-third_party-0004-third_party-crashpad-port-curl-transport-ppc64.patch"
+    "ppc64le-third_party-0002-third_party-libvpx-Remove-bad-ppc64-config.patch"
+    "ppc64le-third_party-0003-third_party-libvpx-Add-ppc64-generated-config.patch"
+    "ppc64le-third_party-0003-third_party-ffmpeg-Add-ppc64-generated-config.patch"
+    "ppc64le-third_party-0004-third_party-libvpx-work-around-ambiguous-vsx.patch"
+    "ppc64le-third_party-0001-add-xnn-ppc64el-support.patch"
+    "ppc64le-third_party-0002-regenerate-xnn-buildgn.patch"
+    "ppc64le-third_party-skia-vsx-instructions.patch"
+    "ppc64le-third_party-use-sysconf-page-size-on-ppc64.patch"
+    "ppc64le-third_party-dawn-fix-ppc64le-detection.patch"
+    "ppc64le-third_party-0001-Force-baseline-POWER8-AltiVec-VSX-CPU-features-when-.patch"
+    
+    # PowerPC64LE - WebRTC support
+    "ppc64le-webrtc-Rtc_base-system-arch.h-PPC.patch"
+    
+    # PowerPC64LE - Workarounds
+    "ppc64le-workarounds-HACK-third_party-libvpx-use-generic-gnu.patch"
+    "ppc64le-workarounds-HACK-debian-clang-disable-base-musttail.patch"
+    "ppc64le-workarounds-HACK-debian-clang-disable-pa-musttail.patch"
+    
+    # PowerPC64LE - libaom support
+    "ppc64le-libaom-0001-Add-ppc64-target-to-libaom.patch"
+    "ppc64le-libaom-0001-Add-pregenerated-config-for-libaom-on-ppc64.patch"
+    
+    # PowerPC64LE - Breakpad/Crashpad
+    "ppc64le-breakpad-0001-Implement-support-for-ppc64-on-Linux.patch"
+    "ppc64le-crashpad-0001-Implement-support-for-PPC64-on-Linux.patch"
+    
+    # PowerPC64LE - Build fixes
+    "ppc64le-fixes-fix-clang-selection.patch"
+    "ppc64le-fixes-fix-rustc.patch"
+    "ppc64le-fixes-fix-rust-linking.patch"
+    "ppc64le-fixes-fix-breakpad-compile.patch"
+    "ppc64le-fixes-fix-partition-alloc-compile.patch"
+    "ppc64le-fixes-fix-different-data-layouts.patch"
+    "ppc64le-fixes-fix-study-crash.patch"
+    "ppc64le-fixes-fix-unknown-warning-option-messages.diff"
+    
+    # PowerPC64LE - V8 engine support
+    "ppc64le-v8-0001-Enable-ppc64-pointer-compression.patch"
+    "ppc64le-v8-0002-Add-ppc64-trap-instructions.patch"
+    
+    # PowerPC64LE - Sandbox fixes
+    "ppc64le-sandbox-fix-ppc64-linux-syscalls-headers.patch"
+    
+    # PowerPC64LE - Core architecture support
+    "ppc64le-core-add-ppc64-architecture-string.patch"
+    "ppc64le-core-add-ppc64-pthread-stack-size.patch"
+    "ppc64le-core-add-ppc64-architecture-to-extensions.diff"
+    "ppc64le-core-baseline-isa-3-0.patch"
+    
+    # Ungoogled Chromium patches
+    "ungoogled-misc-change-user-agent.patch"
+    "ungoogled-misc-fix-debian-ftbfs.patch"
+    "ungoogled-core-inox-patchset-0001-fix-building-without-safebrowsing.patch"
+    "ungoogled-core-ungoogled-chromium-fix-building-without-safebrowsing.patch"
+
+    "hack-archpower-rust-target.patch"
 )
-_unwanted_bundled_libs=(
-  $(printf "%s\n" ${!_system_libs[@]} | sed 's/^libjpeg$/&_turbo/')
-)
-depends+=(${_system_libs[@]})
 
-# Google API keys (see https://www.chromium.org/developers/how-tos/api-keys)
-# Note: These are for Arch Linux use ONLY. For your own distribution, please
-# get your own set of keys.
-#
-# Starting with Chromium 89 (2021-03-02) the OAuth2 credentials have been left
-# out: https://archlinux.org/news/chromium-losing-sync-support-in-early-march/
-_google_api_key=AIzaSyDwr302FpOSkGRpLlUpPThNTDPbXcIn_FM
+# Add patch sources (these would need to be created from debian/patches/)
+for patch in "${_patches[@]}"; do
+    source+=("$patch")
+done
+
+# Checksums would need to be generated
+sha256sums=('63dfb8509737466ac4de636ddf3d8110f1434e0c4999ba5e6f34891439dbfe20'
+            '6e49854d9fa380f6f39b8bed43ef643a188f6f37c4fdbdb1a9eb938882cba8de'
+            'b72faf418a31aa5d7a05434d0473eafb5dcf012e14049f6e55b1e1f3fcb8ba28'
+            'a82bab305730bb94413400776b03e5c589e9f4d23e4cea9f275535ae4c5fed57'
+            '5fe4322a44e0e5aa9e3ea9548b07a21a5bf60d696e0cd3fb0b7443951ca0272b'
+            '3c3bd678552774f265c12c42d27971f22cbf62617148f74b483b41065dfdeb8d'
+            '85104b0dd723ac061fa03dfdf3412a6988a7a3785b8341b952e83e78fca5f5fa'
+            'ba559123089d37786fb20ac57d44eee50564f07e45cf701c3ba355d331483205'
+            '36a89d9cdd6a093a78614223da0a6e0c12d8f731f8f7cf6659d07aa03af6251b'
+            '2e2619bdceeb3cd6f5337b51b8c4b724935c8de54076b083eec36faf9c377f97'
+            '13ae24eb8b2bf66ac9be111b469da86e9e73c0548ba66b58db2615c8c707cbd5'
+            'c98662da99d5f74873a7dc4d9399313cf193ccbe0218ab1ec82e6730b03c1875'
+            '348dfce5a232f5a71c1f59b7a17ca90c55693b8eb9c9ae1721daf1a8148fb4d0'
+            '638fe4a1c58e39dc8cbacf569a01b170dbc77bd15181bc33eaf8d8ce1ce808f9'
+            'd917a7eafbc48316608da7dac465e9ebae81bb294bd6d6416d499df84a8b4349'
+            '1519069b750d14a69bfe8de991aef6219e5f11e3afb910b68fbdf567ede25332'
+            'dc97e4dd028d312a0cbb99aeb62b97383b744a9c55de4c2a352f27a878884d6e'
+            '3a78223090e587f98ed0f531f5ee1f064ab80be3f2fe5d7bfe3c9da99e30f322'
+            '0346363366553c779d8dbea1e1a4a7d19ebe0543433fdbd37cd14676074c6f89'
+            '525520f676a3973f3cc8c0e31c30da7df26924971615cd3a73dcc13665a48220'
+            'b895462fcd2ea32a46937beb24ba62be9c612e4a73b6f4be863aa895ba45d5ee'
+            'ede0945441709a908ee00879dbcd43422bc65a8bca671e9cda5310cf566408de'
+            '2d5e951faa8b2c1b190861cd122dc397707cef0eb1240c1d216dff97cdc1f47c'
+            '43a31bef3594d19165ca04d3e0a17e4da0dde1bf2a6560c88815476bffd102bc'
+            '1eedc19a2122e52e4de1144019e9bc9cd8bfd33273b8f51cb3854897cd7d6cd7'
+            '1931cd57b13d124a0799257b5292fb5636b7cac88a79dade09e6599cb4700cbe'
+            'ae2209d18b8c04936c28f885a3ba277011dae1183cc6c8843c306dd4e2ea124a'
+            '1990b0719e6252a7833e88278818d940bc562e5cbb30da67ae88a3e2fac03124'
+            '742626d339e4029dac028d02eb5f01603eb050ca153f9756a14fe835cf4550e9'
+            '834ca0a4c9cccad0a5aadbcf2a0b0bfd99743a12fe3280876b49b37f65c7cec3'
+            'a6234a8cb6490fec4e070cabe1619a517570c515edae25c55c03fd14da2c4dc7'
+            '3bef2b35c15b77f39c0433cae271fc50155ec80294405d0a6c91fb767cfb9c73'
+            '3d03b1ba122cb3061003014949fa7a280b28e00bbfaa818d58caabbf4b757879'
+            '1a9c0bf2965bdae5c41b1e8b8e1ac7476ef80c689463fec05e78edc7fed6f267'
+            '1418050b06bcab9d98949f885516caa0bced7a7635f95b36a052b2615fb159ae'
+            '9a9607609a165d156d7e74581ae510f1dc986337814d7a5aa6b05b7f6dece74a'
+            '528e8bd54f27707412427383c5d766eaa6704016885995b80af278ba2eefb39a'
+            'aeaf87235eb07baa1386f95ac2a75d923fe371b88bb84062d840cfcf59e4b2b8'
+            'ef19c4791a513acc7cbd0ccc680ca9059664f0f0d208d8fc450971408178e74b'
+            '1c90b765fa45fa82877c2deafbe51113ba8d4fd1ec281b515136f7b6568cdbf7'
+            '16706dfb5236dd0fc52b4d13422858be1cd81c1b4907dacb1ec7e66e015b5afb'
+            '902aa98e8abe3c14f5b9e043cb4caca70b63967a5ea8b58d9c90a47825619043'
+            'ee835327d337da56d07fad79307ecae92f8fb74b7794ee89eb3016921fba5dfb'
+            '7cf747e22652cd9512467353038cc7a6f85740169f87bbc6587bebe7fcceae5b'
+            '0bcb1d3f4998e43530bdfe01aa7afbbf712c1b020afd8356741c083bb8e7b091'
+            '164dbcc8b9481f7b9a14e287c16bea951bb7af9077de3b0b19d68f7a5b8df04e'
+            'c92ceb125296d89f330bdcfab94d71dd5c5133d2be551d6e965b550be6d5b10c'
+            '440c9785f824ac1317d632a383b88f50ffb9ef2ffbab02a238f008e148ec3bbc'
+            'c2692916c3739f7cf14445028dfe76db2c28775c45f1aef2e9105063a5805d75'
+            '3c7f3cb6d37cb02b245079bea3ebe69b7e919385d2f9f266b56e430972d4717b'
+            '66a2040ee69ed7878bcf89afcbc15bfd5512162922e3a39570313c51cf107579'
+            '3b27baed43619700dff2c6b8b7e07a258c7d4e0bd7439fe354a46d6a096dfffb'
+            'efcb689c5a8378eb2ae23acaafcf95dd2ed9504b9562ecf3eaa06f8bcd3745b7'
+            'c44a927a0b0c7d6724eaa21b65625b22fe43249bf930a13ec56b2628c9ee3f02'
+            '78bfc48dfeeb7180b0383d5dbc5568a363b03162c5efef229bb8d13f17295181'
+            '198c6fbcf00ceb67b199e136da1d93bd98eaf4da5f0b4c96106f265b0cfaf477'
+            'bced93005e1f9a3be8cfd2456df91dab25671a857e19ddcc765d2794a46a2e2e'
+            '9ebdefca0d8ce3dbca9a7bc11cb248fc8eeb9029d90553a9b6eebdbd6d428315'
+            'a8d4d391915b248406ee99c37a82125b307b0e2938c086daa96efd5b69f1ef9e'
+            '23ed20c907d80f86626aa5347fc162b28455f445660db552302cbd86b4f60175'
+            'c4676a899e4221e058d13e78a554db2dee181a6133e56f11f15fd67ba45b49ef'
+            'a93e5bbd03063fcb4964756bda10e952bc52f9624880361193627496427b045c'
+            '3c18b05c7e90f12be5709ac8b439c6b333d00f7adbbe19453dd9f22cd8d23c8e'
+            'd6bd2f95f1352300f1da317d737fb845df219c664071dc1cfebc6f8b980826d7'
+            'a7dcfa7e092d503219159b7eff47942506bcddd5440c2b39bae500e9b6c1178c'
+            'da527f40cb754f49459892812e774be8d7274db742075c5874b113545f35e76a'
+            'aeef76de4ee14f618aba5c13494add2976f4bf66da0aa95af79573f107fcb940'
+            '20e6775598e6ec61b995394103016cf2e3cfe15d48c229d6f96bb72275880797'
+            '24b0971dddf759bc4908edee7c2856e7aa6450ae9fbc34846a02de43cdcd886d'
+            'fe5f432ac30168b65d04ddca6752faad21b81b4b24354afa4eefa70e3dd04db2'
+            '454d4111c8e96bdfacd2c2ee248a43443edad45ff9fc63c19efea1b903ec29d6'
+            '884ef9640d846dc18095d86c9fd5971298006681779fb64b684c4b035ec2143f'
+            'bdcb376e0235d3e9a5ab71263c58496afafd8f486e624429941395ce03cbea9b'
+            '18e838bcf229bde975e340d038794e0156e96646ed14d1a316112736bbc35287'
+            'c89450cf0b928b8d520eb65625324f9c5c078e515a13cefb306511b499533c73'
+            'd6e64617e069638ff37e7c43af06c5f2d8eee4f2c81337ab4dab6005b23a34ab'
+            'b90b5aa481ba05fcda057606c31eb9414c24914b97540267a80514d3fabb3206'
+            'ce4458e96f7d003f70e30f325f5294f42fe65711381e742e79b1b7001348b159'
+            'c19f4dd3b422eea4d6f014b60e799d5844f86ac4cb5dd81699c7b6f781adc531'
+            'fb82cae9d39d2f9f9eee5391dfaa3b26bcad71a2059208371402c96f258e78ea'
+            '217bd8cf38d7d9eb21546ce0d0015d48c9561fb680708d7d5d819535e5698c3e'
+            '06809c53b616526d157bf187a3953a21cd8c8e4b2220c79e1ecc88901afbf1e1'
+            '6cba5fb4e5eaeb0804147c4149a010601e2231be27557aa2c40d45a2d2b91802'
+            '817cc8a7e1858e6d8aee97588e6631ba1a030b38788c3e280c41d559cd165cba'
+            'ec643bf55f485b236f054a2eca911d074434263f6829a3a68483da9989899de5'
+            '75af57d2132c9ec89e932c45df4aca76f1e6b85a33ce78575da6bc3d97f5c04c'
+            '599fcdef492897eab795b5ce46cc164442036092af5bbddf70ae213a6eee33ef'
+            'f6d7db563a3dd8510a65641f21a4539aa8e95e176bb1143f631cfec511818d06'
+            '8b4cda7021953306906107f0fb84e4c11c552b3f8cf642e72763e7ad67922632'
+            '7a2b368f1d17c6ab6abb261a704566ce0110c35145196fb0359fb985d19f54ae'
+            'bfc30e7d93d887b92d5e8e99a864ce3a46aa5636a42ec9b04570582b6d16ae22'
+            '0b67c83f5ad8661f2b57c8b85295962d0050ecaba9a27c8bdfc20a9b23210628'
+            'ec58ea41da772c73f8b16ebb19c4bb53f373b158b8fe80992696e85ee4bab570'
+            '68d9bb426fe9b7bead06170b0258579d79723168c1f01e7895b3e14fbf54f234'
+            '268edc2df80f1fa5043a210c02b670c017b1e952d323815ef14e8d94efdaa3d1'
+            '95a5b83da8a2bd478ca713b1fca5baaee4efcbd4205e17e204785ed53cf1a5b9'
+            '4b7451335cc5971149113669c4d83ed8db768b128289c8150466e67ea902df36'
+            'adcc4ea9b0bd4113fce1def27aa12427ff1439a792e7cda38ed56e9071d87a68'
+            '369d9d0013ffc3a5acac6d1ee6e87288b6adf03012fa8b0c9caa007e33244293'
+            '98a25551bf28cf8991ac9075fb2babe11428fb79cc71a6159897db966b79ab52'
+            '80c903a956f2d4e46c1820cbab7b05748ce720a4269f6d59e8c7cbca65112419'
+            '4e39aa2c3b7ef469e1d9d2130984600cf7be1a453fa3b2d69145dc0ac6796bac'
+            '60f7c34fd119a83426b33eb6e996dce5e2856b3ae2bd3c3f363a33aecb246479'
+            'f7c96b49d2a2fff12b7d714d4d09cdb0adf8627a437988f095740f2c0b1a9077'
+            '4a205bdbdef44be0b4541103c1367818e187e48570b3256a10ca893f5d9f8f45'
+            '579758b21a99290c30bebbc9a369829db0b5b9e0070946e853a7d99309b2b044'
+            'c077abaccf32d1ac8082505617836d2f98efebf03ad255368f53bffdba72f174'
+            '13ef17b58b4aed19bf9c49c7cd80763f3b9e1b485b2a28fb6002c6b5c43ea91b'
+            '4e5567b1982a2238d5463e37411bff07745d20f57fef39af6e3cc712511b476e'
+            '665e736ca240f1272c4307c422cde9c4ffb8001dadf84322525f5fd91e1f8691'
+            '5254cfdf6773caa5f19a0a2dd154a790d852790831979034336e92c955ee28c7'
+            'f59441acb5b5ffb0220ef4cb277d3fae4a75c3e406cf5d9561dfd84c85345cc8'
+            'da2a35972d059ba9cb89e63516f1b1fd903093cc8a5dd4bad8b892ce4f9b3964'
+            'b11116d6ee3338ffd9fb9f41105ac149734fe033d645ebdcbb16413fc19220f2'
+            'a1e26e1f564b30b374ee8ad8ee828c138f29d03b9b62490f7c8e1a49390a8ba3'
+            '7aa44011f6692f0c20ec1aa753b764e490e1205ce88e81593705071b8994f373'
+            '900997c27e6802857cce66cc6a7bee46492f98499abdce93eb6f296ff2af83e5'
+            '53578be7a612fcba56beb1a9d4fc746f40c20e573ce3a39de7177c06f468287d'
+            'ae8d4ae845dafe0c245e430f2360b263de0ecc244c99b769da3193744d59d819'
+            'db85690f2789b376631b60cbd7e227c62eb9a8d3d8457cc098976662f07bb954'
+            'a7d16cc26614c8d17589cc3e6550c83247ed2508110f6b6457d42b8a45a7fff3'
+            'c630ef9cc2f09e3c502af7fd53b3bfcf94ea45f4ba94f9a569ddfecd5d247773'
+            'cac8eb38133e3c8573bbd32a1494f51d3e642d8b4f4c82a661f4584cfb4a6e4f'
+            'b82accfdf90fca03605c780b32b1f80d9ee8ac13067218c7e726d56d170ed050'
+            '92dc3118da047cadf220da365faa30620334d1b1ff76622b27fa97e57b745c6e'
+            'd1879e95a09ccec329c7e3c7c7ee6de56a5d6625dc7f9d892c20a499bdeb0007'
+            '86f3acdfa6e7469709368013d76b2667de61c16e5747b9f5667e336596ad977c'
+            'b94fd6b937c0e81fc2de4f9ca66b9d71c7ea25594dd74f7819ebda05a2b0fb00'
+            'da2caeaacbc8134fd07b69ba31ad8dfca679e9072adda61c272a3fa79fe69cda'
+            '4143c4a52918adb0bf4a430956a930c0b2c215f5701cd485ad8f4ada6ec4fcd3'
+            '1176407c46e1c55937455fee9ee7861759a18e8e381709fcec06f026b09ee3b4'
+            'be7c874f8179d42450eb99f8edab895ea6192a9f50e1122ed69ba9f3a6cfc299'
+            'ca1b388f4bdce513a6fcd4cf0c1794d79942cc4e627d8ce62bf9b5d9bd7a37b6'
+            'f31b69899cada839e900bcaac27b331d551a23955a41d691922409ade790ba1c'
+            '12b2ad343f7a447156915b547bcb9b73dc0e2cbb642b90e9eccedd5c07c43973'
+            'b96067d2713d06a513ad02a57bac169fa55e3fd832febef5de02b3b38a9dea77'
+            '0295efb90524b8fd43a4aa005b26d1f9b37bb468f7f465c631f2e50370479f32'
+            '75f507396088ce42806aec33bc3261a24a987e95c8d3d93f85a10c56d027ac23'
+            'b14c32975df5e97b34748b4f1a7d797093406d5d0aacf0c4d5526c2881212181'
+            '166c999c8e17b294aee93a7d899e5e68f39da3d2c650009a75b120a33ead19ed')
 
 prepare() {
-  if (( _manual_clone )); then
-    ./fetch-chromium-release $pkgver
-  fi
-  cd chromium-$pkgver
+    cd "chromium-${pkgver}"
+    
+    # Apply PowerPC64LE and other patches
+    for patch in "${_patches[@]}"; do
+        echo "Applying $patch..."
+        patch -Np1 -i "../$patch"
+    done
 
-  # Allow building against system libraries in official builds
-  sed -i 's/OFFICIAL_BUILD/GOOGLE_CHROME_BUILD/' \
+    # Allow building against system libraries in official builds
+    sed -i 's/OFFICIAL_BUILD/GOOGLE_CHROME_BUILD/' \
     tools/generate_shim_headers/generate_shim_headers.py
 
-  # https://crbug.com/893950
-  sed -i -e 's/\<xmlMalloc\>/malloc/' -e 's/\<xmlFree\>/free/' \
-         -e '1i #include <cstdlib>' \
-    third_party/blink/renderer/core/xml/*.cc \
-    third_party/blink/renderer/core/xml/parser/xml_document_parser.cc \
-    third_party/libxml/chromium/*.cc
+    
+    # Setup system node for build
+    mkdir -p third_party/node/linux/node-linux-x64/bin
+    ln -sf /usr/bin/node third_party/node/linux/node-linux-x64/bin/
 
-  # Use the --oauth2-client-id= and --oauth2-client-secret= switches for
-  # setting GOOGLE_DEFAULT_CLIENT_ID and GOOGLE_DEFAULT_CLIENT_SECRET at
-  # runtime -- this allows signing into Chromium without baked-in values
-  patch -Np1 -i ../use-oauth2-client-switches-as-default.patch
+    # Setup system rollup for build
+    mkdir -p third_party/devtools-frontend/src/node_modules
+    ln -sf /usr/lib/node_modules/rollup third_party/devtools-frontend/src/node_modules/rollup3
 
-  # Upstream fixes
-
-  # Allow libclang_rt.builtins from compiler-rt >= 16 to be used
-  patch -Np1 -i ../compiler-rt-adjust-paths.patch
-
-  # Increase _FORTIFY_SOURCE level to match Arch's default flags
-  #patch -Np1 -i ../increase-fortify-level.patch
-
-  # Fixes for building with libstdc++ instead of libc++
-
-  sed "s/^ungoogled//g" -i ../chromium-openpower-patches/patches/series
-  sed "s@^ppc64le/fixes/fix-clang-selection.patch@@g" -i ../chromium-openpower-patches/patches/series
-
-  export QUILT_PATCHES=../chromium-openpower-patches/patches
-  export QUILT_REFRESH_ARGS="-p ab --no-timestamps --no-index"
-  quilt push -a
-
-  patch -Np1 -i ${srcdir}/bindgen.patch
-  patch -Np1 -i ${srcdir}/memory-allocator-dcheck-assert-fix.patch
-  patch -Np1 -i ${srcdir}/clang-rust-target.patch
-  patch -Np1 -i ${srcdir}/clang19.patch
-  patch -Np1 -i ${srcdir}/swiftshader-use-llvm-16.patch
-  patch -Np1 -i ${srcdir}/third-party-cookies.patch
-  patch -Np1 -i ${srcdir}/disable-tests.patch
-  patch -Np1 -i ${srcdir}/disable-tests-swiftshader.patch
-  patch -Np1 -i ${srcdir}/blink-attrib.patch
-  patch -Np1 -i ${srcdir}/constexpr.patch
-  patch -Np1 -i ${srcdir}/constflatset.patch
-  patch -Np1 -i ${srcdir}/libxml-parseerr.patch
-  patch -Np1 -i ${srcdir}/traitors.patch
-  patch -Np1 -i ${srcdir}/font-gc-asan.patch
-  patch -Np1 -i ${srcdir}/ps-print.patch
-  patch -Np1 -i ${srcdir}/rust-clanglib.patch
-
-  # Link to system tools required by the build
-  rm third_party/node/linux/node-linux-x64/bin/node
-  ln -s /usr/bin/node third_party/node/linux/node-linux-x64/bin/
-  ln -s /usr/bin/java third_party/jdk/current/bin/
-
-	# use system rollup
-  cp -ra /usr/lib/node_modules/rollup third_party/node/node_modules/
-	ln -sf /usr/bin/rollup third_party/devtools-frontend/src/node_modules/rollup3
-
-  if (( !_system_clang )); then
-    # Use prebuilt rust as system rust cannot be used due to the error:
-    #   error: the option `Z` is only accepted on the nightly compiler
-    ./tools/rust/update_rust.py
-
-    # To link to rust libraries we need to compile with prebuilt clang
-    ./tools/clang/scripts/update.py
-  fi
-
-  # Remove bundled libraries for which we will use the system copies; this
-  # *should* do what the remove_bundled_libraries.py script does, with the
-  # added benefit of not having to list all the remaining libraries
-  local _lib
-  for _lib in ${_unwanted_bundled_libs[@]}; do
-    find "third_party/$_lib" -type f \
-      \! -path "third_party/$_lib/chromium/*" \
-      \! -path "third_party/$_lib/google/*" \
-      \! -path "third_party/harfbuzz-ng/utils/hb_scoped.h" \
-      \! -regex '.*\.\(gn\|gni\|isolate\)' \
-      -delete
-  done
-
-  ./build/linux/unbundle/replace_gn_files.py \
-    --system-libraries "${!_system_libs[@]}"
+    # Create rust-toolchain directory and symlink system bindgen
+    mkdir -p third_party/rust-toolchain/bin
+    ln -sf /usr/bin/bindgen third_party/rust-toolchain/bin/bindgen
+    
+    # Use system libraries where possible
+    local _system_libs=(
+        #'zlib'
+        'libpng' 
+        'libjpeg'
+        'freetype'
+        'harfbuzz-ng'
+        'libwebp'
+        'opus'
+        'dav1d'
+        #'libaom'
+        'fontconfig'
+    )
+    
+    python3 build/linux/unbundle/replace_gn_files.py --system-libraries "${_system_libs[@]}"
+    
+    # Create output directory
+    mkdir -p out/Release
 }
 
 build() {
-  make -C chromium-launcher-$_launcher_ver
+  cd "chromium-${pkgver}"
+    
+  export CC=clang
+  export CXX=clang++
+  export AR=ar
+  export NM=nm
+  export RUSTC_BOOTSTRAP=1
 
-  cd chromium-$pkgver
-
-  if (( _system_clang )); then
-    export CC=clang
-    export CXX=clang++
-    export AR=ar
-    export NM=nm
-  else
-    local _clang_path="$PWD/third_party/llvm-build/Release+Asserts/bin"
-    export CC=$_clang_path/clang
-    export CXX=$_clang_path/clang++
-    export AR=$_clang_path/llvm-ar
-    export NM=$_clang_path/llvm-nm
-  fi
-
-  local _flags=(
-    'custom_toolchain="//build/toolchain/linux/unbundle:default"'
-    'host_toolchain="//build/toolchain/linux/unbundle:default"'
-    'is_official_build=true' # implies is_cfi=true on x86_64
-    'symbol_level=0' # sufficient for backtraces on x86(_64)
-    'treat_warnings_as_errors=false'
-    'disable_fieldtrial_testing_config=true'
-    'ffmpeg_branding="Chrome"'
-    'proprietary_codecs=true'
-    'rtc_use_pipewire=true'
-    'link_pulseaudio=true'
-    'use_sysroot=false'
-    'use_system_libffi=true'
-    'enable_hangout_services_extension=true'
-    'enable_widevine=true'
-    'enable_nacl=false'
-  )
-
-  case "${CARCH}" in
-    powerpc64le)
-       # do not optimize away null pointer safety checks
-       export CXXFLAGS+=' -fno-delete-null-pointer-checks'
-       # avoid altivec incompatibilities / deprecation warnings
-       export CXXFLAGS+=' -faltivec-src-compat=mixed -Wno-deprecated-altivec-src-compat'
-
-       export LD=lld
-
-      _flags+=(
-        'is_debug=false'
-        'enable_reading_list=false'
-        'enable_iterator_debugging=false'
-        'enable_hangout_services_extension=false'
-        'angle_has_histograms=false'
-        'angle_build_tests=false'
-        'build_angle_perftests=false'
-        'use_qt=false'
-        'build_dawn_tests=false'
-        'use_custom_libcxx=false'
-        'is_cfi=false'
-        'use_thin_lto=false'
-        'chrome_pgo_phase=0'
-        'use_gio=true'
-        'is_official_build=true'
-        'use_pulseaudio=true'
-        'v8_enable_backtrace=true'
-        #'use_system_zlib=true'
-        'use_system_lcms2=true'
-        'use_system_libjpeg=true'
-        'use_system_libpng=true'
-        'use_system_freetype=true'
-        'use_system_harfbuzz=true'
-        'use_system_libopenjpeg2=true'
-        'concurrent_links=1'
-        'safe_browsing_mode=1'
-        'build_with_tflite_lib=true'
-        'host_cpu="ppc64"'
-        'use_v4l2_codec=false'
-        'use_vaapi=true'
-        'enable_reporting=false'
-        'use_unofficial_version_number=false'
-      )
-    ;;
-    *)
-      _flags+=(
-        'use_custom_libcxx=true' # https://github.com/llvm/llvm-project/issues/61705
-        'blink_enable_generated_code_formatting=false'
-        'use_qt6=true'
-        'moc_qt6_path="/usr/lib/qt6"'
-        "google_api_key=\"$_google_api_key\""
-      )
-    ;;
-  esac
-
-
-  if [[ -n ${_system_libs[icu]+set} ]]; then
-    _flags+=('icu_use_data_file=false')
-  fi
-
-  if (( _system_clang )); then
-     local _clang_version=$(
-       clang --version | grep -m1 version | sed 's/.* \([0-9]\+\).*/\1/')
-
-    _flags+=(
-      'clang_base_path="/usr"'
-      'clang_use_chrome_plugins=false'
-      "clang_version=\"$_clang_version\""
-      #'chrome_pgo_phase=0' # needs newer clang to read the bundled PGO profile
-    )
-
-    # Allow the use of nightly features with stable Rust compiler
-    # https://github.com/ungoogled-software/ungoogled-chromium/pull/2696#issuecomment-1918173198
-    export RUSTC_BOOTSTRAP=1
-
-    _flags+=(
-      'rust_sysroot_absolute="/usr"'
-      'rust_bindgen_root="/usr"'
-      "rustc_version=\"$(rustc --version)\""
-    )
+  # Set Debian-compatible environment variables for patches
+  export DEB_BUILD_ARCH="powerpc64le"
+  export DEB_HOST_ARCH="powerpc64le"
+    
+  # PowerPC64LE specific flags  
+  if [[ $CARCH == "powerpc64le" ]]; then
+    export CXXFLAGS+=" -faltivec-src-compat=mixed -Wno-deprecated-altivec-src-compat"
+    export LD=ld
+    #export LDFLAGS+=" -z,max-page-size=4096"
   fi
 
   # Facilitate deterministic builds (taken from build/config/compiler/BUILD.gn)
@@ -341,80 +450,204 @@ build() {
   # https://crbug.com/957519#c122
   CXXFLAGS=${CXXFLAGS/-Wp,-D_GLIBCXX_ASSERTIONS}
 
-  gn gen out/Release --args="${_flags[*]}"
-  ninja -C out/Release chrome chrome_sandbox chromedriver.unstripped
+
+    local _rustc_version="1.87.0" 
+    local _clang_version=$(clang --version | head -n1 | grep -o '[0-9]\+' | head -n1)
+
+    # Build configuration
+    local _flags=(
+        'custom_toolchain="//build/toolchain/linux/unbundle:default"'
+        'host_toolchain="//build/toolchain/linux/unbundle:default"'
+        'is_official_build=true'
+        'is_debug=false'
+        'symbol_level=0'
+        'use_sysroot=false'
+        'use_custom_libcxx=true'
+        
+        # System clang configuration
+        'is_clang=true'
+        "clang_base_path=\"/usr\""
+        "clang_version=\"${_clang_version}\""
+        'clang_use_chrome_plugins=false'
+        'treat_warnings_as_errors=false'
+        'clang_warning_suppression_file=""'
+        
+        # Disable problematic features completely
+        'safe_browsing_mode=0'
+        'enable_pdf=true'
+        'enable_print_preview=true'
+        'enable_supervised_users=true'
+        'enable_service_discovery=false'
+        'enable_mdns=false'
+        'enable_remoting=false'
+        'enable_hangout_services_extension=false'
+        'use_official_google_api_keys=false'
+        
+        # Core features we want to keep
+        'enable_extensions=true'
+        'enable_nacl=false'
+        'enable_widevine=true'
+        'enable_vr=false'
+        'enable_reading_list=false'
+        
+        # Media and codecs
+        'proprietary_codecs=true'
+        'ffmpeg_branding="Chrome"'
+        
+        # System libraries
+        'use_system_zlib=true'
+        'use_system_lcms2=true'
+        'use_system_libjpeg=true'
+        'use_system_libpng=true'
+        'use_system_freetype=true'
+        'use_system_harfbuzz=true'
+        'use_system_libopenjpeg2=true'
+        'use_system_libffi=true'
+        
+        # Audio/Video
+        'use_pulseaudio=true'
+        'link_pulseaudio=true'
+        'rtc_use_pipewire=true'
+        
+        # UI toolkit
+        'use_gio=true'
+        'use_qt5=false'
+        'use_qt6=false'
+        
+        # Build optimization
+        'use_thin_lto=true'
+        
+        # Rust configuration
+        'rust_sysroot_absolute="/usr"'       
+        "rustc_version=\"${_rustc_version}\""
+        'rust_bindgen_root="/usr"'
+        #'use_system_rust=true'
+        #'rust_prebuilt_stdlib=false'
+        #'build_rust_base_target=false'
+ 
+        # V8 and ICU
+        'v8_enable_backtrace=true'
+        'icu_use_data_file=true'
+        'disable_fieldtrial_testing_config=true'
+    )
+
+    # Architecture specific settings
+    case "$CARCH" in
+        x86_64)
+            _flags+=('host_cpu="x64"' 'use_vaapi=true')
+            ;;
+        aarch64)
+            _flags+=('host_cpu="arm64"' 'use_v4l2_codec=true' 'use_vaapi=false')
+            ;;
+        powerpc64le)
+            _flags+=('host_cpu="ppc64"' 'use_vaapi=true')
+            ;;
+    esac
+    
+    # Generate build files
+    gn gen out/Release --args="${_flags[*]}"
+    
+    # Build main targets
+    ninja -C out/Release chrome chrome_sandbox content_shell chromedriver headless_shell
+    
+    # Create renamed binaries
+    cp out/Release/chrome out/Release/chromium
+    cp out/Release/content_shell out/Release/chromium-shell  
+    cp out/Release/headless_shell out/Release/chromium-headless-shell
+    cp out/Release/chrome_sandbox out/Release/chrome-sandbox
+    
+    # Generate man page
+    sed -e s/@@PACKAGE@@/chromium/g -e s/@@MENUNAME@@/chromium/g \
+        < chrome/app/resources/manpage.1.in > out/Release/chromium.1
 }
 
-package() {
-  cd chromium-launcher-$_launcher_ver
-  make PREFIX=/usr DESTDIR="$pkgdir" install
-  install -Dm644 LICENSE \
-    "$pkgdir/usr/share/licenses/chromium/LICENSE.launcher"
-
-  cd ../chromium-$pkgver
-
-  install -D out/Release/chrome "$pkgdir/usr/lib/chromium/chromium"
-  install -D out/Release/chromedriver.unstripped "$pkgdir/usr/bin/chromedriver"
-  install -Dm4755 out/Release/chrome_sandbox "$pkgdir/usr/lib/chromium/chrome-sandbox"
-
-  install -Dm644 chrome/installer/linux/common/desktop.template \
-    "$pkgdir/usr/share/applications/chromium.desktop"
-  install -Dm644 chrome/app/resources/manpage.1.in \
-    "$pkgdir/usr/share/man/man1/chromium.1"
-  sed -i \
-    -e 's/@@MENUNAME@@/Chromium/g' \
-    -e 's/@@PACKAGE@@/chromium/g' \
-    -e 's/@@USR_BIN_SYMLINK_NAME@@/chromium/g' \
-    "$pkgdir/usr/share/applications/chromium.desktop" \
-    "$pkgdir/usr/share/man/man1/chromium.1"
-
-  # Fill in common Chrome/Chromium AppData template with Chromium info
-  (
-    tmpl_file=chrome/installer/linux/common/appdata.xml.template
-    info_file=chrome/installer/linux/common/chromium-browser.info
-    . $info_file; PACKAGE=chromium
-    export $(grep -o '^[A-Z_]*' $info_file)
-    sed -E -e 's/@@([A-Z_]*)@@/\${\1}/g' -e '/<update_contact>/d' $tmpl_file | envsubst
-  ) \
-  | install -Dm644 /dev/stdin "$pkgdir/usr/share/metainfo/chromium.appdata.xml"
-
-  local toplevel_files=(
-    chrome_100_percent.pak
-    chrome_200_percent.pak
-    chrome_crashpad_handler
-    libqt5_shim.so
-    libqt6_shim.so
-    resources.pak
-    v8_context_snapshot.bin
-
-    # ANGLE
-    libEGL.so
-    libGLESv2.so
-
-    # SwiftShader ICD
-    libvk_swiftshader.so
-    libvulkan.so.1
-    vk_swiftshader_icd.json
-  )
-
-  if [[ -z ${_system_libs[icu]+set} ]]; then
-    toplevel_files+=(icudtl.dat)
-  fi
-
-  cp "${toplevel_files[@]/#/out/Release/}" "$pkgdir/usr/lib/chromium/"
-  install -Dm644 -t "$pkgdir/usr/lib/chromium/locales" out/Release/locales/*.pak
-
-  for size in 24 48 64 128 256; do
-    install -Dm644 "chrome/app/theme/chromium/product_logo_$size.png" \
-      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/chromium.png"
-  done
-
-  for size in 16 32; do
-    install -Dm644 "chrome/app/theme/default_100_percent/chromium/product_logo_$size.png" \
-      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/chromium.png"
-  done
-
-  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/chromium/LICENSE"
+check() {
+    cd "chromium-${pkgver}"
+    
+    # Run basic functionality tests
+    xvfb-run out/Release/chromium --headless --disable-gpu --no-sandbox \
+        --dump-dom --virtual-time-budget=1000 data:text/html,hello
 }
 
-# vim:set ts=2 sw=2 et:
+package_chromium() {
+    pkgdesc="Web browser"
+    depends+=('chromium-common')
+    optdepends+=('chromium-sandbox: setuid sandbox for improved security')
+    provides=('chromium-browser')
+    conflicts=()
+    
+    cd "chromium-${pkgver}"
+    
+    install -Dm755 out/Release/chromium "$pkgdir/usr/lib/chromium/chromium"
+    install -Dm755 ../chromium-launcher "$pkgdir/usr/bin/chromium"
+    
+    install -Dm644 ../chromium.desktop "$pkgdir/usr/share/applications/chromium.desktop"
+    install -Dm644 out/Release/chromium.1 "$pkgdir/usr/share/man/man1/chromium.1"
+    
+    # Icons
+    for size in 16 22 24 32 48 64 128 256; do
+        install -Dm644 "chrome/app/theme/chromium/product_logo_$size.png" \
+            "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/chromium.png"
+    done
+    
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/chromium/LICENSE"
+}
+
+package_chromium-common() {
+    pkgdesc="Common resources for chromium packages"
+    depends=('xdg-utils' 'hicolor-icon-theme')
+    
+    cd "chromium-${pkgver}"
+    
+    install -dm755 "$pkgdir/usr/lib/chromium"
+    
+    # Resources and locales
+    cp -a out/Release/locales "$pkgdir/usr/lib/chromium/"
+    cp -a out/Release/resources "$pkgdir/usr/lib/chromium/"
+    
+    # Remove the en-US pak file (it will be in main package)
+    rm -f "$pkgdir/usr/lib/chromium/locales/en-US.pak"
+    
+    # Other shared resources
+    for file in icudtl.dat chrome_100_percent.pak chrome_200_percent.pak; do
+        [[ -f "out/Release/$file" ]] && cp "out/Release/$file" "$pkgdir/usr/lib/chromium/"
+    done
+}
+
+package_chromium-sandbox() {
+    pkgdesc="Setuid security sandbox for chromium"
+    depends=('glibc')
+    
+    cd "chromium-${pkgver}"
+    
+    install -Dm4755 out/Release/chrome-sandbox "$pkgdir/usr/lib/chromium/chrome-sandbox"
+}
+
+package_chromium-shell() {
+    pkgdesc="Minimal shell version of chromium"
+    depends+=('chromium-common')
+    
+    cd "chromium-${pkgver}"
+    
+    install -Dm755 out/Release/chromium-shell "$pkgdir/usr/lib/chromium/chromium-shell"
+    install -Dm755 out/Release/chromium-shell "$pkgdir/usr/bin/chromium-shell"
+}
+
+package_chromium-headless-shell() {
+    pkgdesc="Headless version of chromium (no GUI)"
+    depends+=('chromium-common')
+    
+    cd "chromium-${pkgver}"
+    
+    install -Dm755 out/Release/chromium-headless-shell "$pkgdir/usr/lib/chromium/chromium-headless-shell"
+    install -Dm755 out/Release/chromium-headless-shell "$pkgdir/usr/bin/chromium-headless-shell"
+}
+
+package_chromium-driver() {
+    pkgdesc="WebDriver support for chromium"
+    depends+=('chromium')
+    
+    cd "chromium-${pkgver}"
+    
+    install -Dm755 out/Release/chromedriver "$pkgdir/usr/bin/chromedriver"
+} 
