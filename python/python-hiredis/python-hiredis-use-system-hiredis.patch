@@ -1,0 +1,45 @@
+diff --git i/setup.py w/setup.py
+index 90a29d8..f9395d4 100644
+--- i/setup.py
++++ w/setup.py
+@@ -19,21 +19,28 @@ def version():
+ 
+ def get_sources():
+     hiredis_sources = ("alloc", "async", "hiredis", "net", "read", "sds", "sockcompat")
+-    return sorted(glob.glob("src/*.c") + ["vendor/hiredis/%s.c" % src for src in hiredis_sources])
++    return sorted(glob.glob("src/*.c"))
+ 
++def pkg_config_flags(var: str) -> list[str]:
++    import subprocess
++    try:
++        out = subprocess.check_output(["pkg-config", "--" + var, "hiredis"], text=True)
++        return out.strip().split()
++    except (subprocess.CalledProcessError, FileNotFoundError):
++        return []
+ 
+ def get_linker_args():
+     if 'win32' in sys.platform or 'darwin' in sys.platform:
+         return []
+     else:
+-        return ["-Wl,-Bsymbolic", ]
++        return pkg_config_flags("libs") + (["-Wl,-Bsymbolic"] if sys.platform not in ("win32", "darwin") else [])
+ 
+ 
+ def get_compiler_args():
+     if 'win32' in sys.platform:
+         return []
+     else:
+-        return ["-std=c99"]
++        return pkg_config_flags("cflags") + (["-std=c99"] if sys.platform != "win32" else [])
+ 
+ 
+ def get_libraries():
+@@ -48,7 +55,7 @@ ext = Extension("hiredis.hiredis",
+                 extra_compile_args=get_compiler_args(),
+                 extra_link_args=get_linker_args(),
+                 libraries=get_libraries(),
+-                include_dirs=["vendor"])
++                include_dirs=pkg_config_flags("cflags-only-I"))
+ 
+ setup(
+     name="hiredis",
