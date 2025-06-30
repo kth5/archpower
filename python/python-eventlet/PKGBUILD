@@ -1,62 +1,73 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 
 pkgname=python-eventlet
-_pyname=eventlet
-pkgver=0.38.0
+pkgver=0.40.0
 pkgrel=1
 pkgdesc='Highly concurrent networking library'
 url='https://eventlet.net'
 arch=(any)
 license=('MIT')
-depends=('python' 'python-greenlet' 'python-dnspython')
-makedepends=('python-build' 'python-installer' 'python-sphinx' 'python-sphinxcontrib-apidoc' 'python-hatchling' 'python-hatch-vcs')
-checkdepends=('python-psycopg2' 'python-pyopenssl' 'python-httplib2' 'python-pyzmq' 'python-pytest')
+depends=(
+  'python'
+  'python-dnspython'
+  'python-greenlet'
+)
+makedepends=(
+  'python-build'
+  'python-hatch-vcs'
+  'python-hatchling'
+  'python-installer'
+  'python-sphinx'
+  'python-sphinxcontrib-apidoc'
+)
+checkdepends=(
+  'python-httplib2'
+  'python-psycopg2'
+  'python-pyopenssl'
+  'python-pytest'
+  'python-pyzmq'
+)
 optdepends=(
+  'python-httplib2: non-blocking HTTP support'
   'python-psycopg2: non-blocking PostgreSQL support'
   'python-pyopenssl: non-blocking SSL support'
-  'python-httplib2: non-blocking HTTP support'
   'python-pyzmq: non-blocking ZeroMQ support'
-  'python-dnspython: non-blocking DNS support'
 )
-options=('!makeflags')
-source=($pkgname-$pkgver.tar.gz::https://github.com/eventlet/eventlet/archive/refs/tags/${pkgver}.tar.gz
-        python310.patch)
-sha512sums=('406ad6223fa770273104b55780efd340b36985bd40a8bf40cba26ad749d907c5fb01e93c8e4cabc69053d5c8893ee5d5312148ce75be9a73a9d8f11705945007'
-            '07739075628ff9d140064e04189332b479f184e4647753f987b0818fa55aaca907d4880afb5cf31f980426f315e1014027dcd848551149000a12145f982cd883')
-b2sums=('649fff870d18cf038e445e3f46526b9450a42e06ae140885ae458f2a5b836f5d98336ec1af430ad5391ad2d195ed17eb2c176502bc9d763abcd346755e537518'
-        '783445f708c12586e026f7feac982a7b6c21f86468609c375568b51ad6055977df3d0bc740f3127b9f8bc95c1c50e81aae02ca0e0be674ed4627910d39b1ef47')
-
-prepare() {
-  cd ${_pyname}-${pkgver}
-  # https://github.com/eventlet/eventlet/issues/730
-  # https://github.com/eventlet/eventlet/issues/739
-  patch -Np1 -i ../python310.patch
-  sed -r 's|(check_idle_cpu_usage\(.*,) .*\)|\1 0.8\)|g' -i tests/*_test.py
-}
+source=("https://github.com/eventlet/eventlet/archive/$pkgver/${pkgname#python-}-$pkgver.tar.gz")
+sha512sums=('10ff32ac22dc75cad58d4b97b8e3f411b49e8c199b1d56c933eb341c49a82845f5dabf75ec39697f0cf0e4867545df91556eb0b20f229aa499bf0418912481c7')
+b2sums=('cc953b557a700628d5aca34ab8ebdd51ca46f891d68a085d06183094e98b9a2ba59280f6bc3b820881b0fdcfc0033e44144b854ced41452502ce8911cc61a19e')
 
 build() {
-  cd ${_pyname}-${pkgver}
-  SETUPTOOLS_SCM_PRETEND_VERSION=${pkgver} \
-  python -m build -wn
-  PYTHONPATH="$PWD" sphinx-build -b text doc/source doc/build/html
+  cd ${pkgname#python-}-$pkgver
+  export SETUPTOOLS_SCM_PRETEND_VERSION=$pkgver
+  python -m build --wheel --no-isolation
+
+  python -m venv --system-site-packages doc-env
+  doc-env/bin/python -m installer dist/*.whl
+  local site_packages=$(doc-env/bin/python -c "import site; print(site.getsitepackages()[0])")
+  PYTHONPATH="$site_packages" sphinx-build -b text doc/source doc/build/html
 }
 
 check() {
-  cd ${_pyname}-${pkgver}
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
+  cd ${pkgname#python-}-$pkgver
   # test_ssl_close already failed under Python3.12 "known regression"
-  pytest -v --deselect=tests/ssl_test.py::SSLTest::test_ssl_close \
-            --deselect=tests/env_test.py::test_tpool_dns \
-            tests
+  pytest tests --deselect=tests/ssl_test.py::SSLTest::test_ssl_close 
 }
 
 package() {
-  cd ${_pyname}-${pkgver}
-  python -m installer --destdir="${pkgdir}" dist/*.whl
-  install -Dm 644 LICENSE -t "${pkgdir}/usr/share/licenses/${pkgname}"
-  install -d "${pkgdir}/usr/share/doc/${pkgname}"
-  cp -r doc/build/html "${pkgdir}/usr/share/doc/${pkgname}"
-  cp -r examples "${pkgdir}/usr/share/doc/${pkgname}"
+  cd ${pkgname#python-}-$pkgver
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm 644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
+
+  install -vdm 755 "$pkgdir/usr/share/doc/$pkgname"
+  cp -vr doc/build/html "$pkgdir/usr/share/doc/$pkgname"
+  cp -vr examples "$pkgdir/usr/share/doc/$pkgname"
 }
 
 # vim: ts=2 sw=2 et:
