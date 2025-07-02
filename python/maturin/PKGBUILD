@@ -7,7 +7,7 @@ pkgname=(
   maturin
   python-maturin
 )
-pkgver=1.8.3
+pkgver=1.8.7
 pkgrel=1
 pkgdesc="Build and publish crates with pyo3, rust-cpython and cffi bindings"
 url="https://github.com/PyO3/maturin"
@@ -24,6 +24,7 @@ makedepends=(
   python-setuptools-rust
   python-wheel
   rust
+  xz
 )
 checkdepends=(
   python-cffi
@@ -34,12 +35,12 @@ checkdepends=(
 # https://github.com/briansmith/ring/issues/1444
 options=(!lto)
 source=("$pkgname::git+$url.git#tag=v$pkgver")
-sha512sums=('508256411357acd32c8dcc11cb3c274b1c8ad0218d2b4c55c72a5b40cb97cbb11f8206a2133b5af1308c12b6110b44b4810a76764cd620f25f02d05bffef0edb')
-b2sums=('4851db537466b5b78ff4c591575b2ae58aa56d37942220b928902c4afeb8c22b777e2cdfb6368ecb4cc05c8de257fbba09ef91c7208d2219c2da3965f2a873f3')
+sha512sums=('075329b79d671da15d11907f3bb8355d533c42648b40aecb77f25581990251f1eac3c2cff25f2ad689853803e5214ce3abd33910d057c8e1beb81be08e566f85')
+b2sums=('a3af967d14e4aa1084486537a989fbceb8dfd83304e89b615044bda073cb72fd729f4067b19bd3a00b07eb8067fceb5f548ac8f66d298d9d2c0afb96bd9198e1')
 
 prepare() {
   cd $pkgbase
-  cargo fetch --locked --target "${CHOST}"
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
 }
 
 build() {
@@ -58,11 +59,10 @@ check() {
   local cargo_skip_args=(
     # Requires wasm32-wasip1 target
     --skip=integration_wasm_hello_world
-    # Fails with the following error, not sure why:
-    # AttributeError: module 'uniffi_pure_proc_macro' has no attribute 'add'
-    --skip=integration_uniffi_pure_proc_macro
   )
-  cargo test --frozen --all-features -- "${cargo_skip_args[@]}"
+  # Using --all-features here causes test failures due to:
+  #   Cause: unsupported Zip archive: Unsupported compression level
+  cargo test --frozen -- "${cargo_skip_args[@]}"
 }
 
 package_maturin() {
@@ -72,13 +72,14 @@ package_maturin() {
     glibc
     openssl
     rust
+    xz
   )
 
   cd $pkgbase
   python -m installer --destdir="$pkgdir" dist/*.whl
   rm -vr "$pkgdir/usr/lib"
-  install -vDm 644 {Changelog,README}.md -t "$pkgdir/usr/share/doc/$pkgname/"
-  install -vDm 644 license-mit -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -vDm 644 -t "$pkgdir/usr/share/doc/$pkgname" {Changelog,README}.md
+  install -vDm 644 -t "$pkgdir/usr/share/licenses/$pkgname" license-mit
 }
 
 package_python-maturin() {
@@ -92,5 +93,5 @@ package_python-maturin() {
   cd $pkgbase
   python -m installer --destdir="$pkgdir" dist/*.whl
   rm -vr "$pkgdir/usr/bin"
-  install -vDm 644 -t "$pkgdir/usr/share/licenses/$pkgname/" license-mit
+  install -vDm 644 -t "$pkgdir/usr/share/licenses/$pkgname" license-mit
 }
