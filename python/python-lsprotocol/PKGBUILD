@@ -1,0 +1,41 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Daniel M. Capella <polyzen@archlinux.org>
+
+pkgname=python-lsprotocol
+_name=${pkgname#python-}
+pkgver=2023.0.1
+pkgrel=3
+pkgdesc='Python types for Language Server Protocol'
+arch=('any')
+url=https://github.com/microsoft/lsprotocol
+license=('MIT')
+depends=('python-cattrs')
+makedepends=('git' 'python-build' 'python-flit-core' 'python-installer')
+checkdepends=('python-jsonschema' 'python-pyhamcrest' 'python-pytest' 'python-typing_extensions')
+source=("git+$url.git#tag=$pkgver")
+b2sums=('8e3ce2c021a8e170aaa05fb7ff8d25136d26a88977d070fa5f1c29616199c50e7fb2e401597dfe16b16e61e381923a6aa5df326624ac03258dc33028d17d4312')
+
+build() {
+  cd "$_name"/packages/python
+  python -m build --wheel --skip-dependency-check --no-isolation
+}
+
+check() {
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
+  cd "$_name"
+  pytest tests/python
+}
+
+package() {
+  cd "$_name"/packages/python
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # Symlink license file
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "$pkgdir"/usr/share/licenses/$pkgname
+  ln -s "$site_packages"/"$_name"-$pkgver.dist-info/LICENSE \
+    "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
