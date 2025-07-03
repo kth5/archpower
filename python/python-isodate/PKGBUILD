@@ -1,33 +1,50 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Kyle Keen <keenerd@gmail.com>
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+# Contributor: Kyle Keen <keenerd@gmail.com>
 
-pkgbase=isodate
-pkgname=('python-isodate')
-pkgver=0.6.1
-pkgrel=3.1
-pkgdesc="An ISO 8601 date/time/duration parser and formatter"
+pkgname=python-isodate
+pkgver=0.7.2
+pkgrel=2
+pkgdesc='An ISO 8601 date/time/duration parser and formatter'
 arch=(any)
-url="https://github.com/gweis/isodate/"
-license=('BSD')
-depends=('python-six')
-makedepends=('python-setuptools')
-source=("https://files.pythonhosted.org/packages/source/i/isodate/isodate-$pkgver.tar.gz")
-sha1sums=('ea36ce1c780dd44f01225dca7f9995a6685a60cc')
-sha256sums=('48c5881de7e8b0a0d648cb024c8062dc84e7b840ed81e864c7614fd3c127bde9')
+url='https://github.com/gweis/isodate'
+license=('BSD-3-Clause')
+depends=('python')
+makedepends=(
+  'git'
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-setuptools-scm'
+  'python-wheel'
+)
+checkdepends=('python-pytest')
+source=("$pkgname::git+$url#tag=$pkgver")
+sha512sums=('69a381ef52b3cdc0f4d9a26c9ae42681ff4c192b25744189bf206dc61a0e55f26946bda365dd37ae1c078d0f3e6cccd79c845f6a536f4a994de733b556572fed')
+b2sums=('6b1949889122954e2c704f09fb76107e2b6a11ffcf66aec4a668b4258ca0a5ec0ae1320df7d86b83c429ec90f3bc7f6f11d90309768dcfe18d83c487c0213ae1')
 
 build() {
-  cd "$srcdir/$pkgbase-$pkgver"
-  python setup.py build
+  cd "$pkgname"
+
+  python -m build --wheel --no-isolation
 }
 
 check() {
-  cd "$srcdir/$pkgbase-$pkgver"
-  python setup.py test
+  cd "$pkgname"
+
+  # temporary install
+  python -m installer --destdir="$(pwd)/tmp" dist/*.whl
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  export PYTHONPATH="$(pwd)/tmp/$site_packages"
+
+  pytest -v
 }
 
-package_python-isodate() {
-  cd "$srcdir/$pkgbase-$pkgver"
-  python setup.py install --root="$pkgdir/" --optimize=1
-  install -d "${pkgdir}/usr/share/licenses/${pkgname}"
-  head -26 src/isodate/isodates.py > "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+package() {
+  cd "$pkgname"
+
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # license
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
 }
