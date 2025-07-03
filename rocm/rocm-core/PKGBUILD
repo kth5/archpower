@@ -2,39 +2,38 @@
 # Maintainer: Torsten Keßler <tpkessler at archlinux dot org>
 
 pkgname=rocm-core
-_rocm_major=6
-_rocm_minor=2
-_rocm_patch=4
-_pkgver_magic=139
-pkgver=$_rocm_major.$_rocm_minor.$_rocm_patch
-pkgrel=2
+pkgver=6.4.1
+pkgrel=1
 pkgdesc='AMD ROCm core package (version files)'
-license=('Unlicense')
+license=('MIT')
 arch=(any)
-source=('LICENSE'
+depends=('gcc-libs' 'glibc')
+makedepends=('cmake')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/ROCm/rocm-core/archive/refs/tags/rocm-$pkgver.tar.gz"
         'rocm-ld.conf'
         'rocm-profile.sh')
-b2sums=('e4c94a21ea352227919ba41e0e461b61b700cfb469a0cc1019d7daee85b009410edb4078987dc163d0504b0385162c0f4988ba6c4d5cab23c059486f8bdb4db3'
+b2sums=('5be79d6b4fae2bbbc85d5a66cee4eac109e85d48f840a2b3e095670a364ecece8b55f78a96272c68d2ac6bb33a11d1fb923649a91681b614a5650af587a76dd0'
         'd045c357d8e7e8a4840ab137404f12cd08419444ffc478046c13ed3bd13a5d33358c1443bf76ee571a7a062454e2bdda1a5507a70edbd001bce004f18775e4b2'
         '4372bcbe97d7c95d4918ad4beacc4fe9bfc8bfb8cafcf08d9ebbcba7df3e3bf535ff51f90c2d0f653858b0ae03b108ac3cb32b61b4ecac3abb609acc06be3ee3')
 url='https://rocm.docs.amd.com/'
 
-package() {
-  # AMD hasn't released the complete source code of the package,
-  # so we only package the version file that is required by some libraries.
-  echo "$pkgver-$_pkgver_magic" > version-rocm
-  install -Dm644 version-rocm "$pkgdir/opt/rocm/.info/version"
-  install -Dm644 version-rocm "$pkgdir/opt/rocm/.info/version-dev"
+build() {
+  local cmake_args=(
+    -Wno-dev
+    -B build
+    -S $pkgname-rocm-$pkgver
+    -D CMAKE_BUILD_TYPE=None
+    -D BUILD_SHARED_LIBS=ON
+    -D CMAKE_INSTALL_PREFIX=/opt/rocm
+    -D ROCM_VERSION="$pkgver"
+  )
+  cmake "${cmake_args[@]}"
+  cmake --build build
+}
 
+package() {
+  DESTDIR="$pkgdir" cmake --install build
   install -Dm644 rocm-ld.conf "$pkgdir/etc/ld.so.conf.d/rocm.conf"
   install -Dm644 rocm-profile.sh "$pkgdir/etc/profile.d/rocm.sh"
-
-  echo "#pragma once" > rocm_version.h
-  echo "#define ROCM_VERSION_MAJOR $_rocm_major" >> rocm_version.h
-  echo "#define ROCM_VERSION_MINOR $_rocm_minor" >> rocm_version.h
-  echo "#define ROCM_VERSION_PATCH $_rocm_patch" >> rocm_version.h
-  echo "#define ROCM_BUILD_INFO \"$_rocm_major.$_rocm_minor.$_rocm_patch.0-$_pkgver_magic\"" >> rocm_version.h
-  install -Dm644 rocm_version.h "$pkgdir/opt/rocm/include/rocm_version.h"
-  install -Dm644 rocm_version.h "$pkgdir/opt/rocm/include/rocm-core/rocm_version.h"
-  install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$srcdir/$pkgname-rocm-$pkgver/copyright" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
