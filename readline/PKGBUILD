@@ -8,19 +8,30 @@ pkgname=readline
 _basever=8.2
 _patchlevel=013
 pkgver=${_basever}.${_patchlevel}
-pkgrel=1.2
+pkgrel=2
 pkgdesc='GNU readline library'
-arch=(x86_64 powerpc64le powerpc64 powerpc espresso riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://tiswww.case.edu/php/chet/readline/rltop.html'
-license=('GPL-3.0-only')
+license=('GPL-3.0-or-later')
 backup=('etc/inputrc')
-depends=('glibc' 'ncurses' 'libncursesw.so')
-provides=('libhistory.so' 'libreadline.so')
+depends=(
+  glibc
+  libncursesw.so
+  ncurses
+)
+provides=(
+  libhistory.so
+  libreadline.so
+)
 options=('!emptydirs')
-source=(https://ftp.gnu.org/gnu/readline/readline-$_basever.tar.gz{,.sig}
-        inputrc)
+source=(
+  https://ftp.gnu.org/gnu/readline/readline-$_basever.tar.gz{,.sig}
+  readline-8.2-c23.patch
+  inputrc
+    )
 b2sums=('7974322b9c092a756a79e537df08e8532f8e0fcb598f77732e28287c33ebec9e9837ed88b43334c310892d56a871b423903f0f564def2fbe700a1004f2ae7b18'
         'SKIP'
+        'f7053bf7bb1453ae48c7dede08aef016432b0233fcd4380f41ad16851971b5874c65d04be17197978988e785da2559eba8e10a8388ab01e33cb8a53fad126e4c'
         '50db43bff430f282175aba4c4259e0b2222bc7e342fbe47b9dcce0172458472e72aebb9852eeafa4d10d4e89f2e1e8bb83b6b5dfc68eeababe699d4b5eae80f7'
         '2e8f3d2aa14c4c4c4f9621f80f4ffae9bbd6f46c3561e87aaf684c759ffd82e3c46843cf4c4224533b28a847d83f7b8b254813f8a306d438e9f7cb457516c4e0'
         'SKIP'
@@ -65,6 +76,12 @@ prepare() {
 
   # remove RPATH from shared objects (FS#14366)
   sed -i 's|-Wl,-rpath,$(libdir) ||g' support/shobj-conf
+
+  # patch from gentoo.org: 
+  # https://gitweb.gentoo.org/repo/gentoo.git/commit/?id=6b9a8501590c4b1fa99ff64229a50618ec060db1
+  # HAVE_STDARG_H isn't defined for readline consumers externally so we always
+  # end up using the ancient non-prototypes.
+  patch -Np1 -i ../readline-8.2-c23.patch
 }
 
 build() {
@@ -73,7 +90,7 @@ build() {
   # build with -fPIC for x86_64 (FS#15634)
   [[ $CARCH == "x86_64" ]] && CFLAGS="$CFLAGS -fPIC"
 
-  ./configure --prefix=/usr || cat config.log
+  ./configure --prefix=/usr
   make SHLIB_LIBS=-lncurses
 }
 
