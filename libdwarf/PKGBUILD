@@ -1,44 +1,48 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+# Contributor: Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
 # Contributor: Alain Kalker <a.c.kalker@gmail.com>
 # Contributor: Marti Raudsepp <marti@juffo.org>
 
 pkgname=libdwarf
 epoch=1
-pkgver=0.8.0
-pkgrel=1.1
-pkgdesc="A library for handling DWARF Debugging Information Format"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=('GPL' 'LGPL')
-url="https://www.prevanders.net/dwarf.html"
-depends=('elfutils')
+pkgver=2.0.0
+pkgrel=1
+pkgdesc='A library for handling DWARF Debugging Information Format'
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url='https://www.prevanders.net/dwarf.html'
+license=('LGPL-2.1-only' 'GPL-2.0-only' 'BSD-2-Clause' 'BSD-3-Clause' 'LicenseRef-libdwarf-public-domain')
+depends=('glibc' 'elfutils' 'zlib' 'zstd')
+makedepends=('git' 'meson')
 checkdepends=('python')
 provides=('libdwarf.so')
-options+=('staticlibs' 'debug')
-#_commit="245262d6ccaeed17f7564c31b78da2d4df1a3ee0"
-#source=(https://sourceforge.net/code-snapshots/git/l/li/libdwarf/code.git/libdwarf-code-$_commit.zip)
-source=(https://www.prevanders.net/libdwarf-$pkgver.tar.xz)
-sha512sums=('82aa00b6fd5e8935fdc4b7d55379667fb9c514e75763109ea18a7cf7d9c1077ee0eb30d7482fa7d3621df44853bea0d15fde6cb846723bfb47752869e9687145')
+options=('staticlibs')
+source=("$pkgname::git+https://github.com/davea42/libdwarf-code#tag=libdwarf-$pkgver")
+sha512sums=('94d1a1be4db8082130451f5d50e8734e041cbbb6ae16bf5f32668c1431a7cb9b6859a9e1d0b4b9beff95fb36b8aad434ba5ed21be5f7ffa59a0db7707cbbc01e')
+b2sums=('d3ff335909c2eb58abc442dd6b134f530e11ff41be54a7e0128df8be7256609a587a25545a5954c13d0072b024bd3c591188b73760c08807107cf78939e1f04d')
 
 build() {
-  cd "$srcdir"/libdwarf-$pkgver
-  # cd "$srcdir"/libdwarf-code-$_commit
-  CFLAGS+=" -ffat-lto-objects"
-  ./configure --prefix=/usr --includedir=/usr/include/libdwarf --enable-shared
-  make
+  CFLAGS+=' -ffat-lto-objects'
+
+  arch-meson "$pkgname" build -Ddwarfexample=true
+
+  meson compile -C build
 }
 
 check() {
-  cd "$srcdir"/libdwarf-$pkgver
-  # cd "$srcdir"/libdwarf-code-$_commit
-  make -j1 check
+  meson test -C build -j1
 }
 
 package() {
-  cd "$srcdir"/libdwarf-$pkgver
-  # cd "$srcdir"/libdwarf-code-$_commit
-  make DESTDIR="$pkgdir" install
+  meson install -C build --destdir "$pkgdir"
 
-  install -dm755 "$pkgdir"/usr/share/doc/$pkgname
-  install -m644 README NEWS "$pkgdir"/usr/share/doc/$pkgname/
+  cd "$pkgname"
+
+  # documentation
+  install -vDm644 -t "$pkgdir/usr/share/doc/$pkgname" README NEWS
+
+  # license
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" \
+    COPYING src/lib/libdwarf/LIBDWARFCOPYRIGHT \
+    src/bin/dwarfdump/DWARFDUMPCOPYRIGHT
 }
