@@ -3,11 +3,11 @@
 # Maintainer: Morten Linderud <foxboron@archlinux.org>
 
 pkgname=pacman
-pkgver=7.0.0.r6.gc685ae6
-pkgrel=2.1
+pkgver=7.0.0.r7.g1f38429
+pkgrel=1
 # use annotated tag and patch level commit from release branch (can be empty for no patches)
 _git_tag=7.0.0
-_git_patch_level_commit=c685ae6412af04cae1eaa5d6bda8c277c7ffb8c8
+_git_patch_level_commit=1f38429b1c5f30edce30c731aa352e6363cc788e
 pkgdesc="A library-based package manager with dependency support"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://www.archlinux.org/pacman/"
@@ -15,14 +15,15 @@ license=('GPL-2.0-or-later')
 depends=(
   bash
   coreutils
-  curl
+  curl libcurl.so
   gawk
   gettext
   glibc
   gnupg
-  gpgme
+  gpgme libgpgme.so
   grep
-  libarchive
+  libarchive libarchive.so
+  openssl libcrypto.so
   systemd
 )
 makedepends=(
@@ -97,6 +98,31 @@ prepare() {
 build() {
   cd "$pkgname"
 
+  sed "s@^Architecture.*@Architecture = ${CARCH}@g" -i "$srcdir/pacman.conf"
+  sed "s@%ARCH%@${CARCH}@g" -i "$srcdir/makepkg.conf"
+
+  case "${CARCH}" in
+    powerpc)
+      _CFLAGS="-O2 -pipe"
+      _LDFLAGS="-Wl,--no-warn-rwx-segments -Wl,--no-warn-execstack"
+    ;;
+    powerpc64le)
+      _CFLAGS="-O2 -pipe -mcpu=power8"
+    ;;
+    powerpc64)
+      _CFLAGS="-O2 -pipe -mcpu=powerpc64 -mabi=altivec -maltivec"
+    ;;
+    *)
+      _CFLAGS="-O2 -pipe"
+    ;;
+  esac
+  sed "s@%CFLAGS%@${_CFLAGS}@g" -i "$srcdir/makepkg.conf"
+  sed "s@%LDFLAGS%@${_LDFLAGS}@g" -i "$srcdir/makepkg.conf"
+  sed "s@%CARCH%@${CARCH}@g" -i "$srcdir/makepkg.conf"
+  sed "s@%CHOST%@${CHOST}@g" -i "$srcdir/makepkg.conf"
+
+  export LD_LIBRARY_PATH=${srcdir}/../:${LD_LIBRARY_PATH}
+
   meson --prefix=/usr \
         --buildtype=plain \
         -Ddoc=enabled \
@@ -118,32 +144,6 @@ package() {
   cd "$pkgname"
 
   DESTDIR="$pkgdir" meson install -C build
-
-  sed "s@^Architecture.*@Architecture = ${CARCH}@g" -i "$srcdir/pacman.conf"
-  sed "s@%ARCH%@${CARCH}@g" -i "$srcdir/makepkg.conf"
-
-  case "${CARCH}" in
-    powerpc)
-      _CFLAGS="-O2 -pipe"
-      _LDFLAGS="-Wl,--no-warn-rwx-segments -Wl,--no-warn-execstack"
-    ;;
-    powerpc64le)
-      _CFLAGS="-O2 -pipe -mcpu=power8"
-    ;;
-    powerpc64)
-      _CFLAGS="-O2 -pipe -mcpu=powerpc64 -mabi=altivec -maltivec"
-    ;;
-    riscv64)
-      _CFLAGS="-march=rv64gc -mabi=lp64d -O2 -pipe -mno-omit-leaf-frame-pointer"
-    ;;
-    *)
-      _CFLAGS="-O2 -pipe"
-    ;;
-  esac
-  sed "s@%CFLAGS%@${_CFLAGS}@g" -i "$srcdir/makepkg.conf"
-  sed "s@%LDFLAGS%@${_LDFLAGS}@g" -i "$srcdir/makepkg.conf"
-  sed "s@%CARCH%@${CARCH}@g" -i "$srcdir/makepkg.conf"
-  sed "s@%CHOST%@${CHOST}@g" -i "$srcdir/makepkg.conf"
 
   # install Arch specific stuff
   install -dm755 "$pkgdir/etc"
