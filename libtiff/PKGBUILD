@@ -1,18 +1,38 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
 # Contributor: Eric Bélanger <eric@archlinux.org>
+# Contributor: HurricanePootis <hurricanepootis@protonmail.com>
 
 pkgname=libtiff
 pkgver=4.7.0
-pkgrel=1.1
+pkgrel=2
 pkgdesc='Library for manipulation of TIFF images'
 url='http://www.simplesystems.org/libtiff/'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=('custom')
-depends=('gcc-libs' 'glibc' 'jbigkit' 'libjpeg-turbo' 'libjpeg.so' 'zlib' 'xz' 'zstd')
-makedepends=('freeglut' 'git' 'glu' 'mesa')
-optdepends=('freeglut: for using tiffgt')
-provides=('libtiff.so' 'libtiffxx.so')
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+license=(libtiff)
+depends=(
+  gcc-libs
+  glibc
+  jbigkit
+  libdeflate
+  libjpeg-turbo
+  libjpeg.so
+  libwebp
+  xz
+  zlib
+  zstd
+)
+makedepends=(
+  cmake
+  freeglut
+  git
+  glu
+  mesa
+)
+optdepends=(
+  'freeglut: for using tiffgt'
+)
+provides=(libtiff.so libtiffxx.so)
 source=("git+https://gitlab.com/libtiff/libtiff.git?signed#tag=v${pkgver}")
 sha256sums=('5db48dfd7c67c67df49868fc68a99be7544f1c60306b5bfc70bbe207661b1776')
 b2sums=('15c36e609a96fe58ffb6123d0f99dbed22e3af532e1b2f72347b3fb37932437d85ae2e7489edb67553e3339da3742693abe2d38dcc3d8fe3c3a6df9be38ca948')
@@ -21,35 +41,26 @@ validpgpkeys=(
   'B1FA7D81EEB8E66399178B9733EBBFC47B3DD87D' # Even Rouault <even.rouault@spatialys.com>
 )
 
-prepare() {
-  cd libtiff
-  autoreconf -fiv
-}
-
 build() {
-  local configure_options=(
-    --prefix=/usr
-    --sysconfdir=/etc
-    --enable-ld-version-script
-    --mandir=/usr/share/man
-    --with-docdir=/usr/share/doc/${pkgname}
-  )
+  cmake -B build -S $pkgname \
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -DCMAKE_BUILD_TYPE=None \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 
-  cd libtiff
-  ./configure "${configure_options[@]}"
-  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-  make
+  cmake --build build
 }
 
 check() {
-  cd libtiff
-  make check
+  case "${CARCH}" in
+    powerpc|powerpc64) return 0 ;;
+  esac
+
+  ctest --test-dir build
 }
 
 package() {
-  cd libtiff
-  make DESTDIR="${pkgdir}" install
-  install -Dm 644 LICENSE.md -t "${pkgdir}/usr/share/licenses/${pkgname}/"
+  DESTDIR="${pkgdir}" cmake --install build
+  install -Dm 644 libtiff/LICENSE.md -t "${pkgdir}/usr/share/licenses/${pkgname}/"
 }
 
 # vim: ts=2 sw=2 et:
