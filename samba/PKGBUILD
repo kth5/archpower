@@ -1,4 +1,3 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Tobias Powalowski <tpowa@archlinux.org>
 # Contributor: judd <jvinet@zeroflux.org>
 # Contributor: Michael Hansen <zrax0111 gmail com>
@@ -10,9 +9,9 @@
 
 pkgbase=samba
 pkgname=('libwbclient' 'ldb' 'smbclient' 'samba')
-pkgver=4.22.1
+pkgver=4.22.4
 pkgrel=1
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://www.samba.org"
 license=('GPL-3.0-or-later')
 makedepends=(
@@ -59,13 +58,13 @@ optdepends=(
 )
 epoch=2
 source=(
-  https://us1.samba.org/samba/ftp/stable/${pkgbase}-${pkgver}.tar{.gz,.asc}
+  https://download.samba.org/samba/ftp/stable/${pkgbase}-${pkgver}.tar{.gz,.asc}
   samba.logrotate
   samba.pam
-  samba.conf
+  samba.tmpfiles
 )
 validpgpkeys=('81F5E2832BD2545A1897B713AA99442FB680B620') #Samba Distribution Verification Key <samba-bugs@samba.org>
-b2sums=('cc2fa24d26f7b8f491aa51f995a9a56e22ecafa475912fa0ff9f476aef12da2dad0545aafa970b452c145fbd03b8de3ac2cf9f8c7abb16a9612ff47cfb76d2da'
+b2sums=('c2d239f2d62f450fbef84ceee1077201c0fca926cc97e99527d4bff07ff11a815a4167ca270afd04af4257759bcc1e003493bfcfd9e552e9410d426921341c8c'
         'SKIP'
         '72ecb413ca3499af984a0bb391f96e678a24a19d8e5c96050ba227878f0770f03466ac7a0ee328416e08204e92e9d16ec22d63ef25b53c20d957a17221cd3a98'
         '3eab84d332d96678fe6e435ee243c8f1a82b838f601d61d3604d11e918aed7a62202edca5e476c4b9031ed284570e6fcd6c659cfdbd9624aa0019d3233755f81'
@@ -76,16 +75,15 @@ b2sums=('cc2fa24d26f7b8f491aa51f995a9a56e22ecafa475912fa0ff9f476aef12da2dad0545a
 # (This is so RPATHS and symlinks are generated correctly via
 # make install, but the otherwise unsplit pieces can be split)
 build() {
+  case "${CARCH}" in
+    powerpc) LDFLAGS+=' -latomic' ;;
+  esac
+
 _samba4_idmap_modules=idmap_ad,idmap_rid,idmap_adex,idmap_hash,idmap_tdb2
 _samba4_pdb_modules=pdb_tdbsam,pdb_ldap,pdb_ads,pdb_smbpasswd,pdb_wbc_sam,pdb_samba4
 _samba4_auth_modules=auth_unix,auth_wbc,auth_server,auth_netlogond,auth_script,auth_samba4
 _pkgsrc="${srcdir}"/samba-pkg
   rm -rf ${_pkgsrc}
-
-  case "${CARCH}" in
-    powerpc) LDFLAGS+=' -latomic' ;;
-  esac
-
   cd ${pkgbase}-${pkgver}
   ./configure --enable-fhs \
     --prefix=/usr \
@@ -339,7 +337,7 @@ _pkgsrc="${srcdir}"/samba-pkg
   install -m644 "${srcdir}"/samba-${pkgver}/packaging/systemd/samba.sysconfig "${pkgdir}"/etc/conf.d/samba
 
   # create ephemeral dirs via tmpfiles rather than shipping them in package
-  install -D -m644 "${srcdir}"/samba.conf "${pkgdir}"/usr/lib/tmpfiles.d/samba.conf
+  install -D -m644 "${srcdir}"/samba.tmpfiles "${pkgdir}"/usr/lib/tmpfiles.d/samba.conf
   # create config dir
   install -d -m755 "${pkgdir}"/etc/samba
 
