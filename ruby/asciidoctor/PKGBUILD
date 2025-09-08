@@ -7,30 +7,89 @@
 
 pkgname='asciidoctor'
 pkgver=2.0.23
-pkgrel=6
+pkgrel=8
 pkgdesc='An implementation of AsciiDoc in Ruby'
 arch=(any)
 url='https://asciidoctor.org'
 license=('MIT')
-makedepends=('ruby-rdoc')
-depends=('ruby')
+depends=(
+  ruby
+)
+makedepends=(
+  git
+  ruby-rdoc
+)
 options=('!emptydirs')
-source=("https://rubygems.org/downloads/${pkgname}-${pkgver}.gem")
-noextract=("$pkgname-$pkgver.gem")
-sha512sums=('61aeb0c78438b61cdd7caf31840c82fc68d94ed296e381927c1e3a0b36be5bc29a025a7d9a076c19293f1c8b69056120f0493456106eeeb4a083afb59a414328')
+source=("git+https://github.com/asciidoctor/asciidoctor#tag=v${pkgver}")
+sha512sums=('ab545c2e6b4c96573b1cb900fa778e252dbc176c0fda2e30de5b8a281f827a87c0d0bae0cc1b723be99c1b767d252e0428fe4323506d7f20ce168359341f5a06')
+b2sums=('8deb7bab70a8697086b2daca4a1f23e14f1e97421139fb10c54d7d9d072c45c3eff335dd82c7b764c0e62791c269ad0fd5da2ebcdca9dcbc2488aa2015c11d6d')
+
+prepare() {
+  cd "${pkgname}"
+
+  # resolves #4634 normalize output from inspect when comparing to fixture
+  git cherry-pick -n e5442fc2848680eada862841b0e92dc9265e1a29
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended \
+    --expression 's|~>|>=|g' \
+    "${pkgname}.gemspec"
+}
+
+build() {
+  cd "${pkgname}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${pkgname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${pkgname}-${pkgver}.gem"
+
+  # remove unreproducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${pkgname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${pkgname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
 
 package() {
-    local _gemdir="$(ruby -e 'puts Gem.default_dir')"
+  cd "${pkgname}"
 
-    gem install --ignore-dependencies --no-user-install --verbose \
-        -i "$pkgdir/$_gemdir" -n "$pkgdir/usr/bin" \
-        "$pkgname-$pkgver.gem"
+  local _gemdir="$(gem env gemdir)"
 
-    install -Dm644 "$pkgdir/$_gemdir/gems/$pkgname-$pkgver/LICENSE" \
-        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-    install -Dm644 "$pkgdir/$_gemdir/gems/$pkgname-$pkgver/man/asciidoctor.1" \
-        "$pkgdir/usr/share/man/man1/asciidoctor.1"
+  install --verbose -D --mode=0644 "tmp_install${_gemdir}/gems/${pkgname}-${pkgver}/man/asciidoctor.1" "${pkgdir}/usr/share/man/man1/asciidoctor.1"
 
-    rm "$pkgdir/$_gemdir/cache/$pkgname-$pkgver.gem"
-    rm -rf "$pkgdir/$_gemdir/gems/$pkgname-$pkgver/man"
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 LICENSE* --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.adoc --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
 }
+
+# vim: tabstop=2 shiftwidth=2 expandtab:
