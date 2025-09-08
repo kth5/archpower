@@ -3,8 +3,8 @@
 
 _name=test-unit-ruby-core
 pkgname=ruby-test-unit-ruby-core
-pkgver=1.0.6
-pkgrel=6
+pkgver=1.0.7
+pkgrel=1
 pkgdesc="Additional test assertions for Ruby standard libraries"
 arch=(any)
 url="https://github.com/ruby/test-unit-ruby-core"
@@ -15,8 +15,8 @@ makedepends=(
   ruby-rdoc
 )
 source=($_name-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz)
-sha512sums=('7b71546112e19ad453d76098c47bc1e471d1c9fda4962a3217c06cad405a773ff080b94aa650ffed94df0067ac1842ed22b438c43b143e717de64392337be446')
-b2sums=('ad1fbab21cf4972451d44c6e31cdae5b6c7209b8f4b8f54cfbfdb3d04d456c551e7f038a18e6d465a0cc9f1b965d913138a23d6e0c6e00551b655682340d1c44')
+sha512sums=('5899f195bc83d7fd7ece40e0dca9efa92868abf3f9a370d9f426df8e969d3ead10fffce5d65baaac3925879ef31a57117ce4e21448e6af2088dc8332794dbc98')
+b2sums=('51710f4d4997e2afbf46fe616943f47952485a655ea650d005175be5129a64fa910de29a258dad40990e88351f71dfa11f1b047aeac85ed6248ab87e23d3b573')
 
 prepare() {
   cd $_name-$pkgver
