@@ -6,34 +6,63 @@
 
 _gemname=ffi
 pkgname=ruby-$_gemname
-pkgver=1.17.1
-pkgrel=3
+pkgver=1.17.2
+pkgrel=1
 pkgdesc='Ruby FFI'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://github.com/ffi/ffi'
 license=('BSD-3-Clause' 'MIT')
-depends=('ruby')
-makedepends=('ruby-rdoc')
+depends=(
+  glibc
+  libffi
+  ruby
+)
+makedepends=(
+  git
+  ruby-bundler
+  ruby-rake
+  ruby-rake-compiler
+  ruby-rdoc
+  ruby-rspec
+)
+checkdepends=(ruby-bigdecimal)
 options=('!emptydirs')
-source=("https://rubygems.org/downloads/$_gemname-$pkgver.gem")
-noextract=("$_gemname-$pkgver.gem")
-sha512sums=('b467ef8bcd0f3877705b352502489d4918113fed741a44e1e954bfa921a6b5620730829e677c739c356473e8b4d4c7a57e302439b06d06bf46e36c09b17b78f7')
-b2sums=('2d96b4bc2a4e46e4de6b13ad20bec05f33f8651c4d8fc91bf927459e65526f514395242cdabbeede370c5132e27119d345579ebf38a20df0f7554608940fc067')
+source=(
+  "$pkgname::git+$url#tag=v$pkgver"
+  "github.com-libffi-libffi::git+https://github.com/libffi/libffi"
+)
+sha512sums=('c48ef741bd54af6b0e95699b9e21c689f0c52182bee9ba8da652c9b0820784b231290dbbd89392da79b17cc30e3073996c9cc7211c00360d9660aaf042f3db75'
+            'SKIP')
+b2sums=('eac62f5668e1d4f9c51a78bcec3d51efaf89a2f8526aa4119d44ff82bd505e00189802cb14e3f721ab392aee0956c00a045ed05d0b2de8ba14ea4f0d2e08e086'
+        'SKIP')
 
-package() {
+prepare() {
+  cd "$pkgname"
+
+  git submodule init
+  git config submodule.ext/ffi_c/libffi.url "$srcdir/github.com-libffi-libffi"
+  git -c protocol.file.allow=always submodule update
+}
+
+build() {
+  cd "$pkgname"
+
   local _gemdir="$(ruby -e'puts Gem.default_dir')"
+
+  rake compile
+  gem build --verbose "${_gemname}.gemspec"
 
   gem install \
     --verbose \
     --ignore-dependencies \
     --no-document \
     --no-user-install \
-    --install-dir "$pkgdir/$_gemdir" \
-    --bindir "$pkgdir/usr/bin" \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
     "$_gemname-$pkgver.gem"
 
   # delete unnecessary files & folders
-  cd "$pkgdir/$_gemdir"
+  cd "tmp_install/$_gemdir"
   find . -type f -name 'gem_make.out' -delete -o -name 'mkmf.log' -delete
   rm -vrf cache
   cd "gems/$_gemname-$pkgver"
@@ -41,18 +70,32 @@ package() {
   find lib/ffi/platform/* -prune -not -name "$CARCH-linux" -exec rm -rf {} +
 
   # move documentation
-  install -vd "$pkgdir/usr/share/doc/$pkgname"
-  mv -v samples CHANGELOG.md README.md "$pkgdir/usr/share/doc/$pkgname"
+  install -vd "$srcdir/$pkgname/tmp_install/usr/share/doc/$pkgname"
+  mv -v samples CHANGELOG.md README.md "$srcdir/$pkgname/tmp_install/usr/share/doc/$pkgname"
 
   # move licenses
-  install -vd "$pkgdir/usr/share/licenses/$pkgname"
-  mv -v LICENSE* COPYING "$pkgdir/usr/share/licenses/$pkgname"
+  install -vd "$srcdir/$pkgname/tmp_install/usr/share/licenses/$pkgname"
+  mv -v LICENSE* COPYING "$srcdir/$pkgname/tmp_install/usr/share/licenses/$pkgname"
 
   # generate Ruby documentation
   rdoc \
     --format ri \
-    --output "$pkgdir$_gemdir/doc/$_gemname-$pkgver/ri" \
+    --output "$srcdir/$pkgname/tmp_install$_gemdir/doc/$_gemname-$pkgver/ri" \
     ./lib
   # delete unnecessary artifacts
-  rm -rf "$pkgdir$_gemdir/doc/$_gemname-$pkgver/ri/"{lib,created.rid}
+  rm -rf "$srcdir/$pkgname/tmp_install$_gemdir/doc/$_gemname-$pkgver/ri/"{lib,created.rid}
+}
+
+check() {
+  cd "$pkgname"
+
+  local _gemdir="$(ruby -e'puts Gem.default_dir')"
+
+  GEM_HOME="tmp_install${_gemdir}" rake test
+}
+
+package() {
+  cd "$pkgname"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
 }
