@@ -4,21 +4,96 @@
 _gemname=rake
 pkgname=ruby-$_gemname
 pkgver=13.2.1
-pkgrel=4
+pkgrel=5
 pkgdesc='Make-like build tool implemented in Ruby'
 provides=(rake)
 arch=(any)
 url='https://ruby.github.io/rake/'
 license=(MIT)
-depends=(ruby)
+depends=(
+  ruby
+)
+makedepends=(
+  git
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-bundler
+  ruby-rake
+  ruby-test-unit
+)
 options=(!emptydirs)
-source=(https://rubygems.org/downloads/$_gemname-$pkgver.gem)
-noextract=($_gemname-$pkgver.gem)
-sha512sums=('1671f477527347084046001fee8bc4b49b990079de1acf876bf588c2d9cdc2aba302e95a1e9dfb7300283f0268799a4b3b8bca8f962cb7e09a255e9288f83f37')
-b2sums=('597b1a57583adaca0b3cde98f37a23856c54ab7a350f668abe4d67d38c855322ef613170fdf1e75907743ad534f61f8cd18641b4a97b8db77e675f4968ac07ee')
+source=("git+https://github.com/ruby/rake#tag=v${pkgver}")
+sha512sums=('40368036fde1d27a369533be1d722da38310110eea8535e591fd01074eafe8001cd75edaf7d6731bf7bc9063dc990cd9ae592f490b67517c30a38a9d91ebc248')
+b2sums=('7e7824591a70e4a387f70be537de4613996cc548e348d0254db0cea13ae0bd92bc688086fa95ae53f5cbff44623a7a5eb3bc439930a7a7c7ed8ee8d00edfec59')
+
+prepare() {
+  cd "${_gemname}"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended \
+    --expression 's|~>|>=|g' \
+    "${_gemname}.gemspec"
+}
+
+build() {
+  cd "${_gemname}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unreproducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${_gemname}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rake test
+}
 
 package() {
-  local _gemdir="$(ruby -e'puts Gem.default_dir')"
-  gem install --ignore-dependencies --no-user-install --no-document -i "$pkgdir/$_gemdir" -n "$pkgdir/usr/bin" $_gemname-$pkgver.gem
-  rm "$pkgdir/$_gemdir/cache/$_gemname-$pkgver.gem"
+  cd "${_gemname}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 MIT-LICENSE --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.rdoc --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
 }
+
+# vim: tabstop=2 shiftwidth=2 expandtab:
