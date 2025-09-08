@@ -6,9 +6,9 @@
 
 pkgname=(texlive-bin libsynctex)
 pkgver=2025.2
-pkgrel=2
+pkgrel=2.1
 license=(GPL-2.0-or-later)
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 makedepends=(bash
              cairo
              clisp
@@ -49,10 +49,40 @@ options=(!lto)
 _commit=8115c4d97aa0e68da1f957a56bca780449d1be59
 source=(git+https://github.com/Tex-Live/texlive-source.git#commit=$_commit
         ptex-debug-print.patch
-        lua-root.patch)
+        lua-root.patch
+        6bf2b2d8ad6bfc810038ba8d426cc603f88ae99a.patch
+        86.patch
+        dvi2tty.h.diff
+        dviljk_config.h.diff
+        fontfcn.h.diff
+        fontforge.diff
+        gregorio_bool.h.diff
+        more_lua.diff
+        more_ps2pk.diff
+        rev74891.diff
+        rev74892.diff
+        seetexk_tempfile.c.diff
+        t1part.h.diff
+        texlive_svn_r74888.diff
+        texlive_svn_r75793.diff)
 sha256sums=('842fc0a45cb4d363253eefcaae1f88be7b8446def80d78cce251dad32d3802ec'
             'aa838f09003c62c2efb5770a8de66f99b409df049fbd65098d80fd1957d06c50'
-            'c2d6a8b14dd8197874c1d894e70df80ad076f28ee4d1cff81e3b7811d9264fb9')
+            'c2d6a8b14dd8197874c1d894e70df80ad076f28ee4d1cff81e3b7811d9264fb9'
+            '8b1b28ed032d2d96c579eb93951595d512bac0bb5cad486766b9ce83e036ec49'
+            '30e6bc47f47a7a3d4535b5104ad72ac3a0182951e05edcb8f19a288cda71bf0d'
+            '488f32562ac45423704ce5548ccdc2ecfdb8c497a9ef7e6c8d2c9c5d8ca2f218'
+            'ed430cdcbaa3e576f559e2ad779d11b756a5958da370d8774dbf4cf6818d7d96'
+            'f87ea5cccbd714eb10789eee175e21d49decb21938a44d1c4678706c9fbf562d'
+            '3882a2936e07b13e48dfd7ddcfda763a336daa829a399d9c58edfd76efb1a28a'
+            '76fadce6d728ee8284afcb6e806d9d50440ee85e19d44f6ba9c85c3a95e726e6'
+            '03d72f5b5bfd76229eb98353113e259c268974c400719e04f4e90ff85b6af5a9'
+            'ab5ba04213a5d6260764ce9d235835b20417d5bbd0c886441eea6839943e9db9'
+            '6207a83be33452be7e4232ea729aa1170f54db1b8db0786fcb3715e5d7f442d0'
+            '6f7657fa0cfc42e208393d1b58aec0e8cfc167ca796b5d37a0c90a374bcb942c'
+            '274e49be5677191e4ce5c78f7636c9f3a64ae2a073cc19d353376adbfd66cc53'
+            '00d6d9d0d6421a69db10be6f17b0f0c3142b37270358308219437182d6cc2d87'
+            'a131864911fe33d3036dc9e97b70476b73b855efddd55e614f0e091d8c96157b'
+            '7a1765be70ab14410868cc0d8383278aa52531aa5d3a1e1faf324a99611d4bf2')
 
 prepare() {
   cd texlive-source
@@ -66,6 +96,23 @@ prepare() {
   patch -p1 -i ../lua-root.patch
 # remove spurious ptex "guessed encoding" print
   patch -p1 -i ../ptex-debug-print.patch
+
+
+  patch -Np1 -i ${srcdir}/6bf2b2d8ad6bfc810038ba8d426cc603f88ae99a.patch
+  patch -Np1 -i ${srcdir}/86.patch
+  patch -Np1 -i ${srcdir}/dvi2tty.h.diff
+  patch -Np1 -i ${srcdir}/dviljk_config.h.diff
+  patch -Np1 -i ${srcdir}/fontfcn.h.diff
+  patch -Np1 -i ${srcdir}/fontforge.diff
+  patch -Np1 -i ${srcdir}/gregorio_bool.h.diff
+  patch -Np1 -i ${srcdir}/more_lua.diff
+  patch -Np1 -i ${srcdir}/more_ps2pk.diff
+  patch -Np1 -i ${srcdir}/rev74891.diff
+  patch -Np1 -i ${srcdir}/rev74892.diff
+  patch -Np1 -i ${srcdir}/seetexk_tempfile.c.diff
+  patch -Np1 -i ${srcdir}/t1part.h.diff
+  patch -Np1 -i ${srcdir}/texlive_svn_r74888.diff
+  patch -Np1 -i ${srcdir}/texlive_svn_r75793.diff
 }
 
 build() {
@@ -75,6 +122,13 @@ build() {
   cd build
   CFLAGS=${CFLAGS/FORTIFY_SOURCE=3/FORTIFY_SOURCE=2} # https://gitlab.archlinux.org/archlinux/packaging/packages/texlive-bin/-/issues/3 
 
+  case "${CARCH}" in
+    powerpc64)
+      export CFLAGS+=' -DU_IS_BIG_ENDIAN=1'
+      export CXXFLAGS+=' -DU_IS_BIG_ENDIAN=1'
+    ;;
+  esac
+
   _bigendian=no
   case "${CARCH}" in
     powerpc|powerpc64)
@@ -83,9 +137,9 @@ build() {
         --disable-luajittex
         --disable-mfluajit
         --disable-luajithbtex
+        --with-system-zzipli
       )
     ;;
-    riscv64) _configure_flags=(--disable-mfluajit --disable-luajithbtex --disable-luajittex --with-system-zzipli) ;;
     *) _configure_flags=(--enable-xindy --with-system-zziplib)
  ;;
   esac
