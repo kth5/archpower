@@ -4,8 +4,8 @@
 
 _name=zeitwerk
 pkgname=ruby-zeitwerk
-pkgver=2.7.2
-pkgrel=3
+pkgver=2.7.3
+pkgrel=1
 pkgdesc="Efficient and thread-safe code loader for Ruby"
 arch=(any)
 url="https://github.com/fxn/zeitwerk"
@@ -24,8 +24,8 @@ checkdepends=(
 )
 options=(!emptydirs)
 source=($pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz)
-sha512sums=('3da8d33ee272148b31981f1795200ce112c4b5c4e26cc051000f24355d7f2df05f0591aa05390e523d9a3e7c8dffd51cd17ea19ed8427d8a4217061bde2d590f')
-b2sums=('8ac1e725099655a8db65d699a89ec47f6134c31243d11f724a39668015f22d71cd850d38993bb51f247b6fb70523102e4f51c849551ed7fd2b5e76bdf7f705ee')
+sha512sums=('c84a5175f0c1b7c616ae9ff1ee2a3f46ba550e0d49f6a08a8862bc3181eadafc1b95adfb97cb3fc8015971fa26d68439f6eadec3eb375abb727ccd6c3ac78cec')
+b2sums=('6c9f51bdb4215c7d6ac108c5574b9fc506b08aea19fc6279052a5bf5c9c140f8af79eb7860b28e7acf9fe83a717aad8944afa54f54d6b000eaf7d543ca459332')
 
 prepare() {
   cd $_name-$pkgver
