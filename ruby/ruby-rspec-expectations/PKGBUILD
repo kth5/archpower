@@ -1,13 +1,14 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Andreas 'Segaja' Schleifer <segaja at archlinux dot org>
 # Contributor: Artem Vorotnikov <artem@vorotnikov.me>
 
 _gemname=rspec-expectations
 pkgname=ruby-${_gemname}
-pkgver=3.13.3
-pkgrel=3
+pkgver=3.13.5
+pkgrel=1
 pkgdesc='Provides a readable API to express expected outcomes of a code example'
-url='https://github.com/rspec/rspec-expectations'
+url='https://github.com/rspec/rspec'
 arch=(any)
 license=('MIT')
 depends=(
@@ -16,19 +17,100 @@ depends=(
   ruby-rspec-support
 )
 makedepends=(
+  git
   ruby-rdoc
 )
+checkdepends=(
+  ruby-bigdecimal
+  ruby-bundler
+  ruby-childprocess
+  ruby-diff-lcs
+  ruby-drb
+  ruby-ffi
+  ruby-minitest
+  ruby-mutex_m
+  ruby-rake
+  ruby-rspec
+  ruby-rspec-core
+  ruby-rspec-expectations
+  ruby-rspec-mocks
+  ruby-test-unit
+  ruby-thread_order
+)
 options=('!emptydirs')
-source=(https://rubygems.org/downloads/${_gemname}-${pkgver}.gem)
-noextract=(${_gemname}-${pkgver}.gem)
-sha512sums=('887d378bccf08f8f42dd3b580dc67dac0d91b7e08a23ab924bd8d618fae2f37132048b473a288a9f1c40096271e4312c28fc91383a074eda53d62939bb8c58fe')
+source=(
+  "${pkgname}::git+${url}#tag=${_gemname}-v${pkgver}"
+  "${pkgname}_no_version_constraints.patch"
+)
+sha512sums=('a08d4181f7bd92f0bc7576fc8143ba782720ae95e58984918b9618d515a868d5627172006879903ed7efdc0bbcff56efe0a4073778d08f942fcef756f52e2b61'
+            '652fa6198074b297f49ca72d6c8a90d1f7623a6b24d59ab243fa9e7fd265458f39de78c480886c4da7643f7fc4308b75ab17a785716a1fe78d12a65d0f9146e5')
+b2sums=('71acfe6a50daa401325e25eb818d16a3307b6265fa6009f6a64938f99c1c0eddbe7554f18d4df941ef7a393e69361aac46096d66091fded4cb547c818c688f1f'
+        'a6f7deeb30e30a510f04f338f2d70b2fc88de18e3c413c4846348a6f7b686982d4367b87f1b28a0355885f0cc1ab651a24f50e1a5d0f23e8ace74b2beec7a8ce')
 
-package() {
-  local _gemdir="$(ruby -e'puts Gem.default_dir')"
-  gem install --ignore-dependencies --no-user-install -i "${pkgdir}${_gemdir}" -n "${pkgdir}/usr/bin" ${_gemname}-${pkgver}.gem
-  install -Dm 644 "${pkgdir}${_gemdir}/gems/${_gemname}-${pkgver}/LICENSE.md" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
-  install -Dm 644 "${pkgdir}${_gemdir}/gems/${_gemname}-${pkgver}/README.md" "${pkgdir}/usr/share/doc/${pkgname}/README"
-  rm "${pkgdir}/${_gemdir}/cache/${_gemname}-${pkgver}.gem"
+prepare() {
+  cd "${pkgname}"
+
+  patch --verbose --strip=1 --input="../${pkgname}_no_version_constraints.patch"
 }
 
-# vim: ts=2 sw=2 et:
+build() {
+  cd "${pkgname}/${_gemname}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unreproducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${pkgname}/${_gemname}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rake spec
+}
+
+package() {
+  cd "${pkgname}/${_gemname}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 LICENSE* --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
+
+# vim: tabstop=2 shiftwidth=2 expandtab:
