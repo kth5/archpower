@@ -5,20 +5,108 @@
 _gemname=mustache
 pkgname=ruby-$_gemname
 pkgver=1.1.1
-pkgrel=6
+pkgrel=7
 pkgdesc='Mustache is a framework-agnostic way to render logic-free views.'
 arch=(any)
 url='https://github.com/defunkt/mustache'
 license=(MIT)
-depends=(ruby)
+depends=(
+  ruby
+)
+makedepends=(
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-minitest
+  ruby-rake
+)
 options=(!emptydirs)
-source=(https://rubygems.org/downloads/$_gemname-$pkgver.gem)
-noextract=($_gemname-$pkgver.gem)
-sha256sums=('90891fdd50b53919ca334c8c1031eada1215e78d226d5795e523d6123a2717d0')
+source=(
+  "${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz"
+  # https://github.com/mustache/mustache/pull/258
+  https://github.com/mustache/mustache/commit/407c6a5db6c1f1cfb40bd6113f07f067d07885a4.patch
+)
+sha512sums=('3bfe85698ffc95828cb2c6d7ee77049a7dab3a60313289cb0b19e9210d17e4de043df913784c5322a0d9d2073ee6be66f973df9b290e939a0eab153727c31fab'
+            'bb122077fa486acd9b737dcf961baeae53b766a48bc635ac48b11e675923885c8110b0095a2600f1655adb034938b04c979c1f5a5d7064d040c207f47eb4d2cc')
+b2sums=('ea62a722ce87e82906a481079f862283e8adab175213176ba83ade3654fc77b6b68472ef8074df6aab9f8094d9208e41686a6e4a1be44739170a6b0051335c40'
+        '7797403a81ed860b9bc940d07196f235722e7dd83aa42c3a8ac9200f8179284c2a6a996621f2f6332ef53fa2654772eacdbd14ce5ca0019fca54bd082a3e0155')
+
+prepare() {
+  cd "${_gemname}-${pkgver}"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended \
+    --expression 's|~>|>=|g' \
+    "${_gemname}.gemspec"
+
+  patch --verbose --strip=1 --input="../407c6a5db6c1f1cfb40bd6113f07f067d07885a4.patch"
+
+  sed --in-place --regexp-extended \
+    --expression '/group :test do/,/end/d' \
+    --expression '/SimpleCov.start do/,/end/d' \
+    --expression '/simplecov/d' \
+    Gemfile \
+    test/helper.rb
+}
+
+build() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unreproducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd "${_gemname}-${pkgver}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  GEM_HOME="tmp_install${_gemdir}" rake test
+}
 
 package() {
-  local _gemdir="$(ruby -e'puts Gem.default_dir')"
-  gem install --ignore-dependencies --no-user-install -N -i "$pkgdir/$_gemdir" -n "$pkgdir/usr/bin" $_gemname-$pkgver.gem
-  rm "$pkgdir/$_gemdir/cache/$_gemname-$pkgver.gem"
-  install -D -m644 "$pkgdir/$_gemdir/gems/$_gemname-$pkgver/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  cd "${_gemname}-${pkgver}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 LICENSE* --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
 }
+
+# vim: tabstop=2 shiftwidth=2 expandtab:
