@@ -3,8 +3,8 @@
 
 _gemname=mapping
 pkgname="ruby-${_gemname}"
-pkgver=1.1.2
-pkgrel=2
+pkgver=1.1.3
+pkgrel=1
 pkgdesc='Map model objects based on their class to a given output model'
 arch=(any)
 url='https://github.com/ioquatix/mapping'
@@ -27,8 +27,8 @@ checkdepends=(
 )
 options=(!emptydirs)
 source=(git+https://github.com/ioquatix/mapping.git#tag=v$pkgver)
-sha512sums=('e8be39f4c15a27274be35f151c864b27b4ae32076ee4adb17dd6307dafce23d39d05f07cb3b03372059c57336ee4143d9b6ab0ffd4a66e53a4a55310302c4518')
-b2sums=('7e0a4df2c6a46c3a3eb49403467535b2c608a3ac4c94cce31d32cd79dd50041e6c1ceb07775a9570ab7ceaf20c954bb077c4a26c5ba21fe82f308928c508b562')
+sha512sums=('35633dc444bcee45380ce74c65b47617c17891544fb4bf3078e1c93c29ac08349ee485824b9815801e941e844f686a40a8cbbc86ab23013ba1a62f368bbe19e0')
+b2sums=('5b6e7078c7057cceda370e0a4c59ddc44c3add30ced479579a8ee4c57b00698c31856bb6ca0f39855efd8cdf06da053ede78d99b98648649734821ae9ca9316f')
 
 prepare() {
   cd "${_gemname}"
