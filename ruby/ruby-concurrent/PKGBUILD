@@ -4,27 +4,90 @@
 
 _gemname='concurrent-ruby'
 pkgname='ruby-concurrent'
-pkgver=1.3.4
-pkgrel=4
+pkgver=1.3.5
+pkgrel=1
 pkgdesc='Modern concurrency tools including agents, futures, promises, thread pools, actors, supervisors, and more.'
-arch=('any')
+arch=(any)
 url="https://github.com/ruby-concurrency/${_gemname}"
 license=('MIT')
-depends=('ruby')
-makedepends=('ruby-rdoc')
+depends=(
+  ruby
+)
+makedepends=(
+  git
+  jruby
+  ruby-rake
+  ruby-rake-compiler
+  ruby-rake-compiler-dock
+  ruby-rdoc
+)
 optdepends=('java-runtime>=8: jruby support')
 options=('!emptydirs')
-source=("https://rubygems.org/gems/${_gemname}-${pkgver}.gem")
-noextract=("${_gemname}-${pkgver}.gem")
-sha512sums=('3a89107da7eb9631f93b54e881b51c2992299179bc9ba839d71572df254d5a0b561e6a928947ba3adadd931439ae17f071676ed1e110370aa370435997239b0d')
+source=("git+${url}#tag=v${pkgver}")
+sha512sums=('c228d949589680d78fbe706fe0b67dd1a0ce70fd20072e68529c28c990c597bbcd3c47a9efe4eb72dc8ff9a28502ac70c2953375840b19049f8290563bb36c84')
+b2sums=('02b92b96b5ecfe94f590b6f6ee68d714739b4459c4a4ba23273cebbed5667aa7662c2d047e844333aedd42a388b19167b9b401eb0a289c8cc6cbff499efb893e')
 
-package() {
-  local _gemdir="$(ruby -e 'puts Gem.default_dir')"
+prepare() {
+  cd "${_gemname}"
 
-  gem install --ignore-dependencies --no-user-install --install-dir "${pkgdir}${_gemdir}" --bindir "${pkgdir}/usr/bin" "${_gemname}-${pkgver}.gem"
-
-  rm "${pkgdir}/${_gemdir}/cache/${_gemname}-${pkgver}.gem"
-  install -Dm 644 "${pkgdir}${_gemdir}/gems/${_gemname}-${pkgver}/LICENSE.txt" -t "${pkgdir}/usr/share/licenses/${pkgname}"
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended \
+    --expression 's|~>|>=|g' \
+    "${_gemname}.gemspec"
 }
 
-# vim: ts=2 sw=2 et:
+build() {
+  cd "${_gemname}"
+
+  local _gemdir="$(gem env gemdir)"
+
+  export JRUBY_HOME=/opt/jruby
+  rake repackage
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "${_gemname}-${pkgver}.gem"
+
+  # remove unreproducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${pkgver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${pkgver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+package() {
+  cd "${_gemname}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode=0644 LICENSE* --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
+}
+
+# vim: tabstop=2 shiftwidth=2 expandtab:
