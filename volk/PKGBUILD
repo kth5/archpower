@@ -1,35 +1,49 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-_pkgname=volk
-pkgname=$_pkgname
-pkgver=1.3.295
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+# Maintainer: Laurent Carlier <lordheavym@gmail.com>
+
+pkgname=volk
+pkgver=1.4.321.0
 pkgrel=1
 pkgdesc="Meta loader for Vulkan API"
-arch=(aarch64 armv7h i486 i686 pentium4 x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://github.com/zeux/volk"
-license=('MIT')
-groups=('vulkan-devel')
-depends=('vulkan-headers' 'vulkan-icd-loader')
-makedepends=('cmake' 'git')
-provides=("$_pkgname=$pkgver")
-conflicts=("$_pkgname")
-source=("$_pkgname::git+$url.git#tag=${pkgver}")
-b2sums=('SKIP')
+arch=(aarch64 armv7h i486 i686 pentium4 x86_64 powerpc64le powerpc64 powerpc espresso)
+license=(MIT)
+makedepends=(
+  cmake
+  git
+  ninja
+  vulkan-headers
+)
+groups=(vulkan-devel)
+options=(
+  # We are producing static libraries
+  !lto
+)
+source=("git+$url#tag=vulkan-sdk-$pkgver")
+b2sums=('5450a6884143b7b9ef8bc7bcb17c6edd61f80031772c625e6ed0f65b3d278508b75103bca82ff3f5607d48efebca7befd630e8fd80b1b010a3b9fa311f9a7c23')
 
 build() {
-  if [[ $CC != clang* ]]; then
-    CFLAGS+=" -ffat-lto-objects"
-  fi
-  cmake -S $_pkgname -B build \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_C_FLAGS_RELEASE="-DNDEBUG" \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DVOLK_INSTALL=ON \
-    -Wno-dev
+  local cmake_options=(
+    -D CMAKE_BUILD_TYPE=Release
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_INSTALL_SYSCONFDIR=/etc
+    -D CMAKE_SKIP_INSTALL_RPATH=ON
+    -D VOLK_INSTALL=ON
+  )
+
+  cmake -S volk -B build -G Ninja "${cmake_options[@]}"
   cmake --build build
 }
 
-package() {
-  # shellcheck disable=SC2154
-  DESTDIR="$pkgdir" cmake --install build
-  install -Dm644 -t "$pkgdir"/usr/share/licenses/$pkgname $_pkgname/LICENSE.md
+check() {
+  ctest --test-dir build --output-on-failure --stop-on-failure
 }
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+
+  install -Dm644 volk/LICENSE.md -t "$pkgdir/usr/share/licenses/$pkgname"
+}
+
+# vim:set sw=2 sts=-1 et:
