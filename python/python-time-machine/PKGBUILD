@@ -3,10 +3,10 @@
 # Maintainer: Daniel M. Capella <polyzen@archlinux.org>
 
 pkgname=python-time-machine
-pkgver=2.16.0
-pkgrel=2
+pkgver=2.19.0
+pkgrel=1
 pkgdesc='Travel through time in your tests'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://github.com/adamchainz/time-machine'
 license=('MIT')
 depends=(
@@ -23,10 +23,14 @@ makedepends=(
 checkdepends=(
   'python-pytest'
   'python-pytest-randomly'
+  'python-tokenize-rt'
 )
-optdepends=('python-pytest: for pytest plugin')
+optdepends=(
+  'python-pytest: for pytest plugin'
+  'python-tokenize-rt: for the migration tool'
+)
 source=("$pkgname::git+$url#tag=$pkgver")
-b2sums=('800fd97077b62497eac4378d732ff32dfde9b16261237ded7cb55452b4d11acd44ade247a56749e8cd05165ada0c464130f14a18319172d5b8d33d5c52c8cad5')
+b2sums=('146e5dcc6b76116aa272b20fd652dd225a7e6d9a847d26c2f5e741cf728756c3919361706c6d028254a276e8f5a078dc07048dd854d45f594686a3b85a59f781')
 
 build() {
   cd "$pkgname"
@@ -37,23 +41,18 @@ build() {
 check() {
   cd "$pkgname"
 
-  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-
-  # install to temporary directory
-  python -m installer --destdir="$(pwd)/tmp_install" dist/*.whl
-
-  PYTHONPATH="$(pwd)/tmp_install$site_packages" \
-    pytest -v
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer dist/*.whl
+  test-env/bin/python -m pytest -v
 }
 
 package() {
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "$pkgdir/usr/share/licenses/$pkgname"
+  ln -s "$site_packages/time_machine-$pkgver.dist-info/licenses/LICENSE" \
+    "$pkgdir/usr/share/licenses/$pkgname"
+
   cd "$pkgname"
 
   python -m installer --destdir="$pkgdir" dist/*.whl
-
-  # symlink license file
-  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-  install -d "$pkgdir/usr/share/licenses/$pkgname"
-  ln -s "$site_packages/time_machine-$pkgver.dist-info/LICENSE" \
-    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
