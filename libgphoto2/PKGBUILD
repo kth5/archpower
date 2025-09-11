@@ -5,9 +5,13 @@
 # Contributor: Eduardo Romero <eduardo@archlinux.org>
 # Contributor: Damir Perisa <damir.perisa@bluewin.ch>
 
-pkgname=libgphoto2
-pkgver=2.5.31
-pkgrel=4.1
+pkgbase=libgphoto2
+pkgname=(
+  libgphoto2
+  libgphoto2-docs
+)
+pkgver=2.5.32
+pkgrel=3
 pkgdesc="Digital camera access library"
 url="http://www.gphoto.org/"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
@@ -24,54 +28,73 @@ depends=(
   libxml2
 )
 makedepends=(
-  autoconf-archive
+  doxygen
   git
+  graphviz
+  meson
 )
-provides=(libgphoto2{,_port}.so)
-source=("git+https://github.com/gphoto/libgphoto2#tag=v$pkgver")
-b2sums=('4359a165282d4c1a512f9cf01367421e735897b0e790271848f1a1eafd8bfdd13e27257b0e62fdc089cd959b10135935b765c4646a0e564dacd85c7eb1f62c82')
+source=(
+  "git+https://github.com/gphoto/libgphoto2#tag=v$pkgver"
+)
+b2sums=('de9380961e1731b7510d5555b0f8ec4a691461aa269bcde98e457cf06867f3cd841244f9f5a267b8998e9ab983ac398a49241d7fbc1c6dd7795b87c899926b04')
 validpgpkeys=(
   7C4AFD61D8AAE7570796A5172209D6902F969C95 # Marcus Meissner <marcus@jet.franken.de>
 )
 
 prepare() {
-  cd $pkgname
-  autoreconf -fvi
+  cd $pkgbase
+
+  # Meson fixes
+  git cherry-pick -n 53a0d5e8ed57ac2582c54a5fc0c425455e9eafc1 \
+                     fd294cdf2d905472519e937b3383cd6928230322 \
+                     2eaa91be3c24835667e99cc5214ecf8429b5aecf
+  sed -i 's/2\.5\.32\.1/2.5.32/' meson.build
 }
 
 build() {
-  local configure_options=(
-    --prefix=/usr
-    --sysconfdir=/etc
-    --localstatedir=/var
-    --disable-rpath
+  local meson_options=(
+    -D docs=true
   )
 
-  case "${CARCH}" in
-    powerpc) export CFLAGS+=' -Wno-incompatible-pointer-types' ;;
-  esac
-
-  cd $pkgname
-  ./configure "${configure_options[@]}"
-  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-  make
+  arch-meson $pkgbase build "${meson_options[@]}"
+  meson compile -C build
 }
 
-package() {
-  make -C $pkgname DESTDIR="$pkgdir" install
+check() {
+  meson test -C build --print-errorlogs --no-suite no-ci
+}
+
+package_libgphoto2() {
+  provides=(libgphoto2{,_port}.so)
+
+  meson install -C build --destdir "$pkgdir"
+
+  local camlibdir="$pkgdir/usr/lib/libgphoto2/$pkgver"
+  test -d "$camlibdir"
 
   # Remove unused udev helper
-  rm -rv "$pkgdir/usr/lib/udev"
+  rm -v "$pkgdir/usr/lib/udev/check-ptp-camera"
 
   (
     export LD_LIBRARY_PATH="$pkgdir/usr/lib"
-    export CAMLIBS="$PWD/$pkgver"
+    export CAMLIBS="$camlibdir"
 
-    "$pkgdir/usr/lib/libgphoto2/print-camera-list" hwdb \
+    build/packaging/generic/print-camera-list hwdb \
       | install -Dm644 /dev/stdin "$pkgdir/usr/lib/udev/hwdb.d/20-gphoto.hwdb"
-    "$pkgdir/usr/lib/libgphoto2/print-camera-list" udev-rules version 201 \
+    build/packaging/generic/print-camera-list udev-rules version 201 \
       | install -Dm644 /dev/stdin "$pkgdir/usr/lib/udev/rules.d/40-gphoto.rules"
   )
+
+  # Split docs
+  mkdir -p doc/usr/share
+  mv {"$pkgdir",doc}/usr/share/doc
+}
+
+package_libgphoto2-docs() {
+  pkgdesc+=" (documentation)"
+  depends=()
+
+  mv doc/* "$pkgdir"
 }
 
 # vim:set sw=2 sts=-1 et:
