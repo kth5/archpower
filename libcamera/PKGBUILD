@@ -1,5 +1,6 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: David Runge <dvzrv@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 
 pkgbase=libcamera
 pkgname=(
@@ -10,8 +11,8 @@ pkgname=(
   gst-plugin-libcamera
   python-libcamera
 )
-pkgver=0.5.0
-pkgrel=2
+pkgver=0.5.2
+pkgrel=1
 pkgdesc="A complex camera support library for Linux, Android, and ChromeOS"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://libcamera.org/"
@@ -35,17 +36,16 @@ makedepends=(
   python-ply
   python-pyyaml
   python-sphinx
+  python-sphinxcontrib-doxylink
   qt6-base
   qt6-tools
   sdl2
   systemd
   texlive-core
 )
-source=(
-  "git+$_url#tag=v$pkgver"
-)
-sha512sums=('403f3bd855bd783b8a943d5aaf9516f33271c447774b148734be30e31f8c63e812d032c7f43ae3dbd135244de518b4f6c420ad50153b582fe5e86315440da639')
-b2sums=('5b4b6c17371ebd8c5c897481e53c572846dfb5f8282ec4c90eebe1800ad181e137f5b7acf8bc669605797e97ee09005cdb1071e576680f71209ee1a0aae02383')
+source=("git+$_url#tag=v$pkgver")
+sha512sums=('4d9688e2587854cd7bd4b98cb53b4f5c89dab588c793523f0d3d41cdb7f884dca5490dd72eb78aeee838bc33a2db6db580409d4835841e8c123e3edf1fa7bf78')
+b2sums=('749b620a993140ac3ce4d7c1808d588f65a99592f03247cff117d3949d3a169650d7f763fb4f67eb296c95f8f663daf7b3fedca1e2c8c48345b2733d54d8cfb2')
 
 _pick() {
   local p="$1" f d; shift
@@ -57,24 +57,16 @@ _pick() {
   done
 }
 
-pkgver() {
-  cd $pkgbase
-  git describe --tags | sed 's/\([^-]*-g\)/r\1/;s/-/./g;s/v//g'
-}
-
 prepare() {
   cd $pkgbase
 
   # add version, so that utils/gen-version.sh may rely on it
   printf "%s\n" "$pkgver" > .tarball-version
-
-  # Fix libyuv detection
-  git cherry-pick -n 1ea124c7a3de5cb1289ec6416f957f7da5f0c1c1
 }
 
 build() {
   local meson_options=(
-    -D v4l2=true
+    -D v4l2=enabled
     -D tracing=disabled
     -D test=true
   )
@@ -84,7 +76,15 @@ build() {
 }
 
 check() {
-  meson test -C build || echo "Tests require CLONE_NEWUSER/ CLONE_NEWNET."
+  # Skip tests failing due to requiring CLONE_NEWUSER/CLONE_NEWNET
+  local tests=$(
+    meson test -C build --list | awk '{print $3}' \
+      | grep -v single_stream_test \
+      | grep -v multi_stream_test \
+      | grep -v memory_lifetime_test \
+  )
+  # shellcheck disable=SC2068
+  meson test -C build ${tests[@]}
 }
 
 package_libcamera() {
