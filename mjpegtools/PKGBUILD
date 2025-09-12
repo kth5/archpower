@@ -5,18 +5,50 @@
 
 pkgname=mjpegtools
 pkgver=2.2.1
-pkgrel=2.1
+pkgrel=3
 pkgdesc='Video capture, editing, playback and compression to MPEG of MJPEG video'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://mjpeg.sourceforge.io/'
-license=('GPL')
-depends=('bash' 'gcc-libs' 'glibc' 'libdv' 'libjpeg-turbo' 'libpng')
-source=("https://downloads.sourceforge.net/mjpeg/$pkgname-$pkgver.tar.gz")
-sha256sums=('b180536d7d9960b05e0023a197b00dcb100929a49aab71d19d55f4a1b210f49a')
+license=(GPL-2.0-or-later)
+depends=(
+  bash
+  gcc-libs
+  glibc
+  libdv
+  libjpeg-turbo
+  libpng
+)
+source=(
+  "https://downloads.sourceforge.net/mjpeg/$pkgname-$pkgver.tar.gz"
+  mjpegtools-2.2.1-gcc15.patch
+)
+b2sums=(
+  a6f2698dda6b7c92a1a786f39bfb1989587b2c35a1f94e435247f04a01f405808d464470fddf1eddaee73df75daaef460bd62e901b89b2b2e0b095332492b20b
+  bcd92c20d39cc1a23ee27cfb591abbad7842e87df17b22e0c4a88e66a4f167fa98365dfb809224a9380a7189b834d94a944a41bc79c681666c1809695139e2a8
+)
+
+prepare() {
+  cd $pkgname-$pkgver
+
+  # Fix build with with GCC 15
+  patch -Np2 -i ../mjpegtools-2.2.1-gcc15.patch
+
+  autoreconf -fi
+}
 
 build() {
   cd $pkgname-$pkgver
-  ./configure --prefix=/usr
+
+  case "${CARCH}" in
+    powerpc|powerpc64)
+      export CFLAGS+=' -Wno-incompatible-pointer-types'
+    ;;
+  esac
+
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
 }
