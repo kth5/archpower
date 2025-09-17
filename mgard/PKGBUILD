@@ -3,13 +3,14 @@
 # Maintainer: Jakub Klinkovský <lahwaacz at archlinux dot org>
 
 pkgname=mgard
-pkgver=1.5.2
-pkgrel=10
+pkgver=1.6.0
+pkgrel=1
 pkgdesc="MultiGrid Adaptive Reduction of Data"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://github.com/CODARcode/MGARD"
 license=(Apache-2.0)
 depends=(
+  abseil-cpp
   gcc-libs
   glibc
   protobuf libprotobuf.so
@@ -24,7 +25,7 @@ makedepends=(
   #tclap # 1.4 required but not packaged
 )
 source=(${url}/archive/${pkgver}/${pkgname}-${pkgver}.tar.gz)
-b2sums=('fbebe814483f7ebbfd1f3bc33ca387fe77f7b0f0de369e5c4d2525d01172146197458e1a070824a8697fd0b9acef267f5813562aa9848db32d9175f879ce13f7')
+b2sums=('ca88641cfe2f1b1f72c8bbb35078925a96c426ff2918f7b564c0ad5c7bb49e68a145cec74cf269b3ee208ef5bd41f0c4ab7ce1376c5ff4a1f8ce7b2a268a1ca2')
 
 build() {
   local cmake_options=(
@@ -38,10 +39,24 @@ build() {
     -DMGARD_ENABLE_OPENMP=ON
     -DMGARD_ENABLE_MDR=ON
     #-DMGARD_ENABLE_CLI=ON  requires tclap 1.4
-    -DBUILD_TESTING=OFF
   )
+
+  case "${CARCH}" in
+    powerpc|powerpc64) cmake_options+=(-DBUILD_TESTING=OFF) ;;
+    *)                 cmake_options+=(-DBUILD_TESTING=ON) ;;
+  esac
+
   cmake "${cmake_options[@]}"
   cmake --build build
+}
+
+check() {
+  case "${CARCH}" in
+    powerpc|powerpc64) return 0 ;;
+  esac
+
+  # Upstream is missing the integration with ctest
+  OMP_NUM_THREADS=4 ./build/bin/tests
 }
 
 package() {
