@@ -1,0 +1,58 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+
+pkgname=python-geographiclib
+_name="${pkgname#python-}-python"
+pkgver=2.1
+pkgrel=1
+pkgdesc="Python implementation of the geodesic routines in GeographicLib"
+arch=(any)
+url="https://github.com/geographiclib/geographiclib-python"
+license=(MIT)
+depends=(python)
+makedepends=(
+  python-build
+  python-installer
+  python-setuptools
+  python-wheel
+)
+checkdepends=(python-pytest)
+source=($pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz)
+sha512sums=('62d018dcc6ef0eaa8856a828d34ddadebf1e5c2f4a5fc9fa9dd2f58af04a5cea357a949c0331b1577d43a16dbef3f86ab7d32765106bd93d5bf7db0d76caa004')
+b2sums=('3a2e86ca0ac58286ff3801d346e731c00eb7617b963084e3b7c4f8cfc4321d6058ccb0e33de4bc3db12ed4872cf6dab665889efbe23aef03612462316948d178')
+
+prepare() {
+  cd $_name-$pkgver
+  local python_version_number="$(python -c 'import sys; print("".join(map(str, sys.version_info[:2])))')"
+  # Extract the version parts from pkgver and use them as needed.
+  IFS='.' read -r -a _version_parts <<< "$pkgver"
+  local project_version_major="${_version_parts[0]}"
+  local project_version_minor="${_version_parts[1]}"
+  if [[ "${#_version_parts[@]}" -eq 3 ]]; then
+    local project_version_patch="${_version_parts[2]}"
+  else
+    local project_version_patch="0"
+  fi
+
+  # Upstream uses cmake to configure (and directly publish) artifacts on PyPI, so we have to do this manually... :(
+  sed "s/@Python_VERSION_NUMBER@/$python_version_number/" setup.cfg.in > setup.cfg
+  sed "s/@PROJECT_VERSION_MAJOR@/$project_version_major/; s/@PROJECT_VERSION_MINOR@/$project_version_minor/; s/@PROJECT_VERSION_PATCH@/$project_version_patch/; s/@PROJECT_FULLVERSION@/$pkgver/; s/@RELEASE_DATE@/1970-01-01/" "${pkgname#python-}/__init__.py.in" > "${pkgname#python-}/__init__.py"
+}
+
+build() {
+  cd $_name-$pkgver
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd $_name-$pkgver
+  export PYTHONPATH="build:$PYTHONPATH"
+  pytest -vv
+}
+
+package() {
+  cd $_name-$pkgver
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm 644 README.md -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -vDm 644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+}
