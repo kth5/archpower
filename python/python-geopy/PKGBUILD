@@ -1,0 +1,72 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+
+_name=geopy
+pkgname=python-geopy
+pkgver=2.4.1
+pkgrel=4
+pkgdesc="Geocoding library for Python"
+arch=(any)
+url="https://github.com/geopy/geopy"
+license=(MIT)
+depends=(
+  python
+  python-geographiclib
+)
+makedepends=(
+  git
+  python-build
+  python-installer
+  python-setuptools
+  python-wheel
+)
+checkdepends=(
+  python-aiohttp
+  python-pytest-asyncio
+  python-pytest-aiohttp
+  python-pytest
+  python-pytz
+  python-requests
+)
+optdepends=(
+  'python-aiohttp: for async http support'
+  'python-requests: for requests support'
+  'python-pytz: for timezone support'
+)
+source=("git+$url?signed#tag=$pkgver")
+sha512sums=('2f7d64d2568e18ade7fb799e9ee12786e3ab9093f633db189143ba0eff7c5e72bd3e8c3c929fba864ec111f4f28e446eec60432482bb61ad371bb05e71fa638b')
+b2sums=('9a6a4a42828cfe48265cb3bf7792c788e5ae1d7e3199db4ca077df8f45285b962942ae4fb72b7229ac336a1f429b9d45f402a088a0ff8d5e29b5ba07f33f3b8f')
+validpgpkeys=('A18FE9F6F570D5B4E1E1853FAA7B5406547AF062') # Kostya Esmukov <kostya@esmukov.ru>
+
+pkgver() {
+  cd $_name
+  git describe --tags | sed 's/^v//'
+}
+
+build() {
+  cd $_name
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  case "${CARCG}" in
+    powerpc) return 0 ;;
+  esac
+
+  local pytest_options=(
+    -vv
+    --deselect test/adapters/each_adapter.py::test_geocoder_constructor_uses_https_proxy
+    --deselect test/adapters/each_adapter.py::test_geocoder_https_proxy_auth_is_respected
+    --ignore=test/geocoders
+  )
+
+  cd $_name
+  pytest "${pytest_options[@]}"
+}
+
+package() {
+  cd $_name
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm 644 {AUTHORS,README.rst} -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -vDm 644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+}
