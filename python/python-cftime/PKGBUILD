@@ -1,0 +1,51 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Bruno Pagani <archange@archlinux.org>
+
+_pkg=cftime
+pkgname=python-${_pkg}
+pkgver=1.6.4
+pkgrel=2
+pkgdesc="Time-handling functionality from python-netcdf4"
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url="https://unidata.github.io/cftime"
+license=(MIT)
+depends=(python-numpy)
+makedepends=(
+  cython
+  python-build
+  python-installer
+  python-setuptools
+  python-wheel
+)
+checkdepends=(python-pytest)
+#source=(https://files.pythonhosted.org/packages/source/${_pkg::1}/${_pkg}/${_pkg}-${pkgver}.tar.gz)
+source=(https://github.com/Unidata/cftime/archive/v${pkgver}rel/${pkgname}-${pkgver}.tar.gz)
+sha256sums=('38970aa0d0ed9ed6b1d90f2cff2301b7299ae62d38e39a540400ab00edb4d2ce')
+
+prepare() {
+  cd ${_pkg}-${pkgver}rel
+  sed -i 's/ "oldest-supported-numpy.*,//' pyproject.toml
+}
+
+build() {
+  cd ${_pkg}-${pkgver}rel
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  MYARCH=${CARCH}
+  case "${CARCH}" in
+    powerpc*) MYARCH=${CARCH/powerpc/ppc} ;;
+  esac
+
+  cd ${_pkg}-${pkgver}rel
+  sed -i '/--cov/d' setup.cfg
+  local python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+  PYTHONPATH="${PWD}"/build/lib.linux-${MYARCH}-cpython-${python_version/./} pytest -vv --color=yes
+}
+
+package() {
+  cd ${_pkg}-${pkgver}rel
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 LICENSE -t "${pkgdir}"/usr/share/licenses/${pkgname}
+}
