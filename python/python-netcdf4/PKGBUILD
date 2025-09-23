@@ -1,0 +1,47 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Bruno Pagani <archange@archlinux.org>
+# Contributor: Spyros Stathopoulos <foucault.online@gmail.com>
+# Contributor: richli <rich at dranek dot com>
+# Contributor: rememberthemer <rememberthemer@_GMAIL_DOT_COM_>
+
+_pkg=netCDF4
+pkgname=python-${_pkg,,}
+pkgver=1.7.2
+pkgrel=3
+pkgdesc="Python/NumPy interface to the netCDF C library"
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url="https://unidata.github.io/netcdf4-python"
+license=(MIT)
+depends=(python-numpy python-cftime netcdf python-certifi)
+makedepends=(cython git python-build python-installer python-wheel python-setuptools python-setuptools-scm)
+checkdepends=(python-pytest)
+source=(git+https://github.com/Unidata/netcdf4-python#tag=v${pkgver}rel)
+sha256sums=('0c491ff44c2c2b42625b104b4276a3b0d8fbaea8971d967794e2722373651389')
+
+MYARCH=${CARCH}
+case "${CARCH}" in
+  powerpc*) MYARCH=${CARCH/powerpc/ppc} ;;
+esac
+
+build() {
+  cd netcdf4-python
+  CFLAGS+=" -Wno-incompatible-pointer-types" \
+  USE_NCCONFIG=1 NETCDF_PLUGIN_DIR=/usr/lib/netcdf/plugin \
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  case "${CARCH}" in
+    powerpc|powerpc64) return 0 ;;
+  esac
+
+  cd netcdf4-python/test
+  local python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+  NO_NET=1 PYTHONPATH="../build/lib.linux-${MYARCH}-cpython-${python_version/./}" python -B ./run_all.py
+}
+
+package() {
+  cd netcdf4-python
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 LICENSE -t "${pkgdir}"/usr/share/licenses/${pkgname}
+}
