@@ -3,26 +3,39 @@
 # Contributor: judd <jvinet@zeroflux.org>
 pkgname=cpio
 pkgver=2.15
-pkgrel=2
+pkgrel=3
 pkgdesc="A tool to copy files into or out of a cpio or tar archive"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=('GPL-3.0-or-later')
 url="https://www.gnu.org/software/cpio"
 depends=('glibc')
 makedepends=('git' 'rsync' 'wget')
-source=(git+https://git.savannah.gnu.org/git/cpio.git?signed#tag=v${pkgver})
-b2sums=('SKIP')
+options=('!emptydirs')
+source=("git+https://git.savannah.gnu.org/git/cpio.git?signed#tag=v${pkgver}"
+        "git+https://git.savannah.gnu.org/git/gnulib.git"
+        "git+https://git.savannah.gnu.org/git/paxutils.git")
 validpgpkeys=('325F650C4C2B6AD58807327A3602B07F55D0C732') # Sergey Poznyakoff <gray@gnu.org>
+b2sums=('a440520f0cb0d77cff6fc8a44b13f32454a1052ce1d79a4733ebeaafcc0af3404a906edf0aecbc86c69b95b4b55005f63c20746f688672223bd751054f378a99'
+        'SKIP'
+        'SKIP')
 
 prepare() {
   cd "${pkgname}"
+
+  git submodule init
+  git config submodule.gnulib.url "${srcdir}/gnulib"
+  git config submodule.paxutils.url "${srcdir}/paxutils"
+  git -c protocol.file.allow=always submodule update
+
+  #fix c23 conformity https://cgit.git.savannah.gnu.org/cgit/cpio.git/commit/?id=f42137f5ab9cf07d1e62edc05e0212688d3ebaa2
+  git cherry-pick -n 'f42137f5ab9cf07d1e62edc05e0212688d3ebaa2'
+
   ./bootstrap
 }
 
 build() {
   cd "${pkgname}"
-  CFLAGS+=' -fcommon' # https://wiki.gentoo.org/wiki/Gcc_10_porting_notes/fno_common
-  ./configure --prefix=/usr --mandir=/usr/share/man
+  ./configure --prefix=/usr --mandir=/usr/share/man --with-rmt=/dev/null
   make
 }
 
@@ -34,6 +47,4 @@ check() {
 package() {
   cd "${pkgname}"
   make DESTDIR="${pkgdir}" install
-  rm -r "${pkgdir}"/usr/libexec
-  rm -r "${pkgdir}"/usr/share/man/man8
 }
