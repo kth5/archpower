@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kdesdk-thumbnailers
-pkgver=25.08.0
+pkgver=25.08.1
 pkgrel=1
 pkgdesc='Plugins for the thumbnailing system'
 url='https://www.kde.org/'
@@ -22,7 +22,7 @@ makedepends=(extra-cmake-modules)
 groups=(kde-applications
         kde-sdk)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('533c9319075a9fcddc127d1e46442c3b5987b7dcc25746288b8572ec714bb8bb'
+sha256sums=('38931ce4eae4b1a16790668e3687fe7326cfbecdbf74762bff4bd90176d9ab1e'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
