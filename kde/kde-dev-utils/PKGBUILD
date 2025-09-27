@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kde-dev-utils
-pkgver=25.08.0
+pkgver=25.08.1
 pkgrel=1
 pkgdesc='Small utilities for developers using KDE/Qt libs/frameworks'
 url='https://apps.kde.org/kuiviewer/'
@@ -26,7 +26,7 @@ makedepends=(extra-cmake-modules)
 groups=(kde-applications
         kde-sdk)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('6cbd5ee79fb7ad909ac81ddf2c2916fe86047aabe8ca2b606034f76744a31393'
+sha256sums=('28eae56d7115ef85e193c69712dca18a6fef9f7b733997df4b21f5451dac9db3'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
