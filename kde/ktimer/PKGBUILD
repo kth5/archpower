@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=ktimer
-pkgver=25.08.0
+pkgver=25.08.1
 pkgrel=1
 pkgdesc='Countdown Launcher'
 url='https://apps.kde.org/ktimer/'
@@ -27,7 +27,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-utilities)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('232ef83aba74706ba34f96b3cd5bb00dd15ce18690365da24eabbeebddb3e41b'
+sha256sums=('75ae9e1beded795a87458735350ee64002ac6fa3a13e7678c9bac41b946e1f7b'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
