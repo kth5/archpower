@@ -6,7 +6,7 @@
 pkgbase=libkdcraw
 pkgname=(libkdcraw
          libkdcraw5)
-pkgver=25.08.0
+pkgver=25.08.1
 pkgrel=1
 pkgdesc='A C++ interface used to decode RAW picture'
 url='https://www.kde.org/'
@@ -19,7 +19,7 @@ makedepends=(extra-cmake-modules
              qt5-base
              qt6-base)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgbase-$pkgver.tar.xz{,.sig})
-sha256sums=('4640d1740dbb85487e57a5f07a65aca90093ec107cdc32430fea88fbea0797be'
+sha256sums=('b5f112ced53a76b1414bd904b7ac7c8d9b743592e25a6c44c42dd6df7b0feb81'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
