@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kiten
-pkgver=25.08.0
+pkgver=25.08.1
 pkgrel=1
 pkgdesc='Japanese Reference/Study Tool'
 url='https://apps.kde.org/kiten/'
@@ -29,7 +29,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-education)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('a7961268808e303edc412cf1cd6e853511fd1e5724d717c3f92e8605f5b9dfb4'
+sha256sums=('2a57d5718e72aaddfe36df85f372cd1b32ba44871637e7e55c43cc37aefa9460'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
