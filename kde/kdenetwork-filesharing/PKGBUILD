@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kdenetwork-filesharing
-pkgver=25.08.0
+pkgver=25.08.1
 pkgrel=1
 pkgdesc='Properties dialog plugin to share a directory with the local network'
 url='https://apps.kde.org/kdenetwork_filesharing/'
@@ -26,7 +26,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-network)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('8609f1aaf957db01c1352e5bfa2898770c2b08b0a52d739308713b09c8743e68'
+sha256sums=('a63ac269ab8d1363d88a0df0830e39b74bc06f0a60fd126062b6abdbdfcedaef'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
