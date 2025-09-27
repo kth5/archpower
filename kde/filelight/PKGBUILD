@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=filelight
-pkgver=25.08.0
+pkgver=25.08.1
 pkgrel=1
 pkgdesc='View disk usage information'
 url='https://apps.kde.org/filelight/'
@@ -28,7 +28,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-utilities)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('6080649ed7621178a7aeff1d3070629caa3d91da4978bcc5b568c75bedf53185'
+sha256sums=('17f8cf4b478c53dae921e2c5549e3f7cddd3dabeddb8f75c551e2dbef29adba5'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
