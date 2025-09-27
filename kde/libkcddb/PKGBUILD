@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=libkcddb
-pkgver=25.08.0
+pkgver=25.08.1
 pkgrel=1
 pkgdesc='KDE CDDB library'
 url='https://www.kde.org/'
@@ -25,7 +25,7 @@ makedepends=(extra-cmake-modules
              kdoctools)
 conflicts=('libkcddb5<24')
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('e6a8573f554cd920e6f828010cde8c4aaeac5b329029f76ca2fe4bd5495627ec'
+sha256sums=('7042e4d08ce53a830eb6947a5c2f7c9aa5e9c60c163731da149df3e82c338d6f'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
