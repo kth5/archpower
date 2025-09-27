@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kqtquickcharts
-pkgver=25.08.0
+pkgver=25.08.1
 pkgrel=1
 pkgdesc='A QtQuick plugin to render beautiful and interactive charts'
 url='https://www.kde.org/'
@@ -17,7 +17,7 @@ depends=(gcc-libs
          qt6-declarative)
 makedepends=(extra-cmake-modules)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('ac19517bd806746b3ed4f9c63ed219bb083bcfc614426400d0959c6a4638672c'
+sha256sums=('31d9ced7427f748d47d4937354f204fddd613ce5e8ef4d46d53f3221a8f2f045'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
