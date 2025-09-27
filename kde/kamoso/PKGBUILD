@@ -5,7 +5,7 @@
 # Contributor: Panagiotis Papadopoulos <pano_90 AT gmx DOT net>
 
 pkgname=kamoso
-pkgver=25.08.0
+pkgver=25.08.1
 pkgrel=1
 pkgdesc='A webcam recorder from KDE community'
 url='https://apps.kde.org/kamoso/'
@@ -36,7 +36,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-multimedia)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('32dc14864fa4b634ce057bf29647cad7bfdac15a282ba2ca98f4230b28142160'
+sha256sums=('c5347bb111789a9b188c85e81fac33e760ab7efe7f14ddb0b689a96575ae5b3b'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
