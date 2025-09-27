@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kig
-pkgver=25.08.0
+pkgver=25.08.1
 pkgrel=1
 pkgdesc='Interactive Geometry'
 url='https://apps.kde.org/kig/'
@@ -35,7 +35,7 @@ makedepends=(boost
 groups=(kde-applications
         kde-education)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('10f5c931723a34ea6e075df052711148c2912bcab2cc70d307f60e40311a3d97'
+sha256sums=('f25a61a481b89a5a57dee616bc1bb35049c9ac2673b2480b4723f0e0c7c15f7f'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
