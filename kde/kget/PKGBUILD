@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kget
-pkgver=25.08.0
+pkgver=25.08.1
 pkgrel=1
 pkgdesc='Download Manager'
 url='https://apps.kde.org/kget/'
@@ -45,7 +45,7 @@ groups=(kde-applications
         kde-network)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
 
-sha256sums=('153e2fc21af6188f2f2b0b9763496192966d1694382f536625e1c820779e4a2c'
+sha256sums=('67adedc2eb2ef24e30f33ad99f9556263c28c43d1ca718323fed11d0c366e25d'
             'SKIP')
 
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
