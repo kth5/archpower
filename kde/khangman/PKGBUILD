@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=khangman
-pkgver=25.08.0
+pkgver=25.08.1
 pkgrel=1
 pkgdesc='Hangman Game'
 url='https://apps.kde.org/khangman/'
@@ -29,7 +29,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-education)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('6e0395602370083082525717485fa1030ae7b4e31ecb97ad2035aa3c4788a890'
+sha256sums=('dc47b788044366f1e7731caeac9b61c310db6ee7f63b737d3dfac6c612d5e543'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
