@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kompare
-pkgver=25.08.0
+pkgver=25.08.1
 pkgrel=1
 pkgdesc='Graphical file differences tool'
 url='https://apps.kde.org/kompare/'
@@ -31,7 +31,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-sdk)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('2b2f67eb9a31093b1d1e295724f0f0b0cd13275cacdfb864590d5fcce8b4c872'
+sha256sums=('55fb17f8337df779cecec9f4a85b6e225c630414c657df51f5b25e158e23e017'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
