@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=ktouch
-pkgver=25.08.0
+pkgver=25.08.1
 pkgrel=1
 pkgdesc='Touch Typing Tutor'
 url='https://apps.kde.org/ktouch/'
@@ -38,7 +38,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-education)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('d1ca5bf8760d19bfa0412875bcda5cdb9b4c0db9bbb39c43f1d7a4042b2d91d3'
+sha256sums=('453ee29c45531364d20a2fdf7643e59fcbe7e50e5e2ac1f889c74f9645db2e09'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
