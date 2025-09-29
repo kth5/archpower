@@ -1,71 +1,58 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Contributor: Jan de Groot <jgc@archlinux.org>
 
 pkgname=yelp
-pkgver=42.2
-pkgrel=2
+pkgver=42.3
+pkgrel=1
 pkgdesc="Get help with GNOME"
 url="https://apps.gnome.org/Yelp"
-license=(GPL)
-arch=(x86_64 powerpc powerpc64 powerpc64le riscv64)
+license=(GPL-2.0-or-later)
+arch=(x86_64 powerpc powerpc64 powerpc64le espresso)
 depends=(
   bzip2
+  dconf
+  glib2
+  glibc
+  gtk3
+  hicolor-icon-theme
   libhandy
+  libxml2
   libxslt
+  sqlite
   webkit2gtk-4.1
   xz
   yelp-xsl
 )
 makedepends=(
-  appstream-glib
-  autoconf-archive
   git
-  itstool
   glib2-devel
+  itstool
+  meson
 )
 optdepends=('man-db: View manual pages')
 provides=(libyelp.so)
 groups=(gnome)
-_commit=9fd1a84e1eae23db21939ff76c7e96d5422d3b1a  # tags/42.2^0
 source=(
-  "git+https://gitlab.gnome.org/GNOME/yelp.git#commit=$_commit"
-  no-gtk-doc.diff
+  "git+https://gitlab.gnome.org/GNOME/yelp.git#tag=${pkgver/[a-z]/.&}"
 )
-b2sums=('SKIP'
-        'd6200723395292742105065baeab12ae308f8141069343c5ec79bcab10e4efbdea69ea9deffdcd7a2fb0c0ceeb886398b8b303ff750af1a79c38c64046664501')
-
-pkgver() {
-  cd yelp
-  git describe --tags | sed 's/[^-]*-g/r&/;s/-/+/g'
-}
+b2sums=('e571f5ab96e2b5ce78c5cdc9c835441e1bc10bcfc81d65c5d7b82209a50094662c4fe07f2eb732c60e15fa4172d7141026d4cecbe47897003ad5989239a02ed1')
 
 prepare() {
   cd yelp
-
-  # Remove vestiges of docs build to allow building without gtk-doc
-  git apply -3 ../no-gtk-doc.diff
-
-  NOCONFIGURE=1 ./autogen.sh
 }
 
 build() {
-  local configure_options=(
-    --prefix=/usr
-    --sysconfdir=/etc
-    --localstatedir=/var
-    --enable-compile-warnings=minimum
-    --disable-static
-  )
+  arch-meson yelp build
+  meson compile -C build
+}
 
-  cd yelp
-  ./configure "${configure_options[@]}"
-  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-  make
+check() {
+  meson test -C build --print-errorlogs
 }
 
 package() {
-  cd yelp
-  make DESTDIR="$pkgdir" install
+  meson install -C build --destdir "$pkgdir"
 }
 
 # vim:set sw=2 sts=-1 et:
