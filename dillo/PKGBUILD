@@ -5,13 +5,13 @@
 
 pkgname=dillo
 pkgver=3.2.0
-pkgrel=4
+pkgrel=5
 pkgdesc="A small, fast graphical web browser built on FLTK"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://dillo-browser.github.io/"
 license=('GPL-3.0-or-later')
 depends=(
-  'fltk'
+  'fltk1.3'
   'gcc-libs'
   'glibc'
   'libjpeg-turbo'
@@ -22,19 +22,33 @@ depends=(
   'perl'
   'zlib'
 )
+makedepends=(
+  git
+)
 backup=(
   etc/dillo/dillorc
   etc/dillo/domainrc
   etc/dillo/dpidrc
   etc/dillo/keysrc
 )
-source=("https://github.com/dillo-browser/dillo/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz"{,.asc})
-sha256sums=('ed685168397c7b333d25c21208fcf1313ffede59b44f526b7c9b6ee41ebccabd'
-            'SKIP')
+source=(
+  "git+https://github.com/dillo-browser/dillo.git?signed#tag=v$pkgver"
+  $pkgname-3.2.0-fltk1.3.patch
+)
+sha256sums=('edf1af002f708e77b7832fe19f0cd646ef0cbbb80456ae97f6141809508fd7fe'
+            '0be3bd7f2b497be343e22cc93ba7cef7ef94ee328d57efc017013f1838c38eec')
 validpgpkeys=('32E65EC501A1B6FDF8190D293EE6BA977EB2A253') # Rodrigo Arias Mallo <rodarima@gmail.com>
 
+prepare() {
+  cd $pkgname
+  # Use fltk1.3 as upstream is not yet compatible with fltk >= 1.4
+  patch -Np1 -i ../$pkgname-3.2.0-fltk1.3.patch
+
+  autoreconf -fiv
+}
+
 build() {
-  cd $pkgname-$pkgver
+  cd $pkgname
   ./configure --prefix=/usr --sysconfdir=/etc \
     --enable-cookies \
     --enable-tls \
@@ -43,12 +57,12 @@ build() {
 }
 
 check() {
-  cd $pkgname-$pkgver
+  cd $pkgname
   make check
 }
 
 package() {
-  cd $pkgname-$pkgver
+  cd $pkgname
   make DESTDIR="$pkgdir" install
   install -vDm644 -t "$pkgdir/usr/share/pixmaps" icons/128x128/dillo.png
   install -vDm644 -t "$pkgdir/usr/share/applications" dillo.desktop
