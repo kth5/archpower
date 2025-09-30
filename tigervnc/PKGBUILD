@@ -1,83 +1,156 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
 # Maintainer: Uroš Vampl <mobile.leecher at gmail dot com>
 
 pkgname=tigervnc
 pkgver=1.15.0
-pkgrel=1
+pkgrel=3
 _xorgver=21.1.15
 pkgdesc="Suite of VNC servers and clients based on the VNC 4 branch of TightVNC"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://www.tigervnc.org"
 license=('GPL-2.0-only')
-depends=('fltk' 'pam' 'gnutls' 'libjpeg-turbo' 'libxtst' 'pixman'
-	 'xorg-xauth' 'xorg-xsetroot' 'xkeyboard-config' 'xorg-xkbcomp'
-	 'libgl' 'libgcrypt' 'perl' 'libxdamage' 'libxfont2' 'libdrm'
-	 'xorg-xinit' 'libxcvt' 'ffmpeg')
-makedepends=('cmake' 'xorg-font-util' 'xorg-util-macros'
-	     'git' 'xtrans' 'xorgproto'
-	     'mesa' 'imagemagick')
-makedepends_powerpc=('nasm' 'java-environment=8')
-makedepends_powerpc64=('nasm' 'java-environment=17')
-makedepends_powerpc64le=('nasm' 'java-environment=8')
-makedepends_riscv64=('nasm' 'java-environment=11')
-makedepends_x86_64=('nasm' 'java-environment=8')
-optdepends=('mesa: for OpenGL functionality in Xvnc')
+depends=(
+  'bash'
+  'ffmpeg'
+  'fltk1.3'
+  'gcc-libs'
+  'glibc'
+  'gmp'
+  'gnutls'
+  'hicolor-icon-theme'
+  'libgl'
+  'libjpeg-turbo'
+  'libunwind'
+  'libx11'
+  'libxau'
+  'libxcvt'
+  'libxdamage'
+  'libxdmcp'
+  'libxext'
+  'libxfixes'
+  'libxfont2'
+  'libxi'
+  'libxrender'
+  'libxshmfence'
+  'libxtst'
+  'mesa'
+  'nettle'
+  'pam'
+  'perl'
+  'pixman'
+  'systemd-libs'
+  'xkeyboard-config'
+  'xorg-xauth'
+  'xorg-xinit'
+  'xorg-xkbcomp'
+  'xorg-xsetroot'
+  'zlib'
+)
+makedepends=(
+  'cmake'
+  'git'
+  'imagemagick'
+  'java-environment>=8'
+  'java-environment<=17'
+  'strip-nondeterminism'
+  'xorg-font-util'
+  'xorg-util-macros'
+  'xorgproto'
+  'xtrans'
+)
+makedepends_x86_64=(
+  'nasm'
+)
+optdepends=(
+  'java-runtime: for java-based client'
+)
 conflicts=('tightvnc')
-backup=(etc/pam.d/tigervnc
-	etc/tigervnc/vncserver-config-defaults
-	etc/tigervnc/vncserver-config-mandatory
-	etc/tigervnc/vncserver.users)
-source=(git+https://github.com/TigerVNC/tigervnc.git#tag=v${pkgver}
-        git+https://gitlab.freedesktop.org/xorg/xserver.git?#tag=xorg-server-${_xorgver}
-	Xsession
-	more-xsessions.patch
-	remove-selinux.patch)
+backup=(
+  etc/pam.d/tigervnc
+  etc/tigervnc/vncserver-config-defaults
+  etc/tigervnc/vncserver-config-mandatory
+  etc/tigervnc/vncserver.users
+)
+source=(
+  git+https://github.com/TigerVNC/tigervnc.git#tag=v${pkgver}
+  git+https://gitlab.freedesktop.org/xorg/xserver.git#tag=xorg-server-${_xorgver}
+  Xsession
+  more-xsessions.patch
+  remove-selinux.patch
+  $pkgname-1.15.0-fltk1.3.patch
+)
 sha256sums=('ee76908af3f034891774a0f91fbcc2276460ba2023800d3bed7030ece31c5331'
             '66a1e4e3f13c334e2cf86410dfc778a4c46a3c00cf44346215e7d9e43e113ad9'
             'c9276f6ea277cf9654fb2cc3bc9dadbb2e596b5cf8ca867ee906c0080cf7f810'
             'df7d5ac0b16781ba50963833f1bdd4603f1cdfcc24b1727f563ae800508c9dc0'
-            'b5da49ee5f10dd40945df9c8563066c5523a24ac0ad934c7efcb41d0847b94ed')
+            'b5da49ee5f10dd40945df9c8563066c5523a24ac0ad934c7efcb41d0847b94ed'
+            'cda4a1b96296377b573b7ad79caa8ed6e32ae56a00ef24725a59eefa937cd64a')
 
 prepare() {
   cd ${pkgname}
-  patch -p1 -i "$srcdir"/more-xsessions.patch
-  patch -p1 -i "$srcdir"/remove-selinux.patch
+  patch -p1 -i ../more-xsessions.patch
+  patch -p1 -i ../remove-selinux.patch
+
+  # use fltk1.3, as upstream is not compatible with fltk >= 1.4 yet
+  patch -Np1 -i ../$pkgname-1.15.0-fltk1.3.patch
 
   cd unix/xserver
-  cp -r "$srcdir"/xserver/* .
+  cp -r ../../../xserver/* .
   patch -Np1 -i ../xserver21.patch
+
+  autoreconf -fiv
 }
 
 build() {
-  cd ${pkgname}
+  local cmake_options=(
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_INSTALL_SBINDIR=/usr/bin
+    -D CMAKE_INSTALL_LIBEXECDIR=/usr/bin
+    -D BUILD_JAVA=TRUE
+    -S .  # out-of-tree build not possible due to xorg-server build below
+    -W no-dev
+  )
+  local configure_options=(
+    --disable-config-hal
+    --disable-config-udev
+    --disable-devel-docs
+    --disable-dri
+    --disable-kdrive
+    --disable-selective-werror
+    --disable-static
+    --disable-unit-tests
+    --disable-xephyr
+    --disable-xnest
+    --disable-xorg
+    --disable-xvfb
+    --disable-xwin
+    --enable-dri2
+    --enable-dri3
+    --enable-glx
+    --prefix=/usr
+    --with-pic
+    --without-dtrace
+  )
 
-  cmake -G "Unix Makefiles" \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_INSTALL_SBINDIR=/usr/bin \
-    -DCMAKE_INSTALL_LIBEXECDIR=/usr/bin \
-    -DBUILD_JAVA=TRUE
-  make
+  cd $pkgname
+  CFLAGS+=" -L/usr/lib/fltk1.3"
+  cmake "${cmake_options[@]}"
+  cmake --build . --verbose
 
   cd unix/xserver
-  autoreconf -fiv
-  CFLAGS="$CFLAGS -I/usr/include/libdrm" ./configure --prefix=/usr \
-	--disable-static --without-dtrace \
-	--disable-xorg --disable-xnest --disable-xvfb --disable-dmx \
-	--disable-xwin --disable-xephyr --disable-kdrive --disable-xwayland \
-	--disable-config-hal --disable-config-udev --with-pic \
-	--disable-unit-tests --disable-devel-docs --disable-selective-werror \
-	--disable-dri --enable-dri2 --enable-dri3 --enable-glx
+  ./configure "${configure_options[@]}"
   make
 }
 
 package() {
-  cd ${pkgname}
-  make DESTDIR="$pkgdir" install
+  cd $pkgname
+  DESTDIR="$pkgdir" cmake --install .
   install -Dm0644 java/VncViewer.jar "${pkgdir}"/usr/share/vnc/classes/VncViewer.jar
+
   cd unix/xserver/hw/vnc
   make DESTDIR="$pkgdir" install
   install -Dm0755 "$srcdir"/Xsession "$pkgdir"/etc/X11/tigervnc/Xsession
-#  install -Dm0644 "$srcdir"/${pkgname}-${pkgver}/unix/vncserver/vncserver@.service \
-#    "$pkgdir"/usr/lib/systemd/user/vncserver@.service
+
+  strip-nondeterminism "$pkgdir"/usr/share/vnc/classes/VncViewer.jar
 }
