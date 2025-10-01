@@ -1,0 +1,129 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Fabian Bornschein <fabiscafe@archlinux.org>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+
+pkgbase=glycin
+pkgname=(
+  glycin
+  glycin-gtk4
+)
+pkgver=2.0.2
+pkgrel=1
+pkgdesc="Sandboxed and extendable image decoding"
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url="https://gitlab.gnome.org/GNOME/glycin"
+license=('MPL-2.0 OR LGPL-2.1-or-later')
+depends=(
+  bubblewrap
+  cairo
+  fontconfig
+  gcc-libs
+  glib2
+  glibc
+  lcms2
+  libjxl
+  librsvg
+  libseccomp
+)
+makedepends=(
+  clang
+  git
+  gtk4
+  gobject-introspection
+  libheif
+  meson
+  rust
+  vala
+)
+checkdepends=(
+  dav1d
+  ffmpeg
+  rav1e
+  svt-av1
+)
+source=(
+  "git+$url.git#tag=${pkgver/[a-z]/.&}"
+  "git+https://gitlab.gnome.org/sophie-h/test-images.git"
+)
+b2sums=('d044ce4475894525f2cd86a703a61b7ec551599f6c61bc4291d9e66c31bdd163255d0eafd11c60a331a16982f6e679035e38e24b9cd3c77b77da7055cd247985'
+        'SKIP')
+
+# Use debug
+export CARGO_PROFILE_RELEASE_DEBUG=2 CARGO_PROFILE_RELEASE_STRIP=false
+
+# Use LTO
+export CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+
+prepare() {
+  cd glycin
+
+  git submodule init
+  git submodule set-url tests/test-images "$srcdir/test-images"
+  git -c protocol.file.allow=always -c protocol.allow=never submodule update
+
+  # Match cargo_home in meson.build
+  CARGO_HOME="$srcdir/build/cargo-home" \
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  local meson_options=(
+  )
+
+  arch-meson glycin build "${meson_options[@]}"
+  meson compile -C build
+}
+
+check() {
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
+  meson test -C build --print-errorlogs
+}
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_glycin() {
+  optdepends=(
+    'libheif: Load .avif, .heic and .heif'
+  )
+  provides=(libglycin-2.so)
+
+  meson install -C build --destdir "$pkgdir" --no-rebuild
+
+  cd "$pkgdir"
+  _pick gtk4 usr/include/glycin-gtk4-*
+  _pick gtk4 usr/lib/girepository-1.0/GlyGtk4-*
+  _pick gtk4 usr/lib/libglycin-gtk4-*
+  _pick gtk4 usr/lib/pkgconfig/glycin-gtk4-*
+  _pick gtk4 usr/share/gir-1.0/GlyGtk4-*
+  _pick gtk4 usr/share/vala/vapi/glycin-gtk4-*
+}
+
+package_glycin-gtk4() {
+  pkgdesc+=" - GTK4 integration"
+  depends=(
+    fontconfig
+    gcc-libs
+    glib2
+    glibc
+    glycin
+    gtk4
+    lcms2
+    libseccomp
+  )
+  provides=(libglycin-gtk4-2.so)
+
+  mv gtk4/* "$pkgdir"
+}
+
+# vim:set sw=2 sts=-1 et:
