@@ -3,9 +3,13 @@
 # Contributor: Thijs Vermeir <thijsvermeir@gmail.com>
 # Contributor: Denis Zawada <deno@rootnode.net>
 
-pkgname=gupnp-av
-pkgver=0.14.3
-pkgrel=2
+pkgbase=gupnp-av
+pkgname=(
+  gupnp-av
+  gupnp-av-docs
+)
+pkgver=0.14.4
+pkgrel=1
 pkgdesc="Library to ease handling and implementation of UPnP A/V profiles"
 url="https://wiki.gnome.org/Projects/GUPnP"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
@@ -16,22 +20,29 @@ depends=(
   libxml2
 )
 makedepends=(
+  gi-docgen
   git
   glib2-devel
   gobject-introspection
-  gtk-doc
   meson
   vala
 )
-source=("git+https://gitlab.gnome.org/GNOME/gupnp-av.git#tag=gupnp-av-$pkgver")
-b2sums=('78d905d0d0c2c46be1fc9d8602894ec2f684fb3d137ff740b1cb06f8d02766654eba8815ae91ab6451e098af59b1ee7a247393926978b94ad4d2b2bd2d7a608f')
+source=("git+https://gitlab.gnome.org/GNOME/gupnp-av.git?signed#tag=gupnp-av-$pkgver")
+b2sums=('e71b3cf4edeab33659111fac6f594690dd6a6c2d7c5ae9c02b1ab3308fcc2e0f721a031de611cf25a3a5246535fae85dd7981121af1a82a57e5515401f8bc4b5')
+validpgpkeys=(
+  AC9CD4E32D7C7F6357BA8ADD10F6E970175D29E1 # Jens Georg <mail@jensge.org>
+)
 
 prepare() {
   cd gupnp-av
 }
 
 build() {
-  arch-meson gupnp-av build -D gtk_doc=true
+  local meson_options=(
+    -D gtk_doc=true
+  )
+
+  arch-meson gupnp-av build "${meson_options[@]}"
   meson compile -C build
 }
 
@@ -39,11 +50,30 @@ check() {
   meson test -C build --print-errorlogs
 }
 
-package() {
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_gupnp-av() {
   depends+=(libg{lib,object}-2.0.so)
   provides+=(libgupnp-av-1.0.so)
 
   meson install -C build --destdir "$pkgdir"
+
+  cd "$pkgdir"
+  _pick docs usr/share/doc
+}
+
+package_gupnp-av-docs() {
+  pkgdesc+=" (documentation)"
+  depends=()
+  mv docs/* "$pkgdir"
 }
 
 # vim:set sw=2 sts=-1 et:
