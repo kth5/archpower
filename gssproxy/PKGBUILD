@@ -4,9 +4,9 @@
 
 pkgname=gssproxy
 pkgver=0.9.2
-pkgrel=1.1
+pkgrel=2
 pkgdesc="GSSAPI Proxy"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://github.com/gssapi/gssproxy"
 license=('custom: MIT')
 depends=('libverto-module-base' 'popt' 'ding-libs' 'systemd-libs'
@@ -15,20 +15,22 @@ makedepends=('libxslt' 'systemd' 'docbook-xsl' 'doxygen'  'po4a')
 options=('emptydirs' 'makeflags')
 backup=(etc/gssproxy/{gssproxy,24-nfs-server,80-httpd,99-network-fs-clients}.conf
         etc/gss/mech.d/proxymech.conf)
-source=(https://github.com/gssapi/gssproxy/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz)
+source=(https://github.com/gssapi/gssproxy/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz
+        0001-Fix-various-issues-detected-by-static-analysis.patch)
 # https://github.com/gssapi/gssproxy/releases/download/v0.9.2/gssproxy-0.9.2.tar.gz.sha512sum.txt
-sha512sums=('6de484c9c1715e8b845106e1b16e1c29805e4104db296eb44ea15e6b6973fd1df0b043d2cdc2798f04c7a0ce66279e356a285684bc3573ef847532ab2b87aca3')
+sha512sums=('6de484c9c1715e8b845106e1b16e1c29805e4104db296eb44ea15e6b6973fd1df0b043d2cdc2798f04c7a0ce66279e356a285684bc3573ef847532ab2b87aca3'
+            'f2777d08ae7df74a25bc007227bdea250ca9e9931e145235f2778c4838fbf5deaf11f296d4eb0e2f2d5e568189987003d0f8ad37d0210d20f8e6e9587e6ba906')
 
 prepare() {
   cd "$srcdir/gssproxy-$pkgver"
-  # delete unneeded service dependency
-  sed -i "/# GSSPROXY will not be started until syslog is/d" systemd/gssproxy.service.in
-  sed -i "s/syslog.target //" systemd/gssproxy.service.in
-  
+  patch -Np1 -i ../0001-Fix-various-issues-detected-by-static-analysis.patch
+
   autoreconf -vfi
 }
 
 build() {
+  CFLAGS+=" -std=gnu17" #fix build with gcc-15
+
   cd gssproxy-$pkgver
   ./configure --prefix=/usr \
     --sysconfdir=/etc  \
