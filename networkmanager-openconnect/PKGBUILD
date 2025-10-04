@@ -2,41 +2,42 @@
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Contributor: Ionut Biru <ibiru@archlinux.org>
 
-pkgname=networkmanager-openconnect
-pkgver=1.2.10
-pkgrel=2.1
-pkgdesc="NetworkManager VPN plugin for OpenConnect"
-url="https://wiki.gnome.org/Projects/NetworkManager"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=(GPL)
-depends=(
-  libnm
-  libsecret
-  openconnect
+pkgbase=networkmanager-openconnect
+pkgname=(
+  networkmanager-openconnect
+  networkmanager-vpn-plugin-openconnect
 )
-makedepends=(
+pkgver=1.2.10
+pkgrel=4
+pkgdesc="NetworkManager VPN plugin for OpenConnect"
+url="https://networkmanager.dev/docs/vpn/"
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+license=(GPL-2.0-or-later)
+depends=(
   gcr
-  git
-  intltool
+  glib2
+  glibc
+  gtk3
+  libnm
   libnma
-  libnma-gtk4
-  python
+  libsecret
+  libsoup3
+  libxml2
+  openconnect
   webkit2gtk-4.1
 )
-optdepends=(
-  'gcr: GUI support'
-  'libnma-gtk4: GUI support (GTK 4)'
-  'libnma: GUI support (GTK 3)'
-  'webkit2gtk-4.1: GUI support'
+makedepends=(
+  gcc-libs
+  git
+  intltool
+  libnma-gtk4
+  python
 )
-_commit=a28d393b5fc9e0df9c19292065187e7145e83f51  # tags/1.2.10^0
-source=("git+https://gitlab.gnome.org/GNOME/NetworkManager-openconnect.git#commit=$_commit")
-b2sums=('SKIP')
-
-pkgver() {
-  cd NetworkManager-openconnect
-  git describe --tags | sed 's/-dev/dev/;s/[^-]*-g/r&/;s/-/+/g'
-}
+source=("git+https://gitlab.gnome.org/GNOME/NetworkManager-openconnect.git?signed#tag=$pkgver")
+b2sums=('2a2a92181f28c2c1bd50559c9430f8262bb6ebe73b2ee77b5fcc1af456e1b5124a4888285e31d86b3e0f820290b25c8b2b86d797389c3021d9a9ca27aacf8149')
+validpgpkeys=(
+  BE07D9FD54809AB2C4B0FF5F63762CDA67E2F359 # David Woodhouse <dwmw2@infradead.org>
+)
 
 prepare() {
   cd NetworkManager-openconnect
@@ -45,20 +46,65 @@ prepare() {
 }
 
 build() {
+  local configure_options=(
+    --prefix=/usr
+    --sysconfdir=/etc
+    --localstatedir=/var
+    --libexecdir=/usr/lib
+    --disable-static
+    --with-gtk4
+  )
+
   cd NetworkManager-openconnect
-  ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
-    --libexecdir=/usr/lib --disable-static --with-gtk4
+  ./configure "${configure_options[@]}"
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
 }
 
-package() {
-  depends+=(libopenconnect.so)
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_networkmanager-openconnect() {
+  pkgdesc+=" (with GUI)"
+  depends+=(
+    "networkmanager-vpn-plugin-openconnect=$pkgver-$pkgrel"
+    libopenconnect.so
+  )
+  optdepends=(
+    "libnma-gtk4: GUI support (GTK 4)"
+  )
 
   cd NetworkManager-openconnect
   make DESTDIR="$pkgdir" install dbusservicedir=/usr/share/dbus-1/system.d
+
+  cd "$pkgdir"
+  _pick plugin usr/lib/NetworkManager/VPN
+  _pick plugin usr/lib/NetworkManager/libnm-vpn-plugin-openconnect.so
+  _pick plugin usr/lib/nm-openconnect-service*
+  _pick plugin usr/share/dbus-1
+}
+
+package_networkmanager-vpn-plugin-openconnect() {
+  pkgdesc+=" (VPN plugin only)"
+  depends=(
+    gcc-libs
+    glib2
+    glibc
+    libnm
+    openconnect libopenconnect.so
+  )
+
+  mv plugin/* "$pkgdir"
+
   echo 'u nm-openconnect - "NetworkManager OpenConnect"' |
-    install -Dm644 /dev/stdin "$pkgdir/usr/lib/sysusers.d/$pkgname.conf"
+    install -Dm644 /dev/stdin "$pkgdir/usr/lib/sysusers.d/$pkgbase.conf"
 }
 
 # vim:set sw=2 sts=-1 et:
