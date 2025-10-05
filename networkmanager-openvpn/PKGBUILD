@@ -1,35 +1,40 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Contributor: Ionut Biru <ibiru@archlinux.org>
 
-pkgname=networkmanager-openvpn
-pkgver=1.12.0
-pkgrel=1.1
+apb_output_timeout=7200
+
+pkgbase=networkmanager-openvpn
+pkgname=(
+  networkmanager-openvpn
+  networkmanager-vpn-plugin-openvpn
+)
+pkgver=1.12.3
+pkgrel=1
 pkgdesc="NetworkManager VPN plugin for OpenVPN"
 url="https://networkmanager.dev/docs/vpn/"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(GPL-2.0-or-later)
 depends=(
   gcc-libs
   glib2
   glibc
+  gtk4
   libnm
+  libnma-gtk4
   libsecret
-  openvpn
 )
 makedepends=(
   git
   libnma
-  libnma-gtk4
+  openvpn
   python
 )
-optdepends=(
-  "libnma-gtk4: GUI support (GTK 4)"
-  "libnma: GUI support (GTK 3)"
-)
 source=("git+https://gitlab.gnome.org/GNOME/NetworkManager-openvpn.git?signed#tag=$pkgver")
-b2sums=('45c3b6f6c240af1b7c368aa7c7d613cc2cb67216a3f6cbb3438d524095e9fa22d81fd8c51dd4541d62845feb239e3dcea5d0ba88b2047399f5138bfe20876cec')
+b2sums=('32c4563703b9aa795c31e627fd6eaedbe29334c090833dac2fc1dc3bc71d5af84f7b7d4f26cdd5d2566ea64ec5b8f0b411c2af3b39ee7615dedaee7d7d90edc5')
 validpgpkeys=(
   07F9AEC86144386D9576210B66A44781B4EBC2D0 # Íñigo Huguet <ihuguet@redhat.com>
+  1CFF865BDF957BE935765BBD2E1878D078DEF7C6 # Íñigo Huguet <ihuguet@riseup.net>
 )
 
 prepare() {
@@ -53,11 +58,49 @@ build() {
   make
 }
 
-package() {
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_networkmanager-openvpn() {
+  pkgdesc+=" (with GUI)"
+  depends+=(
+    "networkmanager-vpn-plugin-openvpn=$pkgver-$pkgrel"
+  )
+  optdepends=(
+    "libnma: GUI support (GTK 3)"
+  )
+
   cd NetworkManager-openvpn
   make DESTDIR="$pkgdir" install dbusservicedir=/usr/share/dbus-1/system.d
+
+  cd "$pkgdir"
+  _pick plugin usr/lib/NetworkManager/VPN
+  _pick plugin usr/lib/NetworkManager/libnm-vpn-plugin-openvpn.so
+  _pick plugin usr/lib/nm-openvpn-service*
+  _pick plugin usr/share/dbus-1
+}
+
+package_networkmanager-vpn-plugin-openvpn() {
+  pkgdesc+=" (VPN plugin only)"
+  depends=(
+    gcc-libs
+    glib2
+    glibc
+    libnm
+    openvpn
+  )
+
+  mv plugin/* "$pkgdir"
+
   echo 'u nm-openvpn - "NetworkManager OpenVPN"' |
-    install -Dm644 /dev/stdin "$pkgdir/usr/lib/sysusers.d/$pkgname.conf"
+    install -Dm644 /dev/stdin "$pkgdir/usr/lib/sysusers.d/$pkgbase.conf"
 }
 
 # vim:set sw=2 sts=-1 et:
