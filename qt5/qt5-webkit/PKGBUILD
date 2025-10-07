@@ -9,8 +9,8 @@ pkgname=qt5-webkit
 _pkgver=5.212.0-alpha4
 _basever=5.15.3
 pkgver=${_pkgver/-/}
-pkgrel=27
-arch=(x86_64 aarch64 powerpc64le powerpc64 powerpc riscv64)
+pkgrel=28
+arch=(x86_64 aarch64 powerpc64le powerpc64 powerpc espresso)
 url="https://github.com/qtwebkit/qtwebkit"
 license=(LGPL-2.1-only)
 pkgdesc="Classes for a WebKit2 based implementation and a new QML API"
@@ -27,11 +27,9 @@ source=("https://github.com/qtwebkit/qtwebkit/releases/download/qtwebkit-$_pkgve
          jscore_big_endian.diff
          ppc-llint.patch
          reduce-exports.patch
-         riscv64.patch
-         no_pdf_image_plugin.diff
 )
 depends=(qt5-location qt5-sensors qt5-webchannel libwebp libxcomposite gst-plugins-base hyphen woff2
-         libicuuc.so libicui18n.so
+         libicuuc.so libicui18n.so libxml2.so
 
          # namcap implicit depends
          glibc gcc-libs glib2 zlib libx11 sqlite gst-plugins-base-libs libjpeg-turbo icu libpng gstreamer libxml2
@@ -51,9 +49,7 @@ sha256sums=('9ca126da9273664dd23a3ccd0c9bebceb7bb534bddd743db31caf6a5a6d4a9e6'
             '34f37b53ee0bc31c63ce85ebd1ae95543a8ba28483e387b20efd50574bd813be'
             '8e1aa3994ac6a939cbfdf4a05209a9c20f338ef1ee9501fc74d1da1b7c4a6041'
             '51a3756bdd5605d58b031edecc2bde4059e4c1c33de959f9b3b2ee9b17e39ab9'
-            '1bdd5391655036672e833892a182234d4827b52d9e1414a3f45847d3f4776d00'
-            '2e08b75a159514e35ff90c8a5bcfc42a39b6f13bec0f332334e9cb7c246cf1db'
-            '70de08deba306a6aa9c4853c2ae75eb09b9f32298bd404c601f2c7ba4d7ca1d9')
+            '1bdd5391655036672e833892a182234d4827b52d9e1414a3f45847d3f4776d00')
 
 prepare() {
   cd "qtwebkit-${_pkgver}"
@@ -69,18 +65,28 @@ prepare() {
   patch -Np1 -i ../webkit-offlineasm-warnings-ruby27.patch
   echo "Done patch for Ruby 3.2"
 
-  patch -p1 -i ../jscore_big_endian.diff
-  patch -p1 -i ../ppc-llint.patch
-  patch -p1 -i ../reduce-exports.patch
-  patch -p1 -i ../riscv64.patch
-  patch -p1 -i ../no_pdf_image_plugin.diff
+  patch -Np1 -i ${srcdir}/jscore_big_endian.diff
+  patch -Np1 -i ${srcdir}/ppc-llint.patch
+  patch -Np1 -i ${srcdir}/reduce-exports.patch
 }
 
+# disabling XSLT to build https://github.com/qtwebkit/qtwebkit/issues/1097
+
 build() {
+  local _flags=(
+    -DCMAKE_CXX_FLAGS="${CXXFLAGS} -DNDEBUG"
+    -DPORT=Qt
+    -DUSE_LD_GOLD=OFF
+    -DENABLE_XSLT=OFF
+    -DENABLE_TOOLS=OFF
+    -DPYTHON_EXECUTABLE:FILEPATH=/usr/bin/python
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+  )
+
   case "${CARCH}" in
-    powerpc*|riscv64)
+    powerpc*)
      warning "Detected ${CARCH} and disabling JIT..."
-     _cmake_options+=(-DENABLE_JIT=OFF)
+     _flags+=(-DENABLE_JIT=OFF)
    ;;
   esac
 
@@ -93,28 +99,14 @@ build() {
       export LDFLAGS=" -Wl,--no-keep-memory"
       _cmake_options+=(-DUSE_SYSTEM_MALLOC=ON)
     ;;
-    riscv64)
-      export CXXFLAGS+=" -latomic"
-      export LDFLAGS+=" -latomic"
-    ;;
   esac
-
-  local _flags=(
-    -DCMAKE_CXX_FLAGS="${CXXFLAGS} -DNDEBUG"
-    -DPORT=Qt
-    -DUSE_LD_GOLD=OFF
-    -DENABLE_XSLT=OFF
-    -DENABLE_TOOLS=OFF
-  )
 
   cmake -B build -S "qtwebkit-${_pkgver}" -Wno-dev \
     -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    "${_flags[@]}" ${_cmake_options[@]}
+    "${_flags[@]}"
 
   cmake --build build
-
-# disabling XSLT to build https://github.com/qtwebkit/qtwebkit/issues/1097
 }
 
 package() {
