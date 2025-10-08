@@ -1,23 +1,17 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Contributor: Alexander 'hatred' Drozdov <adrozdoff@gmail.com>
-# Contributor: toha257 <toha257@gmail.com>
-# Contributor: Allan McRae <allan@archlinux.org>
-# Contributor: Kevin Mihelich <kevin@archlinuxarm.org>
-# Contributor: Tavian Barnes <tavianator@tavianator.com>
-# Maintainer: Stefan Schmidt <thrimbor.github@gmail.com>
 
 _target=m68k-unknown-linux-gnu
 pkgname=${_target}-gcc-stage1
 pkgver=15.2.1+r22+gc4e96a094636
 _commit=c4e96a094636b3c15b5e3bfde8673ec3b8172993
-pkgrel=1
+pkgrel=2
 pkgdesc="The GNU Compiler Collection. Stage 1 for toolchain building (${_target})"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(GPL LGPL FDL custom)
 url='http://gcc.gnu.org'
 depends=(${_target}-binutils libmpc zlib libisl)
 makedepends=(git)
-options=(!debug !emptydirs !distcc !strip)
+options=(!debug !emptydirs !strip)
 source=(git+https://sourceware.org/git/gcc.git#commit=${_commit}
 	gcc11-Wno-format-security.patch)
 validpgpkeys=(F3691687D867B81B51CE07D9BBE43771487328A9  # bpiotrowski@archlinux.org
@@ -26,6 +20,11 @@ validpgpkeys=(F3691687D867B81B51CE07D9BBE43771487328A9  # bpiotrowski@archlinux.
               D3A93CAD751C2AF4F8C7AD516C35B99309B5FA62) # Jakub Jelinek <jakub@redhat.com>
 sha256sums=('d1d0263f7595e2189110dbe5d12608e144637a6a29a247e41c6926915caab8de'
             '504e4b5a08eb25b6c35f19fdbe0c743ae4e9015d0af4759e74150006c283585e')
+
+pkgver() {
+  cd gcc
+  echo "$(cat gcc/BASE-VER)+$(git describe --abbrev=12 --tags | sed 's/[^-]*-[^-]*-//;s/[^-]*-/r&/;s/-/+/g;s/_/./')"
+}
 
 prepare() {
   [[ ! -d gcc ]] && ln -s gcc-${pkgver/+/-} gcc
@@ -36,6 +35,7 @@ prepare() {
 
   # Arch Linux installs x86_64 libraries /lib
   sed -i '/m64=/s/lib64/lib/' gcc/config/i386/t-linux64
+  sed -i 's@/lib64@/lib@g' gcc/config/rs6000/t-*
 
   # hack! - some configure tests for header files using "$CPP $CPPFLAGS"
   sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" {libiberty,gcc}/configure
@@ -60,7 +60,7 @@ build() {
       --program-prefix=${_target}- \
       --with-local-prefix=/usr/${_target} \
       --with-sysroot=/usr/${_target} \
-      --with-build-sysroot=/usr/${_target} \
+      --with-build-sysroot=/usr/${_target}/usr \
       --with-as=/usr/bin/${_target}-as \
       --with-ld=/usr/bin/${_target}-ld \
       --libdir=/usr/lib \
@@ -90,7 +90,8 @@ build() {
       --enable-default-ssp \
       --target=${_target} \
       --host=${CHOST} \
-      --build=${CHOST}
+      --build=${CHOST} \
+      --enable-secureplt
 
   make STAGE1_CFLAGS="-O2" all-gcc all-target-libgcc
 }
@@ -104,6 +105,4 @@ package() {
 
   # strip it manually
   strip "$pkgdir/usr/bin/"* 2>/dev/null || true
-  find "$pkgdir/usr/lib" -type f -exec /usr/bin/${_target}-strip \
-    --strip-unneeded {} \; 2>/dev/null || true
 }
