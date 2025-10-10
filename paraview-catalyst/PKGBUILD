@@ -1,0 +1,75 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jakub Klinkovský <lahwaacz at archlinux dot org>
+
+_name=catalyst
+pkgname=paraview-catalyst
+pkgver=2.0.0
+pkgrel=2
+pkgdesc="API specification developed for simulations (and other scientific data producers) to analyze and visualize data in situ"
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url="https://gitlab.kitware.com/paraview/catalyst"
+license=(BSD-3-Clause)
+depends=(
+  gcc-libs
+  glibc
+  openmpi
+  python
+)
+makedepends=(
+  cmake
+  gcc-fortran
+  gtest
+  ninja
+  python-numpy
+)
+checkdepends=(
+  python-mpi4py
+)
+source=("$url/-/archive/v$pkgver/$_name-v$pkgver.tar.gz")
+b2sums=('f5d81bbbe57ccbab692935f9ed45258be72e261af5c788ee0f4601a5ff1fe74be62a94f4a2992871b14a02ed56b5b9393ad02c939174eac292dc26bfded4e2a0')
+
+# LTO breaks the ABI tests
+options=(!lto)
+
+prepare() {
+  # Building the Fortran wrappers causes the ABI test to fail due to three
+  # unexpected symbols: https://gitlab.kitware.com/paraview/catalyst/-/issues/42
+  # Adding the extra symbols tricks the test suite to pass.
+  cat >> $_name-v$pkgver/tests/abi_tests/catalyst_fortran.symbols.txt << EOF
+__catalyst_conduit_MOD___copy___iso_c_binding_C_ptr
+__catalyst_conduit_MOD___def_init___iso_c_binding_C_ptr
+__catalyst_conduit_MOD___vtab___iso_c_binding_C_ptr
+EOF
+}
+
+build() {
+  local cmake_options=(
+    -B build
+    -S $_name-v$pkgver
+    -G Ninja
+    -W no-dev
+    -DCMAKE_BUILD_TYPE=None
+    -DCMAKE_INSTALL_PREFIX=/usr
+    -DCATALYST_USE_MPI=ON
+    -DCATALYST_WRAP_PYTHON=ON
+    -DCATALYST_WRAP_FORTRAN=ON
+  )
+  cmake "${cmake_options[@]}"
+  cmake --build build
+}
+
+check() {
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
+  ctest --test-dir build --parallel 8 --output-on-failure
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+
+  # install the licenses
+  install -vDm 644 $_name-v$pkgver/License.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -vDm 644 $_name-v$pkgver/3rdPartyLicenses.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
+}
