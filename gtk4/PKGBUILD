@@ -2,10 +2,6 @@
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Maintainer: Fabian Bornschein <fabiscafe@archlinux.org>
 
-# LTO passes may not produce any output for quite some time
-# especially on slower systems
-apb_output_timeout=7200
-
 pkgbase=gtk4
 pkgname=(
   gtk4
@@ -14,7 +10,7 @@ pkgname=(
   gtk-update-icon-cache
 )
 pkgver=4.20.2
-pkgrel=1
+pkgrel=3
 epoch=1
 pkgdesc="GObject-based multi-platform GUI toolkit"
 url="https://www.gtk.org/"
@@ -24,6 +20,7 @@ depends=(
   adwaita-fonts
   adwaita-icon-theme
   at-spi2-core
+  bash
   cairo
   dconf
   desktop-file-utils
@@ -32,8 +29,12 @@ depends=(
   gcc-libs
   gdk-pixbuf2
   glib2
+  glibc
   graphene
   gst-plugins-bad-libs
+  gst-plugins-base-libs
+  gstreamer
+  gtk-update-icon-cache
   harfbuzz
   iso-codes
   libcloudproviders
@@ -59,6 +60,7 @@ depends=(
   pango
   shared-mime-info
   tinysparql
+  vulkan-icd-loader
   wayland
 )
 makedepends=(
@@ -90,6 +92,8 @@ b2sums=('ead89ae2d48b6f31d22bf811013fa48b8cdabba45ad7d9abb8cd0e86d9cacfcf4041f09
         '4b90eb8d582509b09aab401313d4399cc139ad21b5dd7d45d79860d0764c7494c60714e0794e09823e51d1894ac032a994f27d79d1499abf24ee6f59bdb0c243'
         '4db5571be715561f56ecc58c23dad422be42923ef293e5636088c75761e7cffd3fc2fc5585cfbd2980d15faa7984ce23c4d0a8a486df4b380e7f3b96d0bba98d')
 
+export LDFLAGS="${LDFLAGS/-flto=auto/-flto}" # don't bomb cpu (nproc * nproc LTO)
+
 prepare() {
   cd gtk
 
@@ -109,13 +113,11 @@ build() {
     -D tracker=enabled
     -D build-testsuite=false
     -D build-tests=false
-  )
-
+   )
+ 
   case "${CARCH}" in
     powerpc) meson_options+=(-D vulkan=disabled) ;;
   esac
-
-  export LDFLAGS="${LDFLAGS/-flto=auto/-flto}" # don't bomb cpu (nproc * nproc LTO)
 
   CFLAGS+=" -DG_DISABLE_CAST_CHECKS"
   arch-meson gtk build "${meson_options[@]}"
@@ -133,15 +135,10 @@ _pick() {
 }
 
 package_gtk4() {
-  depends+=(
-    bash
-    glibc
-    gst-plugins-base-libs
-    gstreamer
-    gtk-update-icon-cache
-    vulkan-icd-loader
+  optdepends=(
+    'evince: Default print preview command'
+    'xdg-desktop-portal-gtk: Fallback portals for various APIs'
   )
-  optdepends=('evince: Default print preview command')
   provides=(libgtk-4.so)
 
   meson install -C build --destdir "$pkgdir"
