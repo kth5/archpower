@@ -6,40 +6,42 @@
 pkgbase=openbabel
 pkgname=(openbabel python-openbabel)
 pkgver=3.1.1
-pkgrel=10
+pkgrel=12
 pkgdesc='A library designed to interconvert between many file formats used in molecular modeling and computational chemistry'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://openbabel.org/'
-license=(GPL)
+license=(GPL-2.0-only)
+depends=(gcc-libs
+         glibc)
 makedepends=(boost
              cmake
              coordgen
              eigen
+             git
              maeparser
              python-setuptools
              rapidjson
              swig
              wxwidgets-gtk3)
-source=(https://github.com/openbabel/openbabel/releases/download/openbabel-${pkgver//./-}/openbabel-$pkgver-source.tar.bz2
-        https://github.com/openbabel/openbabel/commit/c0570bfe.patch)
-sha256sums=('a6ec8381d59ea32a4b241c8b1fbd799acb52be94ab64cdbd72506fb4e2270e68'
-            '70e16fe1ae60806ef1a022e6b768e9ebd0b1d832d052d4ceea30cbb76354ca7c')
+source=(git+https://github.com/openbabel/openbabel#tag=openbabel-${pkgver//./-})
+sha256sums=('b045f861b0544856dc5a2f5bd2943a4a8d9efc05ea4f8cf9cd5155751b214e77')
 
 prepare() {
-  patch -d openbabel-$pkgver -p1 < c0570bfe.patch # Fix build with GCC 12
-  sed -e '/SET CMP0042 OLD/d' -i $pkgname-$pkgver/CMakeLists.txt # Fix build with cmake 4
+  cd openbabel
+  git cherry-pick -n c0570bfe # Fix build with GCC 12
+  git cherry-pick -n b75c392b # UB https://github.com/openbabel/openbabel/issues/2223
+  sed -e '/SET CMP0042 OLD/d' -i CMakeLists.txt # Fix build with cmake 4
 }
 
 build() {
   case "${CARCH}" in
-    powerpc) export LDFLAGS+=' -Wl,--no-keep-memory -Wl,--no-warn-rwx-segments -Wl,--no-warn-execstack' ;;
     powerpc64)
       export CFLAGS='-O2 -pipe'
       export CXXFLAGS='-O2 -pipe'
     ;;
   esac
 
-  cmake -B build -S openbabel-$pkgver \
+  cmake -B build -S openbabel \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DRUN_SWIG=ON \
     -DPYTHON_BINDINGS=ON \
@@ -51,17 +53,17 @@ build() {
 }
 
 package_openbabel() {
-  depends=(cairo
-           coordgen
-           libxml2)
+  depends+=(cairo
+            coordgen
+            libxml2)
   optdepends=('wxwidgets-gtk3: GUI interface')
 
   DESTDIR="$pkgdir" cmake --install build
 }
 
 package_python-openbabel() {
-  depends=(openbabel
-           python)
+  depends+=(openbabel
+            python)
 
   DESTDIR="$pkgdir" cmake --install build/scripts
 }
