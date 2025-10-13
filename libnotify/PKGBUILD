@@ -7,13 +7,14 @@ pkgname=(
   libnotify
   libnotify-docs
 )
-pkgver=0.8.6
+pkgver=0.8.7
 pkgrel=1
 pkgdesc="Library for sending desktop notifications"
 url="https://gitlab.gnome.org/GNOME/libnotify"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(LGPL-2.1-or-later)
 depends=(
+  gcc-libs
   gdk-pixbuf2
   glib2
   glibc
@@ -27,25 +28,37 @@ makedepends=(
   meson
   xmlto
 )
+checkdepends=(
+  dbus
+  gtk4
+  python-dbusmock
+  python-gobject
+  xorg-server-xvfb
+)
 source=("git+$url.git?signed#tag=$pkgver")
-b2sums=('254c112fe783d2e470989ace2535c0bbb3485f577cf1ed2439a2c0cb0b6dad61a6e64aa3f365d0c87975f5c4337571c511724c19971a689bc1b3f84008e2d827')
+b2sums=('681ca138787cfe7f9b0619b98c770c436cf2f6d314d3d9257a19c3b261c034bca6628d7fc27ae7f9d075feecb8be556d1b3d93d8025127fcbb736630c8fae10c')
 validpgpkeys=(
   98FF7532A4639119B8FB4F15E520923A38618D6C # Logan Rathbone (GNOME) <larathbone@gnome.org>
   D4C501DA48EB797A081750939449C2F50996635F # Marco Trevisan (Treviño) <mail@3v1n0.net>
 )
 
 prepare() {
-  cd $pkgname
+  cd libnotify
+
+  # Use external Xvfb
+  sed -i "/xvfb_run, '-a'/d" tests/meson.build
 }
 
 build() {
   local meson_options=(
-    # Tests need user interaction
-    -D tests=false
   )
 
-  arch-meson $pkgname build "${meson_options[@]}"
+  arch-meson libnotify build "${meson_options[@]}"
   meson compile -C build
+}
+
+check() {
+  xvfb-run -s '-nolisten local' meson test -C build --print-errorlogs
 }
 
 package_libnotify() {
