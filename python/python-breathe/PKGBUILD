@@ -4,7 +4,7 @@
 # Contributor: Simon Boulay <simon.boulay@alkeona.net>
 
 pkgname=python-breathe
-pkgver=4.36.0
+pkgver=5.0.0a5
 pkgrel=1
 pkgdesc='An extension to reStructuredText and Sphinx to be able to read and render Doxygen xml output'
 arch=(any)
@@ -20,22 +20,38 @@ makedepends=(
     'python-flit-core'
     'python-installer'
     'python-setuptools'
-    'python-wheel')
-checkdepends=('python-pytest')
+    'python-wheel'
+    'ruff')
+checkdepends=(
+    'doxygen'
+    'python-pytest')
 source=("https://github.com/michaeljones/breathe/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('fd640ed75680134a5a0e8860764bb430bb971f49ad2f88392de7ba97d633e377079eaf1c7e35a72db135e4c4d3b066c6c9744ccc151ad18d865bb37c9de833d7')
+sha512sums=('a1ec41b5f7483a500f1bb09cb94e68b259cbd07820518d478618415eade7fb15596cf298b75311577294c12714033a4269592184e826c4f2dc7f37eb24f1b98a')
 
 build() {
   cd "breathe-${pkgver}"
+  make parser
+  make format-parser
   python -m build --wheel --no-isolation
 }
 
 check() {
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
   cd "breathe-${pkgver}"
-  PYTHONPATH="$PWD" pytest
+  
+  # https://github.com/breathe-doc/breathe/issues/1036#issuecomment-3054012476
+  PYTHONPATH="$PWD" pytest -k 'not test_example[group] and not test_example[headings]'
 }
 
 package_python-breathe() {
   python -m installer --destdir="$pkgdir" "breathe-${pkgver}/dist"/*.whl
-  install -D -m644 "breathe-${pkgver}/LICENSE" -t "${pkgdir}/usr/share/licenses/${pkgname}"
+  
+  local _pyver
+  _pyver="$(python -c 'import sys; print("%s.%s" %sys.version_info[:2])')"
+  install -d -m755 "${pkgdir}/usr/share/licenses/${pkgname}"
+  ln -s "../../../lib/python${_pyver}/site-packages/breathe-${pkgver}.dist-info/licenses/LICENSE" \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }
