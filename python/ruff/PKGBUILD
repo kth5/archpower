@@ -6,7 +6,7 @@
 
 pkgbase=ruff
 pkgname=("$pkgbase" "python-$pkgbase")
-pkgver=0.12.1
+pkgver=0.12.11
 pkgrel=1
 pkgdesc='An extremely fast Python linter, written in Rust'
 arch=(x86_64 powerpc64le powerpc64)
@@ -24,8 +24,8 @@ makedepends=(
 )
 options=(!lto)
 source=("git+$url.git#tag=$pkgver")
-sha512sums=('1b70e6246f512e89e191945853b9bc109a3d41f0a5c4c9f536487cc710220dd4554c69882140004e6c94a8f8f06ee3c12f9dc2e97304fe82556af20b9b89cf0e')
-b2sums=('674692e1717f11ac4ce79946924798fef18f8283cac8a7fe6b6f4bbf4b8f32a2e53bb7ef2e7c03db01b1114f3868422ace66357cf8d6319b110252572f79bec2')
+sha512sums=('b70293e00b6669f2f111afb89a189c1e105b3dcc762381ee6c9e2ec8521a0c7490b111304e042fe329a2cb73fc02b56f8516550127bca84a36daeec27ed5d39a')
+b2sums=('853a2f40dc6dc3b302a0f0dbc6269e88394793b58b536b0116c4749a740d1d76b13c5cf5b431b13d1de137cc607fc0a7b08fcdf4016859dbda6e9489d4091e81')
 
 prepare() {
   cd $pkgbase
@@ -33,8 +33,15 @@ prepare() {
 }
 
 build() {
+  local target=$(rustc -vV | sed -n 's/host: //p')
+  local target_binary=target/$target/release/$pkgbase
+
   cd $pkgbase
-  maturin build --locked --release --all-features --target "$(rustc -vV | sed -n 's/host: //p')" --strip
+  maturin build --locked --release --all-features --target "$target" --strip
+
+  for completion in bash elvish fish nushell zsh; do
+    $target_binary generate-shell-completion $completion > $completion-completions
+  done
 }
 
 check() {
@@ -50,12 +57,12 @@ _package_common() {
 package_ruff() {
   cd $pkgbase
   _package_common
-  local _target="target/$(rustc -vV | sed -n 's/host: //p')/release/ruff"
-  install -Dm0755 -t "$pkgdir/usr/bin/" "$_target"
-  $_target generate-shell-completion bash   | install -Dm0644 /dev/stdin "$pkgdir/usr/share/bash-completion/completions/$pkgbase.bash"
-  $_target generate-shell-completion elvish | install -Dm0644 /dev/stdin "$pkgdir/usr/share/elvish/lib/$pkgbase.elv"
-  $_target generate-shell-completion fish   | install -Dm0644 /dev/stdin "$pkgdir/usr/share/fish/vendor_completions.d/$pkgbase.fish"
-  $_target generate-shell-completion zsh    | install -Dm0644 /dev/stdin "$pkgdir/usr/share/zsh/site-functions/_$pkgbase"
+  install -Dm0755 -t "$pkgdir/usr/bin/" "target/$(rustc -vV | sed -n 's/host: //p')/release/ruff"
+  install -Dm0644 bash-completions "$pkgdir/usr/share/bash-completion/completions/$pkgbase.bash"
+  install -Dm0644 elvish-completions "$pkgdir/usr/share/elvish/lib/$pkgbase.elv"
+  install -Dm0644 fish-completions "$pkgdir/usr/share/fish/vendor_completions.d/$pkgbase.fish"
+  install -Dm0644 nushell-completions "$pkgdir/usr/share/nushell/vendor/autoload/$pkgbase.nu"
+  install -Dm0644 zsh-completions "$pkgdir/usr/share/zsh/site-functions/_$pkgbase"
 }
 
 package_python-ruff() {
@@ -66,5 +73,5 @@ package_python-ruff() {
   python -m installer -d "$pkgdir" target/wheels/*.whl
 
   cd "$pkgdir"
-  rm -rf usr/bin
+  rm -r usr/bin
 }
