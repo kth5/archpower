@@ -4,37 +4,42 @@
 # Contributor: Kyle Keen <keenerd@gmail.com>
 
 pkgname=python-rencode
-pkgver=1.0.6
-pkgrel=10
+pkgver=1.0.8
+pkgrel=2
 pkgdesc="A Module similar to bencode from the BitTorrent project"
 url="https://github.com/aresch/rencode"
-license=('GPL')
-arch=(x86_64 powerpc64le powerpc riscv64)
-depends=('python')
-makedepends=('cython' 'python-setuptools')
+license=('GPL-3.0-or-later')
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+depends=('glibc' 'python')
+makedepends=('git' 'cython' 'python-build' 'python-installer' 'python-poetry-core' 'python-setuptools')
 checkdepends=('python-pytest')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/aresch/rencode/archive/v$pkgver.tar.gz"
-        remove-wheel.patch)
-sha512sums=('f04de4d3a83aed916bdc4b7a8ca772655e9324d0531ee882cb7d2a1e92b397bdcec8497bf02939e0a806886ecc62ed2e7319dfee054dad1b69052157f0959e8f'
-            '3062866d4fc890a2df8c8c261a5f67604c9fca67afb5526a24b599332d65ab093253e67c3a117a118f85144e3e32caf939c307f32668795f2eb7a7087572c1a8')
+source=(
+  "git+https://github.com/aresch/rencode.git#tag=v$pkgver"
+  0001-Remove-extra-compile-args.patch
+)
+sha512sums=('974d3efb1e1f7a54902c3772663a5d122399b2e825592634cc88ba1f1a51ebf97470c368e6891d9e52af8a700a50749d428d273de2c5b21b6334fa456f664443'
+            '43088a23f0832a39efcd0acba90163c46e53dde263217693b1b9a35d7b85170b0427ea82bb40fbdefc10508bead3abc2cc2260f898d760cfcdc40edb90b773ef')
 
 prepare() {
-  cd "$srcdir"/rencode-$pkgver
-  patch -Np1 -i ../remove-wheel.patch
+  cd rencode
+
+  # https://gitlab.archlinux.org/archlinux/packaging/packages/python-rencode/-/issues/1
+  # https://github.com/aresch/rencode/issues/38
+  git apply -3 ../0001-Remove-extra-compile-args.patch
 }
 
 build() {
-  cd "$srcdir"/rencode-$pkgver
-  python setup.py build
+  # Running in the rencode dir won't work, as
+  # ./build.py will be ran instead of python-build
+  python -m build --wheel --no-isolation rencode
 }
 
 check() {
-  cd "$srcdir"/rencode-$pkgver
-  local python_version=$(python -c 'import sys; print("".join(map(str, sys.version_info[:2])))')
-  PYTHONPATH="$PWD/build/lib.linux-$CARCH-cpython-$python_version" py.test
+  python -m venv --system-site-packages testenv
+  testenv/bin/python -m installer rencode/dist/*.whl
+  testenv/bin/python -m pytest
 }
 
 package() {
-  cd rencode-$pkgver
-  python setup.py install --root="$pkgdir" --optimize=1
+  python -m installer --destdir="$pkgdir" rencode/dist/*.whl
 }
