@@ -4,35 +4,42 @@
 # Contributor: Caltlgin Stsodaat <contact@fossdaily.xyz>
 
 pkgname=python-rapidfuzz
-pkgver=3.12.2
+pkgver=3.14.0
 pkgrel=1
 pkgdesc='Rapid fuzzy string matching in Python using various string metrics'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://github.com/rapidfuzz/RapidFuzz'
-license=('MIT')
+license=(MIT)
 depends=(
-  'glibc'
-  'gcc-libs'
-  'python'
+  glibc
+  gcc-libs
+  python
 )
 makedepends=(
-  'git'
-  'python-build'
-  'python-installer'
-  'cython'
-  'python-scikit-build-core'
-  'rapidfuzz-cpp'
+  git
+  python-build
+  python-installer
+  cython
+  python-scikit-build-core
+  rapidfuzz-cpp
 )
-checkdepends=('python-hypothesis' 'python-pandas' 'python-pytest')
-optdepends=('python-numpy')
+checkdepends=(
+  python-hypothesis
+  python-pandas
+  python-pytest
+)
+optdepends=(python-numpy)
 source=(
   "$pkgname::git+$url#tag=v$pkgver"
   'github.com-taskflow-taskflow::git+https://github.com/taskflow/taskflow'
+  remove-version-constraints.patch
 )
-sha512sums=('f25c0e8a01bb251b930993888eed777d8a8d97cbbc0ca73d99f9010561d94990a724dab6d951ee99a66091cafdc3f9378b7a24401d7677988775e2ee28933682'
-            'SKIP')
-b2sums=('fcaae6b1ff2879c7875bb4ee29a339f60265f4e72fc342f79cbbb49719154079caff1b5c37d246c719a3c917a29e34e634ffefcf1ed4adde6d26ef5ca46bf190'
-        'SKIP')
+sha512sums=('2a9bb93c1d6884fc21125f2734b8e571a72d543cbbe01dcd4383173c3e0a6a166bd46602865517b36ab3809b452b5db6f8bd4f4a888a87cf26451f759d33dc9b'
+            'SKIP'
+            'f046814e01eb5dcdacbbedcadaa456e03e81d9895dd7dd43098c70e35777962cc0d2b725732b14e63350b561f5e59f1af729632406458259f7039f849c63a5b9')
+b2sums=('4ff34ae76dfb300170ebe73f8b6b5ac20bd2c827e553747626c8125d4a9758dcbadc53bee27fd2a4155b134abd9b7fb7246f89041ee075b481e791f556dcf95a'
+        'SKIP'
+        '7e0643be792d6fc3923170ed2c03613b80385c028bf0c3b81b597aae4d74c7821c5daa79705a009b7d28d4cb4a009db3cc7b4ddf941dab2b6f4627861650d23c')
 
 prepare() {
   cd "$pkgname"
@@ -41,6 +48,8 @@ prepare() {
   git submodule init extern/taskflow
   git config submodule.extern/taskflow.url "$srcdir/github.com-taskflow-taskflow"
   git -c protocol.file.allow=always submodule update
+
+  patch -p1 -i "$srcdir/remove-version-constraints.patch"
 }
 
 build() {
@@ -48,19 +57,15 @@ build() {
 
   case "${CARCH}" in
     powerpc) ;;
-    *) RAPIDFUZZ_BUILD_EXTENSION=1 ;;
+    *) export RAPIDFUZZ_BUILD_EXTENSION=1 ;;
   esac
 
   python -m build --wheel --no-isolation
 }
 
 check() {
-  MYARCH=${CARCH}
   case "${CARCH}" in
-    powerpc) MYARCH=ppc ;;
-    powerpc64) MYARCH=ppc64; return 0 ;;
-    powerpc64le) MYARCH=ppc64le; return 0 ;;
-    espresso) MYARCH=ppc ;;
+    powerpc) return 0 ;;
   esac
 
   cd "$pkgname"
@@ -70,8 +75,8 @@ check() {
   # install to temporary directory
   python -m installer --destdir="$PWD/tmp_install" dist/*.whl
 
-  local python_version=$(python -c 'import sys; print("".join(map(str, sys.version_info[:2])))')
-  PYTHONPATH="$PWD/build/lib.linux-$MYARCH-cpython-$python_version" pytest -v
+  PYTHONPATH="$PWD/tmp_install$site_packages" pytest -v
+
 }
 
 package() {
