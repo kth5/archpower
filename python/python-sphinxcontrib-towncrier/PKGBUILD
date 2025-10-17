@@ -2,28 +2,34 @@
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=python-sphinxcontrib-towncrier
-pkgver=0.4.0a0
-pkgrel=3
-pkgdesc="An RST directive for injecting a Towncrier-generated changelog draft containing fragments for the unreleased (next) project version"
-url="https://github.com/sphinx-contrib/sphinxcontrib-towncrier"
-license=('BSD')
+pkgver=0.5.0a0
+pkgrel=1
+pkgdesc='A RST directive for injecting a Towncrier-generated changelog draft containing fragments for the unreleased (next) project version'
 arch=(any)
-depends=('python-sphinx' 'towncrier')
-makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-setuptools-scm'
-             'python-wheel')
-checkdepends=('python-pytest-xdist')
-source=(
-  "https://github.com/sphinx-contrib/sphinxcontrib-towncrier/archive/v$pkgver/$pkgname-$pkgver.tar.gz"
-  0001-Update-build-system-dependencies.patch
+url='https://github.com/sphinx-contrib/sphinxcontrib-towncrier'
+license=(BSD-3-Clause)
+depends=(
+  python
+  python-sphinx
+  towncrier
 )
-sha512sums=('479210100ca4c5c664a191f14ce7a4a06dfb097c42132abab65b942ef4aa4a548a5be82b3059c85ed5c0e71305038376caf0c89d8b96bc5849134c3e05c163c4'
-            'e8c5f943e4ad8990a97a6aa8e493a1346cd9725a08c2b3e6ab0f3eb9371b9a63a55bad242060916f8a5ebfefe2a4c5c96b9a73291996fe3a4693c9b0920ca6b8')
+makedepends=(
+  git
+  python-build
+  python-installer
+  python-setuptools
+  python-setuptools-scm
+  python-wheel
+)
+checkdepends=(python-pytest python-pytest-xdist)
+source=("$pkgname::git+$url#tag=v$pkgver")
+sha512sums=('3fad2bd259155fd2c2051ca12bf1c84322bb2186063b544e9e784b3162061971af573a726d25f88db82b95f3a1434f44b54698a28406217dbba3dddc27216d6c')
+b2sums=('2cd0596a51e12281b8750f5eacff6d86d8d70383efa3c372d63d0c17dd144ce5bf6ac3186ab7897bffe7485d22160e1175a3b56db2beb76b8f9f63a4ca30a341')
 
 prepare() {
-  cd sphinxcontrib-towncrier-$pkgver
-  # remove requirement for python-setuptools-scm-git-archive: https://github.com/sphinx-contrib/sphinxcontrib-towncrier/pull/80
-  patch -Np1 -i ../0001-Update-build-system-dependencies.patch
+  cd "$pkgname"
 
+  # skip coverage tests
   sed -i '/pytest_cov/d;/--cov/d' pytest.ini
 
   # Do not treat warnings as errors
@@ -31,17 +37,22 @@ prepare() {
 }
 
 build() {
-  cd sphinxcontrib-towncrier-$pkgver
-  python -m build -nw
+  cd "$pkgname"
+
+  SETUPTOOLS_SCM_PRETEND_VERSION=$pkgver python -m build --wheel --no-isolation
 }
 
 check() {
-  cd sphinxcontrib-towncrier-$pkgver
-  PYTHONPATH="$PWD"/src pytest
+  cd "$pkgname"
+
+  PYTHONPATH="$PWD/src" pytest -v
 }
 
 package() {
-  cd sphinxcontrib-towncrier-$pkgver
-  python -m installer -d "$pkgdir" dist/*.whl
-  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
+  cd "$pkgname"
+
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # license
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
 }
