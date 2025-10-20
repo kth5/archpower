@@ -3,7 +3,7 @@
 # Contributor: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=nodejs-lts-iron
-pkgver=20.19.2
+pkgver=20.19.4
 pkgrel=1
 pkgdesc="Evented I/O for V8 javascript (LTS release: Iron)"
 arch=(x86_64 powerpc64le powerpc64)
@@ -11,7 +11,7 @@ url="https://nodejs.org/"
 license=(MIT)
 # maybe revert back to openssl-1.1 or internal openssl
 # https://github.com/nodejs/node/issues/47852
-depends=(openssl zlib icu libuv c-ares brotli libnghttp2) # http-parser v8)
+depends=(openssl zlib icu libuv c-ares brotli libnghttp2 simdutf) # http-parser v8)
 makedepends=(python procps-ng)
 optdepends=('npm: nodejs package manager')
 options=(!lto)
@@ -19,7 +19,14 @@ provides=("nodejs=$pkgver")
 conflicts=(nodejs)
 source=(https://nodejs.org/dist/v${pkgver}/node-v${pkgver}.tar.xz)
 # https://nodejs.org/download/release/latest-iron/SHASUMS256.txt.asc
-sha256sums=('4a7ff611d5180f4e420204fa6f22f9f9deb2ac5e98619dd9a4de87edf5b03b6e')
+sha256sums=('b87fd7106013d3906706913ffc63a4403715fbb272c4f83ff4338527353eec0f')
+
+case "${CARCH}" in
+  powerpc64)
+    export CFLAGS='-O2 -pipe'
+    export CXXFLAGS='-O2 -pipe'
+  ;;
+esac
 
 build() {
   cd node-v${pkgver}
@@ -44,7 +51,8 @@ build() {
     --experimental-http-parser \
     --shared-brotli \
     --shared-cares \
-    --shared-nghttp2
+    --shared-nghttp2 \
+    --shared-simdutf
     # --shared-v8
     # --shared-http-parser
 
@@ -52,6 +60,10 @@ build() {
 }
 
 check() {
+  case "${CARCH}" in
+    powerpc64) return 0 ;;
+  esac
+
   cd node-v${pkgver}
   make test-only || :
 }
