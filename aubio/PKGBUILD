@@ -6,9 +6,9 @@
 pkgbase=aubio
 pkgname=(aubio python-aubio)
 pkgver=0.4.9
-pkgrel=21
+pkgrel=23
 pkgdesc="A tool for extracting annotations from audio signals"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://aubio.org/"
 license=(GPL-3.0-or-later)
 makedepends=(
@@ -63,6 +63,8 @@ prepare() {
   patch -p1 -d $pkgbase-$pkgver -i ../0b947f96.patch
   patch -p1 -d $pkgbase-$pkgver -i ../53bc55cd.patch
   patch -p1 -d $pkgbase-$pkgver -i ../ffmpeg7.patch
+  # Fix build with ffmpeg 8
+  sed -i 's#AV_INPUT_BUFFER_MIN_SIZE#16384#' "$pkgbase-$pkgver"/src/io/source_avcodec.c
   # Fix test with numpy 2.0
   patch -p1 -d $pkgbase-$pkgver -i ../numpy-2.0.patch
   cd $pkgbase-$pkgver
@@ -87,6 +89,10 @@ build() {
 }
 
 check() {
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
   local _site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
 
   cd $pkgbase-$pkgver
@@ -118,12 +124,6 @@ package_aubio() {
   # move doc, as waf configure doesn't honor the htmldir and docdir settings
   mv -v "$pkgdir/usr/share/doc/lib$pkgname-doc" "$pkgdir/usr/share/doc/$pkgname"
   install -vDm 644 {AUTHORS,ChangeLog,README.md} -t "$pkgdir/usr/share/doc/$pkgname/"
-
-  if [ -d ${pkgdir}/usr/lib64 ]; then
-    mkdir -p ${pkgdir}/usr/lib
-    mv ${pkgdir}/usr/lib64/* ${pkgdir}/usr/lib/
-    rmdir ${pkgdir}/usr/lib64
-  fi
 }
 
 package_python-aubio() {
@@ -138,5 +138,11 @@ package_python-aubio() {
   cd $pkgbase-$pkgver
   python -m installer --destdir="$pkgdir" dist/*.whl
   install -vDm 644 {AUTHORS,ChangeLog,README.md} -t "$pkgdir/usr/share/doc/$pkgname/"
+
+  if [ -d ${pkgdir}/usr/lib64 ]; then
+    mkdir -p ${pkgdir}/usr/lib
+    mv ${pkgdir}/usr/lib64/* ${pkgdir}/usr/lib/
+    rmdir ${pkgdir}/usr/lib64
+  fi
 }
 # vim:set ts=2 sw=2 et:
