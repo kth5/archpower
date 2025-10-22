@@ -3,12 +3,12 @@
 
 pkgbase=avogadrolibs
 pkgname=(avogadrolibs
-         avogadrolibs-qt5)
+         avogadrolibs-qt)
 pkgver=1.100.0
-pkgrel=1
+pkgrel=7
 pkgdesc='Libraries that provide 3D rendering, visualization, analysis and data processing useful in computational chemistry, molecular modeling, bioinformatics, materials science, and related areas'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url='https://www.openchemistry.org/'
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url='https://two.avogadro.cc/'
 license=(custom)
 makedepends=(boost
              cmake
@@ -23,34 +23,18 @@ makedepends=(boost
              mmtf-cpp
              nlohmann-json
              openmpi
+             pugixml
              pybind11
              python
+             qt6-svg
+             qt6-tools
              spglib
              tbb
              utf8cpp
-             verdict
-             vtk)
-makedepends_powerpc=(
-             qt6-svg
-             qt6-tools
-)
-makedepends_powerpc64=(
-             qt5-svg
-             qt5-tools
-)
-makedepends_powerpc64le=(
-             qt5-svg
-             qt5-tools
-)
-makedepends_riscv64=(
-             qt5-svg
-             qt5-tools
-)
+             verdict)
 makedepends_x86_64=(
-             qt5-svg
-             qt5-tools
+             vtk
 )
-
 source=(git+https://github.com/OpenChemistry/avogadrolibs#tag=$pkgver)
 sha256sums=('468e577097cd30f1f5c7339ece95278fe7d890f4eba440688d2b5953214de685')
 
@@ -60,17 +44,15 @@ prepare() {
 
 build() {
   case "${CARCH}" in
-    powerpc)
-      _cmake_options=(-DQT_VERSION=6)
-    ;;
     powerpc64)
       export CFLAGS='-O2 -pipe'
       export CXXFLAGS='-O2 -pipe'
-      _cmake_options=(-DQT_VERSION=5)
     ;;
-    *)
-      _cmake_options=(-DQT_VERSION=5)
-    ;;
+  esac
+
+  case "${CARCH}" in
+    powerpc*) cmake_options=(-DUSE_VTK=OFF) ;;
+    *)        cmake_options=(-DUSE_VTK=ON) ;;
   esac
 
   cmake -B build -S $pkgname \
@@ -79,11 +61,12 @@ build() {
     -DCMAKE_CXX_FLAGS="$CXXFLAGS -ffat-lto-objects" \
     -DENABLE_TRANSLATIONS=ON \
     -DUSE_HDF5=ON \
-    -DUSE_VTK=ON \
     -DUSE_PYTHON=ON \
     -DUSE_SYSTEM_GENXRDPATTERN=ON \
     -DUSE_EXTERNAL_NLOHMANN=ON \
-    -DUSE_EXTERNAL_PUGIXML=ON ${_cmake_options[@]}
+    -DUSE_EXTERNAL_PUGIXML=ON \
+    -DQT_VERSION=6 \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ${cmake_options[@]}
   cmake --build build
 }
 
@@ -96,14 +79,13 @@ package_avogadrolibs() {
            glibc
            hdf5
            libglvnd
-           molequeue
            pugixml
            spglib
            verdict)
-  optdepends=('avogadrolibs-qt5: For the VTK and Qt plugins')
+  optdepends=('avogadrolibs-qt: For the VTK and Qt plugins')
 
   DESTDIR="$pkgdir" cmake --install build
-  rm -r "$pkgdir"/usr/lib/libAvogadroQt* \
+  rm -fr "$pkgdir"/usr/lib/libAvogadroQt* \
         "$pkgdir"/usr/lib/libAvogadroMoleQueue* \
         "$pkgdir"/usr/lib/libAvogadroVtk* \
         "$pkgdir"/usr/include/avogadro/{molequeue,qt*,vtk} \
@@ -112,8 +94,8 @@ package_avogadrolibs() {
   install -Dm644 $pkgname/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
 }
 
-package_avogadrolibs-qt5() {
-  pkgdesc="Qt 5 modules for Avogadro"
+package_avogadrolibs-qt() {
+  pkgdesc="Qt modules for Avogadro"
   depends=(avogadrolibs
            fmt # needed by VTK dependencies
            gcc-libs
@@ -124,32 +106,24 @@ package_avogadrolibs-qt5() {
            libmsym
            libxcursor # needed by VTK dependencies
            openmpi # needed by VTK dependencies
-           vtk)
-  depends_powerpc=(
            qt6-base
            qt6-svg
   )
-  depends_powerpc64=(
-           qt5-base
-           qt5-svg
+  depends_x86_64=(
+           vtk
   )
-  depends_powerpc64le=(
-           qt5-base
-           qt5-svg
-  )
-  depends_riscv64=(
-           qt5-base
-           qt5-svg
-  )
-  depends_x86_6464=(
-           qt5-base
-           qt5-svg
-  )
+  conflicts=(avogadrolibs-qt5)
+
   DESTDIR="$pkgdir" cmake --install build/avogadro/molequeue
   DESTDIR="$pkgdir" cmake --install build/avogadro/qtgui
   DESTDIR="$pkgdir" cmake --install build/avogadro/qtopengl
   DESTDIR="$pkgdir" cmake --install build/avogadro/qtplugins
-  DESTDIR="$pkgdir" cmake --install build/avogadro/vtk
+  case "${CARCH}" in
+    powerpc*) ;;
+    *)
+      DESTDIR="$pkgdir" cmake --install build/avogadro/vtk
+    ;;
+  esac
 
   install -Dm644 $pkgbase/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
 }
