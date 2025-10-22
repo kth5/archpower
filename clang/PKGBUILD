@@ -1,16 +1,16 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Evangelos Foutras <foutrelis@archlinux.org>
-# Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
+# Contributor: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
 pkgname=clang
-pkgver=20.1.8
-pkgrel=1
+pkgver=21.1.4
+pkgrel=2
 pkgdesc="C language family frontend for LLVM"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://clang.llvm.org/"
 license=('Apache-2.0 WITH LLVM-exception')
 depends=('llvm-libs' 'gcc' 'compiler-rt')
-makedepends=('llvm' 'cmake' 'ninja' 'python-sphinx' 'python-myst-parser')
+makedepends=("llvm=$pkgver" 'cmake' 'ninja' 'python-sphinx' 'python-myst-parser')
 optdepends=('openmp: OpenMP support in clang with -fopenmp'
             'python: for scan-view and git-clang-format'
             'llvm: referenced by some clang headers')
@@ -30,27 +30,30 @@ source=($_source_base/clang-$pkgver.src.tar.xz{,.sig}
         hotfix-abi-powerpc64-elfv2.patch
         clang-ppc64-dynamic-linker-path.patch
         ppc-dirwatcher.patch
-        use-llvm-lit.patch)
-sha256sums=('b7a1b7b0af7b9c7596af6bd46e36d11321926eaa66a7a7dc957ab0a1375ee4b0'
+        clang-mcpu-espresso.patch)
+sha256sums=('3e8e25a7478bfb0ef510fff35d1a43bdfb62c7727bf98bb43ad33deef2f9f1a2'
             'SKIP'
-            '7d5ce15f84a098d79b5369d3c03857065abc3cb2f3435f08b1e4bc2a829aa2fc'
+            'f645853f93bc960d04411eb1f75b7c7a72de19e7a09c0981c8eecfef1c605664'
             'SKIP'
-            'e1363888216b455184dbb8a74a347bf5612f56a3f982369e1cba6c7e0726cde1'
+            'f311681255deb37f74bbf950a653e9434e7d8383a7b46a603a323c46cd4bf50e'
             'SKIP'
-            '3319203cfd1172bbac50f06fa68e318af84dcb5d65353310c0586354069d6634'
+            'f4316d84a862ba3023ca1d26bd9c6a995516b4fa028b6fb329d22e24cc6d235e'
             'SKIP'
-            '9a4e452a8163732d417db067a89190fcda823cb3aa33199e834ac7c028923f4b'
+            'ae8658390504e08e464f65ecea838a0584df4734c27cecedfe7eb32780e81564'
             'SKIP'
-            'e88768730a7a46e7952758ec80f831997e30e7dbab53077decae3f71f4fc315e'
-            'ef319e65f927718e1d3b1a23c480d686b1d292e2a0bf27229540964f9734117a'
+            '6f3cc7a4847e03d16ed90341bb71fec98427763ff2351f5344b2ca2ce62a604c'
+            '65c2b77693b9380c4e9c08977bed163932fbd72eaaa4dc666bb7310d426f6887'
             '6a0c72fffeb165ba1ccac62a5265f441c627982f122d92f699dd630eea40fd4b'
-            'ef319e65f927718e1d3b1a23c480d686b1d292e2a0bf27229540964f9734117a'
+            '65c2b77693b9380c4e9c08977bed163932fbd72eaaa4dc666bb7310d426f6887'
             '046d562c2dcad24c3c8174f1c8109b28714b65dfbaa8e3ede7d3373ea3206c83'
             '654b9eafcd20125319b3c319ab6674a940ddef400821c80813c16011ef8b6086'
             '307d7db5118647b84570c92c87f097e1a4616794f7d3966261b1e92829a020dc'
-            '8bbc67fb18407b4c363cbba56be4223a33eb72c489eb481eb7723794ac48915a')
+            'ded7c1f26c2efd352e2ef82e2af1756c3fb3f359a92d0dcc7c158ba42836122f')
 validpgpkeys=('474E22316ABF4785A88C6E8EA2C794A986419D8A'  # Tom Stellard <tstellar@redhat.com>
-              'D574BD5D1D0E98895E3BF90044F2485E45D59042') # Tobias Hieta <tobias@hieta.se>
+              'D574BD5D1D0E98895E3BF90044F2485E45D59042'  # Tobias Hieta <tobias@hieta.se>
+              'FFB3368980F3E6BB5737145A316C56D064CACBA5'  # Douglas Yung <douglas.yung@sony.com>
+              '71046D1E9C6656BDD61171873E83BABF4A4F9E85'  # Cullen Rhodes <cullen.rhodes@arm.com>
+)
 
 # Utilizing LLVM_DISTRIBUTION_COMPONENTS to avoid
 # installing static libraries; inspired by Gentoo
@@ -72,10 +75,9 @@ _get_distribution_components() {
 }
 
 prepare() {
-  rename -v -- "-$pkgver.src" '' {cmake,third-party}-$pkgver.src
+  rename -v -- "-$pkgver.src" '' {cmake,clang-tools-extra}-$pkgver.src
   cd clang-$pkgver.src
   mkdir build
-  mv "$srcdir/clang-tools-extra-$pkgver.src" tools/extra
   patch -Np2 -i ../enable-fstack-protector-strong-by-default.patch
 
   # Revert always linking against libamath when -fveclib=ArmPL
@@ -85,13 +87,11 @@ prepare() {
   patch -Np2 -i ../clang-ppc64-dynamic-linker-path.patch
   patch -Np1 -d "$srcdir/llvm-$pkgver.src" -i ../hotfix-abi-powerpc64-elfv2.patch
 
-  # various Adlie lifted
-  patch -Np1 -i ${srcdir}/ppc-dirwatcher.patch
-  patch -Np1 -i ${srcdir}/use-llvm-lit.patch
+  # enable -mcpu=espresso and map to 750
+  patch -Np1 -i ../clang-mcpu-espresso.patch
 
-  # Fix hardcoded test path
-  sed -i 's/clang-tools-extra/tools\/extra/g' tools/extra/test/clang-doc/enum.cpp
-  sed -i 's/clang-tools-extra/tools\/extra/g' tools/extra/test/clang-doc/namespace.cpp
+  # various Adelie lifted
+  patch -Np1 -i ${srcdir}/ppc-dirwatcher.patch
 }
 
 build() {
@@ -113,10 +113,11 @@ build() {
     -DLLVM_BUILD_DOCS=ON
     -DLLVM_ENABLE_RTTI=ON
     -DLLVM_ENABLE_SPHINX=ON
+    -DLLVM_EXTERNAL_CLANG_TOOLS_EXTRA_SOURCE_DIR="$srcdir/clang-tools-extra"
     -DLLVM_EXTERNAL_LIT=/usr/bin/lit
     -DLLVM_INCLUDE_DOCS=ON
     -DLLVM_LINK_LLVM_DYLIB=ON
-    -DLLVM_MAIN_SRC_DIR="$srcdir/llvm-$pkgver.src"
+    -DLLVM_THIRD_PARTY_DIR="$srcdir/third-party-$pkgver.src"
     -DSPHINX_WARNINGS_AS_ERRORS=OFF
     -DPACKAGE_BUGREPORT=https://gitlab.archlinux.org/archlinux/packaging/packages/clang/-/issues
   )
