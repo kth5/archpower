@@ -1,4 +1,4 @@
-From 3501f4e70905e310a7b61b3cd37a1632b9e834ca Mon Sep 17 00:00:00 2001
+From ae83ceee72a0a39c063b02310f6ce928839712a2 Mon Sep 17 00:00:00 2001
 From: Dan Dennedy <dan@dennedy.org>
 Date: Tue, 26 Aug 2025 11:19:13 -0700
 Subject: [PATCH] Support FFmpeg 8 (#1142)
@@ -16,10 +16,10 @@ Subject: [PATCH] Support FFmpeg 8 (#1142)
  6 files changed, 126 insertions(+), 19 deletions(-)
 
 diff --git a/src/modules/avformat/common.c b/src/modules/avformat/common.c
-index e337651..eca4a04 100644
+index 8e22217be..933114f24 100644
 --- a/src/modules/avformat/common.c
 +++ b/src/modules/avformat/common.c
-@@ -367,10 +367,20 @@ void mlt_image_to_avframe(mlt_image image, mlt_frame mltframe, AVFrame *avframe)
+@@ -369,10 +369,20 @@ void mlt_image_to_avframe(mlt_image image, mlt_frame mltframe, AVFrame *avframe)
      avframe->height = image->height;
      avframe->format = mlt_to_av_image_format(image->format);
      avframe->sample_aspect_ratio = av_d2q(mlt_frame_get_aspect_ratio(mltframe), 1024);
@@ -42,10 +42,10 @@ index e337651..eca4a04 100644
      avframe->color_trc = mlt_properties_get_int(frame_properties, "color_trc");
      avframe->color_range = mlt_properties_get_int(frame_properties, "full_range")
 diff --git a/src/modules/avformat/consumer_avformat.c b/src/modules/avformat/consumer_avformat.c
-index 22a90dc..d44d555 100644
+index 537eb6f3d..60c74a50d 100644
 --- a/src/modules/avformat/consumer_avformat.c
 +++ b/src/modules/avformat/consumer_avformat.c
-@@ -1923,18 +1923,27 @@ static int encode_video(encode_ctx_t *enc_ctx,
+@@ -1914,18 +1914,27 @@ static int encode_video(encode_ctx_t *enc_ctx,
          avframe->pts = enc_ctx->frame_count;
  
          // Set frame interlace hints
@@ -81,10 +81,10 @@ index 22a90dc..d44d555 100644
          // Encode the image
          ret = avcodec_send_frame(c, avframe);
 diff --git a/src/modules/avformat/filter_avfilter.c b/src/modules/avformat/filter_avfilter.c
-index 32736c1..8e7ff68 100644
+index aad90822b..c50596ec2 100644
 --- a/src/modules/avformat/filter_avfilter.c
 +++ b/src/modules/avformat/filter_avfilter.c
-@@ -802,10 +802,21 @@ static int filter_get_image(mlt_frame frame,
+@@ -810,10 +810,21 @@ static int filter_get_image(mlt_frame frame,
          pdata->avinframe->sample_aspect_ratio = (AVRational){profile->sample_aspect_num,
                                                               profile->sample_aspect_den};
          pdata->avinframe->pts = pos;
@@ -107,10 +107,10 @@ index 32736c1..8e7ff68 100644
                                                                     "color_primaries");
          pdata->avinframe->color_trc = mlt_properties_get_int(frame_properties, "color_trc");
 diff --git a/src/modules/avformat/filter_swscale.c b/src/modules/avformat/filter_swscale.c
-index 938d074..5b56e22 100644
+index 8047863d5..e1b753c28 100644
 --- a/src/modules/avformat/filter_swscale.c
 +++ b/src/modules/avformat/filter_swscale.c
-@@ -170,8 +170,15 @@ static int filter_scale(mlt_frame frame,
+@@ -173,8 +173,15 @@ static int filter_scale(mlt_frame frame,
          avinframe->height = iheight;
          avinframe->format = avformat;
          avinframe->sample_aspect_ratio = av_d2q(mlt_frame_get_aspect_ratio(frame), 1024);
@@ -127,7 +127,7 @@ index 938d074..5b56e22 100644
                               avinframe->linesize,
                               *image,
 diff --git a/src/modules/avformat/link_avfilter.c b/src/modules/avformat/link_avfilter.c
-index 8efda84..f041c67 100644
+index fcf279b87..f2673e9bb 100644
 --- a/src/modules/avformat/link_avfilter.c
 +++ b/src/modules/avformat/link_avfilter.c
 @@ -1,6 +1,6 @@
@@ -138,7 +138,7 @@ index 8efda84..f041c67 100644
   *
   * This library is free software; you can redistribute it and/or
   * modify it under the terms of the GNU Lesser General Public
-@@ -917,10 +917,21 @@ static int link_get_image(mlt_frame frame,
+@@ -914,10 +914,21 @@ static int link_get_image(mlt_frame frame,
          pdata->avinframe->sample_aspect_ratio = (AVRational){profile->sample_aspect_num,
                                                               profile->sample_aspect_den};
          pdata->avinframe->pts = pos;
@@ -161,10 +161,10 @@ index 8efda84..f041c67 100644
                                                                     "color_primaries");
          pdata->avinframe->color_trc = mlt_properties_get_int(frame_properties, "color_trc");
 diff --git a/src/modules/avformat/producer_avformat.c b/src/modules/avformat/producer_avformat.c
-index 1ce59ef..895b68a 100644
+index 5827f611b..c220cebb7 100644
 --- a/src/modules/avformat/producer_avformat.c
 +++ b/src/modules/avformat/producer_avformat.c
-@@ -335,11 +335,20 @@ static int first_video_index(producer_avformat self)
+@@ -331,11 +331,20 @@ static int first_video_index(producer_avformat self)
  
  static const char *get_projection(AVStream *st)
  {
@@ -186,7 +186,7 @@ index 1ce59ef..895b68a 100644
      return NULL;
  }
  
-@@ -349,7 +358,16 @@ static double get_rotation(mlt_properties properties, AVStream *st)
+@@ -345,7 +354,16 @@ static double get_rotation(mlt_properties properties, AVStream *st)
  {
      AVDictionaryEntry *rotate_tag = av_dict_get(st->metadata, "rotate", NULL, 0);
      int has_rotate_metadata = rotate_tag && *rotate_tag->value && strcmp(rotate_tag->value, "0");
@@ -203,7 +203,7 @@ index 1ce59ef..895b68a 100644
      double theta = mlt_properties_get_double(properties, "rotate");
      int has_mlt_rotate = !!mlt_properties_get(properties, "rotate");
  
-@@ -418,13 +436,6 @@ static AVRational guess_frame_rate(producer_avformat self, AVStream *stream)
+@@ -414,13 +432,6 @@ static AVRational guess_frame_rate(producer_avformat self, AVStream *stream)
          frame_rate = av_d2q(av_q2d(stream->avg_frame_rate), 1024);
          fps = av_q2d(frame_rate);
      }
@@ -217,7 +217,7 @@ index 1ce59ef..895b68a 100644
      if (isnan(fps) || isinf(fps) || fps < 1.0) {
          // Use the profile frame rate if all else fails.
          mlt_profile profile = mlt_service_profile(MLT_PRODUCER_SERVICE(self->parent));
-@@ -1580,7 +1591,7 @@ static void get_audio_streams_info(producer_avformat self)
+@@ -1569,7 +1580,7 @@ static void get_audio_streams_info(producer_avformat self)
  #endif
                  if (codec_params->sample_rate > self->max_frequency)
                      self->max_frequency = codec_params->sample_rate;
@@ -226,7 +226,7 @@ index 1ce59ef..895b68a 100644
              }
              pthread_mutex_unlock(&self->open_mutex);
          }
-@@ -1716,7 +1727,11 @@ static int sliced_h_pix_fmt_conv_proc(int id, int idx, int jobs, void *cookie)
+@@ -1705,7 +1716,11 @@ static int sliced_h_pix_fmt_conv_proc(int id, int idx, int jobs, void *cookie)
      struct SwsContext *sws;
      struct sliced_pix_fmt_conv_t *ctx = (struct sliced_pix_fmt_conv_t *) cookie;
  
@@ -238,7 +238,7 @@ index 1ce59ef..895b68a 100644
      field = (interlaced) ? (idx & 1) : 0;
      idx = (interlaced) ? (idx / 2) : idx;
      slices = (interlaced) ? (jobs / 2) : jobs;
-@@ -1865,7 +1880,11 @@ static void convert_image_rgb(producer_avformat self,
+@@ -1854,7 +1869,11 @@ static void convert_image_rgb(producer_avformat self,
      uint8_t *out_data[4];
      int out_stride[4];
  
@@ -250,7 +250,7 @@ index 1ce59ef..895b68a 100644
          // Perform field-aware conversion for 4:2:0
          int field_height = height / 2;
          const uint8_t *in_data[4];
-@@ -2041,8 +2060,13 @@ static int convert_image(producer_avformat self,
+@@ -2037,8 +2056,13 @@ static void convert_image(producer_avformat self,
  
          int sliced = !getenv("MLT_AVFORMAT_SLICED_PIXFMT_DISABLE") && src_pix_fmt != ctx.dst_format;
          if (sliced) {
@@ -264,7 +264,7 @@ index 1ce59ef..895b68a 100644
          } else {
              ctx.slice_w = width;
          }
-@@ -2052,10 +2076,18 @@ static int convert_image(producer_avformat self,
+@@ -2048,10 +2072,18 @@ static void convert_image(producer_avformat self,
  
          if (sliced && (last_slice_w % 8) == 0
              && !(ctx.src_format == AV_PIX_FMT_YUV422P && last_slice_w % 16)) {
@@ -283,7 +283,7 @@ index 1ce59ef..895b68a 100644
              ctx.slice_w = width;
              for (i = 0; i < c; i++)
                  sliced_h_pix_fmt_conv_proc(i, i, c, &ctx);
-@@ -2524,7 +2556,11 @@ static int producer_get_image(mlt_frame frame,
+@@ -2531,7 +2563,11 @@ static int producer_get_image(mlt_frame frame,
                          // there are I frames, and find_first_pts() fails as a result.
                          // Try to set first_pts here after getting pict_type.
                          if (self->first_pts == AV_NOPTS_VALUE
@@ -295,7 +295,7 @@ index 1ce59ef..895b68a 100644
                                  || self->video_frame->pict_type == AV_PICTURE_TYPE_I))
                              self->first_pts = pts;
                          if (self->first_pts != AV_NOPTS_VALUE)
-@@ -2558,22 +2594,45 @@ static int producer_get_image(mlt_frame frame,
+@@ -2565,22 +2601,45 @@ static int producer_get_image(mlt_frame frame,
                  if (mlt_properties_get(properties, "force_progressive")) {
                      self->progressive = !!mlt_properties_get_int(properties, "force_progressive");
                  } else if (self->video_frame && codec_params) {
@@ -341,7 +341,7 @@ index 1ce59ef..895b68a 100644
  #ifdef AVFILTER
                  if ((self->autorotate || mlt_properties_get(properties, "filtergraph"))
                      && !setup_filters(self) && self->vfilter_graph) {
-@@ -3690,7 +3749,7 @@ static int audio_codec_init(producer_avformat self, int index, mlt_properties pr
+@@ -3694,7 +3753,7 @@ static int audio_codec_init(producer_avformat self, int index, mlt_properties pr
          if (codec && avcodec_open2(codec_context, codec, NULL) >= 0) {
              // Now store the codec with its destructor
              if (self->audio_codec[index])
@@ -350,6 +350,136 @@ index 1ce59ef..895b68a 100644
              self->audio_codec[index] = codec_context;
              self->audio_index = index;
          } else {
--- 
-2.51.0
+From 13d1c0ee242471db6ca3cb55aee48f4d32058573 Mon Sep 17 00:00:00 2001
+From: Dan Dennedy <dan@dennedy.org>
+Date: Tue, 14 Oct 2025 12:47:17 -0700
+Subject: [PATCH] Fix VA-API encoding with FFmpeg 8
 
+---
+ src/modules/avformat/consumer_avformat.c | 107 +++++++++++++++--------
+ 1 file changed, 71 insertions(+), 36 deletions(-)
+
+diff --git a/src/modules/avformat/consumer_avformat.c b/src/modules/avformat/consumer_avformat.c
+index d965fc3a1..eb888f3ed 100644
+--- a/src/modules/avformat/consumer_avformat.c
++++ b/src/modules/avformat/consumer_avformat.c
+@@ -156,48 +156,83 @@ static int setup_hwupload_filter(mlt_properties properties,
+                                               buffersrc_args,
+                                               NULL,
+                                               vfilter_graph);
++    if (result < 0) {
++        mlt_log_error(MLT_CONSUMER(properties),
++                      "avfilter_graph_create_filter(buffer) failed with %d\n",
++                      result);
++        return result;
++    }
+ 
+-    if (result >= 0) {
+-        result = avfilter_graph_create_filter(&vfilter_out,
++    vfilter_out = avfilter_graph_alloc_filter(vfilter_graph,
+                                               avfilter_get_by_name("buffersink"),
+-                                              "mlt_buffersink",
+-                                              NULL,
+-                                              NULL,
+-                                              vfilter_graph);
++                                              "mlt_buffersink");
++    if (!vfilter_out) {
++        mlt_log_error(MLT_CONSUMER(properties), "avfilter_graph_alloc_filter(buffersink) failed\n");
++        return result;
++    }
+ 
+-        if (result >= 0) {
+-            enum AVPixelFormat pix_fmts[] = {codec_context->pix_fmt, AV_PIX_FMT_NONE};
+-            result = av_opt_set_int_list(vfilter_out,
+-                                         "pix_fmts",
+-                                         pix_fmts,
+-                                         AV_PIX_FMT_NONE,
+-                                         AV_OPT_SEARCH_CHILDREN);
+-
+-            result = avfilter_graph_create_filter(&vfilter_hwupload,
+-                                                  avfilter_get_by_name("hwupload"),
+-                                                  "mlt_hwupload",
+-                                                  "",
+-                                                  NULL,
+-                                                  vfilter_graph);
++    enum AVPixelFormat pix_fmts[] = {codec_context->pix_fmt, AV_PIX_FMT_NONE};
++    result = av_opt_set_array(vfilter_out,
++                              "pixel_formats",
++                              AV_OPT_SEARCH_CHILDREN,
++                              0,
++                              1,
++                              AV_OPT_TYPE_PIXEL_FMT,
++                              pix_fmts);
++    if (result < 0) {
++        mlt_log_error(MLT_CONSUMER(properties), "av_opt_set_array() failed with %d\n", result);
++        return result;
++    }
+ 
+-            if (result >= 0) {
+-                vfilter_hwupload->hw_device_ctx = av_buffer_ref(codec_context->hw_device_ctx);
+-                result = avfilter_link(vfilter_in, 0, vfilter_hwupload, 0);
+-                if (result >= 0) {
+-                    result = avfilter_link(vfilter_hwupload, 0, vfilter_out, 0);
+-                    if (result >= 0) {
+-                        result = avfilter_graph_config(vfilter_graph, NULL);
+-                        if (result >= 0)
+-                            codec_context->hw_frames_ctx = av_buffer_ref(
+-                                av_buffersink_get_hw_frames_ctx(vfilter_out));
+-                    }
+-                }
+-            }
+-            mlt_properties_set_data(properties, "vfilter_in", vfilter_in, 0, NULL, NULL);
+-            mlt_properties_set_data(properties, "vfilter_out", vfilter_out, 0, NULL, NULL);
+-        }
++    result = avfilter_init_dict(vfilter_out, NULL);
++    if (result < 0) {
++        mlt_log_error(MLT_CONSUMER(properties), "avfilter_init_dict() failed with %d\n", result);
++        return result;
+     }
+ 
++    vfilter_hwupload = avfilter_graph_alloc_filter(vfilter_graph,
++                                                   avfilter_get_by_name("hwupload"),
++                                                   "mlt_hwupload");
++    if (!vfilter_hwupload) {
++        mlt_log_error(MLT_CONSUMER(properties), "avfilter_graph_alloc_filter(hwupload) failed\n");
++        return result;
++    }
++
++    vfilter_hwupload->hw_device_ctx = av_buffer_ref(codec_context->hw_device_ctx);
++    result = avfilter_init_dict(vfilter_hwupload, NULL);
++    if (result < 0) {
++        mlt_log_error(MLT_CONSUMER(properties),
++                      "avfilter_graph_create_filter(hwupload) failed with %d\n",
++                      result);
++        return result;
++    }
++
++    result = avfilter_link(vfilter_in, 0, vfilter_hwupload, 0);
++    if (result < 0) {
++        mlt_log_error(MLT_CONSUMER(properties),
++                      "avfilter_link(vfilter_in, vfilter_hwupload) failed with %d\n",
++                      result);
++        return result;
++    }
++
++    result = avfilter_link(vfilter_hwupload, 0, vfilter_out, 0);
++    if (result < 0) {
++        mlt_log_error(MLT_CONSUMER(properties),
++                      "avfilter_link(vfilter_hwupload, vfilter_out) failed with %d\n",
++                      result);
++        return result;
++    }
++
++    result = avfilter_graph_config(vfilter_graph, NULL);
++    if (result < 0) {
++        mlt_log_error(MLT_CONSUMER(properties), "avfilter_graph_config() failed with %d\n", result);
++        return result;
++    }
++
++    codec_context->hw_frames_ctx = av_buffer_ref(av_buffersink_get_hw_frames_ctx(vfilter_out));
++    mlt_properties_set_data(properties, "vfilter_in", vfilter_in, 0, NULL, NULL);
++    mlt_properties_set_data(properties, "vfilter_out", vfilter_out, 0, NULL, NULL);
++
+     return result;
+ }
+ 
