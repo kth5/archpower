@@ -1,56 +1,85 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Maintainer: Daniel Bermond <dbermond@archlinux.org>
 # Maintainer: Bruno Pagani <archange@archlinux.org>
 
-_srcname=SPIRV-LLVM-Translator
-pkgname=${_srcname,,}
-pkgver=20.1.5
-pkgrel=1
-pkgdesc="Tool and a library for bi-directional translation between SPIR-V and LLVM IR"
+pkgname=spirv-llvm-translator
+pkgver=21.1.1
+pkgrel=3
+pkgdesc="LLVM <-> SPIR-V converter for compilers targeting SPIR-V"
+url="https://www.khronos.org/spirv/"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-url="https://github.com/KhronosGroup/SPIRV-LLVM-Translator"
-license=(LicenseRef-custom)
-depends=(gcc-libs glibc llvm-libs spirv-tools)
-makedepends=(git cmake llvm spirv-headers)
-checkdepends=(python clang)
-source=(git+${url}.git#tag=v$pkgver
-        endian.patch)
-sha256sums=('735001cb8622fc0dfcc4e2005299d185ebc4bb1970a98189a43da262c6c1dfe3'
-            '11397c6eedd6ffa8801b8a1f43f6a53cdda5537e21b13b325af914e38e1ff502')
-
-pkgver() {
-  git -C ${_srcname} describe --tags | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./;s/-/+/'
-}
+license=(NCSA)
+depends=(
+  gcc-libs
+  glibc
+  llvm-libs
+  spirv-tools
+)
+makedepends=(
+  cmake
+  git
+  llvm
+  ninja
+  spirv-headers
+)
+checkdepends=(
+  clang
+  python
+)
+source=(
+  git+https://github.com/KhronosGroup/SPIRV-LLVM-Translator#tag=v$pkgver
+  0001-fixes-a-new-validation-failure-in-a-UniformId-test-3.patch
+  endian.patch
+)
+b2sums=('b68cbb40de22d7a2f6263e3514bad57ba41194081bf189f697fc412edffec6ddadb6faf18c0187914f7c52e93e1e09c673998c9f64405d37822fa9c6a74410b4'
+        '72582c18a18eaee813a262777ae638c36333e516d2b50493dae1e106abe8e7db851419c9fe358a0b80600aa24bd2a87acf0a77d9297836976322ba6109777657'
+        '901b3df8c0ff274932ddddf975c2858c563369ca4f1ffa5173be80d99011185258bdeef02a88d123cdbbc5aeab7f1a949e7f1bec46e09d7509df0f6fc9d0e8e8')
 
 prepare() {
-  cd ${_srcname}
+  cd SPIRV-LLVM-Translator
+
+  # Fix tests
+  git apply -3 ../0001-fixes-a-new-validation-failure-in-a-UniformId-test-3.patch
+
   patch -Np1 -i ${srcdir}/endian.patch
 }
 
 build() {
-  cmake -B build -S ${_srcname} \
-    -G 'Unix Makefiles' \
-    -DBUILD_SHARED_LIBS=ON \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    -DCMAKE_SKIP_RPATH=ON \
-    -DLLVM_INCLUDE_TESTS=ON \
-    -DLLVM_EXTERNAL_LIT=/usr/bin/lit \
-    -DLLVM_EXTERNAL_SPIRV_HEADERS_SOURCE_DIR=/usr/include/spirv/ \
-    -Wno-dev
+  local cmake_options=(
+    -D BUILD_SHARED_LIBS=ON
+    -D CMAKE_BUILD_TYPE=Release
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_INSTALL_SYSCONFDIR=/etc
+    -D CMAKE_POSITION_INDEPENDENT_CODE=ON
+    -D CMAKE_SKIP_RPATH=ON
+    -D LLVM_CONFIG=llvm-config
+    -D LLVM_EXTERNAL_LIT=/usr/bin/lit
+    -D LLVM_EXTERNAL_SPIRV_HEADERS_SOURCE_DIR=/usr/include/spirv
+    -D LLVM_LIBDIR_SUFFIX=
+    -D LLVM_SPIRV_ENABLE_LIBSPIRV_DIS=ON
+    -D LLVM_SPIRV_INCLUDE_TESTS=ON
+    -W no-dev
+  )
+
+  cmake -S SPIRV-LLVM-Translator -B build -G Ninja "${cmake_options[@]}"
   cmake --build build
 }
 
 check() {
   case "${CARCH}" in
-    x86_64)
-      make -C build test
-    ;;
+    powerpc*) return 0 ;;
   esac
+
+  # Does not use ctest-compatible targets
+  cmake --build build --target test
 }
 
 package() {
-  DESTDIR="${pkgdir}" cmake --install build
-  install -Dm644 ${_srcname}/LICENSE.TXT -t "${pkgdir}"/usr/share/licenses/${pkgname}/
+  DESTDIR="$pkgdir" cmake --install build
+
+  install -Dm644 SPIRV-LLVM-Translator/LICENSE.TXT \
+    -t "$pkgdir/usr/share/licenses/$pkgname"
 }
+
+# vim:set sw=2 sts=-1 et:
