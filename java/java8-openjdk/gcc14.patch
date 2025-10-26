@@ -1,0 +1,47 @@
+Description: fix issues pointed out by GCC 14
+ 1. do not use pointer after it has been free(3)d
+ 2. use correctly-typed default return value
+ 3. avoid type-passing error (C++)
+Author: mirabilos <tg@debian.org>
+Forwarded: https://mail.openjdk.org/pipermail/jdk8u-dev/2025-February/019718.html
+
+--- a/jdk/src/share/bin/parse_manifest.c
++++ b/jdk/src/share/bin/parse_manifest.c
+@@ -209,8 +209,8 @@ find_end(int fd, Byte *eb)
+         if ((*cp == (ENDSIG & 0xFF)) && (GETSIG(cp) == ENDSIG) &&
+           (cp + ENDHDR + ENDCOM(cp) == endpos)) {
+             (void) memcpy(eb, cp, ENDHDR);
+-            free(buffer);
+             pos = flen - (endpos - cp);
++            free(buffer);
+             return haveZIP64(eb) ? find_end64(fd, eb, pos) : pos;
+         }
+     free(buffer);
+--- a/jdk/src/share/bin/splashscreen_stubs.c
++++ b/jdk/src/share/bin/splashscreen_stubs.c
+@@ -61,11 +61,11 @@ typedef char* (*SplashGetScaledImageName
+ #define INVOKEV(name) _INVOKE(name, ,;)
+ 
+ int     DoSplashLoadMemory(void* pdata, int size) {
+-    INVOKE(SplashLoadMemory, NULL)(pdata, size);
++    INVOKE(SplashLoadMemory, 0)(pdata, size);
+ }
+ 
+ int     DoSplashLoadFile(const char* filename) {
+-    INVOKE(SplashLoadFile, NULL)(filename);
++    INVOKE(SplashLoadFile, 0)(filename);
+ }
+ 
+ void    DoSplashInit(void) {
+--- a/jdk/src/share/native/sun/awt/image/jpeg/imageioJPEG.c
++++ b/jdk/src/share/native/sun/awt/image/jpeg/imageioJPEG.c
+@@ -2690,7 +2690,8 @@ Java_com_sun_imageio_plugins_jpeg_JPEGIm
+     RELEASE_ARRAYS(env, data, NULL);
+ }
+ 
+-static void freeArray(void** arr, jint size) {
++// first argument is always UINT8** scale
++static void freeArray(UINT8** arr, jint size) {
+     int i;
+     if (arr != NULL) {
+         for (i = 0; i < size; i++) {

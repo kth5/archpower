@@ -1,0 +1,53 @@
+--- a/hotspot/src/os/linux/vm/os_linux.cpp
++++ b/hotspot/src/os/linux/vm/os_linux.cpp
+@@ -5094,6 +5094,7 @@ void os::init(void) {
+ 
+   pthread_mutex_init(&dl_mutex, NULL);
+ 
++NOT_ZERO (
+   // If the pagesize of the VM is greater than 8K determine the appropriate
+   // number of initial guard pages.  The user can change this with the
+   // command line arguments, if needed.
+@@ -5107,6 +5108,7 @@ void os::init(void) {
+   Linux::_pthread_setname_np =
+     (int(*)(pthread_t, const char*))dlsym(RTLD_DEFAULT, "pthread_setname_np");
+ 
++)
+ }
+ 
+ // To install functions for atexit system call
+@@ -5161,9 +5163,16 @@ jint os::init_2(void)
+   // size.  Add a page for compiler2 recursion in main thread.
+   // Add in 2*BytesPerWord times page size to account for VM stack during
+   // class initialization depending on 32 or 64 bit VM.
++NOT_ZERO (
+   os::Linux::min_stack_allowed = MAX2(os::Linux::min_stack_allowed,
+             (size_t)(StackYellowPages+StackRedPages+StackShadowPages) * Linux::page_size() +
+                     (2*BytesPerWord COMPILER2_PRESENT(+1)) * Linux::vm_default_page_size());
++)
++ZERO_ONLY (
++  os::Linux::min_stack_allowed = MAX2(os::Linux::min_stack_allowed,          
++            (size_t)(StackYellowPages+StackRedPages+StackShadowPages+
++                     2*BytesPerWord COMPILER2_PRESENT(+1)) * Linux::page_size());
++)
+ 
+   size_t threadStackSizeInBytes = ThreadStackSize * K;
+   if (threadStackSizeInBytes != 0 &&
+--- a/hotspot/src/os_cpu/linux_zero/vm/globals_linux_zero.hpp
++++ b/hotspot/src/os_cpu/linux_zero/vm/globals_linux_zero.hpp
+@@ -34,9 +34,13 @@
+ define_pd_global(bool,  DontYieldALot,           false);
+ define_pd_global(intx,  ThreadStackSize,         1536);
+ #ifdef _LP64
+-define_pd_global(intx,  VMThreadStackSize,       1024);
++#if defined (_LITTLE_ENDIAN) && defined (__powerpc64__)
++define_pd_global(intx,  VMThreadStackSize,       1920);
+ #else
+-define_pd_global(intx,  VMThreadStackSize,       512);
++define_pd_global(intx,  VMThreadStackSize,       1280);
++#endif
++#else
++define_pd_global(intx,  VMThreadStackSize,       640);
+ #endif // _LP64
+ define_pd_global(intx,  CompilerThreadStackSize, 0);
+ define_pd_global(uintx, JVMInvokeMethodSlack,    8192);

@@ -1,0 +1,44 @@
+Description: ensure the JRE uses the 64-bit time functions for dlsym
+ if present and 64-bit time_t gets used
+ .
+ Original patch by Pushkar Kulkarni
+ submitted via Vladimir Petko
+Author: mirabilos <tg@debian.org>
+Forwarded: https://salsa.debian.org/openjdk-team/openjdk/-/merge_requests/115
+
+--- a/hotspot/src/os/linux/vm/os_linux.cpp
++++ b/hotspot/src/os/linux/vm/os_linux.cpp
+@@ -1383,9 +1383,22 @@ void os::Linux::clock_init() {
+ 
+   if (handle) {
+     int (*clock_getres_func)(clockid_t, struct timespec*) =
+-           (int(*)(clockid_t, struct timespec*))dlsym(handle, "clock_getres");
++      NULL;
+     int (*clock_gettime_func)(clockid_t, struct timespec*) =
+-           (int(*)(clockid_t, struct timespec*))dlsym(handle, "clock_gettime");
++      NULL;
++    if (sizeof(time_t) > 4) {
++      /* could be glibc 64-bit time_t on ILP32 via -D_TIME_BITS=64 */
++      /* could be 64-bit time_t on 64-bit systems with legacy clock_get{res,time} */
++      clock_getres_func = (int(*)(clockid_t, struct timespec*))dlsym(handle, "__clock_getres64");
++      clock_gettime_func = (int(*)(clockid_t, struct timespec*))dlsym(handle, "__clock_gettime64");
++    }
++    if (clock_getres_func == NULL && clock_gettime_func == NULL) {
++      /* could be 32-bit time_t (sizeof(time_t) == 4) */
++      /* could be 64-bit time_t on LP64 (dlsym not found) */
++      /* could be 64-bit time_t on new ILP32 architectures like x32 (amd64ilp32) */
++      clock_getres_func = (int(*)(clockid_t, struct timespec*))dlsym(handle, "clock_getres");
++      clock_gettime_func = (int(*)(clockid_t, struct timespec*))dlsym(handle, "clock_gettime");
++    }
+     if (clock_getres_func && clock_gettime_func) {
+       // See if monotonic clock is supported by the kernel. Note that some
+       // early implementations simply return kernel jiffies (updated every
+@@ -1415,7 +1428,7 @@ void os::Linux::clock_init() {
+ #ifndef SYS_clock_getres
+ 
+ #if defined(IA32) || defined(AMD64) || defined(AARCH64)
+-#define SYS_clock_getres IA32_ONLY(266)  AMD64_ONLY(229) AARCH64_ONLY(114)
++#define SYS_clock_getres IA32_ONLY(sizeof(time_t) == 8 ? 406 : 266)  AMD64_ONLY(229) AARCH64_ONLY(114)
+ #define sys_clock_getres(x,y)  ::syscall(SYS_clock_getres, x, y)
+ #else
+ #warning "SYS_clock_getres not defined for this platform, disabling fast_thread_cpu_time"
