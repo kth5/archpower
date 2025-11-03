@@ -16,8 +16,8 @@ pkgname=(
   rust-wasm
 )
 epoch=1
-pkgver=1.90.0
-pkgrel=2
+pkgver=1.91.0
+pkgrel=1
 pkgdesc="Systems programming language focused on safety, speed and concurrency"
 url=https://www.rust-lang.org/
 arch=(powerpc64le powerpc64 powerpc espresso)
@@ -62,11 +62,12 @@ source=(
   # Put bash completions where they belong
   0002-bootstrap-Change-bash-completion-dir.patch
 
-  # Use our *-pc-linux-gnu targets, making LTO with clang simpler
-  0003-compiler-Change-LLVM-targets.patch
+  # Fix build with system rustc
+  # https://github.com/rust-lang/rust/issues/143735
+  0003-bootstrap-Workaround-for-system-stage0.patch
 
-  # Use our wasm-ld
-  0004-compiler-Use-wasm-ld-for-wasm-targets.patch
+  # Use our *-pc-linux-gnu targets, making LTO with clang simpler
+  0004-compiler-Change-LLVM-targets.patch
 
   # Use our aarch64-linux-gnu-gcc
   0005-compiler-Use-aarch64-linux-gnu-gcc-to-link-aarch64-t.patch
@@ -74,26 +75,17 @@ source=(
   # Prefer "lib" over "lib64"
   0006-compiler-Swap-primary-and-secondary-lib-dirs.patch
 
-  # Fix build with glibc 2.42
-  0001-compiler-rt-Fix-compilation-with-glibc-2.42.patch
-
-  # Fix build with system rustc
-  # https://github.com/rust-lang/rust/issues/143735
-  0007-bootstrap-Workaround-for-system-stage0.patch
-
   # ArchPOWER powerpc64 is ELFv2
   hotfix-abi.powerpc64.elfv2.patch
 )
-b2sums=('7bb22f814f1ccf08bd8c57a0c81d94b5a5850b8e20c563f1da7b1a37bb390b5ed82ff448dfc7738e1990653c798f6edaacc410483b95007691e717d55a6b10de'
+b2sums=('abd675fda0e147735f8f665059826d2e5e2fd334d3b60c10197838553a91bb04c9df1f84062232d4fe71400443cd9ca6e233faf7bd18abd19776d63d6aa388a9'
         'SKIP'
-        '17e7f6e73936137507e387cd2761b0b98f9457391e4f534beb872effaa9f442e72351bb39d5e34963d9f18a31fd9f07139cfbde4df9c4c1d8cc6e5d3a7f2c8f7'
-        'fed39e683a0fa4b7730c629f2453bccb70d2b37329ee8853e0c8e8cbc07a227a6c15bdf81c7285a2a2debeffde24ef14abcfccee6383024ac6bff7405e725482'
-        '1f664dc8156ebe48ae49e7651312ca8879b40fb65471bd9e4180e84fc8b2f6e94b50b7ff7db598e8f298058fae7bcc591532fe087084330650c69df131d2bb85'
-        '2317343e6b986d1ec1fb6d035fb6d8933245704b5be1b3e4a032ad14300d8a338087c52e53a6dff4ceda52232ce7f21dd8ad536c9d4da04faee6a9b79a9670b6'
-        '5db7f8a8320e6900c35c0f3db270f70e5ee00b466038914b474ad33a822f20c2e518934dffb2d4391ae8a5ef94b49ab21ef7f57ab86686a51499d9f5516faa94'
-        '8be938ad0016244e86707396ee147fdff7a7ee4d2a776607ff316a9264512faba99d03a7a6b5ba48744c3ae93b09a2eaede567554142a30570346e177131099f'
-        'b9fdc6e4849dd167568322a09c645e1dfbbb4ceb1d6057744fa170c22f29195f3a6a3e6e71807f24124d6c7af659f7a91611f9b1b1f3702ceaba34f1fd153aca'
-        'f7f43c42856be95b658963275f6ebd94a500f24f23c925e3d9e5fe917f6d509bfd75d2fca072c987e93cd7d5a3776800ba633406cd77fe387b39252b5b7dfbc2'
+        'fc5748f501608bf7a9c9bea991fb6760adc79b055da6807f4d302c8c0539f4bb34acaa13be93af280becd854f5d3cd16b76ef493fb8fbbd357816fda9406545f'
+        'd535647849368c0c82856b69dcdc6eb972fb4377396ec7fea41849b3fe4c2b1ac6f4583065b2ce4fabc5b097bc3392f0a1c3784bcd997f71a6d552f0b83c4856'
+        '4d0391136d247ac85475a2ef413cf5257764815190b63301ad534221ae32626f9a85370ef1da80db61497f9952d8cb10465c3aa207511318d7b06955dd9d9803'
+        'b12acac2f88b171257f5a047fae88cec60c78666f60721f2304eaa7e807d079a3e5ca45e52986759c0b272659bc99f5fd438f2878cedfa40273f796ac030a867'
+        '40e14ccc8b5dfff5d87f43a8763d1d2a49435c7a76633a920648a43dd25df0ab056107722ccdc574d9d603322699c6f3990878e19ab25d5e0117689d8f6b99b8'
+        '3db6d42bb77db44fc220084314b015280507d4afe81990baefdb6c9303d7b9e102497042c67969105b7d1d6206e947f29ec44788299ee8b7e39562be610091aa'
         '486fe88ce95e4bbf72da67ff2818e38d58d145c9e97ab970e4e9a2a4664b5823a6eabcb172999ecf460157a82afc1bec7db0a0114d988694d064583861b440f6')
 validpgpkeys=(
   108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE  # Rust Language (Tag and Release Signing Key) <rust-key@rust-lang.org>
@@ -121,7 +113,7 @@ prepare() {
 
   _lto="fat"
   case "${CARCH}" in
-    powerpc) 
+    powerpc*) 
       _lto="off"
       patch -Np1 -R -i ${srcdir}/hotfix-abi.powerpc64.elfv2.patch
     ;;
@@ -273,7 +265,7 @@ build() {
   case "${CARCH}" in
     powerpc)
       # fails to link with -O3 due to 32bit related relocation problems
-      #export RUSTFLAGS="-C opt-level=1"
+      export RUSTFLAGS="-C opt-level=1"
     ;;
   esac
 
