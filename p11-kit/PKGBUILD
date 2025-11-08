@@ -8,8 +8,8 @@ pkgname=(
   libp11-kit
   p11-kit-docs
 )
-pkgver=0.25.5
-pkgrel=1.2
+pkgver=0.25.10
+pkgrel=2
 pkgdesc="Loads and enumerates PKCS#11 modules"
 url="https://p11-glue.freedesktop.org"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso riscv64)
@@ -18,10 +18,10 @@ depends=(
   coreutils
   glibc
   libtasn1
-  systemd-libs
 )
 makedepends=(
   bash-completion
+  git
   gtk-doc
   libffi
   meson
@@ -31,9 +31,10 @@ checkdepends=(
   gnutls
 )
 source=(
-  https://github.com/p11-glue/p11-kit/releases/download/$pkgver/p11-kit-$pkgver.tar.xz{,.sig}
+  "git+https://github.com/p11-glue/p11-kit?signed#tag=$pkgver"
+  git+https://github.com/p11-glue/pkcs11-json
 )
-b2sums=('96d6a9c2807586abafae4da4df89f566672733963997d6a83e00aaf83a7a0c0e2995638f505e98fb87a90c60bde28814f1e8b7d5071bf0af96bb0467105a1ddc'
+b2sums=('47408bf6bded1f5de38d168a67fcfae460685fc6ee56627db99d9e2148c2f3dfeab0fce94f31026ca423b980b3df283a920cc5f87dc366699451f0e18d3b6497'
         'SKIP')
 validpgpkeys=(
   C0F67099B808FB063E2C81117BFB1108D92765AF  # Stef Walter <stef@thewalter.net>
@@ -42,7 +43,11 @@ validpgpkeys=(
 )
 
 prepare() {
-  cd p11-kit-$pkgver
+  cd p11-kit
+
+  git submodule init
+  git submodule set-url subprojects/pkcs11-json "$srcdir/pkcs11-json"
+  git -c protocol.file.allow=always -c protocol.allow=never submodule update
 }
 
 build() {
@@ -52,7 +57,7 @@ build() {
     -D trust_paths=/etc/ca-certificates/trust-source:/usr/share/ca-certificates/trust-source
   )
 
-  arch-meson p11-kit-$pkgver build "${meson_options[@]}"
+  arch-meson p11-kit build "${meson_options[@]}"
   meson compile -C build
 }
 
@@ -74,7 +79,6 @@ package_p11-kit() {
   depends+=(
     "libp11-kit=$pkgver-$pkgrel"
     libp11-kit.so
-    libsystemd.so
   )
   install=p11-kit.install
 
@@ -88,7 +92,7 @@ package_p11-kit() {
 
   _pick doc "$pkgdir"/usr/share/gtk-doc
 
-  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 p11-kit-$pkgver/COPYING
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 p11-kit/COPYING
 }
 
 package_libp11-kit() {
@@ -102,7 +106,7 @@ package_libp11-kit() {
 
   mv lib/* "$pkgdir"
 
-  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 p11-kit-$pkgver/COPYING
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 p11-kit/COPYING
 }
 
 package_p11-kit-docs() {
@@ -111,7 +115,7 @@ package_p11-kit-docs() {
 
   mv doc/* "$pkgdir"
 
-  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 p11-kit-$pkgver/COPYING
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 p11-kit/COPYING
 }
 
 # vim:set sw=2 sts=-1 et:
