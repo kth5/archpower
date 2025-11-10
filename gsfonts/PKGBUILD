@@ -7,14 +7,21 @@
 _name=urw-base35-fonts
 pkgname=gsfonts
 pkgver=20200910
-pkgrel=5
+pkgrel=6
 pkgdesc="(URW)++ base 35 font set"
 url="https://github.com/ArtifexSoftware/urw-base35-fonts"
 arch=(any)
 license=('AGPL-3.0-only WITH PS-or-PDF-font-exception-20170817')
-source=($url/archive/$pkgver/$_name-$pkgver.tar.gz)
-sha512sums=('71fb27baadf5abc4ff624cdede02038681acd5fffdc728a5b2e7808713b80cb2f2174f90a1862e69d390c4434c49d5167ab095100032fa3ba80b586eb8ae51d1')
-b2sums=('77305946e6ab6e576cca7b62da731709bf4acaeb7181f89aef032f922acfaad59735a651d73ff8793c2cf32a23f45efaf5322568892023d4eae9b2278f681890')
+source=($url/archive/$pkgver/$_name-$pkgver.tar.gz
+        '010-gsfonts-remove-inappropriate-generic-aliases-for-d050000l.patch'::'https://github.com/ArtifexSoftware/urw-base35-fonts/commit/3c0ba3b5687632dfc66526544a4e811fe0ec0cd9.patch')
+sha512sums=('71fb27baadf5abc4ff624cdede02038681acd5fffdc728a5b2e7808713b80cb2f2174f90a1862e69d390c4434c49d5167ab095100032fa3ba80b586eb8ae51d1'
+            'c52dda9230a01e5555ab22d8608b716a848df2b68f6e7deb6ff17d7a35de750e92f9a65f2e9b28d34865b4c99b9c5583f900eabffd03888990ac026c646cbcad')
+b2sums=('77305946e6ab6e576cca7b62da731709bf4acaeb7181f89aef032f922acfaad59735a651d73ff8793c2cf32a23f45efaf5322568892023d4eae9b2278f681890'
+        '2c0205835fa92ec0c5853cb30696313571f5b0401677607110add21ed2e49a72220f553b66d2230a6fed6f54d6dc8983b2326da359a72649c3d0b8c9955cb438')
+
+prepare() {
+  patch -d $_name-$pkgver -Np1 -i "${srcdir}/010-gsfonts-remove-inappropriate-generic-aliases-for-d050000l.patch"
+}
 
 package() {
   local _config _config_path
