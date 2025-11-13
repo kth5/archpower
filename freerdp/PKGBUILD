@@ -3,11 +3,10 @@
 # Contributor: David Runge <dvzrv@archlinux.org>
 # Contributor: Stijn Segers <francesco dot borromini at gmail dot com>
 
-_name=FreeRDP
 pkgname=freerdp
-pkgver=3.17.0
+pkgver=3.17.2
 _libver=${pkgver/.*/}
-pkgrel=1
+pkgrel=5
 epoch=2
 pkgdesc="Free implementation of the Remote Desktop Protocol (RDP)"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
@@ -37,8 +36,8 @@ depends=(
 makedepends=(
   alsa-lib
   cmake
-  e2fsprogs
   ffmpeg
+  git
   icu
   json-c
   krb5
@@ -48,6 +47,7 @@ makedepends=(
   libpulse
   libusb
   libwebp
+  ninja
   openssl
   pam
   pkcs11-helper
@@ -65,10 +65,19 @@ provides=(
   libwinpr$_libver.so
 )
 source=(
-  https://github.com/$pkgname/$pkgname/archive/$pkgver/$pkgname-$pkgver.tar.gz
+  "git+https://github.com/$pkgname/$pkgname?signed#tag=$pkgver"
 )
-sha512sums=('d5813eaaf3c2e66dec1cb2f35e6f532d60861f7c0019c0c380587eed2e3e09dc5eba5cb19c3e80df340d2f104eb54f766e4fb8b476424686f2041319608bb359')
-b2sums=('e47030e9eb6eac50c7b280724827581447b73b485d5774c596d5f6cdfcf752db0ed220bd891ba3eab23f9b67a6a3922d101426e653e2dc2af79c6ef3f0c1b37b')
+sha512sums=('598bb7bb424ebd85c46780019a7264dc979a02f3189d314ffab967c9478e7f04c64c60aeeb1a6938e2796950b97d8a547236109f2539a411d0f828b719ee9436')
+b2sums=('5e83fda70de09191a8bf4300019793fe3b299cc06c8d0baca8393f847e95840dca5bb024c02bde8c2cec21c023703c6fd48dfce671936c1dcad86b061c00b42b')
+validpgpkeys=(
+  7703B333420E0AEF995EB4B3A49454A3FC909FD5 # akallabeth <akallabeth@posteo.net>
+)
+
+prepare() {
+  # Fix building downstream packages
+  # https://github.com/FreeRDP/FreeRDP/pull/11876
+  git -C $pkgname cherry-pick -n 74a3a7695cdd09cf020acdeb09480ac8ee92ccbe
+}
 
 build() {
   # gcc14 buildfix
@@ -77,18 +86,23 @@ build() {
 
   local cmake_options=(
     -B build
+    -D CHANNEL_RDPECAM_CLIENT=ON
     -D CHANNEL_URBDRC_CLIENT=ON
-    -D CMAKE_INSTALL_PREFIX=/usr
-    -D CMAKE_INSTALL_LIBDIR=lib
     -D CMAKE_BUILD_TYPE=Release
+    -D CMAKE_INSTALL_LIBDIR=lib
+    -D CMAKE_INSTALL_PREFIX=/usr
     -D CMAKE_SKIP_INSTALL_RPATH=ON
     -D PROXY_PLUGINDIR=/usr/lib/$pkgname/server/proxy/plugins
     -D RDTK_FORCE_STATIC_BUILD=ON  # prevent file conflicts with freerdp2
     -D UWAC_FORCE_STATIC_BUILD=ON  # prevent file conflicts with freerdp2
+    -D WINPR_UTILS_IMAGE_JPEG=ON
+    -D WINPR_UTILS_IMAGE_PNG=ON
+    -D WINPR_UTILS_IMAGE_WEBP=ON
     -D WITH_ALSA=ON
     -D WITH_BINARY_VERSIONING=ON  # prevent file conflicts with freerdp2
     -D WITH_CHANNELS=ON
     -D WITH_CLIENT_CHANNELS=ON
+    -D WITH_CLIENT_SDL3=OFF
     -D WITH_CUPS=ON
     -D WITH_DSP_FFMPEG=ON
     -D WITH_FFMPEG=ON
@@ -99,17 +113,15 @@ build() {
     -D WITH_PULSE=ON
     -D WITH_SERVER=ON
     -D WITH_SERVER_CHANNELS=ON
-    -D WITH_SYSTEMD=ON
     -D WITH_SWSCALE=ON
-    -D WITH_WAYLAND=ON
+    -D WITH_SYSTEMD=ON
+    -D WITH_VAAPI=ON
     -D WITH_VERBOSE_WINPR_ASSERT=OFF
+    -D WITH_WAYLAND=ON
     -D WITH_WINPR_TOOLS=ON
     -D WITH_X11=ON
-    -D WINPR_UTILS_IMAGE_PNG=ON
-    -D WINPR_UTILS_IMAGE_JPEG=ON
-    -D WINPR_UTILS_IMAGE_WEBP=ON
-    -D WITH_CLIENT_SDL3=OFF
-    -S $_name-$pkgver
+    -G Ninja
+    -S $pkgname
     -W no-dev
   )
 
@@ -118,13 +130,12 @@ build() {
 }
 
 check() {
-  ctest --test-dir build --output-on-failure
+  ctest --test-dir build --output-on-failure --stop-on-failure -j$(nproc)
 }
 
 package() {
   depends+=(
     alsa-lib libasound.so
-    e2fsprogs libcom_err.so
     ffmpeg libavcodec.so libavutil.so libswresample.so libswscale.so
     icu libicuuc.so
     json-c libjson-c.so
@@ -140,5 +151,5 @@ package() {
   )
 
   DESTDIR="$pkgdir" cmake --install build
-  install -vDm 644 $_name-$pkgver/{ChangeLog,README.md} -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -vDm 644 $pkgname/{ChangeLog,README.md} -t "$pkgdir/usr/share/doc/$pkgname/"
 }
