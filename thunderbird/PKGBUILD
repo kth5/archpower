@@ -8,11 +8,11 @@
 
 pkgbase=thunderbird
 pkgname=(thunderbird)
-pkgver=136.0
+pkgver=144.0.1
 pkgrel=1
 pkgdesc='Standalone mail and news reader from mozilla.org'
 url='https://www.thunderbird.net/'
-arch=(x86_64 powerpc64le riscv64)
+arch=(x86_64 powerpc64le powerpc64)
 license=('MPL-2.0' 'GPL-2.0-only' 'LGPL-2.1-only')
 depends=(
   glibc
@@ -52,7 +52,7 @@ depends=(
   json-c
   libcanberra
   ffmpeg
-  icu libicui18n.so libicuuc.so
+  #icu libicui18n.so libicuuc.so
 )
 makedepends=(
   unzip zip diffutils python mesa libpulse libice libsm
@@ -70,16 +70,42 @@ source=(https://archive.mozilla.org/pub/thunderbird/releases/${pkgver}/source/th
         mozconfig.cfg
         metainfo.patch
         org.mozilla.Thunderbird.desktop
-        thunderbird-system-icu-76.patch
+        0001-Install-under-remoting-name.patch
+        ffmpeg-cleanup.patch
+        hotfix-32bit.patch
+        hotfix-bigendian-no-fading.patch
+        hotfix-bigendian-skia.patch
+        hotfix-gcc14.patch
+        hotfix-no-pip-check.patch
+        hotfix-ppc-not-power8.patch
+        hotfix-ppc.patch
+        hotfix-simd-sse2.patch
+        jxl-enable.patch
+        jxl-register-ext.patch
+        sandbox-fonts.patch
+        sandbox-x11.patch
 )
-sha256sums=('d9510154bac28a7e17ec4acb57e396af7dc038e9d3f9c3b4404cf86c916fc636'
+sha256sums=('62dd606308ee0c3298e052c05a8fce321df3a1012628511c7aacdf7ef6b7e965'
             'SKIP'
             'fa11b4736bbf53ec015f71cd42b1040b22d1a855c562b76927b3f0eccb925c85'
             '4a3a61e119637000c563a194283ef741959756b75edf7be84e25b4253c4288c5'
-            '59cab9977c3effbba33129c014e87414ea939c02be859f1f0b9d79581c8935eb'
+            '6a17155440ab11464a3742e992ce96cdf74cfe86c8cc76ff02aeac5a079898da'
             '3390d127e5dd70a0ff60895bcb044ec4521dd528cd9d6efc27c4ba58df9cca5c'
             'cc7c3ed80b8ff04d1edf97ddd977aab59fc2354526eb3835b3a91df09fa40d90'
-            'ad56ac6f2a955e1c639761d11c65cde7d202ae8c12f22038b4a01c1de8d91357')
+            '883ca2fa723a7572269d18559d5b82412782ad63e5dd3820eeb0540e3fe34314'
+            '15fdd2e1ffe314eaee6685ae5178c4089477837d4ed49ba7fc6458d8dedc6c08'
+            '6e7ed5f86d081e979713542594fb4b01b0a4f6ac9fdd84ed479dc88aa3bd0a2f'
+            '27d19a870bb62bef886732e19ccf6c905497e78c6c5741e91d73125061b95b78'
+            '4528c4ed8e3a9b5f4fc7edfcffee0b7ae223648c2559ecdd23298399ef108e37'
+            '57c58477a455bcb5ccff387d205321b7a9ff58ec25ae365e330993b428ba1a6a'
+            'c47c8b8856122bf6fa836f923eec9846330d3db49e90f6ff92619bce1fe3d768'
+            '0473ff417272be827c292f100f22bd42efdf03b10726962b1b81f40c968291c4'
+            'a5216cd5fba16d7a862577e0053bbd33c61b361404b4bc47b1c62079c3a7e81e'
+            'da744ca7087cb8d5cd8a2a5985c4169027ad7c151c4515ffe6d662c278def442'
+            '13ced6860b78e367a82cc2f8e3cec856f9b99da9e0ec01e250ad64d75545b201'
+            'f8c4883f6ebbde94a133a3abd83684868759966ede20c71bef2702a859044ff9'
+            'e8a6346e088d261e9c149667223f1612f664ce5f4a30f4bbe068115b72e59c38'
+            'bfce3e17dc39c536b0bd2a6be1a90985bf54d7fdf8c4141ba5410183ab894f9c')
 validpgpkeys=(
   14F26682D0916CDD81E37B6D61B7B526D98F0353 # Mozilla Software Releases <release@mozilla.com>
   4360FE2109C49763186F8E21EBE41E90F6F12F6D # Mozilla Software Releases <release@mozilla.com>
@@ -121,23 +147,30 @@ prepare() {
   cp ../mozconfig.cfg .mozconfig
   sed "s|@PWD@|${PWD@Q}|g" -i .mozconfig
 
+  # malloc_usable_size is used in various parts of the codebase
+  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  CFLAGS="${CFLAGS/-fexceptions/}"
+  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  CXXFLAGS="${CXXFLAGS/-fexceptions/}"
+
+  CXXFLAGS="${CXXFLAGS} -Wno-error=format-security"
+
   case "${CARCH}" in
     powerpc64*)
       echo "ac_add_options --disable-webrtc" >> .mozconfig
-      echo "export CC=${CHOST}-gcc" >> ../mozconfig
-      echo "export CXX=${CHOST}-g++" >> ../mozconfig
-      echo "ac_add_options --enable-optimize=\"${CXXFLAGS} -fpermissive\""
-      echo 'ac_add_options --enable-linker=bfd' >> ../mozconfig
-      echo 'ac_add_options --enable-lto=full' >> ../mozconfig
-      echo 'ac_add_options --without-wasm-sandboxed-libraries' >> ../mozconfig
-      echo 'ac_add_options --disable-sandbox' >> ../mozconfig
-      echo 'ac_add_options --disable-jit' >> ../mozconfig
-    ;;
-    riscv64)
-      sed 's@.*enable-linker.*@@g' -i .mozconfig
+      echo "export CC=${CHOST}-gcc" >> .mozconfig
+      echo "export CXX=${CHOST}-g++" >> .mozconfig
+      echo "ac_add_options --enable-optimize=\"${CXXFLAGS} -fpermissive\"" >> .mozconfig
+      echo 'ac_add_options --enable-linker=bfd' >> .mozconfig
+      echo 'ac_add_options --enable-lto=full' >> .mozconfig
+      echo 'ac_add_options --without-wasm-sandboxed-libraries' >> .mozconfig
+      echo 'ac_add_options --disable-sandbox' >> .mozconfig
+      echo 'ac_add_options --disable-jit' >> .mozconfig
     ;;
     x86_64)
       echo "ac_add_options --disable-elf-hack" >> .mozconfig
+      # https://bugzilla.mozilla.org/show_bug.cgi?id=1423822
+      echo "ac_add_options --with-wasi-sysroot=/usr/share/wasi-sysroot" >> .mozconfig
     ;;
   esac
 }
@@ -155,7 +188,6 @@ build() {
   CFLAGS="${CFLAGS/-fexceptions/}"
   CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
   CXXFLAGS="${CXXFLAGS/-fexceptions/}"
-
 
   CXXFLAGS="${CXXFLAGS} -Wno-error=format-security"
 
