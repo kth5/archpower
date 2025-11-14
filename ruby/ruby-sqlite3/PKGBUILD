@@ -4,7 +4,7 @@
 
 _gemname='sqlite3'
 pkgname="ruby-${_gemname}"
-pkgver=2.7.3
+pkgver=2.7.4
 pkgrel=1
 pkgdesc='Ruby bindings for the SQLite3 embedded database'
 url='https://github.com/luislavena/sqlite3-ruby'
@@ -28,8 +28,8 @@ checkdepends=(
   ruby-minitest
 )
 source=("https://github.com/sparklemotion/sqlite3-ruby/archive/v${pkgver}/${pkgname}-v${pkgver}.tar.gz")
-sha512sums=('30015de31653b6dbec699a8245172b2db921c7f2c5c74872f926ceec06226bb43545f3caa89a6cc846761dcd3e291e8d9508cc787a1f520eda036df01f03e30e')
-b2sums=('08036a1078818c6e6c5c67d922aa8ebcb05dbd8f2a1789e52af5014e41a39f9c5a9b373e356f99919c2227fc62996e2e87198f6253a102af03076e614f072fa2')
+sha512sums=('eba6eb50ec017f66996e4bb4491d22579912f323aeaa6d0ec57465ddda71acefe8c12d582eb2fc8aa85691c6420ea6b30b697cf208479a40afbbc82ad7ad4f2d')
+b2sums=('f7726bebfa44fb724c23c58b5a20c733c31a916224cefc0da2fac5390cec0c87fa2a8377e0a01fa824a4bd3dcdd7e46feecca14feb06d0265a095b0564e52a84')
 
 prepare() {
   cd "${_gemname}-ruby-${pkgver}"
