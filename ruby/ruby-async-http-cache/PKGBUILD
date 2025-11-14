@@ -3,8 +3,8 @@
 
 _gemname=async-http-cache
 pkgname="ruby-${_gemname}"
-pkgver=0.4.5
-pkgrel=3
+pkgver=0.4.6
+pkgrel=1
 pkgdesc='Standard-compliant cache for async-http'
 arch=(any)
 url='https://github.com/socketry/async-http-cache'
@@ -26,8 +26,8 @@ checkdepends=(
 )
 options=(!emptydirs)
 source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('05c7d312e18de11ec54f48207730c29439980857da85b5bf16d43946cfc595df09e8085bbc15b98ad5b32585d15fbe053dd00d59e895fc6d52d62edc6e7b72c1')
-b2sums=('0dc95ddd866d72c690dfa86da57102e97f7457dc585054c77a9267341c0efad75c5313c2ba86d12a4fa2531a9ee70df2a8fda1886fc916bb9586a8388982fca3')
+sha512sums=('5307d221c646236381351169be47e8473e03fba4ae8bdcf5cfc13dd8898eb26c9f66c231337b5d561cda10416aafa06e423ff24c8f2f78f6c7d2c4ee63aa93f9')
+b2sums=('585cf6730d45170ae386b04cbc797e23644f2b8100b784f7e5ec1c70e11b51534cb8caf95d1706e860700335044ad0f0c08a73ddd5ba3d4a560c2bdf42371b29')
 
 prepare() {
   cd async-http-cache-$pkgver
