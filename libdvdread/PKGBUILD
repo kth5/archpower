@@ -5,26 +5,35 @@
 # Contributor: Tom Newsom <Jeepster@gmx.co.uk>
 
 pkgname=libdvdread
-pkgver=6.1.3
-pkgrel=2.1
+pkgver=7.0.0
+pkgrel=1
 pkgdesc='Library for reading DVD video disks'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://www.videolan.org/developers/libdvdnav.html'
-license=('GPL')
-depends=('glibc')
+license=(GPL-2.0-or-later)
+depends=(glibc)
+makedepends=(
+  git
+  meson
+)
 optdepends=('libdvdcss: Decoding encrypted DVDs')
-source=("https://download.videolan.org/pub/videolan/$pkgname/$pkgver/$pkgname-$pkgver.tar.bz2"{,.asc})
-sha256sums=('ce35454997a208cbe50e91232f0e73fb1ac3471965813a13b8730a8f18a15369'
-            'SKIP')
+source=("git+https://code.videolan.org/videolan/libdvdread.git#tag=$pkgver")
+b2sums=(7716077f6587747521ea0061f8c73c4504c8f41aec10c91a9780921178ca9ed29c5ee40ea2b96661fe76730ad75ba08ab66c2a3f306485c15cf57c9494890832)
 validpgpkeys=(65F7C6B4206BD057A7EB73787180713BE58D1ADC) # VideoLAN Release Signing Key (2015)
 
+prepare() {
+  cd $pkgname
+
+  # Fix out of tree build
+  sed -i "s|'git', 'log'|'git', '-C', meson.project_source_root(), 'log' |" meson.build
+}
+
 build() {
-  cd $pkgname-$pkgver
-  ./configure --prefix=/usr
-  make
+  arch-meson $pkgname build \
+    -D libdvdcss=disabled
+  meson compile -C build
 }
 
 package() {
-  cd $pkgname-$pkgver
-  make DESTDIR="$pkgdir" install
+  meson install -C build --destdir "$pkgdir"
 }

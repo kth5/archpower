@@ -5,7 +5,7 @@
 
 _gemname=rspec
 pkgname=ruby-${_gemname}
-pkgver=3.13.1
+pkgver=3.13.2
 pkgrel=1
 pkgdesc='RSpec meta-gem that depends on the other components'
 url='https://github.com/rspec/rspec'
@@ -26,9 +26,9 @@ source=(
   "${pkgname}::git+${url}#tag=${_gemname}-v${pkgver}"
   "${pkgname}_no_version_constraints.patch"
 )
-sha512sums=('6ec452f0f082eb8bd2152d96c6ad8c2aa1a391b8976e8972a905cf19d9bb11dc195fba89065b204767c07749f404502bf4037a04a1765261e4bf51a59b734762'
+sha512sums=('c5c18343f6ec064af7b4f08fee72e27b065a67acfab5bebc6b4755c23899c47b73a31c010404e099e7356834da5171faacdbe20b285e973c4a3372adda599eaa'
             'cfca36d1ea714da84516975bb89b60f0adae7ca7473b7abef5b1b2e54c3269ee74293be8f5676c6cb55066acde14739b792d434e392b9b8dea81b7ac21fdcf47')
-b2sums=('c1d23aeb76d1b6ebdb225865f56237dd42a190eb6ea86b0fe1638c07c343c36eaf2b0b68677515f39d7f5e70d43add3d2de120b7723f58ab3090208efd6fc601'
+b2sums=('e37308be9ff990c1e891ab37be0b85542562d87b3cdaf0e97b62a594ba5c5b4e72e2fab88ff2e127a7ba37f212d52d0f4a85b15194384f1b0d3998ed6871c798'
         '956919f5fa862fdcda34716277250b2266cfcc3e8b18596533bc6c8f08fd1d16f504905db1b5cb529a539d7707cfb14c737f1e6a9860505f16c735c3a7adb06e')
 
 prepare() {

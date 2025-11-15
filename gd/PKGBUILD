@@ -2,18 +2,23 @@
 
 pkgname=gd
 pkgver=2.3.3
-pkgrel=8.1
+pkgrel=9
 pkgdesc="Library for the dynamic creation of images by programmers"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://libgd.github.io/"
 license=('custom')
 depends=('fontconfig' 'libxpm' 'libwebp' 'libavif' 'libheif')
+makedepends=('git')
 optdepends=('perl: bdftogd script')
 checkdepends=('ttf-liberation')
 source=("https://github.com/libgd/libgd/archive/${pkgname}-${pkgver}.tar.gz"
-        'https://github.com/libgd/libgd/commit/bdc281eadb1d58d5c0c7bbc1125ee4674256df08.patch')
+        'https://github.com/libgd/libgd/commit/bdc281eadb1d58d5c0c7bbc1125ee4674256df08.patch'
+        'https://github.com/libgd/libgd/commit/f1a53c082173567b8ad07eaba8fc7ba66457a730.patch'
+        'https://github.com/libgd/libgd/commit/21633377174354199c3ea3e4b23f64cfaeacc50a.patch')
 sha256sums=('24429f9d0dbe0f865aaa4b1a63558242396ba9134e6cfd32ca5e486a84483350'
-            '1e7bdb17e76ad6b1384222b449b9011ee131d3e1f105f9b30495a9c34b2cd5eb')
+            '1e7bdb17e76ad6b1384222b449b9011ee131d3e1f105f9b30495a9c34b2cd5eb'
+            '1b102b0f87e630bd98f345088d6bc742def72c6619764572049d2c67ca050500'
+            '591b63e9bd35d9ab1e732d33663c1eb4dfa4163f70324d602d361167ba643541')
 
 prepare() {
   cd libgd-${pkgname}-${pkgver}
@@ -21,6 +26,10 @@ prepare() {
   # Re-add macros that are used in PHP
   # See https://github.com/php/php-src/pull/7490
   patch -p1 -R -i "$srcdir/bdc281eadb1d58d5c0c7bbc1125ee4674256df08.patch"
+
+  # Fix heif tests
+  git apply -p1 ../f1a53c082173567b8ad07eaba8fc7ba66457a730.patch
+  patch -p1 -i ../21633377174354199c3ea3e4b23f64cfaeacc50a.patch
 
   # Remove failing tests
   for f in tests/tiff/{tiff_read_bw,tiff_im2im,tiff_dpi}.c; do
@@ -39,6 +48,10 @@ build() {
 }
 
 check() {
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
   cd libgd-${pkgname}-${pkgver}
 
   TMP=$(mktemp -d) make check

@@ -7,14 +7,17 @@
 # Contributor: Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
 # Contributor: Connor Behan <connor.behan@gmail.com>
 # Contributor: henning mueller <henning@orgizm.net>
+# Contributor: drzee99 <info@drzee.net>
 
 pkgbase=audit
 _name=audit-userspace
 pkgname=(
   audit
+  audispd-plugins
+  audispd-plugins-zos
   python-audit
 )
-pkgver=4.0.5
+pkgver=4.1.2
 pkgrel=1
 pkgdesc='Userspace components of the audit framework'
 url="https://github.com/linux-audit/audit-userspace"
@@ -37,14 +40,20 @@ options=(emptydirs)
 source=(
   $url/archive/v$pkgver/$_name-v$pkgver.tar.gz
   $pkgbase.tmpfiles
-  $pkgbase-4.0.5-executable_paths.patch
+  audispd-plugins.tmpfiles
+  audispd-plugins-zos.tmpfiles
+  $pkgbase-4.1.2-executable_paths.patch
 )
-sha512sums=('14fa19922cf6436284e1448d5a0e069ce5066d2d49d28679fe3ad019be60c133aee6e345b36e0f482ea1fdeadad7d78676f931aab1c25b91a2d0b445dce3eedf'
-            '1750741755f58d0ae19ed2c30e136d05560dc12ec613a502bad12f47c6b70432d30b3a16f3f1574c8433ad2701428d1c1d567a4d3b55be19abac300310c831d9'
-            '3f6d9701991260d4a995aacbd322b102ec3e7a821cb8bb8e6c9a1ef9d04f9f9f7e37ba6c2a2c33675d375ee5adf7c7b95d4ea6b8e5cccc3d27ea0b550dd1eb59')
-b2sums=('eaa3106f4ec4fae9a356e33717922131975c5421977af4baad9364f80a4c72a07d725f32b2bf39f49b6ff6063365fd3f047b3eb209c231abaaff67a4506ec2f7'
-        '549ebbbc9e43277d44d0dc5bfd8ca2926628322d898479171b2707dd004968d036ef792b442548af90ad56dea868a72c88b5cf3bb93ea70cb8bbed82747ad9b5'
-        'ccd7342df5db1bd5aef77f92041d7e4f671bcf30a5f514411688d664d198225464aa5588e5e6d65e0e0ff3eb5d29c5ca0fee8cbcd4477f425cdb77837e884c1c')
+sha512sums=('a47fec1041e11a76ad57b57bcf6e9b454188d95ec26cabf15e92e114d46c7c8f09ddb251d5aebef8bc7faacc6ccffe44c73543d8234af237548b4ad89a408fc3'
+            'b9738cd89710e8cc7a3a2104bbd586f3643a66b3b4f0bbe323a3d20f7c7352ca074ca1018e872589309a7dd80503a9a33372387ef6e8af42185934f073114b78'
+            '2e4d545855aa3a029e54099a9a615d37d58413534d6d2091a810e7931a48d0cf35d61d491d9238ea59218f3bf0cba6f739e379e763949d6c12fab43f076f48ee'
+            'e85a182fa619a576d398506f911f3e0a0f7689daeb6f475da215e9c4220b0328bf91ef7c810e51a48c8e1fc06a6cdf57d0af3c59364e9db057909a0fb7bc5760'
+            'e61c7aa747eeb6ea996c051304ae898f3d107e7988cf05adbeff436b39d090395de52fdcf013a2c315d85a83ceff57ceaa403b573c9986771c95f6222cc58f13')
+b2sums=('f71fec5698208b2dffe91525f4fa870658a9a16dab8ddd2c99c347eca14d4cf45b0900864f24913adb98891f5da656f5ebf0e0b0b60c7beedcd77ea0a836b697'
+        'b9b688027c837973c5e0639e8cf22292209af25b60f53de1031edbad4dda2005a4032a8697966e6f23eda26973cdb629eb82ea63ff5ca92e5b3bb52ad9215f6c'
+        '2ec484207e5fa262ee74fadba4cb8cbf23fbcb4a678671f37d332f7fdace56191189e0c8ff9e0de1084f16f8a8df8d7e56e34d8857d74737d16890399cbea6f7'
+        '11408cb4ffb8a9933fa67a0c2f51aab288007ba3e95c7ff2323866b90c4290bb660481730e65b4ea5c600525b11b3ea92284d196824a94f45189487b35fe949c'
+        'ce17316485e197e277997f9b3e61fd73be45fff3c911eb439ee90c68436fc79ba49b62f5fa0ebc93036f03b8e8e84dcd6b8658a9bc63481f031b8a6be5415965')
 
 _pick() {
   local p="$1" f d; shift
@@ -58,7 +67,7 @@ _pick() {
 
 prepare() {
   # use /usr and /bin merge compatible paths in configs
-  patch -Np1 -d $pkgbase-userspace-$pkgver -i ../$pkgbase-4.0.5-executable_paths.patch
+  patch -Np1 -d $pkgbase-userspace-$pkgver -i ../$pkgbase-4.1.2-executable_paths.patch
 
   cd $_name-$pkgver
   autoreconf -fiv
@@ -66,6 +75,7 @@ prepare() {
 
 build() {
   local configure_options=(
+    --enable-experimental
     --enable-gssapi-krb5=yes
     --enable-systemd=yes
     --enable-zos-remote
@@ -74,9 +84,12 @@ build() {
     --runstatedir=/run
     --sbindir=/usr/bin
     --sysconfdir=/etc
+    --with-aarch64
     --with-apparmor=yes
+    --with-arm
     --with-io_uring=yes
     --with-libcap-ng=yes
+    --with-nftables
     --with-python3=yes
   )
 
@@ -89,13 +102,14 @@ build() {
 
 package_audit() {
   depends=(
+    bash
     glibc
     krb5 libkrb5.so libgssapi_krb5.so
     libcap-ng libcap-ng.so
   )
   optdepends=(
-    'libldap: for audispd-zos-remote'
-    'sh: for augenrules'
+    'audispd-plugins: for audit event dispatcher plugins'
+    'audispd-plugins-zos: for z/OS audit event dispatcher plugin'
   )
   provides=(
     libaudit.so
@@ -105,26 +119,11 @@ package_audit() {
     etc/libaudit.conf
     etc/audit/audit-stop.rules
     etc/audit/auditd.conf
-    etc/audit/audisp-remote.conf
-    etc/audit/zos-remote.conf
-    etc/audit/plugins.d/af_unix.conf
-    etc/audit/plugins.d/au-remote.conf
-    etc/audit/plugins.d/audispd-zos-remote.conf
-    etc/audit/plugins.d/syslog.conf
   )
 
   make DESTDIR="$pkgdir" install -C $_name-$pkgver
 
   install -vDm 644 $_name-$pkgver/{{README,SECURITY}.md,ChangeLog} -t "$pkgdir/usr/share/doc/$pkgname/"
-
-  # add rules.d dir to satisfy augenrules
-  install -vdm 755 "$pkgdir/etc/audit/rules.d/"
-  # add config dir for audisp
-  install -vdm 755 "$pkgdir/etc/audisp"
-
-  # add factory files
-  install -vdm 755 "$pkgdir/usr/share/factory/"
-  cp -av "$pkgdir/etc" "$pkgdir/usr/share/factory/"
 
   # add tmpfiles.d integration for factory files and file permissions
   install -vDm 644 $pkgbase.tmpfiles "$pkgdir/usr/lib/tmpfiles.d/$pkgbase.conf"
@@ -135,7 +134,67 @@ package_audit() {
   (
     cd "$pkgdir"
     _pick python-audit usr/lib/python*
+
+    _pick audispd-plugins etc/audit/{audisp-{filter,remote,statsd},ids}.conf
+    _pick audispd-plugins etc/audit/plugins.d/{af_unix,au-{remote,statsd},audisp-ids,filter,syslog}.conf
+    _pick audispd-plugins usr/bin/audisp-{af_unix,filter,ids,remote,statsd,syslog}
+    _pick audispd-plugins usr/share/man/man5/audisp-remote.conf.5
+    _pick audispd-plugins usr/share/man/man8/audisp-{af_unix,filter,remote,statsd,syslog}.8
+
+    _pick audispd-plugins-zos etc/audit/zos-remote.conf
+    _pick audispd-plugins-zos etc/audit/plugins.d/audispd-zos-remote.conf
+    _pick audispd-plugins-zos usr/bin/audispd-zos-remote
+    _pick audispd-plugins-zos usr/share/man/man5/zos-remote.conf.5
+    _pick audispd-plugins-zos usr/share/man/man8/audispd-zos-remote.8
   )
+
+  # add factory files
+  install -vdm 755 "$pkgdir/usr/share/factory/"
+  cp -av "$pkgdir/etc" "$pkgdir/usr/share/factory/"
+}
+
+package_audispd-plugins() {
+  pkgdesc='Plugins for the audit event dispatcher'
+  depends=(
+    audit libaudit.so libauparse.so
+    glibc
+    krb5 libkrb5.so libgssapi_krb5.so
+    libcap-ng libcap-ng.so
+  )
+  backup=(
+    etc/audit/audisp-{filter,remote,statsd}.conf
+    etc/audit/plugins.d/{af_unix,au-{remote,statsd},filter,syslog}.conf
+  )
+
+  mv -v $pkgname/* "$pkgdir"
+
+  install -vDm 644 $pkgname.tmpfiles "$pkgdir/usr/lib/tmpfiles.d/$pkgname.conf"
+
+  # add factory files
+  install -vdm 755 "$pkgdir/usr/share/factory/"
+  cp -av "$pkgdir/etc" "$pkgdir/usr/share/factory/"
+}
+
+package_audispd-plugins-zos() {
+  pkgdesc='z/OS plugin for the audit event dispatcher'
+  depends=(
+    audit libauparse.so
+    glibc
+    libcap-ng libcap-ng.so
+    libldap
+  )
+  backup=(
+    etc/audit/zos-remote.conf
+    etc/audit/plugins.d/audispd-zos-remote.conf
+  )
+
+  mv -v $pkgname/* "$pkgdir"
+
+  install -vDm 644 $pkgname.tmpfiles "$pkgdir/usr/lib/tmpfiles.d/$pkgname.conf"
+
+  # add factory files
+  install -vdm 755 "$pkgdir/usr/share/factory/"
+  cp -av "$pkgdir/etc" "$pkgdir/usr/share/factory/"
 }
 
 package_python-audit() {

@@ -3,27 +3,27 @@
 # Contributor: Alexander Rødseth <rodseth@gmail.com>
 # Contributor: Jon Nordby <jononor@gmail.com>
 
-pkgname=libwebp
+pkgbase=libwebp
+pkgname=(
+  libwebp
+  libwebp-utils
+)
 pkgver=1.6.0
-pkgrel=1
-pkgdesc="WebP library and conversion tools"
+pkgrel=2
+pkgdesc="WebP image codec library"
 url="https://developers.google.com/speed/webp/"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(BSD-3-Clause)
 depends=(
-  giflib
   glibc
-  libjpeg-turbo
-  libpng
-  libtiff
 )
 makedepends=(
   cmake
+  giflib
+  libjpeg-turbo
+  libpng
+  libtiff
   ninja
-)
-provides=(
-  libsharpyuv.so
-  libwebp{,decoder,demux,mux}.so
 )
 source=(
   https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-${pkgver/[a-z]/-&}.tar.gz{,.asc}
@@ -74,8 +74,44 @@ check() {
   ctest --test-dir build --output-on-failure --stop-on-failure -j$(nproc)
 }
 
-package() {
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_libwebp() {
+  optdepends=(
+    'libwebp-utils: WebP conversion and inspection tools'
+  )
+  provides=(
+    libsharpyuv.so
+    libwebp{,decoder,demux,mux}.so
+  )
+
   DESTDIR="$pkgdir" cmake --install build
+
+  _pick utils "$pkgdir"/usr/bin
+
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 \
+    libwebp-$pkgver/COPYING
+}
+
+package_libwebp-utils() {
+  depends=(
+    giflib
+    glibc
+    libjpeg-turbo
+    libpng
+    libtiff
+    libwebp
+  )
+
+  mv utils/* "$pkgdir"
 
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 \
     libwebp-$pkgver/COPYING

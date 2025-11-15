@@ -4,8 +4,8 @@
 
 _gemname=rexml
 pkgname=ruby-$_gemname
-pkgver=3.4.1
-pkgrel=3
+pkgver=3.4.4
+pkgrel=1
 pkgdesc='An XML toolkit for Ruby'
 arch=(any)
 url='https://github.com/ruby/rexml'
@@ -24,8 +24,8 @@ checkdepends=(
 )
 options=(!emptydirs)
 source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('bf1221312c79a1b7601f262486c250696f520e3355a37ee34f245bec975fda0598713d65990852aac9edab6624b4d868730471139cf2ff0894a0c8f85c042aa7')
-b2sums=('579af9ee9c534578acf6e67622f51f533fd965113d4c8654bba17b02d3ff0b9fec7a8314cda0230e8f334d94067d2664813bfed10a0be50c4be867e051d80510')
+sha512sums=('3bb0d4a2cf4d8f567f6a7c1867506eed052fadf15b556f249a7d7dff533242817b90671450e7cc5144d7f09bb9f85c59e01eb9c703da2a479a1ea740f6e055ec')
+b2sums=('d92c88bc8f632c752cd353419818cf452f80824484e5411a2c26a0f13b7d8820f5e985bcbe27f9387725e37a9a54d8e1d2a16966ba12d6f82d286ce8cf12ea97')
 
 prepare() {
   cd "${_gemname}-${pkgver}"
