@@ -4,44 +4,42 @@
 # Contributor:  <mathieu.clabaut@gmail.com>
 
 pkgname=xdg-user-dirs
-pkgver=0.18
-pkgrel=2.1
+pkgver=0.19
+pkgrel=2
 pkgdesc="Manage user directories like ~/Desktop and ~/Music"
 url="https://www.freedesktop.org/wiki/Software/xdg-user-dirs"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=(GPL)
-depends=(sh systemd)
-makedepends=(docbook-xsl git)
-backup=(etc/xdg/user-dirs.conf etc/xdg/user-dirs.defaults)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+license=(GPL-2.0-or-later)
+depends=(
+  glibc
+  sh
+)
+makedepends=(
+  docbook-xsl
+  git
+  meson
+  systemd
+)
+backup=(etc/xdg/user-dirs.{conf,defaults})
 install=xdg-user-dirs.install
-options=(!emptydirs)
-_commit=52e71ff04416f2ca3adaf6d73193de4b8b83de46  # tags/0.18^0
-source=("git+https://gitlab.freedesktop.org/xdg/xdg-user-dirs.git#commit=$_commit"
-        xdg-user-dirs-update.service)
-sha256sums=('SKIP'
-            '53c75f52d782e9492601400236bc8e5bfa76a26f0afd9bce3fe8df1740d341f0')
-
-pkgver() {
-  cd $pkgname
-  git describe --tags | sed 's/[^-]*-g/r&/;s/-/+/g'
-}
+source=("git+https://gitlab.freedesktop.org/xdg/xdg-user-dirs.git#tag=v$pkgver")
+b2sums=('4da6b371454d37dae6f273ea90ff2b9f528b7dfbc87433a13d38aa286ac43bc93dbc06e0a3e96a5649f99979f96d7f2d04a551f0d67258d2fc825803203ea7a4')
 
 prepare() {
   cd $pkgname
-  NOCONFIGURE=1 ./autogen.sh
 }
 
 build() {
-  cd $pkgname
-  ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var
-  make
+  arch-meson $pkgname build
+  meson compile -C build
+}
+
+check() {
+  meson test -C build --print-errorlogs
 }
 
 package() {
-  cd $pkgname
-  make DESTDIR="$pkgdir" install 
-
-  # We use a service
-  rm "$pkgdir/etc/xdg/autostart/xdg-user-dirs.desktop"
-  install -Dt "$pkgdir/usr/lib/systemd/user" -m644 ../xdg-user-dirs-update.service
+  meson install -C build --destdir "$pkgdir"
 }
+
+# vim:set sw=2 sts=-1 et:
