@@ -5,28 +5,64 @@
 
 pkgname=libxklavier
 pkgver=5.4
-pkgrel=6
+pkgrel=7
 pkgdesc='High-level API for X Keyboard Extension (deprecated)'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://www.freedesktop.org/wiki/Software/LibXklavier/'
-license=('LGPL')
-depends=('glib2' 'glibc' 'iso-codes' 'libx11' 'libxi' 'libxkbfile' 'libxml2' 'xkeyboard-config' 'xorg-xkbcomp')
-makedepends=('intltool' 'gobject-introspection' 'gtk-doc' 'glib2-devel')
-source=("https://gitlab.freedesktop.org/archived-projects/$pkgname/-/archive/$pkgname-$pkgver/$pkgname-$pkgname-$pkgver.tar.gz")
-sha256sums=('e1638599e9229e6f6267b70b02e41940b98ba29b3a37e221f6e59ff90100c3da')
+license=(LGPL-2.0-or-later)
+depends=(
+  glib2
+  glibc
+  iso-codes
+  libx11
+  libxi
+  libxkbfile
+  libxml2
+  xkeyboard-config
+  xorg-xkbcomp
+)
+makedepends=(
+  git
+  glib2-devel
+  gobject-introspection
+  gtk-doc
+)
+source=(
+  "git+https://gitlab.freedesktop.org/archived-projects/libxklavier.git?signed#tag=$pkgname-$pkgver"
+  0001-props-fix-the-max-lengths-for-set_name-description-s.patch
+  0002-config-use-our-name-description-setter-functions.patch
+  0003-props-validate-name-and-descriptions-for-valid-UTF-8.patch
+)
+b2sums=(
+  2407ddc4f2c8e839057d2f0f1d9832183a70baabe0ba3dd7942e6a79c19ec158bf558f8ce20b5684f2ec393bbbc43b1705818b1f19e81bbf432f8d6f2b2f0612
+  a0c20175582ddf28bf749225ea49b3316a4f52a69ccabb448c5400d3fd0d8dff9446d1cf6fd9f0a626fc597668949f84e1af9381f6a88d67dbc2cdb510b73cf0
+  a2dc5ce3003a00a6069f7e03723efec2d870494573bf9920c4bb0e2e243934e5649a258c57afa7eb751f3ea60271ebec5c3b9a61a6e45de87c293781bb3d8489
+  7005241d4d460f802d00806303ba0106439190b7a0f455fa86a2470c00d2f1d1f7866e734697c79f3721fc0a3fdaafbd55d037f413b4d1c015e344d08ac7320f
+)
+validpgpkeys=(FFB4CCD275AAA422F5F9808E0661D98FC933A145) # Sergey Udaltsov <sergey.udaltsov@gmail.com>
 
 prepare() {
-  cd $pkgname-$pkgname-$pkgver
-  NOCONFIGURE=1 ./autogen.sh
+  cd $pkgname
+
+  # Fix invalid UTF-8 truncations in XKB descriptions and names (taken from Fedora)
+  git apply -3 ../0001-props-fix-the-max-lengths-for-set_name-description-s.patch
+  git apply -3 ../0002-config-use-our-name-description-setter-functions.patch
+  git apply -3 ../0003-props-validate-name-and-descriptions-for-valid-UTF-8.patch
+
+  autoreconf -fi
 }
 
 build() {
-  cd $pkgname-$pkgname-$pkgver
-  ./configure --prefix=/usr --enable-gtk-doc
+  cd $pkgname
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --enable-gtk-doc
   make
 }
 
 package() {
-  cd $pkgname-$pkgname-$pkgver
+  cd $pkgname
   make DESTDIR="$pkgdir" install
 }
