@@ -4,20 +4,16 @@
 
 pkgbase=lvm2
 pkgname=('lvm2' 'device-mapper')
-pkgver=2.03.34
-pkgrel=1
+pkgver=2.03.36
+pkgrel=2
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://sourceware.org/lvm2/'
 license=('GPL-2.0-only' 'LGPL-2.1-only')
 makedepends=('git' 'systemd' 'libaio' 'thin-provisioning-tools')
 validpgpkeys=('88437EF5C077BD113D3B7224228191C1567E2C17'  # Alasdair G Kergon <agk@redhat.com>
               'D501A478440AE2FD130A1BE8B9112431E509039F') # Marian Csontos <marian.csontos@gmail.com>
-source=("git+https://gitlab.com/lvmteam/lvm2.git#tag=v${pkgver//./_}?signed"
-        '0001-udev-initcpio.patch'
-        '11-dm-initramfs.rules')
-sha256sums=('246f37fe616f5bd1e6f1b38bb7d9e780cefa9d6f1776cec882496b017fa4797d'
-            '2b3a16ec05e2bc6678e9ebd5ffa8319ebfde29aa260ce004f79f9b8df57d73c9'
-            'e10f24b57582d6e2da71f7c80732a62e0ee2e3b867fe84591ccdb53e80fa92e0')
+source=("git+https://gitlab.com/lvmteam/lvm2.git#tag=v${pkgver//./_}?signed")
+sha256sums=('847f864411614e5ec8f2ab8d5e8d91e8d10e430a1b4f2277efa6386a3f7af81c')
 
 _backports=(
 )
@@ -30,9 +26,6 @@ prepare() {
     git log --oneline -1 "${_c}"
     git show "${_c}" -- ':(exclude)WHATS_NEW' | git apply
   done
-
-  # prepare for non-systemd initcpio
-  patch -Np1 --output='udev/69-dm-lvm-initcpio.rules.in' < ../0001-udev-initcpio.patch
 
   # remove install section from systemd units that are enabled by default
   sed -i -e '/^\[Install\]$/,$d' \
@@ -73,8 +66,6 @@ build() {
     --with-thin=internal \
     --with-udev-prefix=/usr
   make
-
-  make -C udev/ 69-dm-lvm-initcpio.rules
 }
 
 package_device-mapper() {
@@ -87,8 +78,6 @@ package_device-mapper() {
   cd lvm2/
 
   make DESTDIR="${pkgdir}" install_device-mapper
-  # extra udev rule for device-mapper in initramfs
-  install -D -m0644 "${srcdir}/11-dm-initramfs.rules" "${pkgdir}/usr/lib/initcpio/udev/11-dm-initramfs.rules"
   # Install dmeventd socket and service
   make DESTDIR="${pkgdir}" install_systemd_units
   rm -f "${pkgdir}/usr/lib/systemd/system/"{blk-availability.service,lvm*}
@@ -110,8 +99,7 @@ package_lvm2() {
   make DESTDIR="${pkgdir}" install_lvm2
   # /etc directories
   install -d "${pkgdir}"/etc/lvm/{archive,backup}
-  # extra udev rule for non-systemd initramfs
-  install -D -m0644 udev/69-dm-lvm-initcpio.rules "${pkgdir}/usr/lib/initcpio/udev/69-dm-lvm.rules"
+
   # systemd support
   make DESTDIR="${pkgdir}" install_systemd_units
   rm -f "${pkgdir}/usr/lib/systemd/system/"dm-*
