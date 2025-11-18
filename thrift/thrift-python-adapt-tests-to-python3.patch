@@ -1,0 +1,298 @@
+From 943a4bf20a2eb4abaf7ce48aba5b82c23e4790c1 Mon Sep 17 00:00:00 2001
+From: Carl Smedstad <carl.smedstad@protonmail.com>
+Date: Sat, 11 Oct 2025 11:41:18 +0200
+Subject: [PATCH 1/2] Adapt Python tests to Python 3 and recent tornado version
+
+---
+ test/py.tornado/test_suite.py      | 12 ++++---
+ test/py/SerializationTest.py       | 52 +++++++++++++++---------------
+ test/py/TSimpleJSONProtocolTest.py |  4 +--
+ test/py/TestFrozen.py              |  6 ++--
+ test/py/TestSocket.py              |  4 +--
+ test/py/util.py                    |  2 +-
+ 6 files changed, 42 insertions(+), 38 deletions(-)
+
+diff --git a/test/py.tornado/test_suite.py b/test/py.tornado/test_suite.py
+index 0ee0a9b85..1a4e05f75 100755
+--- a/test/py.tornado/test_suite.py
++++ b/test/py.tornado/test_suite.py
+@@ -25,6 +25,7 @@ import os
+ import sys
+ import time
+ import unittest
++import socket
+ 
+ basepath = os.path.abspath(os.path.dirname(__file__))
+ sys.path.insert(0, basepath + '/gen-py.tornado')
+@@ -37,7 +38,7 @@ except ImportError:
+     sys.exit(0)
+ 
+ from tornado import gen
+-from tornado.testing import AsyncTestCase, get_unused_port, gen_test
++from tornado.testing import AsyncTestCase, gen_test
+ 
+ from thrift import TTornado
+ from thrift.Thrift import TApplicationException
+@@ -123,19 +124,22 @@ class ThriftTestCase(AsyncTestCase):
+     def setUp(self):
+         super(ThriftTestCase, self).setUp()
+ 
+-        self.port = get_unused_port()
++        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
++        s.bind(('', 0))
++        self.port = s.getsockname()[1]
++        s.close()
+ 
+         # server
+         self.handler = TestHandler(self)
+         self.processor = ThriftTest.Processor(self.handler)
+         self.pfactory = TBinaryProtocol.TBinaryProtocolFactory()
+ 
+-        self.server = TTornado.TTornadoServer(self.processor, self.pfactory, io_loop=self.io_loop)
++        self.server = TTornado.TTornadoServer(self.processor, self.pfactory)
+         self.server.bind(self.port)
+         self.server.start(1)
+ 
+         # client
+-        transport = TTornado.TTornadoStreamTransport('localhost', self.port, io_loop=self.io_loop)
++        transport = TTornado.TTornadoStreamTransport('localhost', self.port)
+         pfactory = TBinaryProtocol.TBinaryProtocolFactory()
+         self.io_loop.run_sync(transport.open)
+         self.client = ThriftTest.Client(transport, pfactory)
+diff --git a/test/py/SerializationTest.py b/test/py/SerializationTest.py
+index 218f26c43..a2b348f2a 100755
+--- a/test/py/SerializationTest.py
++++ b/test/py/SerializationTest.py
+@@ -207,73 +207,73 @@ class AbstractTest(unittest.TestCase):
+ 
+     def testForwards(self):
+         obj = self._deserialize(VersioningTestV2, self._serialize(self.v1obj))
+-        self.assertEquals(obj.begin_in_both, self.v1obj.begin_in_both)
+-        self.assertEquals(obj.end_in_both, self.v1obj.end_in_both)
++        self.assertEqual(obj.begin_in_both, self.v1obj.begin_in_both)
++        self.assertEqual(obj.end_in_both, self.v1obj.end_in_both)
+ 
+     def testBackwards(self):
+         obj = self._deserialize(VersioningTestV1, self._serialize(self.v2obj))
+-        self.assertEquals(obj.begin_in_both, self.v2obj.begin_in_both)
+-        self.assertEquals(obj.end_in_both, self.v2obj.end_in_both)
++        self.assertEqual(obj.begin_in_both, self.v2obj.begin_in_both)
++        self.assertEqual(obj.end_in_both, self.v2obj.end_in_both)
+ 
+     def testSerializeV1(self):
+         obj = self._deserialize(VersioningTestV1, self._serialize(self.v1obj))
+-        self.assertEquals(obj, self.v1obj)
++        self.assertEqual(obj, self.v1obj)
+ 
+     def testSerializeV2(self):
+         obj = self._deserialize(VersioningTestV2, self._serialize(self.v2obj))
+-        self.assertEquals(obj, self.v2obj)
++        self.assertEqual(obj, self.v2obj)
+ 
+     def testBools(self):
+-        self.assertNotEquals(self.bools, self.bools_flipped)
+-        self.assertNotEquals(self.bools, self.v1obj)
++        self.assertNotEqual(self.bools, self.bools_flipped)
++        self.assertNotEqual(self.bools, self.v1obj)
+         obj = self._deserialize(Bools, self._serialize(self.bools))
+-        self.assertEquals(obj, self.bools)
++        self.assertEqual(obj, self.bools)
+         obj = self._deserialize(Bools, self._serialize(self.bools_flipped))
+-        self.assertEquals(obj, self.bools_flipped)
++        self.assertEqual(obj, self.bools_flipped)
+         rep = repr(self.bools)
+         self.assertTrue(len(rep) > 0)
+ 
+     def testLargeDeltas(self):
+         # test large field deltas (meaningful in CompactProto only)
+         obj = self._deserialize(LargeDeltas, self._serialize(self.large_deltas))
+-        self.assertEquals(obj, self.large_deltas)
++        self.assertEqual(obj, self.large_deltas)
+         rep = repr(self.large_deltas)
+         self.assertTrue(len(rep) > 0)
+ 
+     def testNestedListsI32x2(self):
+         obj = self._deserialize(NestedListsI32x2, self._serialize(self.nested_lists_i32x2))
+-        self.assertEquals(obj, self.nested_lists_i32x2)
++        self.assertEqual(obj, self.nested_lists_i32x2)
+         rep = repr(self.nested_lists_i32x2)
+         self.assertTrue(len(rep) > 0)
+ 
+     def testNestedListsI32x3(self):
+         obj = self._deserialize(NestedListsI32x3, self._serialize(self.nested_lists_i32x3))
+-        self.assertEquals(obj, self.nested_lists_i32x3)
++        self.assertEqual(obj, self.nested_lists_i32x3)
+         rep = repr(self.nested_lists_i32x3)
+         self.assertTrue(len(rep) > 0)
+ 
+     def testNestedMixedx2(self):
+         obj = self._deserialize(NestedMixedx2, self._serialize(self.nested_mixedx2))
+-        self.assertEquals(obj, self.nested_mixedx2)
++        self.assertEqual(obj, self.nested_mixedx2)
+         rep = repr(self.nested_mixedx2)
+         self.assertTrue(len(rep) > 0)
+ 
+     def testNestedListsBonk(self):
+         obj = self._deserialize(NestedListsBonk, self._serialize(self.nested_lists_bonk))
+-        self.assertEquals(obj, self.nested_lists_bonk)
++        self.assertEqual(obj, self.nested_lists_bonk)
+         rep = repr(self.nested_lists_bonk)
+         self.assertTrue(len(rep) > 0)
+ 
+     def testListBonks(self):
+         obj = self._deserialize(ListBonks, self._serialize(self.list_bonks))
+-        self.assertEquals(obj, self.list_bonks)
++        self.assertEqual(obj, self.list_bonks)
+         rep = repr(self.list_bonks)
+         self.assertTrue(len(rep) > 0)
+ 
+     def testCompactStruct(self):
+         # test large field deltas (meaningful in CompactProto only)
+         obj = self._deserialize(CompactProtoTestStruct, self._serialize(self.compact_struct))
+-        self.assertEquals(obj, self.compact_struct)
++        self.assertEqual(obj, self.compact_struct)
+         rep = repr(self.compact_struct)
+         self.assertTrue(len(rep) > 0)
+ 
+@@ -296,8 +296,8 @@ class AbstractTest(unittest.TestCase):
+ 
+         parent = RecTree(item=0, children=children)
+         serde_parent = self._deserialize(RecTree, self._serialize(parent))
+-        self.assertEquals(0, serde_parent.item)
+-        self.assertEquals(4, len(serde_parent.children))
++        self.assertEqual(0, serde_parent.item)
++        self.assertEqual(4, len(serde_parent.children))
+         for child in serde_parent.children:
+             # Cannot use assertIsInstance in python 2.6?
+             self.assertTrue(isinstance(child, RecTree))
+@@ -323,7 +323,7 @@ class AbstractTest(unittest.TestCase):
+         rec_list = self._buildLinkedList()
+         serde_list = self._deserialize(RecList, self._serialize(rec_list))
+         out_list = self._collapseLinkedList(serde_list)
+-        self.assertEquals([0, 1, 2, 3, 4], out_list)
++        self.assertEqual([0, 1, 2, 3, 4], out_list)
+ 
+     def testCoRec(self):
+         """Ensure co-recursive structures can be created."""
+@@ -393,7 +393,7 @@ class AcceleratedFramedTest(unittest.TestCase):
+         for part in parts:
+             framed_writer.write(part)
+             framed_writer.flush()
+-        self.assertEquals(len(framed_buffer.getvalue()), len(data) + 8)
++        self.assertEqual(len(framed_buffer.getvalue()), len(data) + 8)
+ 
+         # Recreate framed_buffer so we can read from it.
+         framed_buffer = TTransport.TMemoryBuffer(framed_buffer.getvalue())
+@@ -412,21 +412,21 @@ class SerializersTest(unittest.TestCase):
+ 
+         s1 = serialize(obj)
+         for i in range(10):
+-            self.assertEquals(s1, serialize(obj))
++            self.assertEqual(s1, serialize(obj))
+             objcopy = Xtruct2()
+             deserialize(objcopy, serialize(obj))
+-            self.assertEquals(obj, objcopy)
++            self.assertEqual(obj, objcopy)
+ 
+         obj = Xtruct(string_thing="bar")
+         objcopy = Xtruct()
+         deserialize(objcopy, serialize(obj))
+-        self.assertEquals(obj, objcopy)
++        self.assertEqual(obj, objcopy)
+ 
+         # test booleans
+         obj = Bools(im_true=True, im_false=False)
+         objcopy = Bools()
+         deserialize(objcopy, serialize(obj))
+-        self.assertEquals(obj, objcopy)
++        self.assertEqual(obj, objcopy)
+ 
+         # test enums
+         def _enumerate_enum(enum_class):
+@@ -445,7 +445,7 @@ class SerializersTest(unittest.TestCase):
+             obj = Bonk(message='enum Numberz value %d is string %s' % (num, name), type=num)
+             objcopy = Bonk()
+             deserialize(objcopy, serialize(obj))
+-            self.assertEquals(obj, objcopy)
++            self.assertEqual(obj, objcopy)
+ 
+ 
+ def suite():
+diff --git a/test/py/TSimpleJSONProtocolTest.py b/test/py/TSimpleJSONProtocolTest.py
+index 72987602b..f16150bc6 100644
+--- a/test/py/TSimpleJSONProtocolTest.py
++++ b/test/py/TSimpleJSONProtocolTest.py
+@@ -37,10 +37,10 @@ class SimpleJSONProtocolTest(unittest.TestCase):
+             return
+ 
+         # Substitute implementation not as good as unittest library's
+-        self.assertEquals(len(a), len(b), msg)
++        self.assertEqual(len(a), len(b), msg)
+         for k, v in a.iteritems():
+             self.assertTrue(k in b, msg)
+-            self.assertEquals(b.get(k), v, msg)
++            self.assertEqual(b.get(k), v, msg)
+ 
+     def _serialize(self, obj):
+         trans = TTransport.TMemoryBuffer()
+diff --git a/test/py/TestFrozen.py b/test/py/TestFrozen.py
+index f859398dc..2cc7e6960 100755
+--- a/test/py/TestFrozen.py
++++ b/test/py/TestFrozen.py
+@@ -25,7 +25,7 @@ from DebugProtoTest.ttypes import ExceptionWithAMap, MutableException, Exception
+ from thrift.Thrift import TFrozenDict
+ from thrift.transport import TTransport
+ from thrift.protocol import TBinaryProtocol, TCompactProtocol
+-import collections
++import collections.abc
+ import unittest
+ 
+ 
+@@ -40,9 +40,9 @@ class TestFrozenBase(unittest.TestCase):
+ 
+     def test_dict_is_hashable_only_after_frozen(self):
+         d0 = {}
+-        self.assertFalse(isinstance(d0, collections.Hashable))
++        self.assertFalse(isinstance(d0, collections.abc.Hashable))
+         d1 = TFrozenDict(d0)
+-        self.assertTrue(isinstance(d1, collections.Hashable))
++        self.assertTrue(isinstance(d1, collections.abc.Hashable))
+ 
+     def test_struct_with_collection_fields(self):
+         pass
+diff --git a/test/py/TestSocket.py b/test/py/TestSocket.py
+index 619eb1002..bad85140f 100755
+--- a/test/py/TestSocket.py
++++ b/test/py/TestSocket.py
+@@ -51,7 +51,7 @@ class TimeoutTest(unittest.TestCase):
+                 socket.open()
+                 leaky.append(socket)
+         except Exception:
+-            self.assert_(time.time() - starttime < 5.0)
++            self.assertTrue(time.time() - starttime < 5.0)
+ 
+     def testWriteTimeout(self):
+         starttime = time.time()
+@@ -65,7 +65,7 @@ class TimeoutTest(unittest.TestCase):
+                 lsock.write("hi" * 100)
+ 
+         except Exception:
+-            self.assert_(time.time() - starttime < 5.0)
++            self.assertTrue(time.time() - starttime < 5.0)
+ 
+ 
+ if __name__ == '__main__':
+diff --git a/test/py/util.py b/test/py/util.py
+index c2b3f5cba..dd9370259 100644
+--- a/test/py/util.py
++++ b/test/py/util.py
+@@ -28,5 +28,5 @@ _ROOT_DIR = os.path.dirname(os.path.dirname(_SCRIPT_DIR))
+ def local_libpath():
+     globdir = os.path.join(_ROOT_DIR, 'lib', 'py', 'build', 'lib.*')
+     for libpath in glob.glob(globdir):
+-        if libpath.endswith('-%d.%d' % (sys.version_info[0], sys.version_info[1])):
++        if libpath.endswith('-%d%d' % (sys.version_info[0], sys.version_info[1])):
+             return libpath
+-- 
+2.51.0
+
