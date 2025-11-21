@@ -3,7 +3,7 @@
 # Contributor: Eric Bélanger <eric@archlinux.org>
 
 pkgname=portmidi
-pkgver=2.0.6
+pkgver=2.0.7
 pkgrel=1
 epoch=1
 pkgdesc="Cross platform library for interfacing with OS MIDI I/O APIs"
@@ -21,8 +21,8 @@ provides=(
   libportmidi.so
 )
 source=($url/archive/v$pkgver/$pkgname-v$pkgver.tar.gz)
-sha512sums=('00d7cec97b58c074d484793b6097f4e60d061a9d680940bbcdb6670b287b78dbc099af378fb2e066c61f1c26e5060ded9c8f78c80fc03518b33e43f830e34a27')
-b2sums=('5ebb3815a0b57711962836e241fe02f657420d7b95f1241f3fb1bfa8ba7897bd28acbb9c05e352a0d42be45ce73ac43d59cfed9da1b392f593ff1a41d5e01367')
+sha512sums=('da5c8ccdbd47c7318fffc26f2fa812c0ab8365ffd6e5b6cb25260b9d2dc42ecb41a0cf1de224e28b1ca99ce3b53773f7a16e7cce5c90a89975ef6a7d03c77638')
+b2sums=('84a15bc094da11625b286357c01da4a52af1958e2a3ffc9cab936881e460c4698cd5d6ae7ee8216b550e6b4c29dc75707317917ca40c66e665dabe078acfbd1e')
 
 build() {
   local cmake_options=(
