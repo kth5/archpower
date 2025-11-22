@@ -1,50 +1,74 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 # Contributor: Gaetan Bisson <bisson@archlinux.org>
 # Contributor: Angel Velasquez <angvp@archlinux.org>
 # Contributor: Hugo Doria <hugo@archlinux.org>
 
-pkgname=nmap
-pkgver=7.97
-pkgrel=1
-pkgdesc='Utility for network discovery and security auditing'
+pkgbase=nmap
+pkgname=(
+  nmap
+  ndiff
+  zenmap
+)
+pkgver=7.98
+pkgrel=3
+pkgdesc="Utility for network discovery and security auditing"
 url='https://nmap.org/'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(LicenseRef-Nmap-Public-Source-License-Version-0.95)
-depends=(
+makedepends=(
+  python-build
+  python-installer
+  python-setuptools
+  python-setuptools-gettext
+  python-wheel
+  # nmap deps:
   gcc-libs
   glibc
   libpcap
   libssh2
-  libssh2.so
   lua
   openssl
   pcre2
   zlib
+  # zenmap deps:
+  gdk-pixbuf2
+  glib2
+  gtk3
+  pango
+  python
+  python-cairo
+  python-gobject
 )
 source=(
-  "https://nmap.org/dist/${pkgname}-${pkgver}.tar.bz2"
-  "https://nmap.org/dist/sigs/${pkgname}-${pkgver}.tar.bz2.asc"
+  "https://nmap.org/dist/$pkgname-$pkgver.tar.bz2"
+  "https://nmap.org/dist/sigs/$pkgname-$pkgver.tar.bz2.asc"
+  "$pkgbase-ndiff-fix-tests.patch"
 )
-sha256sums=('af98f27925c670c257dd96a9ddf2724e06cb79b2fd1e0d08c9206316be1645c0'
-            'SKIP')
-b2sums=('affeca9f28a4ccb67b3f7154a08e587c5f80e292fc8e442f469812518e435b54d1ab125dbfd52981dc4730c41475d384092352715a2131379a7d032bd476298e'
-        'SKIP')
-validpgpkeys=(
-  '436D66AB9A798425FDA0E3F801AF9F036B9355D0' # Nmap Project Signing Key (http://www.insecure.org/)
-)
+sha512sums=('14e13689d1276f70efc8c905e8eb0a15970f4312c2ef86d8d97e9df11319735e7f7cd73f728f69cf43d27a078ef5ac1e0f39cd119d8cb9262060c42606c6cab3'
+            'SKIP'
+            '9836b2f2df95e8a6d1af6cef99ba27ebaaafa16c97d7945887adf00b3022302f730eaf93e81b1e37462bad8f6a6bfef0130670d827d68e61b9f60c8c66497b34')
+b2sums=('bbc7f4931876b2a59dc8d94b5498e72ee76084db19089820030473628f215a0a89972638f4128e46a46ffa55bd92141bfceab311fa00f4798cf111aca5ec104a'
+        'SKIP'
+        '73e2cc10a2addec4cb7ea5df2f6129527733546fb30d412ae27b961840b2876eb19214be308217152bcbd81f27f1fbcfe1c83db7c8214338ae7a93abc4f12ced')
+validpgpkeys=('436D66AB9A798425FDA0E3F801AF9F036B9355D0') # Nmap Project Signing Key (http://www.insecure.org/)
 
 prepare() {
-  cd "${pkgname}-${pkgver}"
-  # ensure we build devendored deps
-  rm -rf liblua libpcap libpcre macosx mwin32 libssh2 libz
-  # fix build
+  cd $pkgbase-$pkgver
+  # Ensure we build de-vendored deps
+  rm -r liblua libpcap libpcre macosx mswin32 libssh2 libz
+  # Fix build
   sed -e '/strlcat/d' -i libdnet-stripped/acconfig.h
+  # Remove usage of Python module imp (removed in Python 3.13) &
+  # remove import-time unittest.main() invocation
+  patch -Np1 < ../$pkgbase-ndiff-fix-tests.patch
+
   autoreconf -fiv -I /usr/share/gettext/m4
 }
 
 build() {
-  cd "${pkgname}-${pkgver}"
+  cd $pkgbase-$pkgver
   ./configure \
     --prefix=/usr \
     --with-libpcap=/usr \
@@ -55,18 +79,80 @@ build() {
     --without-ndiff \
     --without-zenmap
   make
+
+  python -m build --wheel --no-isolation ndiff
+
+  python -m build --wheel --no-isolation zenmap
 }
 
 check() {
-  cd "${pkgname}-${pkgver}"
+  cd $pkgbase-$pkgver
   make check
+
+  cd zenmap
+  python -m unittest discover -p '*.py'
+
+  cd ../ndiff
+  python -m unittest discover -p '*.py'
 }
 
-package() {
-  cd "${pkgname}-${pkgver}"
-  make DESTDIR="${pkgdir}" install
-  install -Dm 644 README.md docs/nmap.usage.txt -t "${pkgdir}/usr/share/doc/${pkgname}"
-  install -Dm 644 LICENSE docs/3rd-party-licenses.txt -t "${pkgdir}/usr/share/licenses/${pkgname}"
+package_nmap() {
+  depends=(
+    gcc-libs
+    glibc
+    libpcap
+    libssh2
+    lua
+    openssl
+    pcre2
+    zlib
+  )
+
+  cd $pkgbase-$pkgver
+  make DESTDIR="$pkgdir" install
+  install -vDm644 -t "$pkgdir/usr/share/doc/$pkgname" \
+    README.md \
+    docs/nmap.usage.txt
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" \
+    LICENSE \
+    docs/3rd-party-licenses.txt
 }
 
-# vim: ts=2 sw=2 et:
+package_ndiff() {
+  pkgdesc="Compare two Nmap XML files and display a list of their differences"
+  depends=(python)
+
+  cd $pkgbase-$pkgver
+  python -m installer --destdir="$pkgdir" ndiff/dist/*.whl
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
+  install -vDm644 -t "$pkgdir/usr/share/man/man1" ndiff/docs/ndiff.1
+}
+
+package_zenmap() {
+  pkgdesc+=" (GUI)"
+  depends=(
+    gdk-pixbuf2
+    glib2
+    gtk3
+    ndiff
+    nmap
+    pango
+    python
+    python-cairo
+    python-gobject
+  )
+
+  cd $pkgbase-$pkgver
+  python -m installer --destdir="$pkgdir" zenmap/dist/*.whl
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
+  install -vDm644 -t "$pkgdir/usr/share/man/man1" docs/zenmap.1
+
+  ln -vs /usr/bin/zenmap "$pkgdir/usr/bin/nmapfe"
+  ln -vs /usr/bin/zenmap "$pkgdir/usr/bin/xnmap"
+
+  install -vDm644 -t "$pkgdir/usr/share/applications" \
+    zenmap/install_scripts/unix/zenmap-root.desktop \
+    zenmap/install_scripts/unix/zenmap.desktop
+  install -vDm644 -t "$pkgdir/usr/share/pixmaps" \
+    zenmap/zenmapCore/data/pixmaps/zenmap.png
+}
