@@ -1,0 +1,126 @@
+commit 884aff988556c5271eb829768b17d27052a08763
+Author: Michele Calgaro <michele.calgaro@yahoo.it>
+Date:   Tue Nov 18 23:03:25 2025 +0900
+
+    Make 'TDEConfigINIBackEnd::parseSingleConfigFile' reentrant.
+    
+    If a second call to 'TDEConfigINIBackEnd::parseSingleConfigFile' was called from
+    another thread while the first wasn't finished, it would have resulted
+    in a SEGV fault. Config files are usually small and mmap-ing files
+    does not provide meaningful benefits while instead introducing the
+    possibility of a SIGBUS fault, although extremely unlukely in real
+    life.
+    
+    This resolves issue #379.
+    
+    Signed-off-by: Michele Calgaro <michele.calgaro@yahoo.it>
+
+diff --git a/tdecore/tdeconfigbackend.cpp b/tdecore/tdeconfigbackend.cpp
+index 707f4fe69..c7944ed12 100644
+--- a/tdecore/tdeconfigbackend.cpp
++++ b/tdecore/tdeconfigbackend.cpp
+@@ -431,80 +431,23 @@ bool TDEConfigINIBackEnd::parseConfigFiles()
+   return true;
+ }
+ 
+-#ifdef HAVE_MMAP
+-#ifdef SIGBUS
+-static sigjmp_buf mmap_jmpbuf;
+-struct sigaction mmap_old_sigact;
+-
+-extern "C" {
+-   static void mmap_sigbus_handler(int)
+-   {
+-      siglongjmp (mmap_jmpbuf, 1);
+-   }
+-}
+-#endif
+-#endif
+-
+ extern bool kde_kiosk_exception;
+ 
+ void TDEConfigINIBackEnd::parseSingleConfigFile(TQFile &rFile,
+ 					      KEntryMap *pWriteBackMap,
+ 					      bool bGlobal, bool bDefault)
+ {
+-   const char *s; // May get clobbered by sigsetjump, but we don't use them afterwards.
+-   const char *eof; // May get clobbered by sigsetjump, but we don't use them afterwards.
+-   TQByteArray data;
+-
+    if (!rFile.isOpen()) // come back, if you have real work for us ;->
+       return;
+ 
+-   //using kdDebug() here leads to an infinite loop
+-   //remove this for the release, aleXXX
+-   //tqWarning("Parsing %s, global = %s default = %s",
+-   //           rFile.name().latin1(), bGlobal ? "true" : "false", bDefault ? "true" : "false");
+-
+    TQCString aCurrentGroup("<default>");
+ 
+    unsigned int ll = localeString.length();
+ 
+-#ifdef HAVE_MMAP
+-   static volatile const char *map;
+-   map = ( const char* ) mmap(0, rFile.size(), PROT_READ, MAP_PRIVATE,
+-                                          rFile.handle(), 0);
+-
+-   if ( map != MAP_FAILED )
+-   {
+-      s = (const char*) map;
+-      eof = s + rFile.size();
+-
+-#ifdef SIGBUS
+-      struct sigaction act;
+-      act.sa_handler = mmap_sigbus_handler;
+-      sigemptyset( &act.sa_mask );
+-#ifdef SA_ONESHOT
+-      act.sa_flags = SA_ONESHOT;
+-#else
+-      act.sa_flags = SA_RESETHAND;
+-#endif      
+-      sigaction( SIGBUS, &act, &mmap_old_sigact );
+-
+-      if (sigsetjmp (mmap_jmpbuf, 1))
+-      {
+-tqWarning("SIGBUS while reading %s", rFile.name().latin1());
+-         munmap(( char* )map, rFile.size());
+-         sigaction (SIGBUS, &mmap_old_sigact, 0);
+-         return;
+-      }
+-#endif
+-   }
+-   else
+-#endif
+-   {
+-      rFile.at(0);
+-      data = rFile.readAll();
+-      s = data.data();
+-      eof = s + data.size();
+-   }
++   rFile.at(0);
++   TQByteArray data = rFile.readAll();
++   const char *s = data.data();
++   const char *eof = s + data.size();
+ 
+    bool fileOptionImmutable = false;
+    bool groupOptionImmutable = false;
+@@ -757,19 +700,8 @@ tqWarning("SIGBUS while reading %s", rFile.name().latin1());
+      }
+    }
+ 
+-
+    if (fileOptionImmutable)
+       bFileImmutable = true;
+-
+-#ifdef HAVE_MMAP
+-   if (map)
+-   {
+-      munmap(( char* )map, rFile.size());
+-#ifdef SIGBUS
+-      sigaction (SIGBUS, &mmap_old_sigact, 0);
+-#endif
+-   }
+-#endif
+ }
+ 
+ void TDEConfigINIBackEnd::translateKey(TDELocale& locale, TQCString currentGroup, TQCString key) {
