@@ -6,12 +6,12 @@ pkgname=(
   wpewebkit
   wpewebkit-docs
 )
-pkgver=2.48.5
+pkgver=2.51.1
 pkgrel=1
 pkgdesc="Embeddable web content engine"
 url="https://wpewebkit.org"
 #arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-arch=(powerpc64le)
+arch=(powerpc espresso)
 license=(
   # :sort ui /\v^\s*['"]?/
   'AFL-2.0 OR GPL-2.0-or-later'
@@ -76,6 +76,7 @@ depends=(
   libxslt
   mesa
   openjpeg2
+  simdutf
   sqlite
   wayland
   woff2
@@ -84,7 +85,6 @@ depends=(
   zlib
 )
 makedepends=(
-  clang
   cmake
   gettext
   gi-docgen
@@ -92,7 +92,6 @@ makedepends=(
   gobject-introspection
   gperf
   gst-plugins-bad
-  lld
   ninja
   python
   ruby
@@ -101,16 +100,29 @@ makedepends=(
   unifdef
   wayland-protocols
 )
+makedepends_powerpc=(
+  distcc
+)
+makedepends_powerpc64=(
+  gcc14
+)
+makedepends_powerpc64le=(
+  gcc14
+)
+makedepends_x86_64=(
+  clang
+  lld
+)
 source=(
   $url/releases/wpewebkit-$pkgver.tar.xz{,.asc}
-  reduce-memory-overheads.patch
+  missing-resource.patch
 )
-sha256sums=('01f36010705adb14404c56baf033147f7927cc7c6badec81bb141266fcdd8d0b'
+sha256sums=('983a25b20d79863e7b08b0519bb3216d7655b9eeb4af46cfe641a540ca0ce1a7'
             'SKIP'
-            '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864')
-b2sums=('04036f6b5947371a533fb5a569ec6a3cffff8879731a95454e0535160105cbd53b15d73eef14fe4b28a3f5f0b8572026b2e779b63dd2eeb542ad386fcfd5c57f'
+            '2c29bc067cce281b5d97e89f91a967668a841714cb33afa965364d2493d48cde')
+b2sums=('ded294cb5d335c25e583ef190a8e07a5a9cba03c80ba1aecffcbc021c3c5bfd65635a2c31f0fc0597950b5f3a4d9222aba86615c7aff759fd5d655e1adfb9439'
         'SKIP'
-        'cc16462ce22df999b47ef477d4272ef3df2fbbfe5cdc585f3ce47e56cde65a1d7dd1105e6e7bbff41695f79b6394bc3e403e53a669bb7f456c733ed216372c9b')
+        'c854ffd6f2acd1c4a69d119ea19bb2fdfbc158cd9b23dddaba41977118483152b6dc4fcca9b14a950cb45da42d91bd3cce6b3dabcfc69502e4074a7348dcb957')
 validpgpkeys=(
   # https://wpewebkit.org/release/verify/
   5AA3BC334FD7E3369E7C77B291C559DBE4C9123B # Adrián Pérez de Castro <aperez@igalia.com>
@@ -118,12 +130,13 @@ validpgpkeys=(
 )
 
 case "${CARCH}" in
-  powerpc) options+=(!debug !lto) ;;
+  powerpc*) options+=(!debug !lto) ;;
 esac
 
 prepare() {
   cd wpewebkit-$pkgver
-  patch -Np1 -i ${srcdir}/reduce-memory-overheads.patch
+  patch -Np1 -i ${srcdir}/missing-resource.patch
+  sed -i -e "s:--warn-error::" Source/cmake/FindGI.cmake
 }
 
 build() {
@@ -143,25 +156,32 @@ build() {
 
   case "${CARCH}" in
     powerpc64le)
-      #export CFLAGS+=' -mminimal-toc'
-      #export CXXFLAGS+=' -mminimal-toc'
+      cmake_options+=(
+        -DCMAKE_C_COMPILER=gcc-14
+        -DCMAKE_CXX_COMPILER=g++-14
+      )
+      export CFLAGS+=' -mminimal-toc'
+      export CXXFLAGS+=' -mminimal-toc'
       export LDFLAGS+=' -Wl,--no-keep-memory'
-
-      # Upstream prefers Clang
-      # https://gitlab.archlinux.org/archlinux/packaging/packages/webkitgtk-6.0/-/issues/4
-      #export CC=clang CXX=clang++
-      #LDFLAGS+=" -fuse-ld=lld"
     ;;
-    powerpc64)
-      #export CFLAGS+=' -mminimal-toc'
-      #export CXXFLAGS+=' -mminimal-toc'
+
+    powerpc64*)
+      cmake_options+=(
+        -DCMAKE_C_COMPILER=gcc-14
+        -DCMAKE_CXX_COMPILER=g++-14
+      )
+      export CFLAGS='-O2 -pipe -mminimal-toc'
+      export CXXFLAGS='-O2 -pipe -mminimal-toc'
       export LDFLAGS+=' -Wl,--no-keep-memory'
     ;;
     powerpc)
       cmake_options+=(
         -DENABLE_WEBGL=OFF
       )
+      export CFLAGS+=' -mminimal-toc'
+      export CXXFLAGS+=' -mminimal-toc'
       export LDFLAGS+=" -Wl,--no-keep-memory"
+      export PATH=/usr/lib/distcc:$PATH
     ;;
     x86_64)
       # Upstream prefers Clang
@@ -184,8 +204,9 @@ build() {
   CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
   CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
 
+  export WK_USE_CCACHE=NO
   cmake -S wpewebkit-$pkgver -B build -G Ninja "${cmake_options[@]}"
-  cmake --build build
+  cmake --build build ${MAKEFLAGS}
 }
 
 package_wpewebkit() {
