@@ -9,12 +9,12 @@ pkgname=(
   webkit2gtk
   webkit2gtk-docs
 )
-pkgver=2.48.5
+pkgver=2.50.3
 pkgrel=1
 pkgdesc="Web content engine for GTK"
 url="https://webkitgtk.org"
-arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-arch=(powerpc64 powerpc espresso)
+#arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+arch=(powerpc espresso)
 license=(
   # :sort ui /\v^\s*['"]?/
   'AFL-2.0 OR GPL-2.0-or-later'
@@ -88,6 +88,7 @@ depends=(
   openjpeg2
   pango
   sqlite
+  ttf-font
   wayland
   woff2
   xdg-dbus-proxy
@@ -110,14 +111,20 @@ makedepends=(
   unifdef
   wayland-protocols
 )
+makedepends_powerpc=(
+  distcc
+)
+makedepends_powerpc64le=(
+  gcc14
+)
 source=(
   $url/releases/webkitgtk-$pkgver.tar.xz{,.asc}
   reduce-memory-overheads.patch
 )
-sha256sums=('bb64ed9d1cfd58e8b5e89ccad71dd31adfed56336bad7695031ad0b668e1987c'
+sha256sums=('70a006b4695bb6b2e157e801f5a0d029f4110f050c6f0882decd8a3bf594d54f'
             'SKIP'
             '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864')
-b2sums=('aa8ea4b5296a95f8b18f2dec9597f70eba46e739e3cc21dccd97af4ba07c7fcfa50dffe963bcffcd178b99c111d38dc55fb194a87451fa8efa9944249f538aba'
+b2sums=('65a98513ddd953302f036d5be0be27b84de62779a8fc7a941f213d7315695368ed5cc257fdb83a03a3d898b1998045ff75746c73614f4fa6dc5af347c53a7ad8'
         'SKIP'
         'cc16462ce22df999b47ef477d4272ef3df2fbbfe5cdc585f3ce47e56cde65a1d7dd1105e6e7bbff41695f79b6394bc3e403e53a669bb7f456c733ed216372c9b')
 validpgpkeys=(
@@ -127,13 +134,14 @@ validpgpkeys=(
 )
 
 case "${CARCH}" in
-  powerpc) options+=(!debug !lto) ;;
+  powerpc*) options+=(!debug !lto) ;;
 esac
 
 prepare() {
   cd webkitgtk-$pkgver
-
   patch -Np1 -i ${srcdir}/reduce-memory-overheads.patch
+
+  sed -i -e "s:--warn-error::" Source/cmake/FindGI.cmake
 }
 
 build() {
@@ -155,20 +163,27 @@ build() {
 
   case "${CARCH}" in
     powerpc64le)
+      cmake_options+=(
+        -DCMAKE_C_COMPILER=gcc-14
+        -DCMAKE_CXX_COMPILER=g++-14
+      )
       export CFLAGS+=' -mminimal-toc'
       export CXXFLAGS+=' -mminimal-toc'
       export LDFLAGS+=' -Wl,--no-keep-memory'
     ;;
     powerpc64)
-      export CFLAGS+=' -mminimal-toc'
-      export CXXFLAGS+=' -mminimal-toc'
+      export CFLAGS='-O2 -pipe -mminimal-toc'
+      export CXXFLAGS='-O2 -pipe -mminimal-toc'
       export LDFLAGS+=' -Wl,--no-keep-memory'
     ;;
     powerpc)
-      cmake_options+=(
-        -DENABLE_WEBGL=OFF
-      )
+      #cmake_options+=(
+      #  -DENABLE_WEBGL=OFF
+      #)
+      export CFLAGS+=' -mminimal-toc'
+      export CXXFLAGS+=' -mminimal-toc'
       export LDFLAGS+=" -Wl,--no-keep-memory"
+      export PATH=/usr/lib/ccache/bin:/usr/lib/distcc:$PATH
     ;;
     x86_64)
       # Upstream prefers Clang
@@ -192,7 +207,7 @@ build() {
   CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
 
   cmake -S webkitgtk-$pkgver -B build -G Ninja "${cmake_options[@]}"
-  cmake --build build
+  cmake --build build ${MAKEFLAGS}
 }
 
 package_webkit2gtk() {
