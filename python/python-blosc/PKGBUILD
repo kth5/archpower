@@ -4,14 +4,15 @@
 # Contributor: Andrzej Giniewicz <gginiu@gmail.com>
 
 pkgname=python-blosc
-pkgver=1.11.2
-pkgrel=2
+pkgver=1.11.3
+pkgrel=1
 pkgdesc='Python wrapper for the extremely fast Blosc compression library'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://www.blosc.org/python-blosc/python-blosc.html'
 license=('BSD-3-Clause')
 depends=('python' 'blosc')
 makedepends=(
+  'git'
   'cmake'
   'ninja'
   'python-build'
@@ -23,12 +24,23 @@ makedepends=(
 )
 checkdepends=('python-numpy' 'python-psutil')
 optdepends=('python-numpy: for tests and benchmarks')
-source=("https://github.com/Blosc/python-blosc/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('56a53828669ac9d1452b247b8aad6bdfcb71ecffe9b8c7723e4405825704506946f150f54633b7e0886160255e5619c698b97847963c909e14c97808c04f39ab')
-b2sums=('79176961221a2dcdf389165b3ed0e629201605f806aca3e1ada1dd9b35c1acf13ea7fa6692a762f5e31270df327751642256a1c5bafb14fbed48ef69c6b9745c')
+source=(
+  "$pkgname::git+https://github.com/Blosc/python-blosc#tag=v$pkgver"
+  ftbfs-numpy-buffer.patch
+)
+sha512sums=('af658d8684a89761bce7043ef342ac6804ffe621013ecb9b15cf223429b991c4795608e619c8efa93ad93d5e4ed29da256d43c0c8939fb36e0ffad7fde24e4b2'
+            'a15195326155b4538c8b9bd75e0d996ad9311de4946a877f8eeb5a7822aacb595c8f14cf4df8488a94f94ed92cd72960b67e0d8ebd2db1ebc1ba5e82840e9c39')
+b2sums=('f7223c0f784ba245367fcede92d4ecf74bd561de415c73be2fafcfb5a546438c0d2e17b671ca4b85f535b81e9a2377f27afa19a2262d9914bbc7acebac84ae64'
+        '0ee4cab141924bf118512eb72ebf772173ea3175cd08dd5cabdb8ecaeb02698b0630631987896820ae67490adba31bc3ff398132de544f8fd528520a2fbb0eac')
+
+prepare() {
+  cd "$pkgname"
+
+  patch -p1 -i "$srcdir/ftbfs-numpy-buffer.patch"
+}
 
 build() {
-  cd "${pkgname}-${pkgver}"
+  cd "${pkgname}"
 
   # AVX2 disabled because Arch does not have x86_64_v3 yet.
   # Snappy is also disabled by default for compatability with non-C++ systems.
@@ -44,11 +56,11 @@ build() {
 }
 
 check() {
+  cd "${pkgname}"
+
   case "${CARCH}" in
     powerpc*) return 0 ;;
   esac
-
-  cd "${pkgname}-${pkgver}"
 
   python -m venv --system-site-packages test-env
   test-env/bin/python -m installer dist/*.whl
@@ -56,7 +68,7 @@ check() {
 }
 
 package() {
-  cd "${pkgname}-${pkgver}"
+  cd "${pkgname}"
 
   python -m installer --destdir="$pkgdir" dist/*.whl
 
