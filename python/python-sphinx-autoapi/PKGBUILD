@@ -1,0 +1,53 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Maintainer: Daniel M. Capella <polyzen@archlinux.org>
+
+pkgname=python-sphinx-autoapi
+_name=${pkgname#python-}
+pkgver=3.6.1
+pkgrel=1
+pkgdesc='Sphinx API documentation generator'
+arch=(any)
+url=https://github.com/readthedocs/sphinx-autoapi
+license=(MIT)
+depends=(
+  python
+  python-astroid
+  python-docutils  # used directly, pulled in via python-sphinx
+  python-jinja
+  python-sphinx
+  python-yaml
+)
+makedepends=(
+  git
+  python-build
+  python-flit-core
+  python-installer
+)
+checkdepends=(
+  python-beautifulsoup4
+  python-pytest
+)
+source=("git+$url.git#tag=v$pkgver")
+b2sums=('66a94765c04f5a5bf4ee66fd5a1b00af9eb0b9231b34e4fd736bd7cbc6bdea99f9a5b29911a38ec2bfd749dd1723f5d4ef6f58f969798b24e57c6bcbeabf13a2')
+
+build() {
+  cd "$_name"
+  python -m build --wheel --skip-dependency-check --no-isolation
+}
+
+check() {
+  cd "$_name"
+  PYTHONPATH="$_name:$PYTHONPATH" pytest -v
+}
+
+package() {
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d "$pkgdir"/usr/share/licenses/$pkgname
+  ln -s "$site_packages"/"${_name//-/_}"-$pkgver.dist-info/licenses/LICENSE.rst \
+    "$pkgdir"/usr/share/licenses/$pkgname
+
+  cd "$_name"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm 644 {CHANGELOG,README}.rst -t "$pkgdir"/usr/share/doc/$pkgname
+}
