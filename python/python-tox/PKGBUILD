@@ -5,14 +5,15 @@
 # Contributor: George Brooke <george+arch.aur@george-brooke.co.uk>
 # Contributor: Sebastian Wiesner <lunaryorn googlemail com>
 
-_name=tox
 pkgname=python-tox
-pkgver=4.23.2
-pkgrel=2
+_name="${pkgname#python-}"
+pkgver=4.31.0
+pkgrel=1
 pkgdesc='Python virtualenv management and testing tool'
 arch=(any)
 url='https://tox.readthedocs.io'
-license=('GPL2')
+_url="https://github.com/tox-dev/tox"
+license=(MIT)
 depends=(
   'python'
   'python-cachetools'
@@ -30,56 +31,52 @@ makedepends=(
   'python-hatch-vcs'
   'python-hatchling'
   'python-installer'
-  'python-wheel'
 )
 checkdepends=(
   # 'python-devpi-process'  # NOTE: pulls in devpi-{client,server}
   'python-diff-cover'
   'python-distlib'
   'python-flaky'
+  'python-pdm-backend'
+  'python-psutil'
   'python-pytest'
   'python-pytest-mock'
-  'python-psutil'
+  'python-pytest-xdist'
   'python-re-assert'
-  # 'python-time-machine'  # NOTE: needed?
+  'python-setuptools'
+  'python-time-machine'
+  'python-wheel'
 )
 optdepends=(
   'python-pytest: for pytest plugin to test tox and its plugins'
   'python-pytest-mock: for pytest plugin to test tox and its plugins'
   'python-re-assert: for pytest plugin to test tox and its plugins'
 )
-source=(https://files.pythonhosted.org/packages/source/${_name::1}/$_name/$_name-$pkgver.tar.gz)
-sha512sums=('5008964ebed3c94a6ad5f0985150c7bf73fd3996b91171b16323d195bf0288102aac0dc38848bd4c63e5c5678ab1a82c170579139eda97132a4555eb11d381a0')
-b2sums=('776b653388a4b0578b5e5fd7957e97e1b3591d6239a23fe232238a7ce64a9adc641bbd5d3d4585ebb094da7c487da2b0875a466d62e27a9686317cc38a9b2491')
-
-prepare() {
-  find $_name-$pkgver -name "*.pyc" -delete
-}
+source=($pkgname-$pkgver.tar.gz::$_url/archive/refs/tags/$pkgver.tar.gz)
+sha512sums=('6e3712391fa4b4f40fac0e3ef276fa6093c5264646967f622859743ebdee171145c7b44f7801ed56f7dc8f1c26bb0087c758cdaf836d0f15898d5d3a2a4a4077')
+b2sums=('a2ec32c2ff87896b43fa2c51274d48343d791e32ac659f756a64db88bac09f2ff8a9899da2b59b957f050904be168fa3cb86ceb6b0c1e94499942d7cf04bbb92')
 
 build() {
   cd $_name-$pkgver
-  python -m build --wheel --no-isolation
+  SETUPTOOLS_SCM_PRETEND_VERSION=$pkgver python -m build --wheel --no-isolation
 }
 
-check() {
-  local pytest_options=(
-    -vv
-  )
-  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+# NOTE: needs python-devpi-process to be packaged.
+# check() {
+#   local pytest_options=(
+#     -vv
+#   )
 
-  cd $_name-$pkgver
-  # install to temporary location, as importlib is used
-  python -m installer --destdir=test_dir dist/*.whl
-  export PYTHONPATH="$PWD/test_dir/$site_packages:$PYTHONPATH"
-  # TODO: package remaining checkdepends
-  # pytest "${pytest_options[@]}"
-}
+#   cd $_name-$pkgver
+#   PYTHONPATH=src pytest "${pytest_options[@]}"
+# }
 
 package() {
   local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
 
   cd $_name-$pkgver
   python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm 644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
   # add legacy symlink
   ln -sv tox "$pkgdir"/usr/bin/tox3
 }
