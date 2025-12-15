@@ -6,7 +6,7 @@
 
 pkgname=re2
 _re2ver=2024-07-02
-pkgrel=5
+pkgrel=7
 epoch=1
 pkgver=${_re2ver//-}
 pkgdesc="Fast, safe, thread-friendly regular expression engine"
