@@ -6,7 +6,7 @@
 pkgbase=openbabel
 pkgname=(openbabel python-openbabel)
 pkgver=3.1.1
-pkgrel=12
+pkgrel=13
 pkgdesc='A library designed to interconvert between many file formats used in molecular modeling and computational chemistry'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://openbabel.org/'
@@ -18,34 +18,33 @@ makedepends=(boost
              coordgen
              eigen
              git
+             inchi
              maeparser
              python-setuptools
              rapidjson
              swig
              wxwidgets-gtk3)
-source=(git+https://github.com/openbabel/openbabel#tag=openbabel-${pkgver//./-})
-sha256sums=('b045f861b0544856dc5a2f5bd2943a4a8d9efc05ea4f8cf9cd5155751b214e77')
+source=(git+https://github.com/openbabel/openbabel#tag=openbabel-${pkgver//./-}
+        eigen-5.patch)
+sha256sums=('b045f861b0544856dc5a2f5bd2943a4a8d9efc05ea4f8cf9cd5155751b214e77'
+            '2cd739f054ed4f6a8c7d6a610e6f41c302ef7239c2548acdaefda162f57924a8')
 
 prepare() {
   cd openbabel
   git cherry-pick -n c0570bfe # Fix build with GCC 12
   git cherry-pick -n b75c392b # UB https://github.com/openbabel/openbabel/issues/2223
   sed -e '/SET CMP0042 OLD/d' -i CMakeLists.txt # Fix build with cmake 4
+  patch -p1 -i ../eigen-5.patch
 }
 
 build() {
-  case "${CARCH}" in
-    powerpc64)
-      export CFLAGS='-O2 -pipe'
-      export CXXFLAGS='-O2 -pipe'
-    ;;
-  esac
-
   cmake -B build -S openbabel \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DRUN_SWIG=ON \
     -DPYTHON_BINDINGS=ON \
-    -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+    -DOPENBABEL_USE_SYSTEM_INCHI=ON \
+    -DEIGEN3_INCLUDE_DIR=/usr/include/eigen3
   cmake --build build
 
   # To split python bindings
@@ -55,6 +54,7 @@ build() {
 package_openbabel() {
   depends+=(cairo
             coordgen
+            inchi
             libxml2)
   optdepends=('wxwidgets-gtk3: GUI interface')
 
