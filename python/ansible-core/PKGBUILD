@@ -10,7 +10,7 @@
 
 pkgname=ansible-core
 _pkgname=ansible
-pkgver=2.19.1
+pkgver=2.20.0
 pkgrel=1
 pkgdesc='Radically simple IT automation platform'
 arch=(any)
@@ -64,9 +64,9 @@ provides=('python-ansible' 'ansible-base')
 replaces=('ansible-base')
 source=("${pkgname}-${pkgver}.tar.gz::https://github.com/ansible/ansible/archive/refs/tags/v${pkgver}.tar.gz"
         'relax_strict_dependencies_upper_bound.patch')
-sha512sums=('b901afad5cf9628c2705fc1a5b9470c937da80d84fabcb082e92c323e055977046912447f71216717400aa4106e5f96fa4ec4839109f1bda38c60dc515e5ba49'
+sha512sums=('ab08ebe654c22d92e35757009e2119fe457557f64ad44c3e35a27540c45075e1585d8fe2c5a5abbf86af7d0378ca2c3b6cbb49337409f50438bd3e1541664bcd'
             'd5377e207afff62b20d360e1aad99d4d1af39dab4ad7ce67ec6aaf8568e2eb7998a5d7c51a7dcc0f4daed568a904b8940a70045a0274b05f43a8d98a31945bbb')
-b2sums=('d653774206c40d6d3d3ec5296cb8f900fdbe81e66659d4ebbc759cc5d74eb0d8a66418ae50eb471bbbf50527fbe29fb388c86a5cbd97f9e2b414044fe32900b4'
+b2sums=('7a2d2161688d9ac188aa944642da58afbd0bf3cdae098865e298d740596b0e16d8a9a207af8108619b2bc7717317cf8fbbba9a98ff25c93d90f25a6afe4095f3'
         '9e0e5c0bfaab7b7fed023f3f533575c26da3012d956bb1f575fc68be98a2493c0398946e359bc388513851dd62d5519661a57b52fa20af6001bc1fe436a2a351')
 
 prepare() {
@@ -84,12 +84,19 @@ build() {
 }
 
 check() {
+  case "${CARCH}" in
+    powerpc) return 0 ;;
+  esac
+
   local python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
 
   # tests require upstream wrapper to find ansible-core internals: https://github.com/ansible/ansible/issues/80472
   cd "${_pkgname}-${pkgver}"
   # we do not have libselinux packaged
   rm -v test/units/module_utils/basic/test_selinux.py
+  # passlib is not compatible with bcrypt >= 5.0.0
+  # see https://github.com/ansible/ansible/issues/85919
+  rm -v test/units/utils/test_encrypt.py
   bin/ansible-test units --python "${python_version}" --truncate 0
 }
 
