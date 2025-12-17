@@ -1,0 +1,68 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Contributor: Kyle Keen <keenerd@gmail.com>
+
+pkgname=jupyter-nbconvert
+_name=nbconvert
+pkgver=7.16.6
+pkgrel=1
+pkgdesc='Jupyter Notebook Conversion'
+arch=(any)
+url='https://pypi.python.org/pypi/nbconvert'
+license=(BSD-3-Clause)
+depends=(ipython
+         jupyter-nbclient
+         jupyter-nbformat
+         jupyterlab-pygments
+         python
+         python-beautifulsoup4
+         python-bleach
+         python-defusedxml
+         python-importlib-metadata
+         python-jinja
+         python-jupyter-client
+         python-jupyter-core
+         python-markupsafe
+         python-mistune
+         python-packaging
+         python-pygments
+         python-tinycss2
+         python-tornado
+         python-traitlets)
+makedepends=(git
+             python-build
+             python-hatchling
+             python-installer)
+checkdepends=(inkscape
+              python-flaky
+              python-ipywidgets
+              python-pytest
+              texlive-fontsrecommended
+              texlive-latexextra
+              texlive-plaingeneric
+              texlive-xetex)
+source=(git+https://github.com/jupyter/nbconvert#tag=v$pkgver)
+sha256sums=('81dfead8fb51a748ee31477d14d26b787463222aae174f7e47708efc65fa5a06')
+
+build() {
+  cd nbconvert
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd nbconvert
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m pip install -e .
+  # disable tests that download chromium and (probably) require a graphical session
+  test-env/bin/python -m pytest -v -k 'TestWebPDFExporter and not (test_export or test_webpdf_without_pyppeteer)' -W ignore::DeprecationWarning
+  test-env/bin/python -m pytest -v -k 'TestNbConvertApp and not test_webpdf_with_chromium' -W ignore::DeprecationWarning
+  # run all remaining tests
+  test-env/bin/python -m pytest -v -k 'not TestWebPDFExporter and not TestNbConvertApp' -W ignore::DeprecationWarning
+}
+
+package() {
+  cd nbconvert
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
+}
