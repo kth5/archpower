@@ -1,49 +1,82 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer:
-# Contributor:  Ionut Biru <ibiru@archlinux.org>
+# Contributor: Ionut Biru <ibiru@archlinux.org>
 # Contributor: Daniel Balieiro <daniel@balieiro.com>
 
 pkgname=telepathy-salut
 pkgver=0.8.1
-pkgrel=11
-pkgdesc="A link-local XMPP connection manager for Telepathy"
+pkgrel=13
+pkgdesc='Link-local XMPP connection manager for Telepathy'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-url="https://telepathy.freedesktop.org"
-groups=('telepathy')
-license=('LGPL')
-depends=('telepathy-glib' 'avahi' 'libsoup' 'util-linux')
-makedepends=('glib2-devel' 'gtk-doc' 'libxslt' 'xmldiff')
-install=telepathy-salut.install
+url='https://telepathy.freedesktop.org/'
+license=(LGPL-2.1-or-later)
+depends=(
+  avahi
+  dbus
+  dbus-glib
+  glib2
+  glibc
+  gnutls
+  libsoup
+  libxml2
+  sqlite
+  telepathy-glib
+  util-linux-libs
+)
+makedepends=(
+  git
+  glib2-devel
+  gtk-doc
+)
 options=(!lto)
-source=(https://telepathy.freedesktop.org/releases/$pkgname/$pkgname-$pkgver.tar.gz
-        telepathy-salut-0.8.1-python3.patch
-        telepathy-salut-0.8.1-gcc14-fix-incompatible-pointer-types.patch)
-sha256sums=('70b9108ac8b511b7688e1b580de4ddb8981603c3cbde01f287ef8f9cb708618e'
-            '04fb03cf1f085473712dbe3aa64285266dea88b1c423149e0540d7490dbb042b'
-            '017297070b624007ad30a768eec27cd20acac428ad376ff9834e23227d536e9c')
+source=(
+  "git+https://gitlab.freedesktop.org/telepathy/$pkgname.git#tag=$pkgname-$pkgver"
+  git+https://gitlab.freedesktop.org/telepathy/wocky.git
+  telepathy-salut-0.8.1-python3.patch
+  telepathy-salut-0.8.1-gcc14-fix-incompatible-pointer-types.patch
+)
+b2sums=(
+  6adeb239c4c2c4202f88c46c7ca761205d8b2530fbd8556b483248fa2953dd5e23bf80c078324abd9409fe8b19002fe8c3c96f25c85455060713cc2b66cf1de3
+  SKIP
+  db76eaf004418d48359c0ca710a59782fc1cda304825c75259daca41f3cd94ced207be06db7e5fd4d290b8021276077076eed330c20c2249b1577f0670697f93
+  405d68e2e94cad887d034faf41d53da6b77e84d6d3d1920f714c44634523b72acf5431ee71d4d6f8268959780fc1260b232b56b72709e41949a49aa9855029a9
+)
 
 prepare() {
-    cd "$pkgname-$pkgver"
-    # patch for python3, taken from Fedora
-    patch -Np1 -i ../telepathy-salut-0.8.1-python3.patch
-    # patch for gcc14, taken from Fedora
-    patch -Np1 -i ../telepathy-salut-0.8.1-gcc14-fix-incompatible-pointer-types.patch
-    autoreconf -fiv
+  cd $pkgname
+
+  git submodule init
+  git submodule set-url lib/ext/wocky "$srcdir/wocky"
+  git -c protocol.file.allow=always submodule update
+
+  # Port to python3, taken from Fedora
+  patch -Np1 -i ../telepathy-salut-0.8.1-python3.patch
+
+  # Fixes for gcc14, taken from Fedora
+  patch -Np1 -i ../telepathy-salut-0.8.1-gcc14-fix-incompatible-pointer-types.patch
+
+  autoreconf -fi
+
+  cd lib/ext/wocky
+  autoreconf -fi
 }
 
 build() {
-    cd "$pkgname-$pkgver"
-    ./configure --prefix=/usr \
-        --libexecdir=/usr/lib/telepathy \
-        --disable-plugins --disable-Werror \
-        --with-tls=gnutls \
-        --enable-avahi-tests=no \
-        --enable-static=no \
-        --build=${CHOST}
-    make
+  cd $pkgname
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --libexecdir=/usr/lib/telepathy \
+    --enable-olpc \
+    --disable-avahi-tests
+  make
+}
+
+check() {
+  cd $pkgname
+  make check
 }
 
 package() {
-    cd "$pkgname-$pkgver"
-    make DESTDIR="$pkgdir" install
+  cd $pkgname
+  make DESTDIR="$pkgdir" install
 }
