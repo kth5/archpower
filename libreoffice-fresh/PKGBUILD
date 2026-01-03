@@ -2,19 +2,13 @@
 # Maintainer: AndyRTR <andyrtr@archlinux.org>
 # Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 
-# Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
-# Note: These are for Arch Linux use ONLY. For your own distribution, please
-# get your own set of keys. Feel free to contact foutrelis@archlinux.org for
-# more information.
-_google_default_client_id=413772536636.apps.googleusercontent.com
-_google_default_client_secret=0ZChLK6AxeA3Isu96MkwqDR4
-
 pkgbase=libreoffice-fresh
 pkgname=('libreoffice-fresh-sdk' 'libreoffice-fresh')
-_LOver=25.8.1.1
-pkgver=25.8.1
-pkgrel=3
-arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+_LOver=25.8.2.2
+pkgver=25.8.2
+pkgrel=5
+#arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+arch=(powerpc espresso)
 license=('MPL-2.0' 'LGPL-3.0-or-later')
 url="https://www.libreoffice.org/"
 makedepends=('curl>=7.20.0' 'hunspell>=1.2.8' 'python' 'libwpd>=0.9.2' 'libwps'
@@ -64,8 +58,8 @@ source=(${_mirror}/libreoffice{,-help,-translations}-${_LOver}.tar.xz{,.asc}
     ${_additional_source_url2}/odfvalidator-1.2.0-incubating-SNAPSHOT-jar-with-dependencies-971c54fd38a968f5860014b44301872706f9e540.jar # for test suite
     ${_additional_source_url2}/f543e6e2d7275557a839a164941c0a86e5f2c3f2a0042bfc434c88c6dde9e140-opens___.ttf
     libreoffice-24.8.4.2-icu76_fixes-1.patch
-    fix_build_with_poppler_25.09.patch
     orcus-0.21.0.patch
+    poppler-25.10.patch
     soffice-template.desktop.in
     libreoffice-fresh.sh libreoffice-fresh.csh)
 noextract=(a7983f859eafb2677d7ff386a023bc40-xsltml_2.1.2.zip
@@ -90,11 +84,11 @@ noextract=(a7983f859eafb2677d7ff386a023bc40-xsltml_2.1.2.zip
            f543e6e2d7275557a839a164941c0a86e5f2c3f2a0042bfc434c88c6dde9e140-opens___.ttf
 )
 validpgpkeys=('C2839ECAD9408FBE9531C3E9F434A1EFAFEEAEA3') # LibreOffice Build Team (CODE SIGNING KEY) <build@documentfoundation.org>
-sha256sums=('5b4e2c6c2abe9480a49c33543b57e0226c6cf9c966088b8e713d1b23490a2f3e'
+sha256sums=('002ca2eec3df818d3655bc5ab5702263194febc0212f02e12df1eee11bd7c15e'
             'SKIP'
-            '14d3b7dacb8104dcb4c7ccf89de2a01853b0917756497b9c8b49a966d2f3f0b5'
+            'bb9fde2c035c757581f49545ccbfb046fc31f72968b53b28d0987f1c5547eb5f'
             'SKIP'
-            '055da09b5d3998864f016e101ffd11706b64fa2fb03608a5c3844fc48fe83b74'
+            'fb01188fd7258b4da36782618d790e4073769097c0597e103eb814963e272830'
             'SKIP'
             '75823776fb51a9c526af904f1503a7afaaab900fba83eda64f8a41073724c870'
             '983941d31ee8d366085cadf28db75eb1f5cb03ba1e5853b98f12f7f51c63b776'
@@ -117,8 +111,8 @@ sha256sums=('5b4e2c6c2abe9480a49c33543b57e0226c6cf9c966088b8e713d1b23490a2f3e'
             '984f2a479df79e27e7b01a5815ac53ae64e07746b882262d8a64566494515504'
             'f543e6e2d7275557a839a164941c0a86e5f2c3f2a0042bfc434c88c6dde9e140'
             '5c67449d7f7d43b66063780650ebf8954e59164c38b36883078e36c11fde82de'
-            'c20599b39a06e1c9aaf75a0cffdbcdbadf0d04f3df1f49fcfd35c2a3b5c81659'
             '76896e6d3a8f52650ea2c8184b001cdb6f5eb7792803835dfc664e7ba23df923'
+            '28cb230ed4511fc572fc55da570c54a345b0d743c2134b0af3e64bd096b69094'
             'd0be8099cbee3c9dfda694a828149b881c345b204ab68826f317580aafb50879'
             '9fb33dbc3ffeb6af2ea7341b58242142d4eca903584c21c5f4b44ff27fbf5b5f'
             '512355b5ef646791089da8c2b35cf8b019673c0c8a58685962af3b5d9eb5d6bb')
@@ -137,12 +131,11 @@ prepare() {
     # fix build with icu 76
     patch -Np1 -i "${srcdir}"/libreoffice-24.8.4.2-icu76_fixes-1.patch
 
-    # fix build with icu poppler 25.09
-    # see https://gerrit.libreoffice.org/c/core/+/190523
-    patch -Np1 -i "${srcdir}"/fix_build_with_poppler_25.09.patch
-
     # fix build with orcus 0.21.0
     patch -Np1 -i "${srcdir}"/orcus-0.21.0.patch
+
+    # fix build with poppler 25.10
+    patch -Np1 -i "${srcdir}"/poppler-25.10.patch
 
     #use the CFLAGS but remove the LibO overridden ones
     for i in $CFLAGS; do
@@ -171,6 +164,8 @@ build() {
     export CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
     export CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
 
+    # http://site.icu-project.org/download/61#TOC-Migration-Issues
+
     case "${CARCH}" in
       powerpc64le)
                _configure_flags=(--enable-lto --disable-firebird-sdbc --disable-skia)
@@ -179,9 +174,13 @@ build() {
       *)       _configure_flags=(--enable-lto) ;;
     esac
 
+    if [[ "${CFLAGS}" == *"mcpu=espresso"* ]]; then
+      export CXXFLAGS="${CXXFLAGS/-mcpu=espresso/}"
+      export CFLAGS="${CXXFLAGS/-mcpu=espresso/}"
+    fi
 
     #FIXME: **only** use GCC on espresso or patch mcpu=espress into clang
-    if [[ "${CFLAGS}" == *"mcpu=espresso"* ]]; then 
+    if [[ "${CFLAGS}" == *"mcpu=espresso"* ]]; then
       echo ":: espresso detected"
       export AR=gcc-ar
       export CC=${CHOST}-gcc
@@ -189,8 +188,6 @@ build() {
       export NM=gcc-nm
       export RANLIB=gcc-ranlib
     fi
-
-    # http://site.icu-project.org/download/61#TOC-Migration-Issues
 
     ./autogen.sh --with-extra-buildid="${pkgver}-${pkgrel}" \
         --with-vendor="Arch POWER" \
@@ -253,7 +250,6 @@ build() {
         --with-external-thes-dir=/usr/share/mythes \
         --with-system-beanshell \
         --with-system-cppunit\
-        --without-system-libeot \
         --with-system-graphite\
         --with-system-glm \
         --with-system-libnumbertext \
@@ -281,6 +277,7 @@ build() {
         --without-system-zxcvbn \
         --without-system-java-websocket \
         --with-system-rhino \
+        --without-system-libeot \
         --disable-dependency-tracking ${_configure_flags[@]}
 
     touch src.downloaded
