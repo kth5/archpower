@@ -4,7 +4,7 @@
 
 pkgname=pacman
 pkgver=7.0.0.r7.g1f38429
-pkgrel=1.5
+pkgrel=1.6
 # use annotated tag and patch level commit from release branch (can be empty for no patches)
 _git_tag=7.0.0
 _git_patch_level_commit=1f38429b1c5f30edce30c731aa352e6363cc788e
@@ -101,7 +101,20 @@ prepare() {
 build() {
   cd "$pkgname"
 
-  sed "s@^Architecture.*@Architecture = ${CARCH}@g" -i "$srcdir/pacman.conf"
+  REPO_ARCH=${CARCH}
+  CC=${CHOST}-gcc
+  CXX=${CHOST}-g++
+
+  # add WiiU Espresso CPU bug work around
+  if [[ "${CFLAGS}" == *"mcpu=espresso"* ]]; then
+    msg2 "Modifying CFLAGS for WiiU Espresso CPU bug to support SMP"
+    _CFLAGS="-mcpu=espresso -O2 -pipe"
+    CC="powerpc-espresso-linux-gnu-gcc"
+    CXX="powerpc-espresso-linux-gnu-g++"
+    REPO_ARCH=espresso
+  fi
+
+  sed "s@^Architecture.*@Architecture = ${REPO_ARCH}@g" -i "$srcdir/pacman.conf"
   sed "s@%ARCH%@${CARCH}@g" -i "$srcdir/makepkg.conf"
 
   case "${CARCH}" in
@@ -119,17 +132,6 @@ build() {
       _CFLAGS="-O2 -pipe"
     ;;
   esac
-
-  CC=${CHOST}-gcc
-  CXX=${CHOST}-g++
-
-  # add WiiU Espresso CPU bug work around
-  if [[ "${CFLAGS}" == *"mcpu=espresso"* ]]; then
-    msg2 "Modifying CFLAGS for WiiU Espresso CPU bug to support SMP"
-    _CFLAGS="-mcpu=espresso -O2 -pipe"
-    CC="powerpc-espresso-linux-gnu-gcc"
-    CXX="powerpc-espresso-linux-gnu-g++"
-  fi
 
   sed "s@%CFLAGS%@${_CFLAGS}@g" -i "$srcdir/makepkg.conf"
   sed "s@%LDFLAGS%@${_LDFLAGS}@g" -i "$srcdir/makepkg.conf"
