@@ -1,4 +1,3 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Antonio Rojas <arojas@archlinux.org>
 # Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
 # Contributor: robb_force <robb_force@holybuffalo.net>
@@ -7,8 +6,8 @@
 pkgbase=mame
 pkgname=(mame
          mame-tools)
-pkgver=0.276
-pkgrel=1
+pkgver=0.284
+pkgrel=2
 pkgdesc='Port of the popular Multiple Arcade Machine Emulator using SDL with OpenGL support'
 url='https://mamedev.org/'
 license=(BSD-2-Clause
@@ -19,7 +18,7 @@ license=(BSD-2-Clause
          LGPL-2.1-only
          MIT
          Zlib)
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 makedepends=(asio
              flac
              git
@@ -39,20 +38,21 @@ makedepends=(asio
 makedepends_x86_64=(
              nasm
 )
-source=(git+https://github.com/mamedev/mame#tag=mame${pkgver/./}
+source=(git+https://github.com/mamedev/mame#tag=mame${pkgver/./}?signed
         mame.desktop
         mame.sh
         mame.svg
-        fix-922619.patch
-        python3.patch)
-sha256sums=('d18368767348b9af84e4bd0eb106c1f161fbda24cce1a744eb3799d316c81808'
+        lua-5.5.patch
+        constexpr.patch)
+sha256sums=('3a9354febd35eb4c2dbf623f37ee25e06d6c45d77cdf59ac18245e136cdaeb83'
             '0e5e93f84673c2d17a1bf7a6b256cfa54ef89a086a828df19bc054c12776d821'
             'ee1c59bafc5e5441e99fa4c58108a3e18048e60672f34de865c8a5a976094dba'
             '17c442c933d764175e4ce1de50a80c0c2ddd5d733caf09c3cd5e6ba697ac43f4'
-            '6946f783b6ab5981ef489bb76bc26764858719daa2a73df956f10385a55dc241'
-            '4aa2864f8d65e466ccbc28f4b9c187c24bb21390a5a5f0d49a378bb486826f84')
+            '714e4ae47bfb9a3d3d477a41ed86b3b9848610a3b3511c53d87bf4b73b1f877a'
+            '113f6a4bb229fc10195caf400b0376c2cacbd1c1be2065bd44cff17a6e935dad')
 options=(!debug
          !lto) # debug build fails
+validpgpkeys=(D0362DB01844E0433ADBBFBAC174B1018C40710E) # Vas Crabb <vas@vastheman.com>
 
 prepare() {
   cd mame
@@ -66,24 +66,19 @@ prepare() {
 # Use bundled asio, 1.34 is too new
   export CXXFLAGS+=" -I$PWD/3rdparty/asio/include"
 
-# Fixes MAME deadlocks with controller disconnects
-# See https://github.com/mamedev/mame/issues/12825
-  git cherry-pick -n 59363d3d3f3fe9c1fe8f53ed4b3ca79f8fb6065d
+# Fix build with LUA 5.5
+  patch -p1 -i ../lua-5.5.patch
 
-  patch -Np1 -i ${srcdir}/fix-922619.patch
-  patch -Np1 -i ${srcdir}/python3.patch
+# Fix constexpr errors during build on powerpc*
+  patch -p1 -i ../constexpr.patch
 }
 
 build() {
   cd mame
-
-  MY_CPU=${CARCH}
-  case "${CARCH}" in
-    powerpc*) MY_CPU=ppc ;;
-    riscv64) ARCHOPTS='-fPIC' ;;
-  esac
-
   export CXXFLAGS+="  -Wp,-U_GLIBCXX_ASSERTIONS" # FS#73202
+
+  export CXXFLAGS+=" -std=c++17"
+
   make \
     -j10 \
     VERBOSE=1 \
@@ -91,9 +86,8 @@ build() {
     OPTIMIZE=2 \
     TOOLS=1 \
     QT_HOME=/usr/lib/qt6 \
-    ARCHOPTS="-flifetime-dse=1 ${ARCHOPTS}" \
-    USE_WAYLAND=1 \
-    MY_CPU=${MY_CPU}
+    ARCHOPTS=-flifetime-dse=1 \
+    USE_WAYLAND=1
 }
 
 package_mame() {
@@ -117,7 +111,6 @@ package_mame() {
            sdl2_ttf
            sh
            sqlite
-           wayland
            zlib
            zstd)
   conflicts=(sdlmame)
