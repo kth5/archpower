@@ -1,0 +1,54 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+# Maintainer: Balló György <ballogyor+arch at gmail dot com>
+
+pkgname=blueprint-compiler
+pkgver=0.18.0
+pkgrel=2
+pkgdesc="Markup language and compiler for GTK 4 user interfaces"
+url="https://gnome.pages.gitlab.gnome.org/blueprint-compiler/"
+arch=(any)
+license=(LGPL-3.0-or-later)
+depends=(
+  libgirepository
+  python
+  python-gobject
+)
+makedepends=(
+  git
+  meson
+  python-sphinx-furo
+)
+checkdepends=(
+  libadwaita
+  xorg-server-xvfb
+)
+source=("git+https://gitlab.gnome.org/GNOME/blueprint-compiler.git#tag=v$pkgver")
+b2sums=('fb981b48a3f7cc14a72ed6f744fd11364ecf69715e88b2fd50248fac8dc42bf1351be8b109c2ccc8a269367853e9f69838852ebddfdd44dfd91be8c1c3de595b')
+
+build() {
+  local meson_options=(
+    -D docs=true
+  )
+
+  arch-meson $pkgname build "${meson_options[@]}"
+  meson compile -C build
+  meson compile -C build docs
+}
+
+check() {
+  dbus-run-session xvfb-run \
+    -s '-screen 0 1920x1080x24 -nolisten local' \
+    meson test -C build --print-errorlogs --no-rebuild
+}
+
+package() {
+  meson install -C build --destdir "$pkgdir" --no-rebuild
+
+  local docdir="$pkgdir/usr/share/doc/$pkgname"
+  mkdir -p "$docdir"
+  cp -a build/docs/en -t "$docdir"
+  rm -r "$docdir/en/.doctrees"
+}
+
+# vim:set sw=2 sts=-1 et:
