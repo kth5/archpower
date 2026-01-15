@@ -1,6 +1,6 @@
-diff -ruN mkinitcpio-39.2.orig/functions mkinitcpio-39.2/functions
---- mkinitcpio-39.2.orig/functions	2025-09-03 22:59:16.263420361 +0200
-+++ mkinitcpio-39.2/functions	2025-09-03 22:59:23.385388711 +0200
+diff -ruN mkinitcpio-40.orig/functions mkinitcpio-40/functions
+--- mkinitcpio-40.orig/functions	2026-01-15 12:52:02.597263028 +0100
++++ mkinitcpio-40/functions	2026-01-15 12:52:16.749954348 +0100
 @@ -161,6 +161,14 @@
      printf '%s' "$kver"
  }
@@ -38,18 +38,18 @@ diff -ruN mkinitcpio-39.2.orig/functions mkinitcpio-39.2/functions
  
      [[ "$kver" =~ $re ]] || return 1
  
-@@ -1169,7 +1183,7 @@
+@@ -1177,7 +1191,7 @@
          ln -s "../run"  "$root/var/run"
  
          case "$arch" in
--            x86_64)
-+            riscv64|ppc64*|x86_64)
+-            x86_64|loongarch64)
++            x86_64|loongarch64|ppc64*)
                  ln -s "lib"     "$root/usr/lib64"
                  ln -s "usr/lib" "$root/lib64"
                  ;;
-diff -ruN mkinitcpio-39.2.orig/init_functions mkinitcpio-39.2/init_functions
---- mkinitcpio-39.2.orig/init_functions	2025-09-03 22:59:16.258327649 +0200
-+++ mkinitcpio-39.2/init_functions	2025-09-03 23:00:01.352247701 +0200
+diff -ruN mkinitcpio-40.orig/init_functions mkinitcpio-40/init_functions
+--- mkinitcpio-40.orig/init_functions	2026-01-15 12:52:02.598059412 +0100
++++ mkinitcpio-40/init_functions	2026-01-15 12:52:16.752942483 +0100
 @@ -35,6 +35,10 @@
      # tenths of a second
      sleepinterval=1
@@ -61,9 +61,9 @@ diff -ruN mkinitcpio-39.2.orig/init_functions mkinitcpio-39.2/init_functions
      [ -b "$device" ] && return 0
  
      # assigned in /init
-diff -ruN mkinitcpio-39.2.orig/install/fsck mkinitcpio-39.2/install/fsck
---- mkinitcpio-39.2.orig/install/fsck	2025-09-03 22:59:16.260275128 +0200
-+++ mkinitcpio-39.2/install/fsck	2025-09-03 22:59:23.385974625 +0200
+diff -ruN mkinitcpio-40.orig/install/fsck mkinitcpio-40/install/fsck
+--- mkinitcpio-40.orig/install/fsck	2026-01-15 12:52:02.598561383 +0100
++++ mkinitcpio-40/install/fsck	2026-01-15 12:52:16.753454408 +0100
 @@ -15,6 +15,10 @@
                      add_file /etc/e2fsck.conf
                  fi
@@ -75,26 +75,45 @@ diff -ruN mkinitcpio-39.2.orig/install/fsck mkinitcpio-39.2/install/fsck
              xfs)
                  add_binary fsck.xfs
                  add_binary xfs_repair
-diff -ruN mkinitcpio-39.2.orig/install/kms mkinitcpio-39.2/install/kms
---- mkinitcpio-39.2.orig/install/kms	2025-09-03 22:59:16.258485165 +0200
-+++ mkinitcpio-39.2/install/kms	2025-09-03 22:59:23.386243970 +0200
-@@ -5,8 +5,10 @@
+diff -ruN mkinitcpio-40.orig/install/kms mkinitcpio-40/install/kms
+--- mkinitcpio-40.orig/install/kms	2026-01-15 12:52:02.598983666 +0100
++++ mkinitcpio-40/install/kms	2026-01-15 12:52:16.753892177 +0100
+@@ -7,10 +7,12 @@
      # AGP and DRM modules for GPUs
      map add_checked_modules '/drivers/char/agp/' '/drivers/gpu/drm/'
  
 -    # modules that implement the privacy screen interface
--    add_checked_modules_from_symbol 'drm_privacy_screen_register' '=drivers/platform'
+-    IFS=.- read -r major minor _ <<<"$KERNELVERSION"
+-    if (( major > 5 || (major == 5 && minor >= 17) )); then
+-        add_checked_modules_from_symbol 'drm_privacy_screen_register' '=drivers/platform'
 +    # modules that implement the privacy screen interface on x86_64
 +    if [ "$(uname -m)" == 'x86_64' ]; then
-+      add_checked_modules_from_symbol 'drm_privacy_screen_register' '=drivers/platform'
-+    fi
++        IFS=.- read -r major minor _ <<<"$KERNELVERSION"
++        if (( major > 5 || (major == 5 && minor >= 17) )); then
++            add_checked_modules_from_symbol 'drm_privacy_screen_register' '=drivers/platform'
++        fi
+     fi
  }
  
- help() {
-diff -ruN mkinitcpio-39.2.orig/mkinitcpio mkinitcpio-39.2/mkinitcpio
---- mkinitcpio-39.2.orig/mkinitcpio	2025-09-03 22:59:16.260337095 +0200
-+++ mkinitcpio-39.2/mkinitcpio	2025-09-03 22:59:23.386624484 +0200
-@@ -135,7 +135,7 @@
+diff -ruN mkinitcpio-40.orig/meson.build mkinitcpio-40/meson.build
+--- mkinitcpio-40.orig/meson.build	2025-11-04 22:34:36.424376700 +0100
++++ mkinitcpio-40/meson.build	2026-01-15 12:54:13.101482771 +0100
+@@ -33,9 +33,9 @@
+ vconsole_conf = get_option('vconsole_conf')
+ want_systemd_hooks = get_option('systemd_hooks')
+ 
+-hooks = 'base udev autodetect microcode modconf kms keyboard keymap consolefont block filesystems fsck'
++hooks = 'base udev autodetect modconf kms keyboard keymap consolefont block filesystems fsck'
+ if want_systemd_hooks
+-    hooks = 'base systemd autodetect microcode modconf kms keyboard keymap sd-vconsole block filesystems fsck'
++    hooks = 'base systemd autodetect modconf kms keyboard keymap sd-vconsole block filesystems fsck'
+ endif
+ 
+ conf_data = configuration_data({
+diff -ruN mkinitcpio-40.orig/mkinitcpio mkinitcpio-40/mkinitcpio
+--- mkinitcpio-40.orig/mkinitcpio	2026-01-15 12:52:02.599520893 +0100
++++ mkinitcpio-40/mkinitcpio	2026-01-15 12:52:16.754507789 +0100
+@@ -146,7 +146,7 @@
      error "invalid kernel specified: '%s'" "$1"
  
      arch="$(uname -m)"
@@ -103,21 +122,9 @@ diff -ruN mkinitcpio-39.2.orig/mkinitcpio mkinitcpio-39.2/mkinitcpio
          error "kernel version extraction from image not supported for '%s' architecture" "$arch"
          error "there's a chance the generic version extractor may work with a valid uncompressed kernel image"
      fi
-diff -ruN mkinitcpio-39.2.orig/mkinitcpio.conf mkinitcpio-39.2/mkinitcpio.conf
---- mkinitcpio-39.2.orig/mkinitcpio.conf	2025-09-03 22:59:16.260414415 +0200
-+++ mkinitcpio-39.2/mkinitcpio.conf	2025-09-03 22:59:23.387045283 +0200
-@@ -52,7 +52,7 @@
- #
- ##   NOTE: If you have /usr on a separate partition, you MUST include the
- #    usr and fsck hooks.
--HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block filesystems fsck)
-+HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesystems fsck)
- 
- # COMPRESSION
- # Use this to compress the initramfs image. By default, zstd compression
-diff -ruN mkinitcpio-39.2.orig/test/cases/zsh-completion.bats mkinitcpio-39.2/test/cases/zsh-completion.bats
---- mkinitcpio-39.2.orig/test/cases/zsh-completion.bats	2025-09-03 22:59:16.262577678 +0200
-+++ mkinitcpio-39.2/test/cases/zsh-completion.bats	2025-09-03 22:59:23.387320676 +0200
+diff -ruN mkinitcpio-40.orig/test/cases/zsh-completion.bats mkinitcpio-40/test/cases/zsh-completion.bats
+--- mkinitcpio-40.orig/test/cases/zsh-completion.bats	2026-01-15 12:52:02.600155103 +0100
++++ mkinitcpio-40/test/cases/zsh-completion.bats	2026-01-15 12:52:16.755155492 +0100
 @@ -13,6 +13,9 @@
  }
  
@@ -126,5 +133,5 @@ diff -ruN mkinitcpio-39.2.orig/test/cases/zsh-completion.bats mkinitcpio-39.2/te
 +      skip "$(uname -m) unsupported"
 +    fi
      local kernel_ver tmp_knl
-     kernel_ver="6.0.9-arch1-1 #1 SMP PREEMPT_DYNAMIC Wed, 16 Nov 2022 17:01:17 +0000 x86_64 GNU/Linux"
-     tmp_knl=$(__gen_test_kernel "$kernel_ver")
+     local arch
+     arch="$(uname -m)"
