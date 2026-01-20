@@ -1,59 +1,59 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Balló György <ballogyor+arch at gmail dot com>
 # Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 # Contributor: Angel Velasquez <angvp@archlinux.org>
 # Contributor: Geoffroy Carrier <geoffroy.carrier@koon.fr>
 
-pkgbase=lxtask
-pkgname=(lxtask lxtask-gtk3)
+pkgname=lxtask
 pkgver=0.1.12
-pkgrel=1
+pkgrel=2
 pkgdesc='Task manager of the LXDE Desktop'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-license=('GPL2')
-url='https://lxde.org/'
-depends=('gtk2' 'gtk3')
-makedepends=('git' 'intltool')
-source=(git+https://github.com/lxde/lxtask.git#tag=${pkgver})
-sha256sums=('43f8cc6619407111b430ade797a03fcae73b47455feeb5c5388b122814d62b15')
+url='https://github.com/lxde/lxtask'
+license=(GPL-2.0-or-later)
+groups=(lxde)
+depends=(
+  glib2
+  glibc
+  gtk3
+)
+makedepends=(
+  git
+  intltool
+)
+conflicts=(lxtask-gtk3)
+replaces=(lxtask-gtk3)
+source=(
+  "git+https://github.com/lxde/lxtask.git#tag=$pkgver"
+  lxtask.appdata.xml
+  lxtask-transient-dialog.patch
+)
+b2sums=(
+  00fd38d16feb818c2a3c1356b3984882e425821aeff4a7f75caa04aeec5052d1f494536400fce307061642129c65487ad8846e5af546c67d368b863190c331e5
+  d52df1095650dd326fe794d0c08461c1b4c9c3bf2a31ea7f737596423011d90d12d7f613882a401534d07ed29af02578ae8583813cf7da0b1bc94f8ad45c3879
+  7e61be192df34fb12b3117e2e99562c472e2cdf0e594b4db9bc4dcf3703eacd5740353c4fc8e62943b75097c227bc527b390eed25376e14071fdc3e2aa476225
+)
 
 prepare() {
-  cd $pkgbase
-  autoreconf -vif
+  cd $pkgname
+
+  # https://github.com/lxde/lxtask/pull/9
+  git apply -3 ../lxtask-transient-dialog.patch
+
+  autoreconf -fi
 }
 
 build() {
-  # GTK+ 2 version
-  [ -d gtk2 ] || cp -r $pkgbase gtk2
-  cd gtk2
-  ./configure --sysconfdir=/etc --prefix=/usr
-  make
-
-  cd "$srcdir"
-  # GTK+ 3 version
-  [ -d gtk3 ] || cp -r $pkgbase gtk3
-  cd gtk3
-  ./configure --sysconfdir=/etc --prefix=/usr --enable-gtk3
+  cd $pkgname
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --enable-gtk3
   make
 }
 
-package_lxtask() {
-  groups=('lxde')
-  depends=('gtk2')
-
-  cd gtk2
+package() {
+  cd $pkgname
   make DESTDIR="$pkgdir" install
-}
-
-package_lxtask-gtk3() {
-  groups=('lxde-gtk3')
-  pkgdesc+=' (GTK+ 3 version)'
-  depends=('gtk3')
-  conflicts=('lxtask')
-
-  cd gtk3
-  make DESTDIR="$pkgdir" install
-
-  # Ignore package by AppStream to avoid duplicated IDs
-  echo 'X-AppStream-Ignore=true' >> "$pkgdir/usr/share/applications/$pkgbase.desktop"
+  install -Dm644 ../$pkgname.appdata.xml "$pkgdir/usr/share/metainfo/$pkgname.appdata.xml"
 }

@@ -1,0 +1,112 @@
+From c98807faddb6377b7939a889408ccc2c158fa50f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ball=C3=B3=20Gy=C3=B6rgy?= <ballogyor@gmail.com>
+Date: Wed, 15 Oct 2025 11:37:28 +0200
+Subject: [PATCH] Make dialogs transient for the main window
+
+This ensures that the about and preferences dialogs are attached to it.
+---
+ src/interface.c | 17 +++++++++--------
+ src/interface.h |  4 ++--
+ 2 files changed, 11 insertions(+), 10 deletions(-)
+
+diff --git a/src/interface.c b/src/interface.c
+index 296917d..609d01f 100644
+--- a/src/interface.c
++++ b/src/interface.c
+@@ -53,7 +53,7 @@ gint column_width[N_COLS];
+ #define GLADE_HOOKUP_OBJECT_NO_REF(component,widget,name) \
+   g_object_set_data (G_OBJECT (component), name, widget)
+ 
+-void show_preferences(void);
++void show_preferences(GtkWidget *item, gpointer window);
+ extern gint refresh_interval;
+ extern guint rID;
+ GtkWidget *refresh_spin;
+@@ -110,7 +110,7 @@ GtkWidget* create_main_window (void)
+ 	item = gtk_menu_item_new_with_mnemonic( _("_View") );
+ 	gtk_menu_shell_append( (GtkMenuShell*)menubar, item );
+ 
+-	menu = create_mainmenu();
++	menu = create_mainmenu(window);
+ 	gtk_menu_item_set_submenu(GTK_MENU_ITEM (item), menu );
+ 
+ 	item = gtk_menu_item_new_with_mnemonic( _("_Help") );
+@@ -121,7 +121,7 @@ GtkWidget* create_main_window (void)
+     item= gtk_image_menu_item_new_from_stock ("gtk-about", NULL);
+     gtk_widget_show (item);
+     gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+-    g_signal_connect ((gpointer) item, "activate", G_CALLBACK (show_about_dialog), NULL);
++    g_signal_connect ((gpointer) item, "activate", G_CALLBACK (show_about_dialog), window);
+ 
+ 	gtk_widget_show_all( menubar );
+ 
+@@ -383,7 +383,7 @@ GtkWidget *create_prio_submenu(void)
+     return prio_submenu;
+ }
+ 
+-GtkWidget* create_mainmenu (void)
++GtkWidget* create_mainmenu (GtkWidget *window)
+ {
+     GtkWidget *mainmenu;
+ //    GtkWidget *info1;
+@@ -431,7 +431,7 @@ GtkWidget* create_mainmenu (void)
+     gtk_menu_shell_append(GTK_MENU_SHELL(mainmenu), separator1);
+ 
+     preferences1 = gtk_image_menu_item_new_from_stock(GTK_STOCK_PREFERENCES, NULL);
+-    g_signal_connect(G_OBJECT (preferences1), "activate", G_CALLBACK (show_preferences), NULL);
++    g_signal_connect(G_OBJECT (preferences1), "activate", G_CALLBACK (show_preferences), window);
+     gtk_widget_show(preferences1);
+     gtk_menu_shell_append(GTK_MENU_SHELL(mainmenu), preferences1);
+ 
+@@ -446,7 +446,7 @@ GtkWidget* create_mainmenu (void)
+     return mainmenu;
+ }
+ 
+-void show_about_dialog(void)
++void show_about_dialog(GtkWidget *item, gpointer window)
+ {
+     GtkWidget * about_dlg;
+     const gchar *authors[] =
+@@ -479,7 +479,7 @@ void show_about_dialog(void)
+     gtk_about_dialog_set_website ( (GtkAboutDialog*)about_dlg, "http://lxde.org/" );
+     gtk_about_dialog_set_authors ( (GtkAboutDialog*)about_dlg, authors );
+     gtk_about_dialog_set_translator_credits ( (GtkAboutDialog*)about_dlg, translators );
+-    /*gtk_window_set_transient_for( (GtkWindow*) about_dlg, GTK_WINDOW( this ) );*/
++    gtk_window_set_transient_for(GTK_WINDOW (about_dlg), GTK_WINDOW (window));
+ 
+     gtk_dialog_run( ( GtkDialog*)about_dlg );
+     gtk_widget_destroy( about_dlg );
+@@ -707,7 +707,7 @@ void apply_prefs()
+ }
+ 
+ 
+-void show_preferences(void)
++void show_preferences(GtkWidget *item, gpointer window)
+ {
+     GtkWidget *dlg;
+     GtkWidget *c_area;
+@@ -724,6 +724,7 @@ void show_preferences(void)
+     c_area = GTK_DIALOG(dlg)->vbox;
+ #endif
+ 
++    gtk_window_set_transient_for(GTK_WINDOW (dlg), GTK_WINDOW (window));
+     gtk_box_pack_start(GTK_BOX (c_area), notebook, TRUE, TRUE, 0);
+     gtk_notebook_append_page(GTK_NOTEBOOK (notebook), general_box, gtk_label_new(_("General")));
+     gtk_box_pack_start(GTK_BOX (refresh_box), gtk_label_new(_("Refresh rate (seconds):")), TRUE, TRUE, 0);
+diff --git a/src/interface.h b/src/interface.h
+index aca2bc4..0eb65ec 100644
+--- a/src/interface.h
++++ b/src/interface.h
+@@ -69,10 +69,10 @@ void create_list_store(void);
+ 
+ GtkWidget* create_main_window (void);
+ void create_taskpopup (GtkAccelGroup *);
+-GtkWidget* create_mainmenu (void);
++GtkWidget* create_mainmenu (GtkWidget *window);
+ GtkWidget *create_prio_submenu(void);
+ 
+-void show_about_dialog(void);
++void show_about_dialog(GtkWidget *item, gpointer window);
+ 
+ void fill_list_item(guint i, GtkTreeIter *iter);
+ void add_new_list_item(guint i);
