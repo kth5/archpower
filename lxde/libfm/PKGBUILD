@@ -6,63 +6,68 @@
 # Contributor: Juergen Hoetzel <juergen@archlinux.org>
 
 pkgbase=libfm
-pkgname=(libfm libfm-extra libfm-gtk2 libfm-gtk3)
+pkgname=(
+  libfm
+  libfm-extra
+  libfm-gtk3
+)
 pkgver=1.4.0
-pkgrel=1
+pkgrel=2
 pkgdesc='Library for file management'
-url='https://lxde.org/'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-license=('GPL')
-depends=('gtk2' 'gtk3' 'libexif' 'menu-cache')
-makedepends=('intltool' 'gtk-doc' 'vala' 'glib2-devel')
-source=(https://github.com/lxde/libfm/archive/$pkgver/$pkgname-$pkgver.tar.gz)
-sha256sums=('7d7b616411992389a4b7f35796109d605f30bc2ceab84d4081d1665254ebbf82')
+url='https://github.com/lxde/libfm'
+license=('LGPL-2.1-or-later OR GPL-2.0-or-later')
+depends=(
+  at-spi2-core
+  cairo
+  gdk-pixbuf2
+  glib2
+  glibc
+  gtk3
+  libexif
+  menu-cache
+  pango
+)
+makedepends=(
+  git
+  glib2-devel
+  gtk-doc
+  intltool
+  vala
+)
+source=("git+https://github.com/lxde/libfm.git#tag=$pkgver")
+b2sums=(199c769ea44f8a8ded33a53b358e1fb3462d5545d05919957eb345311ef5e1f2f3aba097b8a04e2d04ba800eccfeb917b6b066b8c0de1860e4fa02b99b7e84da)
 
 prepare() {
-  cd $pkgbase-$pkgver
-  # Update xarchiver option
-  # https://github.com/lxde/libfm/issues/35
-  sed -i 's/create=xarchiver --add-to %F/create=xarchiver --compress %F/' data/archivers.list
-
+  cd $pkgbase
   autoreconf -fi
 }
 
 build() {
-  # GTK+ 2 version
-  [ -d gtk2 ] || cp -r $pkgbase-$pkgver gtk2
-  cd gtk2
-  ./configure --prefix=/usr \
+  cd $pkgbase
+  ./configure \
+    --prefix=/usr \
     --sysconfdir=/etc \
-    --with-gnu-ld \
-    --enable-gtk-doc
-
-  #https://bugzilla.gnome.org/show_bug.cgi?id=656231
-  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-
-  make
-
-  cd "$srcdir"
-  # GTK+ 3 version
-  [ -d gtk3 ] || cp -r $pkgbase-$pkgver gtk3
-  cd gtk3
-  ./configure --prefix=/usr \
-    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --enable-gtk-doc \
     --with-gnu-ld \
     --with-gtk=3
-
-  #https://bugzilla.gnome.org/show_bug.cgi?id=656231
-  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-
   make
 }
 
 package_libfm() {
-  depends=('libexif' "libfm-extra=$pkgver" 'menu-cache')
+  depends=(
+    glib2
+    glibc
+    libexif
+    "libfm-extra=$pkgver"
+    menu-cache
+  )
   
-  cd gtk2
+  cd $pkgname
   make DESTDIR="$pkgdir" install
 
-  # Temporary fix to FS#32361
+  # Fix for FS#32361
   rm -rf "$pkgdir"/usr/include/libfm
   mv "$pkgdir"/usr/include/libfm-1.0/ "$pkgdir"/usr/include/libfm
 
@@ -74,21 +79,24 @@ package_libfm() {
      "$pkgdir"/usr/lib/pkgconfig/libfm-extra.pc \
      "$srcdir/libfm-extra/"
 
-  # Split libfm-gtk2
-  [[ -d "$srcdir/libfm-gtk2" ]] && rm -r "$srcdir/libfm-gtk2/"
-  mkdir "$srcdir"/libfm-gtk2
+  # Split libfm-gtk3
+  [[ -d "$srcdir/libfm-gtk3" ]] && rm -r "$srcdir/libfm-gtk3/"
+  mkdir "$srcdir"/libfm-gtk3
   mv "$pkgdir/usr/bin" \
-     "$pkgdir"/usr/lib/libfm-gtk.* \
+     "$pkgdir"/usr/lib/libfm-gtk3.* \
      "$pkgdir"/usr/lib/libfm/modules/gtk-* \
-     "$pkgdir/usr/lib/pkgconfig/libfm-gtk.pc" \
+     "$pkgdir/usr/lib/pkgconfig/libfm-gtk3.pc" \
      "$pkgdir/usr/share/applications" \
      "$pkgdir/usr/share/man" \
-     "$srcdir/libfm-gtk2/"
+     "$srcdir/libfm-gtk3/"
 }
 
 package_libfm-extra() {
   pkgdesc="Extra library for file management" 
-  depends=('glib2')
+  depends=(
+    glib2
+    glibc
+  )
 
   cd "$srcdir"/libfm-extra
   mkdir -p "$pkgdir"/usr/{include/libfm,lib/pkgconfig}
@@ -97,37 +105,30 @@ package_libfm-extra() {
   mv libfm-extra.pc "$pkgdir/usr/lib/pkgconfig"
 }
 
-package_libfm-gtk2() {
-  pkgdesc='GTK+ 2 library for file management'
-  depends=('gtk2' 'menu-cache' "libfm=$pkgver")
-  replaces=('lxshortcut')
-  provides=('lxshortcut')
-  conflicts=('lxshortcut')
-
-  cd "$srcdir"/libfm-gtk2
-  mkdir -p "$pkgdir"/usr/{lib/{libfm/modules,pkgconfig},share}
-  mv bin "$pkgdir/usr"
-  mv libfm-gtk.so* "$pkgdir"/usr/lib
-  mv gtk-* "$pkgdir"/usr/lib/libfm/modules
-  mv libfm-gtk.pc "$pkgdir/usr/lib/pkgconfig"
-  mv applications "$pkgdir/usr/share"
-  mv man "$pkgdir/usr/share"
-}
-
 package_libfm-gtk3() {
-  pkgdesc='GTK+ 3 library for file management'
-  depends=('gtk3' 'menu-cache' "libfm=$pkgver")
-  conflicts=('libfm-gtk2' 'lxshortcut')
-
-  cd gtk3
-  make DESTDIR="$srcdir"/libfm-gtk3 install
+  pkgdesc='GTK library for file management'
+  depends=(
+    at-spi2-core
+    cairo
+    gdk-pixbuf2
+    glib2
+    glibc
+    gtk3
+    "libfm=$pkgver"
+    menu-cache
+    pango
+  )
+  conflicts=(
+    libfm-gtk2
+    lxshortcut
+  )
 
   cd "$srcdir"/libfm-gtk3
   mkdir -p "$pkgdir"/usr/{lib/{libfm/modules,pkgconfig},share}
-  mv usr/bin "$pkgdir/usr"
-  mv usr/lib/libfm-gtk3.so* "$pkgdir"/usr/lib
-  mv usr/lib/libfm/modules/gtk-* "$pkgdir"/usr/lib/libfm/modules
-  mv usr/lib/pkgconfig/libfm-gtk3.pc "$pkgdir/usr/lib/pkgconfig"
-  mv usr/share/applications "$pkgdir/usr/share"
-  mv usr/share/man "$pkgdir/usr/share"
+  mv bin "$pkgdir/usr"
+  mv libfm-gtk3.so* "$pkgdir"/usr/lib
+  mv gtk-* "$pkgdir"/usr/lib/libfm/modules
+  mv libfm-gtk3.pc "$pkgdir/usr/lib/pkgconfig"
+  mv applications "$pkgdir/usr/share"
+  mv man "$pkgdir/usr/share"
 }
