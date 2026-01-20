@@ -3,56 +3,60 @@
 # Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
 # Contributor: Geoffroy Carrier <geoffroy.carrier@koon.fr>
 
-pkgbase=lxrandr
-pkgname=(lxrandr lxrandr-gtk3)
+pkgname=lxrandr
 pkgver=0.3.3
-pkgrel=1
+pkgrel=2
 pkgdesc="Monitor configuration tool (part of LXDE)"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-license=('GPL2')
-url="https://lxde.org/"
-depends=('gtk2' 'gtk3' 'xorg-xrandr')
-makedepends=('git' 'intltool')
-source=("git+https://github.com/lxde/lxrandr.git#tag=${pkgver}")
-sha256sums=('86647b70c29fcb4aa6cded36529aced6f0cf4f2bb2d89c9b19e2b61948b1220f')
+url='https://github.com/lxde/lxrandr'
+license=(GPL-2.0-or-later)
+groups=(lxde)
+depends=(
+  glib2
+  glibc
+  gtk3
+  xorg-xrandr
+)
+makedepends=(
+  git
+  intltool
+)
+conflicts=(lxrandr-gtk3)
+replaces=(lxrandr-gtk3)
+source=(
+  "git+https://github.com/lxde/lxrandr.git#tag=$pkgver"
+  lxrandr-notshowin.patch
+  lxrandr-x11-only.patch
+)
+b2sums=(
+  2a38a2c41f1e45e6bd0cee2e648c477222ec853a091ff410a358788440fa4ea4efe3fafa08aefc9e78e19dc725c1452694b18deb6704b04b05ace82f000c4524
+  3cdd9ad9503892f27bdfd8a7eff39617b1880b5dd57d66e3d9e831104388506789d6273658d629de8a6d09bd6d6aa83b8211ca4f52c1de1884df55d985e604ac
+  0b4e6e7c0960ce5b258c0c84372803da1e81f53edc6986d33d1013aabcf687d5f3f105ac0f1f9a6675ef9eb58995c9212ffe0ba3ae74d6062413bad3a2e1d39b
+)
 
 prepare() {
-  cd $pkgbase
-  autoreconf -fiv
+  cd $pkgname
+
+  # https://github.com/lxde/lxrandr/pull/7
+  git apply -3 ../lxrandr-notshowin.patch
+
+  # https://github.com/lxde/lxrandr/pull/8
+  git apply -3 ../lxrandr-x11-only.patch
+
+  autoreconf -fi
 }
 
 build() {
-  # GTK+ 2 version
-  [ -d gtk2 ] || cp -r $pkgbase gtk2
-  cd gtk2
-  ./configure --sysconfdir=/etc --prefix=/usr
-  make
-
-  cd "$srcdir"
-  # GTK+ 3 version
-  [ -d gtk3 ] || cp -r $pkgbase gtk3
-  cd gtk3
-  ./configure --sysconfdir=/etc --prefix=/usr --enable-gtk3
+  cd $pkgname
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --enable-gtk3
   make
 }
 
-package_lxrandr() {
-  groups=('lxde')
-  depends=('gtk2' 'xorg-xrandr')
-
-  cd gtk2
+package() {
+  cd $pkgname
   make DESTDIR="$pkgdir" install
-}
-
-package_lxrandr-gtk3() {
-  groups=('lxde-gtk3')
-  pkgdesc+=' (GTK+ 3 version)'
-  depends=('gtk3' 'xorg-xrandr')
-  conflicts=('lxrandr')
-
-  cd gtk3
-  make DESTDIR="$pkgdir" install
-
-  # Ignore package by AppStream to avoid duplicated IDs
-  echo 'X-AppStream-Ignore=true' >> "$pkgdir/usr/share/applications/$pkgbase.desktop"
 }
