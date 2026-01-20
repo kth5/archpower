@@ -6,31 +6,66 @@
 
 pkgname=lxterminal
 pkgver=0.4.1
-pkgrel=1
-pkgdesc="VTE-based terminal emulator (part of LXDE)"
+pkgrel=2
+pkgdesc='VTE-based terminal emulator (part of LXDE)'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-url="https://lxde.org/"
-license=('GPL2')
-groups=('lxde' 'lxde-gtk3')
-depends=('vte3')
-makedepends=('git' 'intltool')
-conflicts=('lxterminal-gtk3')
-replaces=('lxterminal-gtk3')
-source=(git+https://github.com/lxde/lxterminal.git#tag=${pkgver})
-sha256sums=('1261b4134b9a83b512008bdd778d241a4db9b731347c78116b7315b5581f0872')
+url='https://github.com/lxde/lxterminal'
+license=(GPL-2.0-or-later)
+groups=(lxde)
+depends=(
+  gdk-pixbuf2
+  glib2
+  glibc
+  gtk3
+  hicolor-icon-theme
+  libx11
+  pango
+  vte3
+)
+makedepends=(
+  git
+  intltool
+)
+conflicts=(lxterminal-gtk3)
+replaces=(lxterminal-gtk3)
+source=(
+  "git+https://github.com/lxde/lxterminal.git#tag=$pkgver"
+  lxterminal.appdata.xml
+  lxterminal-transient-dialog.patch
+  lxterminal-fix-crash-on-close.patch
+)
+b2sums=(
+  6c44a19ef2a00593773efe7c1a7259e9a25c47de4cb7b623fd7ddeb65ce5e03bc5d09d48690155ac812dc7beb878e0ce21f986cf67ef57191f707d7dd5abcba2
+  049f5cb1d453d6d59f2e71be245432938778554c7d3dab7cfbf1ee2a8031634681b79367e7f9080fae1a26d7974bd9d6b91a49f100c6b862dc6967d1e29e62f4
+  12a0f6800cd67bc75a9ffb7bf05bc60749d16e62e52bd3947287c5ee214c7865d4fba935ae8d368917570738d56a14adc1f6f7eb85139ee7863c370dbb3e87c6
+  e0b3c2e9a236eed007d2d95a58c78d97f045914abebe40c41cfb6624183ae0c9aaeae8defa42dc4e8443d395688b03cacb3b126f06a4c11c3de4e86c582b1237
+)
 
 prepare() {
   cd $pkgname
-  autoreconf -fiv
+
+  # https://github.com/lxde/lxterminal/pull/133
+  git apply -3 ../lxterminal-transient-dialog.patch
+
+  # https://github.com/lxde/lxterminal/pull/135
+  git cherry-pick -n 3fa3a935bdacbcedccf51bea4b8b3c0a396b10ee
+  git apply -3 ../lxterminal-fix-crash-on-close.patch
+
+  autoreconf -fi
 }
 
 build() {
   cd $pkgname
-  ./configure --sysconfdir=/etc --prefix=/usr --enable-gtk3
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --enable-gtk3
   make
 }
 
 package() {
   cd $pkgname
   make DESTDIR="$pkgdir" install
+  install -Dm644 ../$pkgname.appdata.xml "$pkgdir/usr/share/metainfo/$pkgname.appdata.xml"
 }
