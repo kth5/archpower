@@ -4,60 +4,66 @@
 # Contributor: Angel Velasquez <angvp@archlinux.org>
 # Contributor: Juergen Hoetzel <juergen@archlinux.org>
 
-pkgbase=lxsession
-pkgname=(lxsession lxsession-gtk3)
+pkgname=lxsession
 pkgver=0.5.6
-pkgrel=1
+pkgrel=2
 epoch=1
 pkgdesc='Lightweight X11 session manager'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-url="https://lxde.org/"
-license=('GPL2')
-depends=('gtk2' 'gtk3' 'polkit' 'which')
-makedepends=('git' 'intltool' 'docbook-xsl' 'vala')
-conflicts=('lxpolkit')
-source=(git+https://github.com/lxde/lxsession.git#tag=${pkgver})
-sha256sums=('552d9331d30c0349b28699ec51de201b23586b209ffb5ac6e32372117dc44557')
+url='https://github.com/lxde/lxsession'
+license=(GPL-2.0-or-later)
+depends=(
+  bash
+  cairo
+  gdk-pixbuf2
+  glib2
+  glibc
+  gtk3
+  libx11
+  polkit
+)
+makedepends=(
+  git
+  intltool
+  vala
+)
+conflicts=(
+  lxpolkit
+  lxsession-gtk3
+)
+replaces=(
+  lxpolkit
+  lxsession-gtk3
+)
+groups=(lxde)
+source=("git+https://github.com/lxde/lxsession.git#tag=$pkgver")
+b2sums=(3242d2c28baf4767a028b737912bb422a5a7bdc391c8fdf85ad6c62959e135a194ee364a87f5c3381a4aaaab47eb98819d4b59bf531c352697d82bd4b4e566fa)
 
 prepare() {
-  cd $pkgbase
-  sh autogen.sh
+  cd $pkgname
+
+  # https://github.com/lxde/lxsession/pull/43
+  sed -i 's/which /command -v /' lxlock/lxlock
+
+  # https://github.com/lxde/lxsession/pull/44
+  sed -i 's/^NotShowIn=.*/OnlyShowIn=LXDE;/' data/lxpolkit.desktop.in.in
+
+  mkdir m4
+  autoreconf -fi
 }
 
 build() {
-  # GTK+ 2 version
-  [ -d gtk2 ] || cp -r $pkgbase gtk2
-  cd gtk2
-  ./configure --sysconfdir=/etc --prefix=/usr --libexecdir=/usr/lib
-  make
-
-  cd "$srcdir"
-  # GTK+ 3 version
-  [ -d gtk3 ] || cp -r $pkgbase gtk3
-  cd gtk3
-  ./configure --sysconfdir=/etc --prefix=/usr --libexecdir=/usr/lib --enable-gtk3
+  cd $pkgname
+   ./configure \
+     --prefix=/usr \
+     --sysconfdir=/etc \
+     --localstatedir=/var \
+     --libexecdir=/usr/lib \
+     --enable-gtk3
   make
 }
 
-package_lxsession() {
-  groups=('lxde')
-  depends=('gtk2' 'polkit')
-  replaces=('lxpolkit')
-
-  cd gtk2
+package() {
+  cd $pkgname
   make DESTDIR="$pkgdir" install
-}
-
-package_lxsession-gtk3() {
-  groups=('lxde-gtk3')
-  pkgdesc+=' (GTK+ 3 version)'
-  depends=('gtk3' 'polkit')
-  conflicts+=('lxsession')
-
-  cd gtk3
-  make DESTDIR="$pkgdir" install
-
-  # Ignore package by AppStream to avoid duplicated IDs
-  echo 'X-AppStream-Ignore=true' >> "$pkgdir/usr/share/applications/lxsession-default-apps.desktop"
-  echo 'X-AppStream-Ignore=true' >> "$pkgdir/usr/share/applications/lxsession-edit.desktop"
 }
