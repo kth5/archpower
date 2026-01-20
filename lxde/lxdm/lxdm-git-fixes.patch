@@ -1,0 +1,884 @@
+diff --git a/INSTALL b/INSTALL
+index 61c3983..86a1826 100644
+--- a/INSTALL
++++ b/INSTALL
+@@ -1,5 +1,6 @@
+ 1 compile and install
+ 
++./autogen.sh
+ ./configure --prefix=/usr --sysconfdir=/etc
+ make
+ make install
+diff --git a/configure.ac b/configure.ac
+index aa3291c..a9fca61 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -32,7 +32,7 @@ AM_CONDITIONAL(HAVE_PAM, [test -n "$USE_PAM" -a "x$USE_PAM" != xno ])
+ 
+ # Checks for header files.
+ AC_PATH_X
+-AC_CHECK_HEADERS([shadow.h stdlib.h string.h unistd.h utmpx.h])
++AC_CHECK_HEADERS([execinfo.h shadow.h stdlib.h string.h unistd.h utmpx.h])
+ 
+ # Checks for typedefs, structures, and compiler characteristics.
+ AC_TYPE_PID_T
+@@ -166,6 +166,16 @@ if test "x$with_systemdsystemunitdir" != xno; then
+ fi
+ AM_CONDITIONAL(HAVE_SYSTEMD, [test -n "$with_systemdsystemunitdir" -a "x$with_systemdsystemunitdir" != xno ])
+ 
++# Generate po/LINGUAS on the fly rather than relying on translators
++# to maintain it manually. This also overcome the problem that Transifex
++# cannot add a language to po/LINGUAS if a new po file is submitted.
++rm -f $srcdir/po/LINGUAS
++for po_file in `ls $srcdir/po/*.po | sort`;
++do
++    lang=`echo "$po_file" | sed "s|.*/po/\(.*\)\.po|\1|g"`
++    echo $lang >> $srcdir/po/LINGUAS
++done
++
+ GETTEXT_PACKAGE=lxdm
+ AC_SUBST(GETTEXT_PACKAGE)
+ AC_DEFINE_UNQUOTED(GETTEXT_PACKAGE,"$GETTEXT_PACKAGE", [Gettext package.])
+diff --git a/data/lxdm.conf.in b/data/lxdm.conf.in
+index d93f280..28e783a 100644
+--- a/data/lxdm.conf.in
++++ b/data/lxdm.conf.in
+@@ -45,6 +45,9 @@ lang=1
+ ## if show keyboard layout select control
+ keyboard=0
+ 
++## if set show onscreen-keyboard button and run content on click
++#onscreenkeyboard=onboard
++
+ ## the theme of greeter
+ theme=Industrial
+ 
+diff --git a/data/lxdm.glade b/data/lxdm.glade
+index 221c2a3..f218202 100644
+--- a/data/lxdm.glade
++++ b/data/lxdm.glade
+@@ -143,6 +143,19 @@
+                     <property name="position">4</property>
+                   </packing>
+                 </child>
++                <child>
++                  <object class="GtkButton" id="onscreenkeyboard">
++                    <property name="label" translatable="yes">Keyboard</property>
++                    <property name="visible">True</property>
++                    <property name="can_focus">False</property>
++                    <property name="receives_default">True</property>
++                    <property name="relief">none</property>
++                  </object>
++                  <packing>
++                    <property name="expand">False</property>
++                    <property name="position">5</property>
++                  </packing>
++                </child>
+                 <child>
+                   <object class="GtkButton" id="exit">
+                     <property name="label">gtk-quit</property>
+@@ -155,7 +168,7 @@
+                   <packing>
+                     <property name="expand">False</property>
+                     <property name="pack_type">end</property>
+-                    <property name="position">5</property>
++                    <property name="position">6</property>
+                   </packing>
+                 </child>
+               </object>
+diff --git a/data/themes/Industrial/greeter-gtk3.ui b/data/themes/Industrial/greeter-gtk3.ui
+index 2f4e631..3fff409 100644
+--- a/data/themes/Industrial/greeter-gtk3.ui
++++ b/data/themes/Industrial/greeter-gtk3.ui
+@@ -41,18 +41,24 @@
+                 <child>
+                   <object class="GtkAlignment" id="alignment2">
+                     <property name="visible">True</property>
++                    <property name="xalign">0.5</property>
+                     <property name="yalign">0.1</property>
+                     <property name="xscale">0</property>
+                     <property name="yscale">0</property>
+                     <child>
+-                      <object class="GtkHBox" id="hbox3">
++                      <object class="GtkVBox" id="vbox3">
++                      <property name="visible">True</property>
++                      <property name="orientation">vertical</property>
++                      <property name="spacing">12</property>
++                      <child>
++                        <object class="GtkHBox" id="hbox3">
+                         <property name="visible">True</property>
+                         <property name="spacing">12</property>
+                         <child>
+                           <object class="GtkLabel" id="prompt">
+                             <property name="visible">True</property>
+                             <property name="label" translatable="yes">User:</property>
+-                            <property name="yalign">0.2</property>
++                            <property name="yalign">0.5</property>
+                           </object>
+                           <packing>
+                             <property name="expand">False</property>
+@@ -66,6 +72,7 @@
+                             <property name="can_focus">False</property>
+                             <property name="hscrollbar_policy">GTK_POLICY_NEVER</property>
+                             <property name="vscrollbar_policy">GTK_POLICY_NEVER</property>
++                            <property name="min-content-height">64</property>
+                             <child>
+                               <object class="GtkIconView" id="user_list">
+                                 <property name="visible">True</property>
+@@ -91,6 +98,26 @@
+                           </packing>
+                         </child>
+                       </object>
++                      </child>
++                      <child>
++                        <object class="GtkHBox" id="hbox4">
++                        <property name="visible">True</property>
++                        <property name="spacing">12</property>
++                        <child>
++                          <object class="GtkLabel" id="info">
++                            <property name="visible">True</property>
++                            <property name="label" translatable="yes"></property>
++                            <property name="yalign">0.2</property>
++                          </object>
++                          <packing>
++                            <property name="expand">False</property>
++                            <property name="fill">False</property>
++                            <property name="position">0</property>
++                          </packing>
++                        </child>
++                        </object>
++                      </child>
++                      </object>
+                     </child>
+                   </object>
+                   <packing>
+@@ -214,6 +241,19 @@
+                     <property name="position">3</property>
+                   </packing>
+                 </child>
++                <child>
++                  <object class="GtkButton" id="onscreenkeyboard">
++                    <property name="label" translatable="yes">Keyboard</property>
++                    <property name="visible">True</property>
++                    <property name="can_focus">False</property>
++                    <property name="receives_default">True</property>
++                    <property name="relief">none</property>
++                  </object>
++                  <packing>
++                    <property name="expand">False</property>
++                    <property name="position">4</property>
++                  </packing>
++                </child>
+                 <child>
+                   <object class="GtkButton" id="exit">
+                     <property name="label">gtk-quit</property>
+@@ -226,7 +266,7 @@
+                   <packing>
+                     <property name="expand">False</property>
+                     <property name="pack_type">end</property>
+-                    <property name="position">4</property>
++                    <property name="position">5</property>
+                   </packing>
+                 </child>
+               </object>
+diff --git a/data/themes/Industrial/greeter.ui b/data/themes/Industrial/greeter.ui
+index 3413922..1d079a1 100644
+--- a/data/themes/Industrial/greeter.ui
++++ b/data/themes/Industrial/greeter.ui
+@@ -43,18 +43,24 @@
+                 <child>
+                   <object class="GtkAlignment" id="alignment2">
+                     <property name="visible">True</property>
++                    <property name="xalign">0.5</property>
+                     <property name="yalign">0.1</property>
+                     <property name="xscale">0</property>
+                     <property name="yscale">0</property>
+                     <child>
+-                      <object class="GtkHBox" id="hbox3">
++                      <object class="GtkVBox" id="vbox3">
++                      <property name="visible">True</property>
++                      <property name="orientation">vertical</property>
++                      <property name="spacing">12</property>
++                      <child>
++                        <object class="GtkHBox" id="hbox3">
+                         <property name="visible">True</property>
+                         <property name="spacing">12</property>
+                         <child>
+                           <object class="GtkLabel" id="prompt">
+                             <property name="visible">True</property>
+                             <property name="label" translatable="yes">User:</property>
+-                            <property name="yalign">0.2</property>
++                            <property name="yalign">0.5</property>
+                           </object>
+                           <packing>
+                             <property name="expand">False</property>
+@@ -93,6 +99,26 @@
+                           </packing>
+                         </child>
+                       </object>
++                      </child>
++                      <child>
++                        <object class="GtkHBox" id="hbox4">
++                        <property name="visible">True</property>
++                        <property name="spacing">12</property>
++                        <child>
++                          <object class="GtkLabel" id="info">
++                            <property name="visible">True</property>
++                            <property name="label" translatable="yes"></property>
++                            <property name="yalign">0.2</property>
++                          </object>
++                          <packing>
++                            <property name="expand">False</property>
++                            <property name="fill">False</property>
++                            <property name="position">0</property>
++                          </packing>
++                        </child>
++                        </object>
++                      </child>
++                      </object>
+                     </child>
+                   </object>
+                   <packing>
+@@ -214,6 +240,19 @@
+                     <property name="position">3</property>
+                   </packing>
+                 </child>
++                <child>
++                  <object class="GtkButton" id="onscreenkeyboard">
++                    <property name="label" translatable="yes">Keyboard</property>
++                    <property name="visible">True</property>
++                    <property name="can_focus">False</property>
++                    <property name="receives_default">True</property>
++                    <property name="relief">none</property>
++                  </object>
++                  <packing>
++                    <property name="expand">False</property>
++                    <property name="position">4</property>
++                  </packing>
++                </child>
+                 <child>
+                   <object class="GtkButton" id="exit">
+                     <property name="label">gtk-quit</property>
+@@ -226,7 +265,7 @@
+                   <packing>
+                     <property name="expand">False</property>
+                     <property name="pack_type">end</property>
+-                    <property name="position">4</property>
++                    <property name="position">5</property>
+                   </packing>
+                 </child>
+               </object>
+diff --git a/data/themes/Industrial/gtk.css b/data/themes/Industrial/gtk.css
+index 179f0d6..25b28a0 100644
+--- a/data/themes/Industrial/gtk.css
++++ b/data/themes/Industrial/gtk.css
+@@ -8,16 +8,22 @@
+ }
+ 
+ #time {
+-	font: Sans 12;
++	font: 12px Sans;
+ 	color: #ffffff;
+ }
+ 
+ #prompt {
+-	font: Sans 14;
++	font: 14px Sans;
+ 	color: #000000;
+ }
+ 
++#bottom_pane label,
+ #bottom_pane GtkLabel {
+-	font: Sans 12;
++	font: 12px Sans;
+ 	color: #9E9D9B;
+ }
++
++#info {
++        font: Sans 14;
++        font-style: italic;
++}
+diff --git a/src/greeter-gdk.c b/src/greeter-gdk.c
+index 1abbefa..68ec4a7 100644
+--- a/src/greeter-gdk.c
++++ b/src/greeter-gdk.c
+@@ -22,6 +22,7 @@
+ 
+ #define XLIB_ILLEGAL_ACCESS
+ 
++#include <gtk/gtk.h>
+ #include <gdk/gdk.h>
+ #include <gdk/gdkx.h>
+ #include <gdk/gdkkeysyms.h>
+@@ -88,12 +89,14 @@ static void on_ui_expose(void)
+ 	}
+ 	
+ 	cr=gdk_cairo_create(win);
++#if GTK_CHECK_VERSION(3,0,0)
+ 	cairo_pattern_t *pattern=gdk_window_get_background_pattern(win);
+ 	if(pattern)
+ 	{
+ 		cairo_set_source(cr,pattern);
+ 		cairo_paint(cr);
+ 	}
++#endif
+ 
+ 	gdk_cairo_set_source_color(cr, &bg);
+ 	cairo_rectangle(cr, rc.x, rc.y, rc.width, rc.height);
+@@ -307,7 +310,7 @@ void ui_prepare(void)
+         attr.wclass = GDK_INPUT_OUTPUT;
+         win = gdk_window_new(root, &attr, mask);
+         gdk_window_set_decorations(win,0);
+-        gdk_window_set_title(win,"lxdm-greter-gdk");
++        gdk_window_set_title(win,"lxdm-greeter-gdk");
+         
+         scr=gdk_screen_get_default();
+         g_signal_connect(scr, "size-changed", G_CALLBACK(on_screen_size_changed), win);
+diff --git a/src/greeter.c b/src/greeter.c
+index 10b7f3f..541197f 100644
+--- a/src/greeter.c
++++ b/src/greeter.c
+@@ -64,12 +64,14 @@ static GtkWidget* win;
+ static GtkWidget* alignment2;
+ static GtkWidget* prompt;
+ static GtkWidget* login_entry;
++static GtkWidget* info;
+ static GtkWidget* user_list_scrolled;
+ static GtkWidget* user_list;
+ 
+ static GtkWidget* sessions;
+ static GtkWidget* lang;
+ 
++static GtkWidget* onscreenkeyboard_btn;
+ static GtkWidget* exit_btn;
+ 
+ static GtkWidget* exit_menu;
+@@ -77,10 +79,14 @@ static GtkWidget *lang_menu;
+ 
+ static char* user = NULL;
+ static char* pass = NULL;
++static char* new_pass = NULL;
++static gboolean pass_expired = FALSE;
+ 
+ static char* ui_file = NULL;
+ static char *ui_nobody = NULL;
+ 
++static char* onscreenkeyboard_cmd = NULL;
++
+ static GIOChannel *greeter_io;
+ 
+ static int auto_login;
+@@ -139,6 +145,8 @@ static void switch_to_input_user(void)
+ 		pass=NULL;
+ 	}
+ 	gtk_label_set_text( GTK_LABEL(prompt), _("User:"));
++	gtk_entry_set_text(GTK_ENTRY(login_entry), "");
++	gtk_entry_set_visibility(GTK_ENTRY(login_entry), TRUE);
+ 	gtk_widget_show(prompt);
+ 	if(user_list)
+ 	{
+@@ -146,7 +154,7 @@ static void switch_to_input_user(void)
+ 		if(user_list_scrolled)
+ 			gtk_widget_show(user_list_scrolled);
+ 		else
+-			gtk_widget_hide(user_list);
++			gtk_widget_show(user_list);
+ 		gtk_widget_grab_focus(user_list);
+ 	}
+ 	else
+@@ -165,10 +173,19 @@ static void switch_to_input_passwd(void)
+ 		else
+ 			gtk_widget_hide(user_list);
+ 	}
+-	gtk_label_set_text( GTK_LABEL(prompt), _("Password:") );
++	if (pass_expired) {
++		if (!new_pass) {
++			gtk_label_set_text(GTK_LABEL(prompt), _("New password:"));
++		} else {
++			gtk_label_set_text(GTK_LABEL(prompt), _("Retype new password:"));
++		}
++	} else {
++		gtk_label_set_text( GTK_LABEL(prompt), _("Password:") );
++	}
+ 	gtk_entry_set_text(GTK_ENTRY(login_entry), "");
+ 	gtk_entry_set_visibility(GTK_ENTRY(login_entry), FALSE);
+ 	gtk_widget_show(login_entry);
++	gtk_widget_show(prompt);
+ 	gtk_widget_grab_focus(login_entry);
+ }
+ 
+@@ -187,6 +204,8 @@ static void try_login_user(const char *user)
+ 
+ static void on_entry_activate(GtkEntry* entry)
+ {
++	static int count = 0;
++
+ 	char* tmp;
+ 	if( !user )
+ 	{
+@@ -206,7 +225,6 @@ static void on_entry_activate(GtkEntry* entry)
+ 		}
+ 		if(g_key_file_get_integer(config,"base","skip_password",NULL)!=0)
+ 		{
+-			gtk_label_set_text( GTK_LABEL(prompt), "");
+ 			try_login_user(user);
+ 		}
+ 		else
+@@ -216,6 +234,53 @@ static void on_entry_activate(GtkEntry* entry)
+ 	}
+ 	else
+ 	{
++		if (pass_expired) {
++			if (!new_pass) {
++				new_pass = g_strdup(gtk_entry_get_text(entry));
++				if (strlen(new_pass) == 0) {
++					new_pass = NULL;
++					gtk_label_set_text((GtkLabel *)info, _("Empty password is not allowed."));
++				}
++				switch_to_input_passwd();
++			} else {
++				tmp = g_strdup(gtk_entry_get_text(entry));
++				if (strcmp(new_pass, tmp)) {
++					g_free(new_pass);
++					new_pass = NULL;
++					// if new passwords not match, retry for 3 times at most
++					if (++count < 3) {
++						gtk_label_set_text((GtkLabel *)info, _("Passwords do not match, please retry."));
++						switch_to_input_passwd();
++					} else {
++						count = 0;
++						pass_expired = FALSE;
++						gtk_label_set_text((GtkLabel *)info, _("Maximum number of failed update password attempts exceeded."));
++						switch_to_input_user();
++					}
++				} else if (pass && !strcmp(pass, g_base64_encode((guchar*)new_pass, strlen(new_pass) + 1))) {
++					// if new password is same as old one
++					g_free(new_pass);
++					new_pass = NULL;
++					if (++count < 3) {
++						gtk_label_set_text((GtkLabel *)info, _("New password is same as old one, password unchanged."));
++						switch_to_input_passwd();
++					} else {
++						count = 0;
++						pass_expired = FALSE;
++						switch_to_input_user();
++					}
++				} else {
++					char *session_exec=get_session_exec();
++					char *session_lang=get_session_lang();
++
++					printf("update-new-password user=%s newpass=%s session=%s lang=%s\n",
++						user, new_pass, session_exec, session_lang);
++				}
++			}
++
++			return ;
++		}
++
+ 		char *session_exec=get_session_exec();
+ 		char *session_lang=get_session_lang();
+ 		
+@@ -226,6 +291,7 @@ static void on_entry_activate(GtkEntry* entry)
+ 		printf("login user=%s pass=%s session=%s lang=%s\n",
+ 			user, pass, session_exec, session_lang);
+ 
++#if 0
+ 		/* password check failed */
+ 		g_free(user);
+ 		user = NULL;
+@@ -240,6 +306,7 @@ static void on_entry_activate(GtkEntry* entry)
+ 		gtk_label_set_text( GTK_LABEL(prompt), _("User:") );
+ 		gtk_entry_set_text(GTK_ENTRY(entry), "");
+ 		gtk_entry_set_visibility(GTK_ENTRY(entry), TRUE);
++#endif
+ 	}
+ }
+ 
+@@ -720,6 +787,15 @@ static void on_exit_clicked(GtkButton* exit_btn, gpointer user_data)
+                    0, gtk_get_current_event_time() );
+ }
+ 
++static void on_screenkeyboard_clicked(GtkButton* screenkeyboard_btn, 
++                                      gpointer user_data)
++{
++	gboolean res;
++	/* set the current xkb */
++	res=g_spawn_command_line_async(onscreenkeyboard_cmd, NULL);
++	printf("spawn onscreenkeyboard: %s %d\n", onscreenkeyboard_cmd, res);
++}
++
+ static void load_exit()
+ {
+     GtkWidget* item;
+@@ -1000,7 +1076,7 @@ static gboolean load_user_list(GtkWidget *widget)
+ 	{
+ 		if(user_list_scrolled)
+ 		{
+-			gtk_alignment_set(GTK_ALIGNMENT(alignment2), 0.5, 0.1, 0, 0.3);
++			//gtk_alignment_set(GTK_ALIGNMENT(alignment2), 0.5, 0.1, 0, 0.3);
+ 			gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(user_list_scrolled), GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
+ 		}
+ 		else
+@@ -1090,8 +1166,15 @@ static void on_screen_size_changed(GdkScreen *screen,GtkWidget *win)
+ 
+ static gint login_entry_on_key_press (GtkWidget *widget,GdkEventKey *event)
+ {
+-	if(event->keyval == GDK_Escape)
++
++	gtk_label_set_text(GTK_LABEL(info), "");
++
++	if(event->keyval == GDK_Escape) {
++		g_free(new_pass);
++		new_pass = NULL;
++		pass_expired = FALSE;
+ 		switch_to_input_user();
++	}
+ 	return FALSE;
+ }		     
+ 
+@@ -1151,11 +1234,14 @@ static void create_win()
+     login_entry = (GtkWidget*)gtk_builder_get_object(builder, "login_entry");
+     if(login_entry!=NULL)
+     {
+-		g_signal_connect_after(login_entry,"key-press-event",G_CALLBACK(login_entry_on_key_press),NULL);
++        g_signal_connect(login_entry,"key-press-event",G_CALLBACK(login_entry_on_key_press),NULL);
+ 	}
+ 
+     g_signal_connect(login_entry, "activate", G_CALLBACK(on_entry_activate), NULL);
+ 
++    info = (GtkWidget *)gtk_builder_get_object(builder, "info");
++    gtk_label_set_text(GTK_LABEL(info), "");
++
+     if( g_key_file_get_integer(config, "display", "bottom_pane", 0)==1)
+     {
+         /* hacks to let GtkEventBox paintable with gtk pixmap engine. */
+@@ -1248,6 +1334,21 @@ static void create_win()
+ 		load_exit();
+     }
+ 
++	onscreenkeyboard_btn = (GtkWidget*)gtk_builder_get_object(builder, "onscreenkeyboard");
++	onscreenkeyboard_cmd = g_key_file_get_string(config, "display", "onscreenkeyboard",NULL);
++
++    if(onscreenkeyboard_cmd && onscreenkeyboard_cmd[0])
++    {
++        gtk_widget_show(onscreenkeyboard_btn);
++	    g_signal_connect(onscreenkeyboard_btn, "clicked", G_CALLBACK(on_screenkeyboard_clicked), NULL);
++    }
++    else
++    {
++		if (onscreenkeyboard_btn != NULL) {
++			gtk_widget_hide(onscreenkeyboard_btn);
++		}
++    }
++
+ 	ui_get_geometry(window,&rc);
+ 	gtk_window_move(GTK_WINDOW(win),rc.x,rc.y);
+ 	gtk_window_set_default_size(GTK_WINDOW(win),rc.width,rc.height);
+@@ -1284,8 +1385,10 @@ static void create_win()
+ 
+ static gboolean on_lxdm_command(GIOChannel *source, GIOCondition condition, gpointer data)
+ {
++
+ 	GIOStatus ret;
+ 	char *str;
++	static int count = 0;
+ 
+ 	if( !(G_IO_IN & condition) )
+ 		return FALSE;
+@@ -1297,12 +1400,33 @@ static gboolean on_lxdm_command(GIOChannel *source, GIOCondition condition, gpoi
+ 	gtk_main_quit();
+ 	else if( !strncmp(str, "reset", 5) )
+ 	{
++		gtk_label_set_text(GTK_LABEL(info), _("Authentication failed."));
+ 		switch_to_input_user();
+ 	}
++	else if (!strncmp(str, "password-expire", 15))
++	{
++		pass_expired = TRUE;
++		gtk_label_set_text(GTK_LABEL(info), _("You are required to change your password immediately."));
++		switch_to_input_passwd();
++	}
+ 	else if( !strncmp(str, "password", 8))
+ 	{
+ 		switch_to_input_passwd();
+ 	}
++	else if (!strncmp(str, "invalid-new-password", 20))
++	{
++		g_free(new_pass);
++		new_pass = NULL;
++
++		if (count++ < 3) {
++			gtk_label_set_text(GTK_LABEL(info), _("Invalid new password. Please input new password again."));
++			switch_to_input_passwd();
++		} else {
++			count = 0;
++			pass_expired = FALSE;
++			switch_to_input_user();
++		}
++	}
+ 	g_free(str);
+ 	return TRUE;
+ }
+diff --git a/src/lxcom.c b/src/lxcom.c
+index 397d1b5..517c775 100644
+--- a/src/lxcom.c
++++ b/src/lxcom.c
+@@ -117,10 +117,15 @@ static gboolean lxcom_dispatch (GSource *source,GSourceFunc callback,gpointer us
+ 	char ctrl[/*CMSG_SPACE(sizeof(LXDM_CRED))*/1024];
+ 	struct sockaddr_un peer;
+ 	struct iovec v={buf,sizeof(buf)};
+-	struct msghdr h={&peer,sizeof(peer),&v,1,ctrl,sizeof(ctrl),0};
++	struct msghdr h={0};
+ 	struct cmsghdr *cmptr;
+ 	int ret;
+-
++	h.msg_name = &peer;
++	h.msg_namelen = sizeof(peer);
++	h.msg_iov = &v;
++	h.msg_iovlen = 1;
++	h.msg_control = ctrl;
++	h.msg_controllen = sizeof(ctrl);
+ 	while(1)
+ 	{
+ 		peer.sun_family=0;
+diff --git a/src/lxdm.c b/src/lxdm.c
+index a37f051..dca2924 100644
+--- a/src/lxdm.c
++++ b/src/lxdm.c
+@@ -49,7 +49,9 @@
+ #include <sys/ioctl.h>
+ #include <sys/stat.h>
+ 
++#ifdef HAVE_EXECINFO_H
+ #include <execinfo.h>
++#endif
+ 
+ #ifdef HAVE_UTMPX_H
+ #include <utmpx.h>
+@@ -104,6 +106,10 @@ static int old_tty=1,def_tty = 7,nr_tty=0;
+ static int def_display=0;
+ static GSList *session_list;
+ 
++#if HAVE_LIBPAM
++static const char *new_passwd = NULL;
++#endif
++
+ static void lxdm_startx(LXSession *s);
+ 
+ static int get_active_vt(void)
+@@ -488,6 +494,9 @@ static char *lxsession_xserver_command(LXSession *s)
+ 	{
+ 		arg[arc++] = g_strdup("-nolisten");
+ 		arg[arc++] = g_strdup("tcp");
++	} else {
++		arg[arc++] = g_strdup("-listen");
++		arg[arc++] = g_strdup("tcp");
+ 	}
+ 	if(!novtswitch)
+ 	{
+@@ -750,7 +759,13 @@ static char ** create_client_auth(struct passwd *pw,char **env)
+ 	if(xauth_write_file(authfile,s->display,s->mcookie)==-1)
+ 	{
+ 		g_free(authfile);
+-		authfile = g_strdup_printf("/var/run/lxdm/.Xauth%d",pw->pw_uid);
++
++		gchar *authdir = g_strdup_printf("/var/run/lxdm/%d", pw->pw_uid);
++		g_mkdir_with_parents(authdir, S_IRWXU);
++		chown(authdir, pw->pw_uid, pw->pw_gid);
++
++		authfile = g_strdup_printf("%s/.Xauthority", authdir);
++		g_free(authdir);
+ 		remove(authfile);
+ 		xauth_write_file(authfile,s->display,s->mcookie);
+ 	}
+@@ -780,6 +795,69 @@ int lxdm_auth_user(int type,char *user, char *pass, struct passwd **ppw)
+ 	return ret;
+ }
+ 
++
++#if HAVE_LIBPAM
++
++static int do_conv(int num, const struct pam_message **msg,struct pam_response **resp, void *arg)
++{
++	int result = PAM_SUCCESS;
++	int i;
++
++	*resp = (struct pam_response *) calloc(num, sizeof(struct pam_response));
++	for(i = 0; i < num; i++)
++	{
++		switch (msg[i]->msg_style) {
++			case PAM_PROMPT_ECHO_ON:
++				break;
++			case PAM_PROMPT_ECHO_OFF:
++				resp[i]->resp = strdup(new_passwd);
++				break;
++			case PAM_ERROR_MSG:
++			case PAM_TEXT_INFO:
++				break;
++			default:
++				break;
++		}
++	}
++	return result;
++}
++
++static int lxdm_change_passwd_pam(const char *service, const char *user, const char *pass)
++{
++	pam_handle_t *pamh = NULL;
++	static struct pam_conv conv = {
++		do_conv,
++		NULL
++	};
++
++	int ret = pam_start("lxdm", user, &conv, &pamh);
++	if (PAM_SUCCESS != ret) {
++		g_warning("pam_start failed.");
++		return 1;
++	}
++
++	new_passwd = pass;
++	ret = pam_chauthtok(pamh, 0);
++	if (PAM_SUCCESS != ret) {
++		g_warning("pam_chauthtok failed: %s", pam_strerror(pamh, ret));
++		return 1;
++	}
++
++	(void)pam_end(pamh, PAM_SUCCESS);
++
++	return 0;
++}
++#endif
++
++int lxdm_change_passwd(const char *user, const char *pass)
++{
++#if HAVE_LIBPAM
++	return lxdm_change_passwd_pam("lxdm", user, pass);
++#else
++	return 0;
++#endif
++}
++
+ static void close_left_fds(void)
+ {
+ 	struct dirent **list;
+@@ -956,6 +1034,11 @@ static void on_xserver_stop(void *data,int pid, int status)
+ 		s->dpy=NULL;
+ 		ui_drop();
+ 		lxdm_startx(s);
++		#ifndef DISABLE_XAUTH
++		char temp[256];
++		sprintf(temp,"/var/run/lxdm/lxdm-:%d.auth",s->display);
++		setenv("XAUTHORITY",temp,1);
++		#endif
+ 		ui_prepare();
+ 		lxsession_set_active(s);
+ 	}
+@@ -1530,6 +1613,7 @@ int lxdm_do_auto_login(void)
+ 			lxdm_do_login(pw,session,lang,option);
+ 			success=1;
+ 		}
++
+ 		g_free(user);g_free(session);g_free(lang);
+ 	}
+ 	g_free(last_lang);
+@@ -1541,6 +1625,7 @@ int lxdm_do_auto_login(void)
+ 
+ static void log_sigsegv(void)
+ {
++#ifdef HAVE_EXECINFO_H
+ 	void *array[40];
+ 	size_t size;
+ 	char **bt_strs;
+@@ -1553,6 +1638,7 @@ static void log_sigsegv(void)
+ 	    fprintf(stderr, "%s\n", bt_strs[i]);
+ 
+ 	free(bt_strs);
++#endif
+ }
+ 
+ static void sigsegv_handler(int sig)
+diff --git a/src/lxdm.h b/src/lxdm.h
+index 568573f..be3c81f 100644
+--- a/src/lxdm.h
++++ b/src/lxdm.h
+@@ -30,6 +30,7 @@ G_BEGIN_DECLS
+ extern GKeyFile *config;
+ 
+ int lxdm_auth_user(int type,char *user,char *pass,struct passwd **ppw);
++int lxdm_change_passwd(const char *user, const char *pass);
+ void lxdm_do_login(struct passwd *pw,char *session,char *lang,char *option);
+ void lxdm_do_reboot(void);
+ void lxdm_do_shutdown(void);
+@@ -41,6 +42,7 @@ enum AuthResult
+     AUTH_SUCCESS,
+     AUTH_BAD_USER,
+     AUTH_FAIL,
++    AUTH_PASSWD_EXPIRE,
+     AUTH_PRIV,
+     AUTH_ERROR
+ };
+diff --git a/src/pam.c b/src/pam.c
+index a377157..d3eca87 100644
+--- a/src/pam.c
++++ b/src/pam.c
+@@ -258,6 +258,10 @@ int lxdm_auth_user_authenticate(LXDM_AUTH *a,const char *user,const char *pass,i
+ 			return AUTH_FAIL;
+ 		}
+ 		ret=pam_acct_mgmt(a->handle,PAM_SILENT);
++		if (ret == PAM_NEW_AUTHTOK_REQD) {
++			g_debug("user %s account has expired\n", user);
++			return AUTH_PASSWD_EXPIRE;
++		}
+ 		if(ret!=PAM_SUCCESS)
+ 		{
+ 			g_debug("user %s acct mgmt fail with %d\n",user,ret);
+diff --git a/src/ui.c b/src/ui.c
+index efe02a1..369c07f 100644
+--- a/src/ui.c
++++ b/src/ui.c
+@@ -161,6 +161,9 @@ static gboolean on_greeter_input(GIOChannel *source, GIOCondition condition, gpo
+ 				ui_drop();
+ 				lxdm_do_login(pw, session, lang,NULL);
+ 			}
++			else if (AUTH_PASSWD_EXPIRE == ret) {
++				xwrite(greeter_pipe[0], "password-expire\n", 16);
++			}
+ 			else
+ 			{
+ 				if(pass!=NULL)
+@@ -205,6 +208,23 @@ static gboolean on_greeter_input(GIOChannel *source, GIOCondition condition, gpo
+ 		g_free(session);
+ 		g_free(lang);
+ 	}
++	else if (!strncmp(str, "update-new-password", 19)) {
++		xwrite(greeter_pipe[0], "update-new-password\n", 20);
++		char *user = greeter_param(str, "user");
++		char *pass = greeter_param(str, "newpass");
++		char *session = greeter_param(str, "session");
++		char *lang = greeter_param(str, "lang");
++
++		int ret = lxdm_change_passwd(user, pass);
++		if (ret) {
++			xwrite(greeter_pipe[0], "invalid-new-password\n", 21);
++		} else {
++			struct passwd *pw;
++			ret = lxdm_auth_user(AUTH_TYPE_NORMAL, user, pass, &pw);
++			ui_drop();
++			lxdm_do_login(pw, session, lang, NULL);
++		}
++	}
+ 	g_free(str);
+ 	return TRUE;
+ }
+diff --git a/systemd/lxdm.service b/systemd/lxdm.service
+index bf4a0a8..90d8cdb 100644
+--- a/systemd/lxdm.service
++++ b/systemd/lxdm.service
+@@ -1,6 +1,6 @@
+ [Unit]
+ Description=LXDE Display Manager
+-Conflicts=getty@tty1.service plymouth-quit.service
++Conflicts=getty@tty1.service
+ After=systemd-user-sessions.service getty@tty1.service plymouth-quit.service
+ 
+ [Service]

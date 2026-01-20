@@ -4,47 +4,83 @@
 # Contributor: AndyRTR <andyrtr@archlinux.org>
 # Contributor: kiefer <jorgelmadrid@gmail.com>
 
-pkgbase=lxdm
-pkgname=(lxdm lxdm-gtk3)
+pkgname=lxdm
 pkgver=0.5.3
-pkgrel=8
+pkgrel=9
 pkgdesc='Lightweight X11 Display Manager'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url="https://lxde.org/"
-license=('GPL')
-depends=('gtk2' 'gtk3' 'xorg-server')
-makedepends=('intltool' 'iso-codes')
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url='https://sourceforge.net/projects/lxdm/'
+license=(GPL-3.0-or-later)
+depends=(
+  bash
+  cairo
+  gdk-pixbuf2
+  glib2
+  glibc
+  gtk3
+  libx11
+  libxcb
+  pam
+  pango
+  xorg-server
+)
+makedepends=(
+  intltool
+  iso-codes
+)
 optdepends=('iso-codes: show language names in language chooser')
-backup=('etc/lxdm/lxdm.conf' 'etc/pam.d/lxdm' 'etc/lxdm/Xsession'
-        'etc/lxdm/PreLogin' 'etc/lxdm/LoginReady' 'etc/lxdm/PostLogin'
-        'etc/lxdm/PostLogout' 'etc/lxdm/PreReboot' 'etc/lxdm/PreShutdown')
-source=(https://downloads.sourceforge.net/lxde/$pkgbase-$pkgver.tar.xz
-        set-path.patch
-        git-fixes.patch
-        default-config.patch
-        lxdm.pam
-        Xsession)
-sha256sums=('4891efee81c72a400cc6703e40aa76f3f3853833d048b72ec805da0f93567f2f'
-            '328f766c4d2ee899fc37a26f6e8666d40ebeaa3bd4c7d5a474ebb5415351a440'
-            'ca3b225fb85a4e87ebb48e2b1a20f4bab86bf619a9ad927f08fdc819bc435bb4'
-            'ea5fbe021b98ec58de8f2ba9a3575f748024bad2a9b911179a44bf94577f869b'
-            'e8c4c5fd3b801a390d201166fd1fb9730e78a5c62928768103b870b6bd980ea0'
-            'a02f547e1c36f1c7dd2a1f942b620fe76445d561f7835e7fef434aa4c12c6967')
+conflicts=(lxdm-gtk3)
+replaces=(lxdm-gtk3)
+groups=(lxde)
+backup=(
+  etc/lxdm/LoginReady
+  etc/lxdm/lxdm.conf
+  etc/lxdm/PostLogin
+  etc/lxdm/PostLogout
+  etc/lxdm/PreLogin
+  etc/lxdm/PreReboot
+  etc/lxdm/PreShutdown
+  etc/lxdm/Xsession
+  etc/pam.d/lxdm
+)
+source=(
+  "https://downloads.sourceforge.net/lxde/$pkgname-$pkgver.tar.xz"
+  lxdm-git-fixes.patch
+  lxdm-fallback-interface.patch
+  lxdm-set-path.patch
+  lxdm-default-config.patch
+  lxdm.pam
+  Xsession
+)
+b2sums=(
+  9d27feb60452af49127972ce0ecdc25122f5f86961f65512fd6c185c5d6ca03e637fab703fa2df156dba8a3d0ef4e7cf9f55e20762ba49bb14dc4ee8a82b1fa3
+  86a40cb3761a8bc623768e93bd62291244ab924d51d282ff882eeb11332f5a8d74b652dfea8ce75bb9e58668e051fcaaff47f14ac665c50bfbe9b718a2ab13d9
+  7c1025c61daaae4610790d16f4aa440765b02ac3ba7dcb8f97f7f8504ef915b7810720d3d91a7c68eb16e6bc3e5c3f17c767b760e66d43784a3d00324b91e547
+  506f86be87465f797423ae99fd7d4165968235672bb089c2ed414a0857331a20730695bbc74209d3d0c777c32dc1cb13a450a00011757a0b8f1a8cecf1e3099f
+  ce4591755af6025229681f5f42e7e79ac93c75c394ae0f2da27a1a846ee2ae4621f40f5287563d1b40bfcd084904764bf1c8e6e5cb5c57b445d7c0197bcf6504
+  11f4c568c6b766d3baf65ea91be2ec0641381a6c195ef460a9a0e282591c1211603d0a3db630e901079fba28819a4efab45bb8b722947dfac37659daafe14aaf
+  0276563db053a305f2d7be37f042514a9d343e271769ce25a572b9cd34756d259410f79e7d5ad32d0ab87fcf976a8140c2d46e3259d82666b6074e2bea775bac
+)
 
 prepare(){
-  cd $pkgbase-$pkgver
-
-  # Don't overwrite PATH if already defined
-  # https://sourceforge.net/p/lxde/bugs/907/
-  patch -Np0 -i ../set-path.patch
+  cd $pkgname-$pkgver
 
   # Apply fixes from git
-  patch -Np1 -i ../git-fixes.patch
+  patch -Np1 -i ../lxdm-git-fixes.patch
+
+  # Add missing fallback interface for GTK3
+  patch -Np1 -i ../lxdm-fallback-interface.patch
+
+  # Stretch background image for GTK3
+  sed -i 's/background-repeat: round;/background-size: 100% 100%;/' data/themes/Industrial/gtk.css
+
+  # Don't overwrite PATH if already defined
+  patch -Np1 -i ../lxdm-set-path.patch
 
   # Adjust Arch-specific settings
-  patch -Np1 -i ../default-config.patch
+  patch -Np1 -i ../lxdm-default-config.patch
 
-  # Use our custom pam and Xsession files
+  # Use our custom PAM and Xsession files
   cp ../lxdm.pam pam/lxdm
   cp ../Xsession data/Xsession
 
@@ -52,49 +88,24 @@ prepare(){
 }
 
 build() {
-  # GTK+ 2 version
-  [ -d gtk2 ] || cp -r $pkgbase-$pkgver gtk2
-  cd gtk2
-  ./configure --prefix=/usr --sbindir=/usr/bin --libexecdir=/usr/lib/lxdm \
-              --sysconfdir=/etc --localstatedir=/var
-  make
-
-  cd "$srcdir"
-  # GTK+ 3 version
-  [ -d gtk3 ] || cp -r $pkgbase-$pkgver gtk3
-  cd gtk3
-  ./configure --prefix=/usr --sbindir=/usr/bin --libexecdir=/usr/lib/lxdm \
-              --sysconfdir=/etc --localstatedir=/var --enable-gtk3
+  cd $pkgname-$pkgver
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --sbindir=/usr/bin \
+    --libexecdir=/usr/lib/lxdm \
+    --enable-gtk3
   make
 }
 
-package_lxdm() {
-  groups=('lxde')
-  depends=('gtk2' 'xorg-server')
-  optdepends+=('gnome-themes-standard: default GTK+ theme')
-
-  cd gtk2
+package() {
+  cd $pkgname-$pkgver
   make DESTDIR="$pkgdir" install
   chmod 644 "$pkgdir/etc/lxdm/lxdm.conf"
 
   # Setup system user and group
   install -dm755 "$pkgdir"/usr/lib/{sysusers,tmpfiles}.d
-  echo 'u lxdm - "Lightweight X11 Display Manager" /var/lib/lxdm' > "$pkgdir/usr/lib/sysusers.d/$pkgbase.conf"
-  echo 'd /var/lib/lxdm 0700 lxdm lxdm - -' > "$pkgdir/usr/lib/tmpfiles.d/$pkgbase.conf"
-}
-
-package_lxdm-gtk3() {
-  groups=('lxde-gtk3')
-  pkgdesc+=' (GTK+ 3 version)'
-  depends=('gtk3' 'xorg-server')
-  conflicts=('lxdm')
-
-  cd gtk3
-  make DESTDIR="$pkgdir" install
-  chmod 644 "$pkgdir/etc/lxdm/lxdm.conf"
-
-  # Setup system user and group
-  install -dm755 "$pkgdir"/usr/lib/{sysusers,tmpfiles}.d
-  echo 'u lxdm - "Lightweight X11 Display Manager" /var/lib/lxdm' > "$pkgdir/usr/lib/sysusers.d/$pkgbase.conf"
-  echo 'd /var/lib/lxdm 0700 lxdm lxdm - -' > "$pkgdir/usr/lib/tmpfiles.d/$pkgbase.conf"
+  echo 'u! lxdm - "Lightweight X11 Display Manager" /var/lib/lxdm' > "$pkgdir/usr/lib/sysusers.d/$pkgname.conf"
+  echo 'd /var/lib/lxdm 0700 lxdm lxdm - -' > "$pkgdir/usr/lib/tmpfiles.d/$pkgname.conf"
 }
