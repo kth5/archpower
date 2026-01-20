@@ -7,31 +7,72 @@
 
 pkgname=pcmanfm
 pkgver=1.4.0
-pkgrel=1
+pkgrel=2
 pkgdesc='Extremely fast and lightweight file manager'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-url='https://lxde.org/'
-license=('GPL')
-groups=('lxde')
-depends=('libfm-gtk2' 'lxmenu-data')
-makedepends=('git' 'intltool')
-optdepends=('gvfs: for trash support, mounting with udisks and remote filesystems'
-            'xarchiver: archive management')
-source=(git+https://github.com/lxde/pcmanfm.git#tag=${pkgver})
-sha256sums=('ab7307df284ebc2a843a0aca85246bdde1187a57be3fc942d6e3b6e8517335b9')
+url='https://github.com/lxde/pcmanfm'
+license=(GPL-2.0-or-later)
+groups=(lxde)
+depends=(
+  at-spi2-core
+  cairo
+  gdk-pixbuf2
+  glib2
+  glibc
+  gtk3
+  libfm
+  libfm-gtk3
+  libx11
+  lxmenu-data
+  pango
+)
+makedepends=(
+  git
+  intltool
+)
+optdepends=(
+  'gvfs: Trash support, mounting with udisks and remote filesystems'
+  'xarchiver: Archive management'
+)
+conflicts=(pcmanfm-gtk3)
+replaces=(pcmanfm-gtk3)
+source=(
+  "git+https://github.com/lxde/pcmanfm.git#tag=$pkgver"
+  pcmanfm.appdata.xml
+  pcmanfm-transient-dialog.patch
+  pcmanfm-desktop-onlyshowin.patch
+)
+b2sums=(
+  5793db3e6c6c5959a9e7d3923f723c5197fb513f15005d1a709c9c572e3d0af98073d2ce927f9d1198603233ebd7c918504b8fb9878640fd70550dfdf04f8dfd
+  4372dadab89cfa22bcc6572149d24afbc53efb5020544266372c69263991a238b0f32f515ee261cf07562ca8abe70df47c2d060f6e6f98bd405e4530f0ab5155
+  aa3c1cc99e85169f03c7222ad2fb4e2da355f9e9e0d2bf1bb0fe3dec889f54817be7b805c519347cc528296d4c6d6815c0f7f5a8620d920437e6545b47bab0b2
+  f8bee16ce19c945d350a77978a2893407a8b1dcc174623aaad33fa8cb1c5b8fc177127c56522e60850bce58e27cab39a5453f6d7a7ee8d783e3122801123c0cd
+)
 
 prepare() {
   cd $pkgname
-  autoreconf -fiv
+
+  # https://github.com/lxde/pcmanfm/pull/32
+  git apply -3 ../pcmanfm-transient-dialog.patch
+
+  # https://github.com/lxde/pcmanfm/pull/34
+  git apply -3 ../pcmanfm-desktop-onlyshowin.patch
+
+  autoreconf -fi
 }
 
 build() {
   cd $pkgname
-  ./configure --sysconfdir=/etc --prefix=/usr
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --with-gtk=3
   make
 }
 
 package() {
   cd $pkgname
   make DESTDIR="$pkgdir" install
+  install -Dm644 ../$pkgname.appdata.xml "$pkgdir/usr/share/metainfo/$pkgname.appdata.xml"
 }
