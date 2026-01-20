@@ -1,0 +1,77 @@
+From b11319d7b8b87a050728aa71b5523575f89a7edb Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ball=C3=B3=20Gy=C3=B6rgy?= <ballogyor@gmail.com>
+Date: Tue, 14 Oct 2025 17:56:05 +0200
+Subject: [PATCH] Rework most suitable viewing mode
+
+- Take size of the toolbar and the window frame into account when resizing
+the window to ensure that the resized window fits into the workarea.
+
+- Use gdk_screen_get_monitor_workarea() for GTK 3.4 and newer, which works
+also on Wayland.
+
+- Always use "zoom fit", and resize the window even if the image doesn't
+fit into the screen in it's original size.
+
+- Enlarge the window only if the window size is not saved, otherwise the
+window become larger and larger every time when the application is opened.
+---
+ src/main-win.c | 43 ++++++++++++++++++++-----------------------
+ 1 file changed, 20 insertions(+), 23 deletions(-)
+
+diff --git a/src/main-win.c b/src/main-win.c
+index ce2bbdd..62e43e2 100644
+--- a/src/main-win.c
++++ b/src/main-win.c
+@@ -448,32 +448,29 @@ gboolean main_win_open( MainWin* mw, const char* file_path, ZoomMode zoom )
+     {
+         int w = gdk_pixbuf_get_width( mw->pix );
+         int h = gdk_pixbuf_get_height( mw->pix );
+-
+-        GdkRectangle area;
++        GdkRectangle area, frame, toolbar;
++        int win_w, win_h;
++        gtk_window_get_size( (GtkWindow*)mw, &win_w, &win_h );
++#if GTK_CHECK_VERSION(3, 4, 0)
++        GdkScreen *screen = gdk_screen_get_default();
++        gdk_screen_get_monitor_workarea( screen, gdk_screen_get_primary_monitor(screen), &area );
++#else
+         get_working_area( gtk_widget_get_screen((GtkWidget*)mw), &area );
+-        // g_debug("determine best zoom mode: orig size:  w=%d, h=%d", w, h);
+-        // FIXME: actually this is a little buggy :-(
+-        if( w + pref.win_x < area.width && h + pref.win_y < area.height && (w >= pref.win_w || h >= pref.win_h) )
+-        {
+-            gtk_scrolled_window_set_policy( (GtkScrolledWindow*)mw->scroll, GTK_POLICY_NEVER, GTK_POLICY_NEVER );
+-            gtk_widget_set_size_request( (GtkWidget*)mw->img_view, w, h );
+-            GtkRequisition req;
+-            gtk_widget_size_request ( (GtkWidget*)mw, &req );
+-            if( req.width < pref.win_w )   req.width = pref.win_w;
+-            if( req.height < pref.win_h )   req.height = pref.win_h;
+-            gtk_window_resize( (GtkWindow*)mw, req.width, req.height );
+-            gtk_widget_set_size_request( (GtkWidget*)mw->img_view, -1, -1 );
+-            gtk_scrolled_window_set_policy( (GtkScrolledWindow*)mw->scroll, GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC );
+-            mw->zoom_mode = ZOOM_ORIG;
+-            mw->scale = 1.0;
+-#if !GTK_CHECK_VERSION(3, 0, 0)
+-            while (gtk_events_pending())
+-                gtk_main_iteration();
+-            g_usleep(10000);
+ #endif
++        gdk_window_get_frame_extents( gtk_widget_get_window((GtkWidget*)mw), &frame );
++        gtk_widget_get_allocation(gtk_widget_get_parent(mw->nav_bar), &toolbar);
++        int deco_w = MAX(4, frame.width - win_w);
++        int deco_h = MAX(27, frame.height - win_h);
++        int req_w = MIN(w, area.width - deco_w);
++        int req_h = MIN(h + toolbar.height + 4, area.height - deco_h);
++
++        if(!pref.save_window && (req_w > win_w || req_h > win_h)) {
++            if( req_w < pref.win_w )   req_w = pref.win_w;
++            if( req_h < pref.win_h )   req_h = pref.win_h;
++            gtk_window_resize( (GtkWindow*)mw, req_w, req_h );
+         }
+-        else
+-            mw->zoom_mode = ZOOM_FIT;
++
++        mw->zoom_mode = ZOOM_FIT;
+     }
+ 
+     if( mw->zoom_mode == ZOOM_FIT )
