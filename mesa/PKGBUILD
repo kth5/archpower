@@ -14,6 +14,7 @@ pkgname=(
   vulkan-radeon
   vulkan-swrast
   vulkan-virtio
+  vulkan-mesa-implicit-layers
   vulkan-mesa-layers
   mesa-docs
 )
@@ -22,8 +23,9 @@ case "${CARCH}" in
     pkgname+=(vulkan-intel)
   ;;
 esac
-pkgver=25.2.6
-pkgrel=1
+pkgver=25.3.3
+_pkgver=${pkgver/[a-z]/-&}
+pkgrel=3
 epoch=1
 pkgdesc="Open-source OpenGL drivers"
 url="https://www.mesa3d.org/"
@@ -35,6 +37,7 @@ makedepends=(
   expat
   gcc-libs
   glibc
+  libdisplay-info
   libdrm
   libelf
   libglvnd
@@ -72,12 +75,14 @@ makedepends=(
   python-mako
   python-packaging
   python-ply
+  python-pycparser
   python-yaml
   rust-bindgen
   wayland-protocols
   xorgproto
 
-  # valgrind deps
+  # mesa-only deps
+  libsysprof-capture
   valgrind
 
   # html-docs
@@ -139,7 +144,7 @@ declare -A _crates=(
 
 # Used to generate the above table
 _gencrates() {
-  grep crates.io subprojects/*.wrap | \
+  grep '^source_url' subprojects/*-rs.wrap | \
     sed -r 's|.*crates/([^/]+)/([0-9.]+)/download|\1 \2|' | \
     column -t -S 2 | sed 's/^/  /'
 }
@@ -151,7 +156,7 @@ for _crate in "${!_crates[@]}"; do
   )
 done
 
-sha256sums=('361c97e8afa5fe20141c5362c5b489040751e12861c186a16c621a2fb182fc42'
+sha256sums=('05328b3891c000e6a110a3e7321d8bfbb21631d132bf86bd3d4a8f45c535ef6b'
             'SKIP'
             '0a8f2792dfd0469bc41540884fe2a1dbf4f0fd92f53bad5b9db831ac1e59dd11'
             '24bfdf0333b553ce5484947a19dee690704b60f4d29c45beaecae941154a1d4c'
@@ -183,7 +188,7 @@ sha256sums=('361c97e8afa5fe20141c5362c5b489040751e12861c186a16c621a2fb182fc42'
             'db7d01726be8ab66ab32f9df467ae8b1148906685bbe75c82d1e65d7f5b3f841'
             '692fcb63b64b1758029e0a96ee63e049ce8c5948587f2f7208df04625e5f6b56'
             '25aa4ce346d03a6dcd68dd8b4010bcb74e54e62c90c573f394c46eae99aba32d')
-b2sums=('40ce74df4049787ed56fc1605f9e2c9e77d0f157b006381493e11f518db977a7d02c33c7d1dc50c9700fe02478877ca240b526cdddea24a8602c0ae88081e087'
+b2sums=('1f380c2fbd7c267a68757fc0d32272daddc4c376a65afda7df4e7a24a9597558ba8e93678f7163499e38d724063eb4446820ac43983a390ac34b15870c83009b'
         'SKIP'
         'c28718783873be25fa2d6c0f43fae900f93e2f20df1c11a40ec86622112b7be7e7f50c3b77e52849fec9288fb8da3744d8bc2027df941ffd0b8c558fe3a927ba'
         'd996fa01c7a140af0620d920b0fe57a35a072c89171e039fecce2cd559d25441be21965f4ada971e9016357675035c956d192791f27e86a59a897324c0abe83e'
@@ -219,7 +224,7 @@ b2sums=('40ce74df4049787ed56fc1605f9e2c9e77d0f157b006381493e11f518db977a7d02c33c
 # https://docs.mesa3d.org/relnotes.html
 
 prepare() {
-  cd mesa-$pkgver
+  cd mesa-$_pkgver
 
   local src
   for src in "${source[@]}"; do
@@ -234,7 +239,7 @@ prepare() {
   # Include package release in version string so Chromium invalidates
   # its GPU cache; otherwise it can cause pages to render incorrectly.
   # https://bugs.launchpad.net/ubuntu/+source/chromium-browser/+bug/2020604
-  echo "$pkgver-arch$epoch.$pkgrel" >VERSION
+  echo "$_pkgver-arch$epoch.$pkgrel" >VERSION
 }
 
 build() {
@@ -267,7 +272,7 @@ build() {
     -D valgrind=enabled
     -D video-codecs=all
     -D vulkan-drivers=amd,nouveau,swrast,virtio,microsoft-experimental${_platform_vulkan_drivers}
-    -D vulkan-layers=device-select,intel-nullhw,overlay,screenshot
+    -D vulkan-layers=device-select,intel-nullhw,overlay,screenshot,anti-lag,vram-report-limit
   )
 
   case "${CARCH}" in
@@ -296,7 +301,7 @@ build() {
   # Inject subproject packages
   export MESON_PACKAGE_CACHE_DIR="$srcdir"
 
-  arch-meson mesa-$pkgver build "${meson_options[@]}"
+  arch-meson mesa-$_pkgver build "${meson_options[@]}"
   meson compile -C build
 }
 
@@ -337,17 +342,14 @@ package_mesa() {
     "mesa-vdpau=$epoch:$pkgver-$pkgrel"
     libva-driver
     opengl-driver
-    vdpau-driver
   )
   conflicts=(
     'libva-mesa-driver<1:24.2.7-1'
     'mesa-libgl<17.0.1-2'
-    'mesa-vdpau<1:24.2.7-1'
   )
   replaces=(
     'libva-mesa-driver<1:24.2.7-1'
     'mesa-libgl<17.0.1-2'
-    'mesa-vdpau<1:24.2.7-1'
   )
 
   meson install -C build --destdir "$pkgdir" --no-rebuild
@@ -389,9 +391,13 @@ package_mesa() {
     _pick vkvirtio $icddir/virtio_icd.*.json
     _pick vkvirtio $libdir/libvulkan_virtio.so
 
+    _pick vkdevice $libdir/libVkLayer_MESA_anti_lag.so
+    _pick vkdevice $libdir/libVkLayer_MESA_device_select.so
+    _pick vkdevice usr/share/vulkan/implicit_layer.d
+
     _pick vklayer $libdir/libVkLayer_*.so
     _pick vklayer usr/bin/mesa-*-control.py
-    _pick vklayer usr/share/vulkan/{ex,im}plicit_layer.d
+    _pick vklayer usr/share/vulkan/explicit_layer.d
 
     _pick docs usr/share/doc
 
@@ -399,7 +405,7 @@ package_mesa() {
     ln -sr $libdir/libGLX_{mesa,indirect}.so.0
   )
 
-  install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 package_opencl-mesa() {
@@ -432,7 +438,7 @@ package_opencl-mesa() {
 
   mv opencl/* "$pkgdir"
 
-  install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 package_vulkan-dzn() {
@@ -441,6 +447,7 @@ package_vulkan-dzn() {
     expat
     gcc-libs
     glibc
+    libdisplay-info
     libdrm
     libx11
     libxcb
@@ -448,6 +455,7 @@ package_vulkan-dzn() {
     spirv-tools
     systemd-libs
     vulkan-icd-loader
+    vulkan-mesa-implicit-layers
     wayland
     xcb-util-keysyms
     zlib
@@ -458,7 +466,7 @@ package_vulkan-dzn() {
 
   mv vkdzn/* "$pkgdir"
 
-  install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 package_vulkan-intel() {
@@ -467,6 +475,7 @@ package_vulkan-intel() {
     expat
     gcc-libs
     glibc
+    libdisplay-info
     libdrm
     libx11
     libxcb
@@ -474,6 +483,7 @@ package_vulkan-intel() {
     spirv-tools
     systemd-libs
     vulkan-icd-loader
+    vulkan-mesa-implicit-layers
     wayland
     xcb-util-keysyms
     zlib
@@ -484,7 +494,7 @@ package_vulkan-intel() {
 
   mv vkintel/* "$pkgdir"
 
-  install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 package_vulkan-nouveau() {
@@ -493,6 +503,7 @@ package_vulkan-nouveau() {
     expat
     gcc-libs
     glibc
+    libdisplay-info
     libdrm
     libx11
     libxcb
@@ -500,6 +511,7 @@ package_vulkan-nouveau() {
     spirv-tools
     systemd-libs
     vulkan-icd-loader
+    vulkan-mesa-implicit-layers
     wayland
     xcb-util-keysyms
     zlib
@@ -510,7 +522,7 @@ package_vulkan-nouveau() {
 
   mv vknvidia/* "$pkgdir"
 
-  install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 package_vulkan-radeon() {
@@ -519,6 +531,7 @@ package_vulkan-radeon() {
     expat
     gcc-libs
     glibc
+    libdisplay-info
     libdrm
     libelf
     libx11
@@ -528,6 +541,7 @@ package_vulkan-radeon() {
     spirv-tools
     systemd-libs
     vulkan-icd-loader
+    vulkan-mesa-implicit-layers
     wayland
     xcb-util-keysyms
     zlib
@@ -535,10 +549,11 @@ package_vulkan-radeon() {
   )
   optdepends=("vulkan-mesa-layers: additional vulkan layers")
   provides=(vulkan-driver)
+  replaces=('amdvlk<=2025.Q2.1-1')
 
   mv vkradeon/* "$pkgdir"
 
-  install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 package_vulkan-swrast() {
@@ -547,6 +562,7 @@ package_vulkan-swrast() {
     expat
     gcc-libs
     glibc
+    libdisplay-info
     libdrm
     libx11
     libxcb
@@ -555,6 +571,7 @@ package_vulkan-swrast() {
     spirv-tools
     systemd-libs
     vulkan-icd-loader
+    vulkan-mesa-implicit-layers
     wayland
     xcb-util-keysyms
     zlib
@@ -567,7 +584,7 @@ package_vulkan-swrast() {
 
   mv vkswrast/* "$pkgdir"
 
-  install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 package_vulkan-virtio() {
@@ -576,12 +593,14 @@ package_vulkan-virtio() {
     expat
     gcc-libs
     glibc
+    libdisplay-info
     libdrm
     libx11
     libxcb
     libxshmfence
     systemd-libs
     vulkan-icd-loader
+    vulkan-mesa-implicit-layers
     wayland
     xcb-util-keysyms
     zlib
@@ -592,18 +611,31 @@ package_vulkan-virtio() {
 
   mv vkvirtio/* "$pkgdir"
 
-  install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+}
+
+package_vulkan-mesa-implicit-layers() {
+  pkgdesc="Mesa's implicit Vulkan layers"
+  depends=(
+    glibc
+    libdrm
+    libxcb
+    wayland
+  )
+  conflicts=(vulkan-mesa-device-select)
+  replaces=(vulkan-mesa-device-select)
+
+  mv vkdevice/* "$pkgdir"
+
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 package_vulkan-mesa-layers() {
-  pkgdesc="Mesa's Vulkan layers"
+  pkgdesc="Mesa's explicit Vulkan layers"
   depends=(
     gcc-libs
     glibc
-    libdrm
     libpng
-    libxcb
-    wayland
 
     python
   )
@@ -612,7 +644,7 @@ package_vulkan-mesa-layers() {
 
   mv vklayer/* "$pkgdir"
 
-  install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 package_mesa-docs() {
@@ -620,7 +652,7 @@ package_mesa-docs() {
   
   mv docs/* "$pkgdir"
 
-  install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 # vim:set sw=2 sts=-1 et:
