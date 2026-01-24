@@ -1,26 +1,61 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Torsten Keßler <tpkessler at archlinux dot org>
+# Maintainer: Christian Heusel <gromit@archlinux.org>
 # Contributor: acxz <akashpatel2008 at yahoo dot com>
 
 pkgbase=rocm-llvm
 pkgname=(rocm-llvm rocm-device-libs comgr)
-pkgver=6.2.4
-pkgrel=1
-arch=(x86_64 powerpc64le powerpc64 riscv64)
+epoch=2
+pkgver=6.4.4
+pkgrel=2
+arch=(x86_64 powerpc64le powerpc64)
 url='https://rocm.docs.amd.com/en/latest/reference/rocmcc.html'
 makedepends=('git' 'cmake' 'python' 'ninja' 'rocm-core' 'rocm-cmake' 'perl'
              'gcc-libs' 'zlib' 'zstd' 'libffi' 'libedit' 'ncurses' 'libxml2' 'patchelf')
 source=("$pkgbase::git+https://github.com/ROCm/llvm-project#tag=rocm-$pkgver"
-        "llvm-ppc64-elfv2.patch"
-        "clang-ppc64-dynamic-linker-path.patch"
-        "clang-ppc64-elfv2.patch")
-sha256sums=('09cb1afda4d2585b35e12142d4a4a4cab42be6ade7f41be59fd13df86d77ae10'
+        rocm-llvm-6.4-llvm-gold-plugin-fix-ModuleName.patch
+        rocm-llvm-6.4-fix-array-assert.patch
+        rocm-llvm-6.4-fix-glibc-2.42-termio-removal.patch
+        llvm-ppc64-elfv2.patch
+        clang-ppc64-dynamic-linker-path.patch
+        clang-ppc64-elfv2.patch
+        comgr-device-libs-id-gcc15.patch)
+sha256sums=('9e4f250e3e294112c49ea7aab722475f5061d997651b1dc9e1a0df0b902c1170'
+            '0293c307131426a9c031f215045e2f0725677de0aac6dda1729456ac9a444415'
+            '6485a06e4f3b85df76110548f428217f86e785ec3dec7b0de0a7a2cf6384f0c0'
+            '09d9135f8212a93d678c6c2fd9f551e55cab431e257f1182cfdfae7834e2fa14'
             '8c4e8db0b80b1a86f8cff9aa678b70458503bc8926ecc41e0df953ea14ab3559'
             '654b9eafcd20125319b3c319ab6674a940ddef400821c80813c16011ef8b6086'
-            '8483b3bfaa31bee7a074bc83a1c7b7fec4cc6579836edb2802348b1340df3e41')
-options=(!debug staticlibs !lto)
+            '8483b3bfaa31bee7a074bc83a1c7b7fec4cc6579836edb2802348b1340df3e41'
+            '73b2cd10b03b08c37cf595467bf61e87dd86dba367eb738f081ccb8f9fb5bf56')
+options=(staticlibs !debug !lto)
 
 prepare() {
+  cd $pkgbase
+
+  # Fix build with cmake 4.0
+  git cherry-pick -n a18cc4c7cb51f94182b6018c7c73acde1b8ebddb
+
+  # Fix build with gcc 15
+  git cherry-pick -n \
+      7e44305041d96b064c197216b931ae3917a34ac1 \
+      8f39502b85d34998752193e85f36c408d3c99248
+
+  # Add fix for build failure in the gold plugin
+  patch -Np1 < ../rocm-llvm-6.4-llvm-gold-plugin-fix-ModuleName.patch
+
+  # Apply fix for gcc15
+  patch -Np1 < ../rocm-llvm-6.4-fix-array-assert.patch
+
+  # Add fix for missing function overload (openat)
+  # https://github.com/llvm/llvm-project/issues/100754
+  git cherry-pick -n 155b7a12820ec45095988b6aa6e057afaf2bc892
+
+  # Fix build with glibc 2.42: https://github.com/llvm/llvm-project/issues/137321
+  patch -Np1 < ../rocm-llvm-6.4-fix-glibc-2.42-termio-removal.patch
+
+  patch -Np1 < ../comgr-device-libs-id-gcc15.patch
+
   cd ${srcdir}/${pkgbase}/llvm
   patch -Np2 -i ${srcdir}/llvm-ppc64-elfv2.patch
 
@@ -37,38 +72,62 @@ build() {
     esac
 
     # Build only minimal debug info to reduce size
-    CFLAGS+=' -g1'
-    CXXFLAGS+=' -g1'
+    #CFLAGS+=' -g1'
+    #CXXFLAGS+=' -g1'
 
+    local _rocm_exe_rpath='\$ORIGIN/../lib:\$ORIGIN/../../../lib'
+    local _rocm_lib_rpath='\$ORIGIN'
+    # Flags according to
+    # https://github.com/ROCm/ROCm/blob/87bc26e672e06294bd2a6a1b507ad5c9ae4cffba/tools/rocm-build/build_lightning.sh#L302
     local cmake_args=(
         -G Ninja
         -B build
         -S "$pkgbase/llvm"
-        -DCMAKE_BUILD_TYPE=Release
-        -DCMAKE_INSTALL_PREFIX='/opt/rocm/lib/llvm'
-        -DLLVM_HOST_TRIPLE=$CHOST
-        -DLLVM_ENABLE_PROJECTS='llvm;clang;lld;compiler-rt;clang-tools-extra'
-        -DCLANG_ENABLE_AMDCLANG=ON
-        -DLLVM_ENABLE_RUNTIMES='libcxx;libcxxabi;libunwind'
-        -DLIBCXX_ENABLE_STATIC=ON
-        -DLIBCXXABI_ENABLE_STATIC=ON
-        -DLLVM_TARGETS_TO_BUILD="AMDGPU;NVPTX;${_target}"
-        -DCLANG_DEFAULT_LINKER=lld
-        -DLLVM_INSTALL_UTILS=ON
-        -DLLVM_ENABLE_BINDINGS=OFF
-        -DLLVM_LINK_LLVM_DYLIB=OFF
-        -DLLVM_BUILD_LLVM_DYLIB=OFF
-        -DLLVM_ENABLE_ASSERTIONS=ON
-        -DOCAMLFIND=NO
-        -DLLVM_ENABLE_OCAMLDOC=OFF
-        -DLLVM_INCLUDE_BENCHMARKS=OFF
-        -DLLVM_BUILD_TESTS=OFF
-        -DLLVM_INCLUDE_TESTS=OFF
-        -DCLANG_INCLUDE_TESTS=OFF
-        -DLLVM_BINUTILS_INCDIR=/usr/include
+        -D CMAKE_BUILD_TYPE=Release
+        -D CMAKE_INSTALL_PREFIX="/opt/rocm/lib/llvm"
+        -D LLVM_HOST_TRIPLE=$CHOST
+        -D LLVM_ENABLE_PROJECTS='clang;lld;clang-tools-extra'
+        -D CLANG_ENABLE_AMDCLANG=ON
+        -D PACKAGE_VENDOR="AMD"
+        -D LLVM_ENABLE_RUNTIMES='compiler-rt;libunwind;libcxx;libcxxabi'
+        -D LIBCXX_ENABLE_SHARED=OFF
+        -D LIBCXX_ENABLE_STATIC=ON
+        -D LIBCXX_INSTALL_LIBRARY=OFF
+        -D LIBCXX_INSTALL_HEADERS=OFF
+        -D LIBCXXABI_ENABLE_SHARED=OFF
+        -D LIBCXXABI_ENABLE_STATIC=ON
+        -D LIBCXXABI_INSTALL_STATIC_LIBRARY=OFF
+        -D LLVM_TARGETS_TO_BUILD="AMDGPU;NVPTX;;${_target}"
+        -D CLANG_DEFAULT_LINKER=lld
+        -D ENABLE_LINKER_BUILD_ID=ON
+        -D CLANG_DEFAULT_RTLIB=compiler-rt
+        -D CLANG_DEFAULT_UNWINDLIB=libgcc
+        -D LLVM_INSTALL_UTILS=ON
+        -D LLVM_ENABLE_BINDINGS=OFF
+        -D LLVM_LINK_LLVM_DYLIB=OFF
+        -D LLVM_BUILD_LLVM_DYLIB=OFF
+        -D LLVM_ENABLE_ASSERTIONS=ON
+        -D OCAMLFIND=NO
+        -D LLVM_ENABLE_OCAMLDOC=OFF
+        -D LLVM_INCLUDE_BENCHMARKS=OFF
+        -D LLVM_BUILD_TESTS=OFF
+        -D LLVM_INCLUDE_TESTS=OFF
+        -D CLANG_INCLUDE_TESTS=OFF
+        -D LLVM_BINUTILS_INCDIR=/usr/include
+        -D CMAKE_SKIP_BUILD_RPATH=TRUE
+        -D CMAKE_SKIP_INSTALL_RPATH=TRUE
+        -D CMAKE_EXE_LINKER_FLAGS="-Wl,--enable-new-dtags,--build-id=sha1,--rpath,$_rocm_exe_rpath"
+        -D CMAKE_SHARED_LINKER_FLAGS="-Wl,--enable-new-dtags,--build-id=sha1,--rpath,$_rocm_lib_rpath"
+        -D CLANG_LINK_FLANG_LEGACY=ON
+        -D CMAKE_CXX_STANDARD=17
     )
     cmake "${cmake_args[@]}"
+    # Bootstrapping libcxx, see
+    # https://github.com/ROCm/ROCm/blob/87bc26e672e06294bd2a6a1b507ad5c9ae4cffba/tools/rocm-build/build_lightning.sh#L352-L359
+    cmake --build build -- clang lld compiler-rt
+    cmake --build build -- runtimes cxx
     cmake --build build
+    cmake --build build -- clang-tidy
 
     local cmake_device_libs_args=(
         -Wno-dev
@@ -89,6 +148,7 @@ build() {
         -D CMAKE_INSTALL_PREFIX=/opt/rocm
         -D BUILD_TESTING=OFF
         -D CMAKE_PREFIX_PATH="$srcdir/build;$srcdir/build-device-libs"
+        -D CMAKE_CXX_STANDARD=11
     )
     cmake "${cmake_comgr_args[@]}"
     cmake --build build-comgr
@@ -105,9 +165,12 @@ package_rocm-llvm() {
     # Provide symlink to old LLVM location, pre ROCm 6.0.0
     ln -s /opt/rocm/lib/llvm "$pkgdir/opt/rocm/llvm"
 
-    # Fix rpath to avoid error when running amdclang and friends
-    # (error while loading shared libraries: libunwind.so.1: cannot open shared object file: No such file or directory)
-    patchelf --set-rpath '$ORIGIN' "$pkgdir/opt/rocm/lib/llvm/lib/libc++abi.so"
+    # Some packages require amdclang to be found in /opt/rocm/bin
+    mkdir -p "$pkgdir/opt/rocm/bin"
+    local _compiler
+    for _compiler in amdclang amdclang++ amdclang-cl amdclang-cpp amdlld; do
+        ln -s /opt/rocm/lib/llvm/bin/$_compiler "$pkgdir/opt/rocm/bin/$_compiler"
+    done
 
     # https://bugs.archlinux.org/task/28479
     install -d "$pkgdir/opt/rocm/lib/llvm/lib/bfd-plugins"
