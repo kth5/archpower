@@ -1,0 +1,42 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Torsten Keßler <tpkessler at archlinux dot org>
+pkgname=rocprofiler-register
+pkgver=6.4.4
+pkgrel=2
+pkgdesc='Helper library for the ROCprofiler (v2) library'
+arch=(x86_64 powerpc64le powerpc64)
+url='https://github.com/ROCm/rocprofiler-register'
+license=('MIT')
+depends=('rocm-core' 'glibc' 'gcc-libs' 'fmt' 'google-glog')
+makedepends=('cmake' 'rocm-cmake')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/rocm-$pkgver.tar.gz")
+sha256sums=('63e14e7b03c517c594dbc1ce0ee5c632b29449820d54a26de844e6126f074db1')
+_dirname="$(basename "$url")-$(basename "${source[0]}" ".tar.gz")"
+
+prepare() {
+  # Remove cpack packaging
+  sed -i '116d' "$srcdir/$_dirname/CMakeLists.txt"
+  # find_package() calls on global scope
+  sed -i 's/add_subdirectory(external)/find_package(fmt REQUIRED)\nfind_package(glog REQUIRED)/' \
+    "$srcdir/$_dirname/CMakeLists.txt"
+}
+
+build() {
+  local cmake_args=(
+    -Wno-dev
+    -S "$_dirname"
+    -B build
+    -D CMAKE_BUILD_TYPE=Release
+    -D CMAKE_INSTALL_PREFIX=/opt/rocm
+    -D ROCPROFILER_REGISTER_BUILD_GLOG=OFF
+    -D ROCPROFILER_REGISTER_BUILD_FMT=OFF
+  )
+  cmake "${cmake_args[@]}"
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+
+  install -Dm644 "$srcdir/$_dirname/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
