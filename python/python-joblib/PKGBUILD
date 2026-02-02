@@ -1,29 +1,60 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer:  Torsten Keßler <tpkessler@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 # Contributor: Andrzej Giniewicz <gginiu@gmail.com>
 # Contributor: Francois Boulogne <fboulogne at april dot org>
 
 pkgname=python-joblib
-pkgver=1.4.2
-pkgrel=2
+pkgver=1.5.3
+pkgrel=1
 pkgdesc="Set of tools to provide lightweight pipelining in Python"
 arch=(any)
 url="https://joblib.readthedocs.io/"
 license=('BSD-3-Clause')
 depends=('python')
-optdepends=('python-numpy: for array manipulation'
-            'python-lz4: for compressed serialization')
-makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
-source=("${pkgname}-${pkgver}.tar.gz::https://github.com/joblib/joblib/archive/${pkgver}.tar.gz")
-sha256sums=('1d95f5f3ab303be89aa4666956bf05a589f56e52c29b836267c8e3885223ff90')
+makedepends=(
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+)
+checkdepends=(
+  'procps-ng'
+  'python-distributed'
+  'python-lz4'
+  'python-numpy'
+  'python-pytest'
+  'python-pytest-asyncio'
+  'python-threadpoolctl'
+)
+optdepends=(
+  'python-distributed: for dask parallel backend'
+  'python-lz4: for compressed serialization'
+  'python-numpy: for array manipulation'
+  'python-psutil: to mitigate memory leaks in worker processes'
+)
+source=("https://github.com/joblib/joblib/archive/${pkgver}/${pkgname}-${pkgver}.tar.gz")
+b2sums=('b1ef74668dfa55c93285af5e827eb47c8a70c14aa910469df651d72493e02340d8bbb8b7391fa7a991d5475a2a3c1d72da79a3b89fef0a9b7a7baa5e4370384f')
 
 build() {
-  cd joblib-${pkgver}
+  cd ${pkgname#python-}-${pkgver}
   python -m build --wheel --no-isolation
 }
 
+check() {
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
+  cd ${pkgname#python-}-${pkgver}
+  pytest \
+    --deselect=joblib/test/test_memory.py::test_parallel_call_cached_function_defined_in_jupyter \
+    --deselect=joblib/test/test_numpy_pickle.py::test_joblib_pickle_across_python_versions \
+    --deselect=joblib/test/test_numpy_pickle.py::test_joblib_pickle_across_python_versions_with_mmap
+}
+
 package() {
-  cd joblib-${pkgver}
+  cd ${pkgname#python-}-${pkgver}
   python -m installer --destdir="$pkgdir" dist/*.whl
-  install -Dm644 LICENSE.txt "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE.txt
 }
