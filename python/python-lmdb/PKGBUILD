@@ -2,49 +2,56 @@
 # Maintainer: Daniel Bermond <dbermond@archlinux.org>
 # Maintainer: Bruno Pagani <archange@archlinux.org>
 
-_pkg=py-lmdb
+_srcname=py-lmdb
 pkgname=python-lmdb
-pkgver=1.5.1
-pkgrel=1
-pkgdesc="Universal Python binding for the LMDB Lightning Database"
+pkgver=1.7.5
+pkgrel=2
+pkgdesc='Universal Python binding for the LMDB Lightning Database'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-url="https://github.com/jnwatson/py-lmdb/"
+url='https://github.com/jnwatson/py-lmdb/'
 license=('OLDAP-2.8')
-depends=(python python-cffi lmdb)
-makedepends=(python-build python-installer python-setuptools python-wheel)
-checkdepends=(python-pytest)
-source=(${url}/archive/${_pkg}_${pkgver}.tar.gz
-        010-python-lmdb-python3.13-fix.patch::https://github.com/jnwatson/py-lmdb/pull/368/commits/206a3754466397baeb418e70be9d35b12cc4079f.patch)
-sha256sums=('fa0a84d166418fdb87fc8bd235d85aa7bcb690e995ff32ea411aa50eaf52607e'
-            'ed07c4346d08e5a0fc67e18529e5e0fbaf8c5c5f79d9d35b44c1315b10181bb6')
-
-MYARCH=${CARCH}
-case "${CARCH}" in
-	powerpc*) MYARCH=${CARCH/powerpc/ppc} ;;
-esac
-
-prepare() {
-    patch -d ${_pkg}-${_pkg}_${pkgver} -Np1 -i "${srcdir}/010-python-lmdb-python3.13-fix.patch"
-}
+depends=(
+    'glibc'
+    'lmdb'
+    'python'
+    'python-cffi')
+makedepends=(
+    'python-build'
+    'python-installer'
+    'python-patch-ng'
+    'python-setuptools'
+    'python-wheel')
+checkdepends=(
+    'python-pytest')
+source=("https://github.com/jnwatson/py-lmdb/archive/${_srcname}_${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha256sums=('715a642f6d8df1dbd2ad47d30a567982350213388ab4559fb418be4c1eb3a320')
 
 build() {
-  cd ${_pkg}-${_pkg}_${pkgver}
-  LMDB_FORCE_SYSTEM=1 python -m build --wheel --no-isolation
+    cd "${_srcname}-${_srcname}_${pkgver}"
+    
+    export LMDB_FORCE_SYSTEM='1'
+    python -m build --wheel --no-isolation
 }
 
 check() {
-  cd ${_pkg}-${_pkg}_${pkgver}
-  local _pyver
-  _pyver="$(python -c 'import sys; print("".join(map(str, sys.version_info[:2])))')"
-  LMDB_FORCE_SYSTEM=1 PYTHONPATH="${PWD}"/build/lib.linux-$MYARCH-cpython-${_pyver} pytest -vv --color=yes
+    cd "${_srcname}-${_srcname}_${pkgver}"
+    
+    local _pyver
+    _pyver="$(python -c 'import sys; print("".join(map(str, sys.version_info[:2])))')"
+    
+    export LMDB_FORCE_SYSTEM='1'
+    export PYTHONPATH="${PWD}/build/lib.linux-${CARCH}-cpython-${_pyver}"
+    pytest -vv --color='yes'
 }
 
 package() {
-  cd ${_pkg}-${_pkg}_${pkgver}
-  local _pyver
-  _pyver="$(python -c 'import sys; print("%s.%s" %sys.version_info[0:2])')"
-  LMDB_FORCE_SYSTEM=1 python -m installer --destdir="$pkgdir" dist/*.whl
-  install -d -m755 "${pkgdir}"/usr/share/licenses/${pkgname}
-  ln -s ../../../lib/python${_pyver}/site-packages/lmdb-${pkgver}.dist-info/LICENSE \
-    "${pkgdir}"/usr/share/licenses/${pkgname}/LICENSE
+    export LMDB_FORCE_SYSTEM='1'
+    python -m installer --destdir="$pkgdir" "${_srcname}-${_srcname}_${pkgver}/dist"/*.whl
+    
+    local _sitepkgs
+    _sitepkgs="$(python -c 'import site; print(site.getsitepackages()[0])')"
+    
+    install -d -m755 "${pkgdir}/usr/share/licenses/${pkgname}"
+    ln -sr "${pkgdir}${_sitepkgs}/lmdb-${pkgver}.dist-info/licenses/LICENSE" \
+        "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }
