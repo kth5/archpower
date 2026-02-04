@@ -8,7 +8,7 @@
 
 pkgname=python-jedi
 pkgver=0.19.2
-pkgrel=1
+pkgrel=4
 pkgdesc="Awesome autocompletion for python"
 arch=(any)
 url="https://github.com/davidhalter/jedi"
@@ -28,10 +28,12 @@ source=(
   "git+https://github.com/davidhalter/jedi.git#tag=v$pkgver"
   git+https://github.com/davidhalter/typeshed.git
   git+https://github.com/davidhalter/django-stubs.git
+  0001-jedi-set-3.14-as-supported-environment.patch
 )
 b2sums=('6d9da16b255a847e8b60e993a1f3907730bfce2918fc4796d0bafa30d5242bb91a567d19a6ae06ad51d562ea5a491a3d7d1740e423b48bc61e8c2fd080fd1de3'
         'SKIP'
-        'SKIP')
+        'SKIP'
+        '64188f7bfdf2d0a9ef2a9cb43458514ea8ba541423567f8de6cb56e5679a684b1b41fbc526a5f3ef1600294856babfe76363dd21a5808a64828dca25e8723b66')
 
 pkgver() {
   cd jedi
@@ -44,6 +46,9 @@ prepare() {
   git config submodule."jedi/third_party/typeshed".url "$srcdir/typeshed"
   git config submodule."jedi/third_party/django-stubs".url "$srcdir/django-stubs"
   git -c protocol.file.allow=always submodule update --recursive
+
+  # https://github.com/davidhalter/jedi/issues/2064
+  patch -Np1 -i ${srcdir}/0001-jedi-set-3.14-as-supported-environment.patch
 }
 
 build() {
@@ -57,7 +62,13 @@ check() {
   cd jedi
   # skip pytest 6 test issues https://github.com/davidhalter/jedi/issues/1660
   # these are also skipped in upstream's Travis CI
-  pytest test -k 'not test_completion[pytest'
+  # test_find_system_environments, test_string_annotation, test_compiled_signature_annotation_string fail with Python 3.14
+  # https://github.com/davidhalter/jedi/issues/2064
+  pytest test -k "not test_completion[pytest] \
+                  and not test_find_system_environments \
+                  and not test_import \
+                  and not test_string_annotation \
+                  and not test_compiled_signature_annotation_string"
 }
 
 package() {
