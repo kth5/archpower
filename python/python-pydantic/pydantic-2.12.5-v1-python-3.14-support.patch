@@ -1,0 +1,136 @@
+diff --git i/pydantic/v1/__init__.py w/pydantic/v1/__init__.py
+index 4807865cf..a861b36fc 100644
+--- i/pydantic/v1/__init__.py
++++ w/pydantic/v1/__init__.py
+@@ -132,11 +132,3 @@ __all__ = [
+     'compiled',
+     'VERSION',
+ ]
+-
+-
+-if sys.version_info >= (3, 14):
+-    warnings.warn(
+-        "Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.",
+-        UserWarning,
+-        stacklevel=2,
+-    )
+diff --git i/pydantic/v1/generics.py w/pydantic/v1/generics.py
+index 9a69f2b39..fa1dcec42 100644
+--- i/pydantic/v1/generics.py
++++ w/pydantic/v1/generics.py
+@@ -1,3 +1,5 @@
++import functools
++import operator
+ import sys
+ import types
+ import typing
+@@ -29,8 +31,6 @@ from pydantic.v1.types import JsonWrapper
+ from pydantic.v1.typing import display_as_type, get_all_type_hints, get_args, get_origin, typing_base
+ from pydantic.v1.utils import all_identical, lenient_issubclass
+ 
+-if sys.version_info >= (3, 10):
+-    from typing import _UnionGenericAlias
+ if sys.version_info >= (3, 8):
+     from typing import Literal
+ 
+@@ -294,7 +294,7 @@ def replace_types(type_: Any, type_map: Mapping[Any, Any]) -> Any:
+         # PEP-604 syntax (Ex.: list | str) is represented with a types.UnionType object that does not have __getitem__.
+         # We also cannot use isinstance() since we have to compare types.
+         if sys.version_info >= (3, 10) and origin_type is types.UnionType:  # noqa: E721
+-            return _UnionGenericAlias(origin_type, resolved_type_args)
++            return functools.reduce(operator.or_, resolved_type_args)
+         return origin_type[resolved_type_args]
+ 
+     # We handle pydantic generic models separately as they don't have the same
+diff --git i/pydantic/v1/main.py w/pydantic/v1/main.py
+index 8000967ea..fe7443f9b 100644
+--- i/pydantic/v1/main.py
++++ w/pydantic/v1/main.py
+@@ -1,3 +1,4 @@
++import sys
+ import warnings
+ from abc import ABCMeta
+ from copy import deepcopy
+@@ -175,7 +176,22 @@ class ModelMetaclass(ABCMeta):
+             return isinstance(v, untouched_types) or v.__class__.__name__ == 'cython_function_or_method'
+ 
+         if (namespace.get('__module__'), namespace.get('__qualname__')) != ('pydantic.main', 'BaseModel'):
+-            annotations = resolve_annotations(namespace.get('__annotations__', {}), namespace.get('__module__', None))
++            if sys.version_info >= (3, 14):
++                if '__annotations__' in namespace:
++                    # `from __future__ import annotations` was used in the model's module
++                    raw_annotations = namespace['__annotations__']
++                else:
++                    # See https://docs.python.org/3/library/annotationlib.html#using-annotations-in-a-metaclass:
++                    from annotationlib import Format, call_annotate_function, get_annotate_from_class_namespace
++
++                    if annotate := get_annotate_from_class_namespace(namespace):
++                        raw_annotations = call_annotate_function(annotate, format=Format.FORWARDREF)
++                    else:
++                        raw_annotations = {}
++            else:
++                raw_annotations = namespace.get('__annotations__', {})
++
++            annotations = resolve_annotations(raw_annotations, namespace.get('__module__', None))
+             # annotation only fields need to come first in fields
+             for ann_name, ann_type in annotations.items():
+                 if is_classvar(ann_type):
+diff --git i/pydantic/v1/typing.py w/pydantic/v1/typing.py
+index 974116183..c5c59794b 100644
+--- i/pydantic/v1/typing.py
++++ w/pydantic/v1/typing.py
+@@ -69,13 +69,26 @@ elif sys.version_info < (3, 12, 4):
+         # TypeError: ForwardRef._evaluate() missing 1 required keyword-only argument: 'recursive_guard'
+         return cast(Any, type_)._evaluate(globalns, localns, recursive_guard=set())
+ 
+-else:
++elif sys.version_info < (3, 14):
+ 
+     def evaluate_forwardref(type_: ForwardRef, globalns: Any, localns: Any) -> Any:
+         # Pydantic 1.x will not support PEP 695 syntax, but provide `type_params` to avoid
+         # warnings:
+         return cast(Any, type_)._evaluate(globalns, localns, type_params=(), recursive_guard=set())
+ 
++else:
++
++    def evaluate_forwardref(type_: ForwardRef, globalns: Any, localns: Any) -> Any:
++        # Pydantic 1.x will not support PEP 695 syntax, but provide `type_params` to avoid
++        # warnings:
++        return typing.evaluate_forward_ref(
++            type_,
++            globals=globalns,
++            locals=localns,
++            type_params=(),
++            _recursive_guard=set(),
++        )
++
+ 
+ if sys.version_info < (3, 9):
+     # Ensure we always get all the whole `Annotated` hint, not just the annotated type.
+diff --git i/pydantic/v1/utils.py w/pydantic/v1/utils.py
+index 02543fd13..2094e84fa 100644
+--- i/pydantic/v1/utils.py
++++ w/pydantic/v1/utils.py
+@@ -710,6 +710,7 @@ DUNDER_ATTRIBUTES = {
+     '__qualname__',
+     '__firstlineno__',
+     '__static_attributes__',
++    '__classdictcell__',
+ }
+ 
+ 
+diff --git i/tests/test_dataclasses.py w/tests/test_dataclasses.py
+index 4caebc39f..0a4871c62 100644
+--- i/tests/test_dataclasses.py
++++ w/tests/test_dataclasses.py
+@@ -1921,6 +1921,10 @@ def test_extra_forbid_list_no_error():
+     assert isinstance(Foo(a=[Bar()]).a[0], Bar)
+ 
+ 
++@pytest.mark.skipif(
++    sys.version_info == (3, 14, 0, 'final', 0),
++    reason='Fails on Python 3.14.0 (used by cibuildwheel)',
++)
+ def test_extra_forbid_list_error():
+     @pydantic.dataclasses.dataclass(config=ConfigDict(extra='forbid'))
+     class Bar: ...

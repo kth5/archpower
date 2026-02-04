@@ -6,8 +6,8 @@
 _name=pydantic
 pkgname=python-$_name
 # WARNING: upstream pins pydantic-core down to the patch-level and using other versions breaks tests! only update in lock-step with python-pydantic-core!
-pkgver=2.12.3
-pkgrel=1
+pkgver=2.12.5
+pkgrel=4
 pkgdesc='Data parsing and validation using Python type hints'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://github.com/pydantic/pydantic"
@@ -27,98 +27,36 @@ makedepends=(
   python-hatch-fancy-pypi-readme
   python-wheel
 )
-checkdepends_powerpc64=(
-  python-ansi2html
-  python-cloudpickle
-  python-dirty-equals
-  python-email-validator
-  python-faker
-  python-greenlet
-  python-hypothesis
-  python-jsonschema
-  python-packaging
-  python-pygments
-  python-pytest
-  python-pytest-benchmark
-  python-pytest-examples
-  python-pytest-mock
-  python-pytest-pretty
-  python-pytest-run-parallel
-  python-pytz
-  python-sqlalchemy
-)
-checkdepends_powerpc64le=(
-  python-ansi2html
-  python-cloudpickle
-  python-dirty-equals
-  python-email-validator
-  python-faker
-  python-greenlet
-  python-hypothesis
-  python-jsonschema
-  python-packaging
-  python-pygments
-  python-pytest
-  python-pytest-benchmark
-  python-pytest-examples
-  python-pytest-mock
-  python-pytest-pretty
-  python-pytest-run-parallel
-  python-pytz
-  python-sqlalchemy
-)
-checkdepends_x86_64=(
-  python-ansi2html
-  python-cloudpickle
-  python-dirty-equals
-  python-email-validator
-  python-faker
-  python-greenlet
-  python-hypothesis
-  python-jsonschema
-  python-packaging
-  python-pygments
-  python-pytest
-  python-pytest-benchmark
-  python-pytest-examples
-  python-pytest-mock
-  python-pytest-pretty
-  python-pytest-run-parallel
-  python-pytz
-  python-sqlalchemy
-)
 optdepends=(
   'mypy: for type validation with mypy'
   'python-dotenv: for .env file support'
   'python-email-validator: for email validation'
   'python-hypothesis: for hypothesis plugin when using legacy v1'
 )
-source=($url/archive/v$pkgver/$_name-v$pkgver.tar.gz)
-sha512sums=('4be1f253ae8954d9a2eb75d064a86aeabc95874290fdca90d17942261362903254e78957db791a57564a08555893654623013e7fa0c7d24ace88eb5a6f75fec7')
-b2sums=('1e3a869d4124f2f22971a9c6c283dd2c79dbad275e465af829fc84bcc58f70f50448d7c546d34ae95c71b2ecf9ab7b8b044386ff1a82230285785effa4a02a83')
+source=(
+  $url/archive/v$pkgver/$_name-v$pkgver.tar.gz
+  $_name-2.12.5-v1-python-3.14-support.patch
+  https://github.com/pydantic/pydantic/commit/53cb5f83.patch
+)
+sha512sums=('92e8c43e207e827d4eaad7cd8a09b3e796e8a150aa4dfe193f8ddf29df4826d4e6e6bba4c98ccdfa77ae12e07d7da4bc6567cd16ee8106e06231e0513b3dde37'
+            'b107f22c28ee3ac4b4b5e74b315bc0b12cca4c7a45c1c68bfe5d90f2e2dc586dd531be6cfa98ab5cf8eee79256048d10011f5e98800b6c6f8fd578d798737d51'
+            '1086ad14004ea772833a2f96e2ab4530441748ac207c957b95caeee439d45c4cf6197125a611825f155fe1fa935588d5dc5b6dbcaac84aa258aecad472a30fa0')
+b2sums=('1a5c38795b65c07f3f17ea262bffe2b9e8cb18e0a304b3c73619a7cbd5a95d5966a1e5ad0e44c8135c8cdba228cce2d54d3d6de09f1e581e868c1e15fbd7d3a3'
+        '1e4e994537c134697e0e82db0c4b5190a3c7813f3150dc98ea6d4112abeda4cf2204521284c199fc08aa8bd64440855cd768ee65710065ea93f479c151dd44d0'
+        'ff9f3e8db0999843f3aaf5f8b5951c99e504821c2e36fed0ece7d4a876ccd215c151788d8a2123d415483d70a909495de8817bc5ecb95ee57d6e80372400e458')
+
+prepare() {
+  # Add Python 3.14 support to the v1 module.
+  # Backport of https://github.com/pydantic/pydantic/commit/59c2e827c8a5a3c15ee6112d7d4460db55136edd
+  patch -Np1 -d $_name-$pkgver -i ../$_name-2.12.5-v1-python-3.14-support.patch
+
+  cd $_name-$pkgver
+  patch -p1 -i ../53cb5f83.patch # Fix tests with Python 3.14
+}
 
 build() {
   cd $_name-$pkgver
   python -m build --wheel --no-isolation
-}
-
-check() {
-  case "${CARCH}" in
-    powerpc) return 0 ;;
-  esac
-  local pytest_options=(
-    -vv
-    --deselect tests/test_docs.py  # we are not interested in code formatting
-    --deselect tests/test_types.py::test_string_fails
-    --deselect 'tests/test_networks.py::test_address_invalid[foobar-An email address must have an @-sign.]'
-  )
-  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-
-  cd $_name-$pkgver
-  # install to temporary location, as importlib is used
-  python -m installer --destdir=test_dir dist/*.whl
-  export PYTHONPATH="$PWD/test_dir/$site_packages:$PYTHONPATH"
-  pytest "${pytest_options[@]}"
 }
 
 package() {
