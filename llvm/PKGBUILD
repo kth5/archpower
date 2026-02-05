@@ -3,14 +3,14 @@
 # Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
 
 pkgname=('llvm' 'llvm-libs')
-pkgver=21.1.5
-pkgrel=1
+pkgver=21.1.6
+pkgrel=2
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://llvm.org/"
 license=('Apache-2.0 WITH LLVM-exception')
 makedepends=('cmake' 'ninja' 'zlib' 'zstd' 'curl' 'libffi' 'libedit' 'libxml2'
              'python-setuptools' 'python-psutil' 'python-sphinx'
-             'python-myst-parser')
+             'python-myst-parser' 'python-build' 'python-installer' 'python-wheel')
 options=('staticlibs' '!lto') # tools/llvm-shlib/typeids.test fails with LTO
 case "${CARCH}" in
   powerpc) options+=('!debug') ;;
@@ -23,11 +23,11 @@ source=($_source_base/llvm-$pkgver.src.tar.xz{,.sig}
         hotfix-abi-powerpc64-elfv2.patch
         espresso-cpu.patch
         hotfix-ppc-jit.patch)
-sha256sums=('c9d6ca5073255192850471a276b3a00a6555c6dd09df6cb3eab77801f0a1cae0'
+sha256sums=('908bce97be0275943414b45af2e2b20e8f6d5d9266fdc120bd59f096ebc547ad'
             'SKIP'
-            '48013d5714a96419bf993a2e5e4c5827377e8cf9c565070731fb2305d50d9511'
+            'e364f135fa14c343d70cac96f577f44e8e20bf026682f647f8c3c5687a0bebd1'
             'SKIP'
-            '4ccc00ec2e7bd0cc121eaa34fa25a0480bfb8a5722faf1694720e0be99b753e6'
+            '8d09dc219cdb3da7dafd2161836aacdd6e02c1a113498ab5f37688599406dc8a'
             'SKIP'
             '3dee6891cbe043e31c7d0a88114144ca5ca9c5acfaedc49f392ec9f020618f0d'
             '046d562c2dcad24c3c8174f1c8109b28714b65dfbaa8e3ede7d3373ea3206c83'
@@ -128,6 +128,11 @@ build() {
 
   cmake .. "${cmake_args[@]}"
   ninja
+
+  # Include lit for running lit-based tests in other projects
+  pushd ../utils/lit
+  python -m build --wheel --no-isolation
+  popd
 }
 
 check() {
@@ -148,7 +153,7 @@ package_llvm() {
 
   # Include lit for running lit-based tests in other projects
   pushd ../utils/lit
-  python3 setup.py install --root="$pkgdir" -O1
+  python -m installer --destdir="$pkgdir" dist/*.whl
   popd
 
   # The runtime libraries go into llvm-libs
