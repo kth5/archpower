@@ -1,0 +1,189 @@
+From 0e9299108fc691cf993db31bd4d136b75a86079e Mon Sep 17 00:00:00 2001
+From: Ananthu C V <ananthucv5@gmail.com>
+Date: Wed, 27 Aug 2025 17:32:14 +0530
+Subject: [PATCH] bump pyo3 version to 0.25 (#914)
+
+Co-authored-by: Ananthu C V <weepingclown@debian.org>
+---
+ rust/Cargo.lock            | 27 ++++++++++-----------------
+ rust/Cargo.toml            |  2 +-
+ rust/src/python/parsing.rs | 20 +++++++++-----------
+ 3 files changed, 20 insertions(+), 29 deletions(-)
+
+diff --git a/rust/Cargo.lock b/rust/Cargo.lock
+index 5fb725ae..326301d3 100644
+--- a/rust/Cargo.lock
++++ b/rust/Cargo.lock
+@@ -24,12 +24,6 @@ dependencies = [
+  "shlex",
+ ]
+ 
+-[[package]]
+-name = "cfg-if"
+-version = "1.0.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+-
+ [[package]]
+ name = "heck"
+ version = "0.5.0"
+@@ -80,11 +74,10 @@ dependencies = [
+ 
+ [[package]]
+ name = "pyo3"
+-version = "0.24.1"
++version = "0.25.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "17da310086b068fbdcefbba30aeb3721d5bb9af8db4987d6735b2183ca567229"
++checksum = "8970a78afe0628a3e3430376fc5fd76b6b45c4d43360ffd6cdd40bdde72b682a"
+ dependencies = [
+- "cfg-if",
+  "indoc",
+  "libc",
+  "memoffset",
+@@ -98,9 +91,9 @@ dependencies = [
+ 
+ [[package]]
+ name = "pyo3-build-config"
+-version = "0.24.1"
++version = "0.25.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e27165889bd793000a098bb966adc4300c312497ea25cf7a690a9f0ac5aa5fc1"
++checksum = "458eb0c55e7ece017adeba38f2248ff3ac615e53660d7c71a238d7d2a01c7598"
+ dependencies = [
+  "once_cell",
+  "python3-dll-a",
+@@ -109,9 +102,9 @@ dependencies = [
+ 
+ [[package]]
+ name = "pyo3-ffi"
+-version = "0.24.1"
++version = "0.25.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "05280526e1dbf6b420062f3ef228b78c0c54ba94e157f5cb724a609d0f2faabc"
++checksum = "7114fe5457c61b276ab77c5055f206295b812608083644a5c5b2640c3102565c"
+ dependencies = [
+  "libc",
+  "pyo3-build-config",
+@@ -119,9 +112,9 @@ dependencies = [
+ 
+ [[package]]
+ name = "pyo3-macros"
+-version = "0.24.1"
++version = "0.25.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "5c3ce5686aa4d3f63359a5100c62a127c9f15e8398e5fdeb5deef1fed5cd5f44"
++checksum = "a8725c0a622b374d6cb051d11a0983786448f7785336139c3c94f5aa6bef7e50"
+ dependencies = [
+  "proc-macro2",
+  "pyo3-macros-backend",
+@@ -131,9 +124,9 @@ dependencies = [
+ 
+ [[package]]
+ name = "pyo3-macros-backend"
+-version = "0.24.1"
++version = "0.25.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f4cf6faa0cbfb0ed08e89beb8103ae9724eb4750e3a78084ba4017cbe94f3855"
++checksum = "4109984c22491085343c05b0dbc54ddc405c3cf7b4374fc533f5c3313a572ccc"
+ dependencies = [
+  "heck",
+  "proc-macro2",
+diff --git a/rust/Cargo.toml b/rust/Cargo.toml
+index f3353018..d29a4f81 100644
+--- a/rust/Cargo.toml
++++ b/rust/Cargo.toml
+@@ -14,7 +14,7 @@ strip = true
+ overflow-checks = false
+ 
+ [dependencies]
+-pyo3 = { version = "0.24", features = ["extension-module", "generate-import-lib"] }
++pyo3 = { version = "0.25", features = ["extension-module", "generate-import-lib"] }
+ 
+ [features]
+ extension-module = ["pyo3/extension-module"]
+diff --git a/rust/src/python/parsing.rs b/rust/src/python/parsing.rs
+index 4984c689..85916757 100644
+--- a/rust/src/python/parsing.rs
++++ b/rust/src/python/parsing.rs
+@@ -4,13 +4,11 @@ use pyo3::prelude::*;
+ use pyo3::types::PyDate;
+ use pyo3::types::PyDateTime;
+ use pyo3::types::PyTime;
++use pyo3::IntoPyObjectExt;
+ 
+ use crate::parsing::Parser;
+ use crate::python::types::{Duration, FixedTimezone};
+ 
+-// TODO: pyO3 v0.23 deprecates `ToPyObject`, function below must be migrated as per
+-//       https://pyo3.rs/v0.23.0/migration
+-#[allow(deprecated)]
+ #[pyfunction]
+ pub fn parse_iso8601(py: Python, input: &str) -> PyResult<PyObject> {
+     let parsed = Parser::new(input).parse();
+@@ -31,12 +29,12 @@ pub fn parse_iso8601(py: Python, input: &str) -> PyResult<PyObject> {
+                             datetime.microsecond,
+                             Some(
+                                 Py::new(py, FixedTimezone::new(offset, datetime.tzname))?
+-                                    .to_object(py)
++                                    .into_any()
+                                     .downcast_bound(py)?,
+                             ),
+                         )?;
+ 
+-                        Ok(dt.to_object(py))
++                        Ok(dt.into_any().unbind())
+                     }
+                     None => {
+                         let dt = PyDateTime::new(
+@@ -51,7 +49,7 @@ pub fn parse_iso8601(py: Python, input: &str) -> PyResult<PyObject> {
+                             None,
+                         )?;
+ 
+-                        Ok(dt.to_object(py))
++                        Ok(dt.into_any().unbind())
+                     }
+                 },
+                 (true, false) => {
+@@ -62,7 +60,7 @@ pub fn parse_iso8601(py: Python, input: &str) -> PyResult<PyObject> {
+                         datetime.day as u8,
+                     )?;
+ 
+-                    Ok(dt.to_object(py))
++                    Ok(dt.into_any().unbind())
+                 }
+                 (false, true) => match datetime.offset {
+                     Some(offset) => {
+@@ -74,12 +72,12 @@ pub fn parse_iso8601(py: Python, input: &str) -> PyResult<PyObject> {
+                             datetime.microsecond,
+                             Some(
+                                 Py::new(py, FixedTimezone::new(offset, datetime.tzname))?
+-                                    .to_object(py)
++                                    .into_any()
+                                     .downcast_bound(py)?,
+                             ),
+                         )?;
+ 
+-                        Ok(dt.to_object(py))
++                        Ok(dt.into_any().unbind())
+                     }
+                     None => {
+                         let dt = PyTime::new(
+@@ -91,7 +89,7 @@ pub fn parse_iso8601(py: Python, input: &str) -> PyResult<PyObject> {
+                             None,
+                         )?;
+ 
+-                        Ok(dt.to_object(py))
++                        Ok(dt.into_any().unbind())
+                     }
+                 },
+                 (_, _) => Err(exceptions::PyValueError::new_err(
+@@ -111,7 +109,7 @@ pub fn parse_iso8601(py: Python, input: &str) -> PyResult<PyObject> {
+                     Some(duration.microseconds),
+                 ),
+             )?
+-            .to_object(py)),
++            .into_py_any(py)?),
+             (_, _, _) => Err(exceptions::PyValueError::new_err(
+                 "Not yet implemented".to_string(),
+             )),
