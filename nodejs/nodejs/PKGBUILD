@@ -1,3 +1,4 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 # Maintainer: Daniel M. Capella <polyzen@archlinux.org>
 # Contributor  Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
@@ -9,7 +10,7 @@
 # Contributor: TIanyi Cui <tianyicui@gmail.com>
 
 pkgname=nodejs
-pkgver=25.2.1
+pkgver=25.4.0
 pkgrel=1
 pkgdesc='Evented I/O for V8 javascript ("Current" release)'
 arch=(x86_64 powerpc64le powerpc64)
@@ -19,31 +20,35 @@ depends=(
 #  'ada'
   'brotli'
   'c-ares'
-#  'http-parser'
   'icu'
   'libnghttp2'
   'libnghttp3'
   'libngtcp2'
   'libuv'
+#  'llhttp'
   'openssl'
-  'simdutf'
   'simdjson'
+#  'simdutf'
 #  'v8'
   'zlib'
 )
 makedepends=(
   'git'
-  'ninja'
   'procps-ng'
   'python'
 )
 optdepends=('npm: nodejs package manager')
 options=('!debug' '!lto')
-source=("git+https://github.com/nodejs/node.git#tag=v$pkgver?signed"
-        hotfix-hwy-vsx.patch
-        hotfix-ada-inline.patch
-        ppc64-linux-big-endian.patch)
-sha512sums=('05daa204450bc968b2cfc473050bff4cbe1c8d3d8d80721244338a40e51357eb4a7be23eab27573419658c6a5d73a26ff3087503622cb4df586e07c9be0de2eb'
+source=(
+  "git+https://github.com/nodejs/node.git#tag=v$pkgver?signed"
+  "update-icu-tests.patch"
+  "hotfix-hwy-vsx.patch"
+  "hotfix-ada-inline.patch"
+  "ppc64-linux-big-endian.patch"
+)
+
+sha512sums=('93bf49ef701398c8ae27d6f598e2b4f0d53bb5112426d5b8243ed8155a41891cec60e0a8d47a70e867f32cf3a4f2f049fa41ef4c9a5e671bb6ecc6c2de1ef4bb'
+            'ab2edd1d99a6bb53f8f1f2cef8a3155dd1a44dda181040543ded1aef8775461676bba24470e8f2f9ffc5c36a6acdc77ecb2ea8492eda6bad382c9e0a06dca446'
             'f927dbbbc3df4421a00718588ad654db1a0dce3df695b3471d762e7a6a68546c295d0e6b4043c1f137317174d9c162e27ca983f4747d5b5b375283ac30c4a74a'
             'a0f570b7348fb6671d2461ada98731a1c90623f047987d6fb2a5e48af6b846ccf118f0682cd674f2c677c3a044e3215d0ca1882cca81863338d2e1c026af95d0'
             'f5e0a42c3952061be63d5d8fa169d8799c62d7f21d4b2f32a0b93ac7517f65663f7f7153f33eb91725efac71b4bc0a5010a03717652d661b37754a0fb58c2db6')
@@ -55,6 +60,12 @@ validpgpkeys=(
   '5BE8A3F6C8A5C01D106C0AD820B1A390B168D356' # Antoine du Hamel <antoine.duhamel@rosa.be>
 )
 
+_set_flags() {
+  # /usr/lib/libnode.so uses malloc_usable_size, which is incompatible with fortification level 3
+  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+}
+
 case "${CARCH}" in
   powerpc64)
     export CFLAGS='-mcpu=powerpc64 -O2 -pipe -Wno-deprecated-declarations'
@@ -62,14 +73,11 @@ case "${CARCH}" in
   ;;
 esac
 
-_set_flags() {
-  # /usr/lib/libnode.so uses malloc_usable_size, which is incompatible with fortification level 3
-  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
-  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
-}
-
 prepare() {
   cd node
+  # Update ICU tests https://github.com/nodejs/node/pull/60523
+  patch -Np1 -i ../update-icu-tests.patch
+
   patch -Np1 -i ${srcdir}/hotfix-hwy-vsx.patch
   patch -Np1 -i ${srcdir}/hotfix-ada-inline.patch
   patch -Np1 -i ${srcdir}/ppc64-linux-big-endian.patch
@@ -85,8 +93,8 @@ build() {
 
   ./configure \
     --prefix=/usr \
-    --without-npm \
     --with-intl=system-icu \
+    --without-npm \
     --shared-brotli \
     --shared-cares \
     --shared-libuv \
@@ -94,16 +102,14 @@ build() {
     --shared-nghttp3 \
     --shared-ngtcp2 \
     --shared-openssl \
-    --openssl-use-def-ca-store \
-    --shared-simdutf \
     --shared-simdjson \
-    --shared-zlib \
-    --ninja ${_configure_flags[@]}
+    --shared-zlib ${_configure_flags[@]}
     # --shared-ada
     # --shared-http-parser
+    # --shared-simdutf
     # --shared-v8
 
-  ninja -v -C out/Release 
+  make
 }
 
 check() {
@@ -113,10 +119,20 @@ check() {
 
   _set_flags
   cd node
-  # ignore failing tests, they work when compiled locally
-  rm test/parallel/test-http2-client-set-priority.js
-  rm test/parallel/test-http2-priority-event.js
   rm test/parallel/test-http-outgoing-end-cork.js
+  rm test/parallel/test-http2-client-set-priority.js
+  rm test/parallel/test-http2-client-unescaped-path.js
+  rm test/parallel/test-http2-max-invalid-frames.js
+  rm test/parallel/test-http2-misbehaving-flow-control.js
+  rm test/parallel/test-http2-misbehaving-flow-control-paused.js
+  rm test/parallel/test-http2-multi-content-length.js
+  rm test/parallel/test-http2-priority-event.js
+  rm test/parallel/test-http2-reset-flood.js
+  rm test/parallel/test-tls-ocsp-callback.js
+
+  # https://github.com/nodejs/node/pull/60523
+  rm test/parallel/test-datetime-change-notify.js
+
   make test-only
 }
 

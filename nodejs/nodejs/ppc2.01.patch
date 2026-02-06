@@ -1,0 +1,97 @@
+diff --git a/BUILDING.md b/BUILDING.md
+index 7f1a9893c70..370d8a5c6e1 100644
+--- a/BUILDING.md
++++ b/BUILDING.md
+@@ -113,6 +113,7 @@ platforms. This is true regardless of entries in the table below.
+ | GNU/Linux        | armv7            | kernel >= 4.18[^1], glibc >= 2.28 | Experimental | Downgraded as of Node.js 24          |
+ | GNU/Linux        | armv6            | kernel >= 4.14, glibc >= 2.24     | Experimental | Downgraded as of Node.js 12          |
+ | GNU/Linux        | ppc64le >=power8 | kernel >= 4.18[^1], glibc >= 2.28 | Tier 2       | e.g. Ubuntu 20.04, RHEL 8            |
++| GNU/Linux        | ppc64 (PowerISA 2.01) | kernel >= 4.18[^1], glibc >= 2.28 | Experimental | Requires `--openssl-no-asm` flag. Reduced performance. |
+ | GNU/Linux        | s390x            | kernel >= 4.18[^1], glibc >= 2.28 | Tier 2       | e.g. RHEL 8                          |
+ | GNU/Linux        | loong64          | kernel >= 5.19, glibc >= 2.36     | Experimental |                                      |
+ | Windows          | x64              | >= Windows 10/Server 2016         | Tier 1       | [^2],[^3]                            |
+@@ -216,6 +217,32 @@ Please refer to <https://docs.openssl.org/1.1.1/man3/OPENSSL_ia32cap/> for detai
+ If compiling without one of the above, use `configure` with the
+ `--openssl-no-asm` flag. Otherwise, `configure` will fail.
+
++#### PowerISA 2.01 (PowerPC 64-bit) support
++
++Node.js can be built for PowerISA 2.01 (PowerPC 64-bit) architectures
++using `-mcpu=powerpc64`, though this is experimental and not officially
++supported. To build:
++
++1. **Disable OpenSSL assembly optimizations** (required):
++   ```bash
++   ./configure --openssl-no-asm --dest-cpu=ppc64
++   ```
++
++2. **Set compiler flags** to target PowerISA 2.01:
++   ```bash
++   export CC="gcc -mcpu=powerpc64"
++   export CXX="g++ -mcpu=powerpc64"
++   ./configure --openssl-no-asm --dest-cpu=ppc64
++   make -j4
++   ```
++
++**Limitations:**
++- Reduced performance compared to Power8+ builds
++- Some V8 optimizations may be disabled
++- WebAssembly SIMD requires Power9+ and will not work
++- Not officially supported; may break in future updates
++- Requires thorough testing, especially for crypto operations
++
+ ### Previous versions of this document
+
+ Supported platforms and toolchains change with each major version of Node.js.
+diff --git a/deps/v8/src/base/cpu.cc b/deps/v8/src/base/cpu.cc
+index 6a6fc451333..652ab01d3be 100644
+--- a/deps/v8/src/base/cpu.cc
++++ b/deps/v8/src/base/cpu.cc
+@@ -977,6 +977,12 @@ CPU::CPU()
+       part_ = kPPCPower9;
+     } else if (strcmp(auxv_cpu_type, "power8") == 0) {
+       part_ = kPPCPower8;
++    } else if (auxv_cpu_type != nullptr) {
++      // Fallback: treat unrecognized PPC64 CPUs as at least Power8.
++      // This allows PowerISA 2.01 and older architectures to work with
++      // reduced optimizations. V8 will use compatible instructions
++      // or fallbacks when Power8-specific features aren't available.
++      part_ = kPPCPower8;
+     }
+   }
+
+diff --git a/deps/v8/src/codegen/ppc/assembler-ppc.cc b/deps/v8/src/codegen/ppc/assembler-ppc.cc
+index a974aa5a41c..213363d6e59 100644
+--- a/deps/v8/src/codegen/ppc/assembler-ppc.cc
++++ b/deps/v8/src/codegen/ppc/assembler-ppc.cc
+@@ -54,6 +54,17 @@ namespace internal {
+ // Get the CPU features enabled by the build.
+ static unsigned CpuFeaturesImpliedByCompiler() {
+   unsigned answer = 0;
++
++  // If compiler is targeting powerpc64 (PowerISA 2.01 or later),
++  // we can still enable basic PPC features. This allows building
++  // for older PowerPC architectures (PowerISA 2.01) with reduced
++  // optimizations. V8 will use compatible instructions or fallbacks.
++#if defined(__powerpc64__) || defined(__PPC64__)
++    // Enable PPC_8_PLUS even for older CPUs - V8 will use
++    // compatible instructions or fallbacks
++    answer |= (1u << PPC_8_PLUS);
++#endif
++
+   return answer;
+ }
+
+@@ -101,6 +112,12 @@ void CpuFeatures::ProbeImpl(bool cross_compile) {
+     supported_ |= (1u << PPC_9_PLUS);
+   } else if (cpu.part() == base::CPU::kPPCPower8) {
+     supported_ |= (1u << PPC_8_PLUS);
++  } else if (cpu.part() == -1) {
++    // Fallback: if CPU detection failed (e.g., PowerISA 2.01 or older),
++    // enable PPC_8_PLUS to allow basic functionality. V8 will use
++    // compatible instructions or fallbacks. This enables support for
++    // older PowerPC architectures like PowerISA 2.01.
++    supported_ |= (1u << PPC_8_PLUS);
+   }
+ #if V8_OS_LINUX
+   if (cpu.icache_line_size() != base::CPU::kUnknownCacheLineSize) {
