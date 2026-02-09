@@ -7,34 +7,39 @@
 # Contributor: Daniel M. Capella <polyzen@archlinux.org>
 # Contributor: Guillaume Gauvrit <guillaume@gauvr.it>
 
+apb_output_timeout=7200
+
 pkgbase=uv
 pkgname=("$pkgbase" "python-$pkgbase"{,-build})
-pkgver=0.9.17
-pkgrel=2
+pkgver=0.9.28
+pkgrel=1
 pkgdesc='An extremely fast Python package installer and resolver written in Rust'
-arch=(powerpc espresso)
+arch=(x86_64 powerpc64le powerpc64)
 url="https://github.com/astral-sh/uv"
 license=('MIT' 'Apache-2.0')
-depends=('gcc-libs' # 'libgcc_s.so'
-         'glibc' # 'libc.so' 'libm.so'
-         'zlib' # 'libz.so'
-         'bzip2' # 'libbz2.so'
-         )
-makedepends=('cargo' 'maturin' 'python-installer' 'cmake' 'git')
-checkdepends=('python' 'python-zstandard' 'libxcrypt-compat' 'clang')
+depends=(
+  'bzip2'
+  'gcc-libs'
+  'glibc'
+)
+makedepends=(
+  'cargo'
+  'cmake'
+  'git'
+  'maturin'
+  'python-installer'
+  'xz'
+)
 options=('!lto')
 case "${CARCH}" in
   powerpc) options+=('!debug') ;;
 esac
 source=("git+$url.git#tag=$pkgver")
-sha256sums=('06afa305f26830d202f8e2923bed468566f79bb5f7457f08ceb4974904373449')
+sha256sums=('8395ac002de1d03a06b406b783ec7f958d3312e338f20db4849c70c9cd8ab987')
 
 prepare() {
   cd "$pkgbase"
-  # reduce memory usage during build enabling 32bit builds
-  sed -i -e '/lto/s:fat:thin:' Cargo.toml
-
-  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+  cargo fetch --locked --target "$(rustc --print host-tuple)"
   mkdir -p completions
 }
 
@@ -42,11 +47,11 @@ prepare() {
 # maturin ends up trying to use so we make do with --locked ...
 build() {
   cd "$pkgbase"
-  local tripple="$(rustc -vV | sed -n 's/host: //p')"
-
   case "${CARCH}" in
-    powerpc) RUSTFLAGS="-C link-args=-Wl,--no-keep-memory -C link-args=-Wl,--reduce-memory-overheads" ;;
+    powerpc) RUSTFLAGS="-C codegen-units=64 -C link-arg=-Wl,--no-keep-memory -C link-args=-Wl,--reduce-memory-overheads"
   esac
+
+  local tripple="$(rustc --print host-tuple)"
 
   # Note: do not use --all-features as in enables a self-updater
   maturin build --locked --release --target "$tripple" --strip --compatibility linux
@@ -64,7 +69,7 @@ check() {
   # using vendored Python installs. Even collapsing the matrix to match our
   # system Python version and patching around the path issues to use it,
   # a majority of the unit tests are irrelevant.
-  local tripple="$(rustc -vV | sed -n 's/host: //p')"
+  local tripple="$(rustc --print host-tuple)"
   local _target="target/$tripple/release/uv"
   $_target -V | grep -F "$pkgname $pkgver"
 }
@@ -75,9 +80,15 @@ _package_common() {
 }
 
 package_uv() {
+  depends=(
+    gcc-libs
+    glibc
+    bzip2
+  )
+
   cd "$pkgbase"
   _package_common
-  local _target="target/$(rustc -vV | sed -n 's/host: //p')/release/uv"
+  local _target="target/$(rustc --print host-tuple)/release/uv"
   install -Dm0755 -t "$pkgdir/usr/bin/" "$_target"
   install -Dm0755 -t "$pkgdir/usr/bin/" "${_target}x"
   install -Dm 644 "completions/$pkgbase" -t "$pkgdir/usr/share/bash-completion/completions/"
@@ -87,7 +98,11 @@ package_uv() {
 }
 
 package_python-uv() {
-  desc+=' (python wrapper)'
+  pkgdesc+=' - Python wrapper'
+  depends=(
+    python
+  )
+
   cd "$pkgbase"
   _package_common
   depends=(python "$pkgbase=$pkgver")
@@ -96,7 +111,16 @@ package_python-uv() {
 }
 
 package_python-uv-build() {
-  desc+=' (python build backend)'
+  pkgdesc+=' - Python build backend'
+  depends=(
+    bzip2
+    gcc-libs
+    glibc
+    python
+    xz
+  )
+  groups=(python-build-backend)
+
   cd "$pkgbase"
   _package_common
   python -m installer -d "$pkgdir" target/wheels/uv_build-$pkgver-*.whl
