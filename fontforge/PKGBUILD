@@ -1,38 +1,61 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Lukas Fleischer <lfleischer@archlinux.org>
+# Maintainer: Caleb Maclennan <caleb@alerque.com>
 # Contributor: Eric Belanger <eric@archlinux.org>
 # Contributor: William Rea <sillywilly@gmail.com>
 
 pkgname=fontforge
 pkgver=20251009
-pkgrel=1
+pkgrel=5
 pkgdesc='Outline and bitmap font editor'
 url='https://fontforge.github.io/'
+_url="https://github.com/$pkgname/$pkgname"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-license=('BSD')
-makedepends=('cmake' 'git' 'python-setuptools' 'python-sphinx')
-depends=('libtool' 'pango' 'giflib' 'libtiff' 'libxml2' 'libspiro' 'python'
-         'potrace' 'woff2' 'gtk3' 'gtkmm3' 'libuninameslist')
-source=("https://github.com/${pkgname}/${pkgname}/releases/download/${pkgver}/${pkgname}-${pkgver}.tar.xz")
-sha256sums=('69046500185a5581b58139dfad30c0b3d8128f00ebbfddc31f2fcf877e329e52')
+license=(GPL-3.0-or-later)
+depends=(giflib
+         gtk3
+         gtkmm3
+         libspiro
+         libtiff
+         libtool
+         libuninameslist
+         libxml2
+         pango
+         potrace
+         python
+         woff2)
+makedepends=(cmake
+             git
+             python-setuptools
+             python-sphinx)
+_archive="$pkgname-$pkgver"
+source=("$_url/releases/download/$pkgver/$_archive.tar.xz"
+        "$_url/pull/5702.patch")
+sha256sums=('69046500185a5581b58139dfad30c0b3d8128f00ebbfddc31f2fcf877e329e52'
+            'dcabf49b2057df11c4e64999f3acb6636d5b80f7931b593cd095de80b6e1a702')
+
+prepare() {
+	cd "$_archive"
+	# https://gitlab.archlinux.org/archlinux/packaging/packages/fontforge/-/issues/2
+	# https://github.com/fontforge/fontforge/pull/5702
+	patch -p1 -i "$srcdir/5702.patch"
+}
 
 build() {
-	cd "${srcdir}/${pkgname}-${pkgver}"
-
-	cmake \
-		-B build -S . \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_INSTALL_PREFIX=/usr \
-		-DENABLE_MAINTAINER_TOOLS=TRUE \
-		-DENABLE_FONTFORGE_EXTRAS=TRUE \
-		-DUNIX=TRUE \
-		..
+	cd "$_archive"
+	local cmake_options=(
+		-D CMAKE_BUILD_TYPE=Release
+		-D CMAKE_INSTALL_PREFIX=/usr
+		-D ENABLE_MAINTAINER_TOOLS=True
+		-D ENABLE_FONTFORGE_EXTRAS=True
+		-D UNIX=True
+	)
+	cmake -B build -S . ${cmake_options[@]} ..
 	make -C build
 }
 
 package() {
-	cd "${srcdir}/${pkgname}-${pkgver}/build"
-
-	make DESTDIR="${pkgdir}" install
-	install -Dm644 ../LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+	cd "$_archive"
+	DESTDIR="$pkgdir" cmake --install build
+	install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname/" LICENSE
 }
