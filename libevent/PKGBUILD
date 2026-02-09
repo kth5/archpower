@@ -5,13 +5,18 @@
 pkgbase=libevent
 pkgname=(libevent libevent-docs)
 pkgver=2.1.12
-pkgrel=4.2
+pkgrel=5
 pkgdesc="Event notification library"
 url="https://libevent.org/"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
-license=(BSD)
-depends=(openssl)
-makedepends=(cmake ninja python zlib doxygen)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+license=(BSD-3-Clause-Modification)
+makedepends=(
+  cmake
+  doxygen
+  ninja
+  openssl
+  python
+)
 source=(
   https://github.com/libevent/libevent/releases/download/release-$pkgver-stable/libevent-$pkgver-stable.tar.gz{,.asc}
   EVENT__SIZEOF_TIME_T.patch
@@ -35,27 +40,46 @@ prepare() {
 }
 
 build() {
-  cmake -S libevent-$pkgver-stable -B build -G Ninja \
-    -DCMAKE_BUILD_TYPE=None \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_SKIP_INSTALL_RPATH=TRUE \
-    -DEVENT__LIBRARY_TYPE=SHARED \
-    -DEVENT__DISABLE_REGRESS=OFF \
-    -DEVENT__DOXYGEN=ON
+  local cmake_options=(
+    -B build
+    -S libevent-$pkgver-stable
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_POLICY_VERSION_MINIMUM=3.5
+    -D CMAKE_SKIP_INSTALL_RPATH=TRUE
+    -D EVENT__DISABLE_REGRESS=OFF
+    -D EVENT__DOXYGEN=ON
+    -D EVENT__LIBRARY_TYPE=SHARED
+    -G Ninja
+  )
+
+  cmake "${cmake_options[@]}"
   cmake --build build
 }
 
 check() {
   case "${CARCH}" in
-    powerpc|riscv64) return 0 ;;
+    powerpc) return 0 ;;
   esac
 
+  local ctest_options=(
+    # Disable flaky tests: https://github.com/libevent/libevent/issues/1407
+    # Note: Backporting e.g. https://github.com/libevent/libevent/pull/1555 didn't resolve this!
+    --exclude-regex '(regress__timerfd_EPOLL|regress__timerfd_EPOLL_debug|regress__changelist_EPOLL|regress__changelist_EPOLL_debug|regress__timerfd_changelist_EPOLL|regress__timerfd_changelist_EPOLL_debug|regress__SELECT|regress__SELECT_debug|regress__POLL|regress__POLL_debug)'
+    --output-on-failure
+    --stop-on-failure
+  )
+
   cd build
-  ctest --output-on-failure --stop-on-failure -j$(nproc)
+  ctest "${ctest_options[@]}"
 }
 
 package_libevent() {
   provides=(libevent{,_core,_extra,_openssl,_pthreads}-2.1.so)
+  depends=(
+    glibc
+    openssl
+  )
   optdepends=('python: event_rpcgen.py')
 
   DESTDIR="$pkgdir" cmake --install build
@@ -68,7 +92,7 @@ package_libevent() {
 
 package_libevent-docs() {
   pkgdesc+=" (documentation)"
-  depends=()
 
-  mv doc/* "$pkgdir"
+  mv -v doc/* "$pkgdir"
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 libevent-$pkgver-stable/LICENSE
 }
