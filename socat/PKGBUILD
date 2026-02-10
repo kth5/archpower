@@ -5,8 +5,8 @@
 # Contributor: John Proctor <jproctor@prium.net>
 
 pkgname=socat
-pkgver=1.8.0.3
-pkgrel=2
+pkgver=1.8.1.0
+pkgrel=1
 pkgdesc='Multipurpose relay'
 url='http://www.dest-unreach.org/socat/'
 license=('GPL-2.0-only')
@@ -22,8 +22,8 @@ checkdepends=(
   'procps-ng'
 )
 source=("http://www.dest-unreach.org/socat/download/${pkgname}-${pkgver}.tar.gz")
-sha256sums=('a9f9eb6cfb9aa6b1b4b8fe260edbac3f2c743f294db1e362b932eb3feca37ba4')
-b2sums=('39c2a9971df59ab418e07c77f4d36b6ffac268037d6ba876d1a58ca0a2fecf1784ce65cdc9435825c687736d358cbb24c635b7b9db5c606f9cbda266031c0858')
+sha256sums=('9a884880b1b00dfb2ffc6959197b1554b200af731018174cd048115dc28ef239')
+b2sums=('de994acadd7f1ae2ca78858ebfe4ea96415a60dae110520026d97976693a46f772b3ae97fd08599ba6d344e1667cfe9b01ad74c729603f0bbaee0eaf335e0dd0')
 
 build() {
   cd "${pkgname}-${pkgver}"
