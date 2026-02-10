@@ -5,15 +5,13 @@
 # Contributor: Gilbert Kennen <gilbert firewatcher org>
 
 pkgname=elixir
-pkgver=1.19.2
+pkgver=1.19.5
 pkgrel=1
 pkgdesc="A dynamic, functional language for building scalable and maintainable applications"
 url="https://elixir-lang.org"
 license=('Apache-2.0')
 arch=(any)
-depends=(
-  'erlang-core'
-)
+depends=('erlang-core')
 makedepends=(
   'erlang-compiler'
   'erlang-crypto'
@@ -26,27 +24,35 @@ makedepends=(
   'erlang-stdlib'
   'erlang-tools'
   'erlang-xmerl'
+  'git'
 )
 checkdepends=(
   'erlang-dialyzer'
   'erlang-eunit'
-  'git'
   'rebar3'
 )
-source=(
-  "${pkgname}-${pkgver}.tar.gz::https://github.com/elixir-lang/elixir/archive/v${pkgver}.tar.gz"
-)
-sha256sums=('3bb6ceadf0174ece79649743bccf208e9708c5a9e1570228ff25c8f7347a2209')
+source=("git+https://github.com/elixir-lang/elixir.git#tag=v${pkgver}")
+sha512sums=('0aed73478563ada1e2f7751718a0a845e379e8bbf15539190b17c2cf6e5e84c6bd32519e6251446d9e49434374e9f87878be9ff7293528aa8532d6863b1fa158')
+
+prepare() {
+  cd ${pkgname}
+  # Fix regex position test for newer PCRE2
+  sed -i 's/position 0\$/position [01]$/' lib/elixir/test/elixir/regex_test.exs
+}
+
 build() {
-  cd "${pkgname}-${pkgver}"
+  cd ${pkgname}
   export REBAR3=/usr/bin/rebar3
   make
 }
 
 check() {
-  cd "${pkgname}-${pkgver}"
+  cd ${pkgname}
   export REBAR3=/usr/bin/rebar3
   export ERL_EPMD_PORT=5369
+  # The test suite creates git fixtures and needs to write global git config.
+  # devtools sets GIT_CONFIG_GLOBAL=/dev/null to prevent this.
+  unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
   make test
   # The elixir test suite starts up epmd and then doesn't kill it again
   # afterwards.
@@ -54,6 +60,6 @@ check() {
 }
 
 package() {
-  cd "${pkgname}-${pkgver}"
+  cd ${pkgname}
   make DESTDIR="${pkgdir}" PREFIX=/usr install
 }
