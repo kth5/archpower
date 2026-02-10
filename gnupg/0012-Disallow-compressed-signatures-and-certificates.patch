@@ -1,7 +1,7 @@
-From 8c685c67f684752ee1c02c774234938e5b9bef56 Mon Sep 17 00:00:00 2001
+From 3566abba5948741467c853adbbf5b23b0b8fe676 Mon Sep 17 00:00:00 2001
 From: Demi Marie Obenour <demi@invisiblethingslab.com>
 Date: Wed, 29 Jun 2022 11:07:28 -0400
-Subject: [PATCH 12/21] Disallow compressed signatures and certificates
+Subject: [PATCH] Disallow compressed signatures and certificates
 
 Compressed packets have significant attack surface, both due to the
 potential for denial of service (zip bombs and the like) and for code
@@ -21,43 +21,13 @@ parse_packet, rather than activating the partial-length filter code.
 GnuPG-bug-id: T5993
 Signed-off-by: Demi Marie Obenour <demi@invisiblethingslab.com>
 ---
- g10/import.c       | 18 ++----------------
  g10/mainproc.c     | 17 +++++++++++++++--
  g10/packet.h       |  2 ++
  g10/parse-packet.c | 44 +++++++++++++++++++++++++++++++++++++++++++-
- 4 files changed, 62 insertions(+), 19 deletions(-)
+ 3 files changed, 60 insertions(+), 3 deletions(-)
 
-diff --git a/g10/import.c b/g10/import.c
-index d93453e68..edd354ab1 100644
---- a/g10/import.c
-+++ b/g10/import.c
-@@ -1057,22 +1057,8 @@ read_block( IOBUF a, unsigned int options,
-       switch (pkt->pkttype)
-         {
-         case PKT_COMPRESSED:
--          if (check_compress_algo (pkt->pkt.compressed->algorithm))
--            {
--              rc = GPG_ERR_COMPR_ALGO;
--              goto ready;
--            }
--          else
--            {
--              compress_filter_context_t *cfx = xmalloc_clear( sizeof *cfx );
--              pkt->pkt.compressed->buf = NULL;
--              if (push_compress_filter2 (a, cfx,
--                                         pkt->pkt.compressed->algorithm, 1))
--                xfree (cfx); /* e.g. in case of compression_algo NONE.  */
--            }
--          free_packet (pkt, &parsectx);
--          init_packet(pkt);
--          break;
-+          rc = GPG_ERR_UNEXPECTED;
-+          goto ready;
- 
-         case PKT_RING_TRUST:
-           /* Skip those packets unless we are in restore mode.  */
 diff --git a/g10/mainproc.c b/g10/mainproc.c
-index 739ad0a35..8c13c99c1 100644
+index 82ea79d46..dfd6403dd 100644
 --- a/g10/mainproc.c
 +++ b/g10/mainproc.c
 @@ -170,6 +170,7 @@ add_onepass_sig (CTX c, PACKET *pkt)
@@ -80,7 +50,7 @@ index 739ad0a35..8c13c99c1 100644
    else if( c->encrypt_only )
      rc = handle_compressed (c->ctrl, c, zd, proc_encrypt_cb, c);
    else
-@@ -1638,6 +1642,7 @@ do_proc_packets (CTX c, iobuf_t a)
+@@ -1644,6 +1648,7 @@ do_proc_packets (CTX c, iobuf_t a)
    c->iobuf = a;
    init_packet(pkt);
    init_parse_packet (&parsectx, a);
@@ -88,12 +58,12 @@ index 739ad0a35..8c13c99c1 100644
    while ((rc=parse_packet (&parsectx, pkt)) != -1)
      {
        any_data = 1;
-@@ -1649,6 +1654,12 @@ do_proc_packets (CTX c, iobuf_t a)
+@@ -1655,6 +1660,12 @@ do_proc_packets (CTX c, iobuf_t a)
            if (gpg_err_code (rc) == GPG_ERR_INV_PACKET
                && opt.list_packets == 0)
              break;
 +
-+          if (gpg_err_code (rc) == GPG_ERR_UNEXPECTED)
++          if (gpg_err_code (rc) == GPG_ERR_UNEXPECTED_PACKET)
 +            {
 +              write_status_text( STATUS_UNEXPECTED, "0" );
 +              goto leave;
@@ -101,22 +71,22 @@ index 739ad0a35..8c13c99c1 100644
            continue;
  	}
        newpkt = -1;
-@@ -1686,7 +1697,9 @@ do_proc_packets (CTX c, iobuf_t a)
+@@ -1692,7 +1703,9 @@ do_proc_packets (CTX c, iobuf_t a)
              case PKT_COMPRESSED:  rc = proc_compressed (c, pkt); break;
              case PKT_ONEPASS_SIG: newpkt = add_onepass_sig (c, pkt); break;
              case PKT_GPG_CONTROL: newpkt = add_gpg_control (c, pkt); break;
 -            default: newpkt = 0; break;
-+            default:
-+	      log_assert(!c->signed_data.used);
-+	      newpkt = 0; break;
++            case PKT_MARKER:      newpkt = 0; break;
++            default: log_assert(!c->signed_data.used);
++              newpkt = 0; break;
  	    }
  	}
        else if (c->encrypt_only)
 diff --git a/g10/packet.h b/g10/packet.h
-index 7bc0a6461..7600abda9 100644
+index 9a1198d4a..d3f0dfe4a 100644
 --- a/g10/packet.h
 +++ b/g10/packet.h
-@@ -673,6 +673,7 @@ struct parse_packet_ctx_s
+@@ -674,6 +674,7 @@ struct parse_packet_ctx_s
    int free_last_pkt; /* Indicates that LAST_PKT must be freed.  */
    int skip_meta;     /* Skip ring trust packets.  */
    unsigned int n_parsed_packets;	/* Number of parsed packets.  */
@@ -124,7 +94,7 @@ index 7bc0a6461..7600abda9 100644
  };
  typedef struct parse_packet_ctx_s *parse_packet_ctx_t;
  
-@@ -683,6 +684,7 @@ typedef struct parse_packet_ctx_s *parse_packet_ctx_t;
+@@ -684,6 +685,7 @@ typedef struct parse_packet_ctx_s *parse_packet_ctx_t;
      (a)->free_last_pkt = 0;         \
      (a)->skip_meta = 0;             \
      (a)->n_parsed_packets = 0;      \
@@ -201,6 +171,3 @@ index aa6bac9da..da3c4cee4 100644
      /* If ONLYKEYPKTS is set to 2, then we never skip user id packets,
         even if DO_SKIP is set.  */
      ;
--- 
-2.49.0
-
