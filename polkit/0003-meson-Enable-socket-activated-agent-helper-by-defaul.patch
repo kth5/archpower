@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Jan Alexander Steffens (heftig)" <heftig@archlinux.org>
+Date: Sun, 28 Dec 2025 13:00:29 +0100
+Subject: [PATCH] meson: Enable socket-activated agent helper by default
+
+---
+ data/meson.build                |  6 ++++++
+ data/polkit-agent-helper.socket |  3 ---
+ meson_post_install.py           | 16 ----------------
+ 3 files changed, 6 insertions(+), 19 deletions(-)
+
+diff --git a/data/meson.build b/data/meson.build
+index cdccaddd2906..14997d3232f7 100644
+--- a/data/meson.build
++++ b/data/meson.build
+@@ -61,6 +61,12 @@ if not get_option('libs-only')
+     install_dir: systemdsystemunitdir,
+   )
+ 
++  install_symlink(
++    'polkit-agent-helper.socket',
++    install_dir: systemdsystemunitdir / 'sockets.target.wants',
++    pointing_to: '../polkit-agent-helper.socket',
++  )
++
+   if polkitd_gid != '-'
+     sysusers_template = 'polkit.conf.with-gid'
+   else
+diff --git a/data/polkit-agent-helper.socket b/data/polkit-agent-helper.socket
+index e8fa80b5d952..9d02bc0159d3 100644
+--- a/data/polkit-agent-helper.socket
++++ b/data/polkit-agent-helper.socket
+@@ -6,6 +6,3 @@ Documentation=man:polkit(8)
+ Accept=yes
+ RemoveOnStop=yes
+ ListenStream=/run/polkit/agent-helper.socket
+-
+-[Install]
+-WantedBy=sockets.target
+diff --git a/meson_post_install.py b/meson_post_install.py
+index 95a741ef70d0..165734e5196c 100644
+--- a/meson_post_install.py
++++ b/meson_post_install.py
+@@ -54,19 +54,3 @@ if not os.path.exists(dst):
+                 dst, polkitd_user,
+             )
+         )
+-
+-# polkit-agent-helper-1 need to be setuid root because it's used to
+-# authenticate not only the invoking user, but possibly also root
+-# and/or other users.
+-dst = os.path.join(pkglibdir, 'polkit-agent-helper-1')
+-
+-if os.geteuid() == 0:
+-    os.chown(dst, 0, -1)
+-    os.chmod(dst, 0o4755)
+-else:
+-    print(
+-        'Owner and mode of {} need to be setuid root (04755) after '
+-        'installation'.format(
+-            dst,
+-        )
+-    )
