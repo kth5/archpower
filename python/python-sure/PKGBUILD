@@ -1,0 +1,58 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Chih-Hsuan Yen <yan12125@archlinux.org>
+
+pkgname=python-sure
+pkgver=2.0.1
+_commit=84a45bf91fde2e4b922fb126a9f45651be9393fb
+pkgrel=6
+pkgdesc="An idiomatic testing library for python with powerful and flexible assertions"
+arch=('any')
+url="https://github.com/gabrielfalcao/sure"
+license=('GPL-3.0-or-later')
+depends=('python-six')
+makedepends=('python-setuptools' 'git')
+# python-nose is still imported in some tests https://github.com/gabrielfalcao/sure/issues/182
+checkdepends=('python-pytest' 'python-nose')
+source=("git+https://github.com/gabrielfalcao/sure.git#commit=$_commit"
+        "use-unittest-mock.diff"
+        "python-3.12.diff"
+         python-3.14.patch)
+sha512sums=('afe1fd4698f7386d40c0a138fb3d3e824549669bfb74b97f336743b7f25278302ab0cb45fb4b8ee18b5709895c623bd885896b984a131c51d7c899113a44b073'
+            'ad17f0bc171058cc488f844a55bd0cf2f83b391c6c47b4ac1864b5de0d0842eb086dd1413c249a05684a45c67542c15eadfa2a7cdff095669e327d0e80f09183'
+            '4849170d433a71a88469009591a2097e17ee9cb3bf85491bc637b26c36982fc8960153bbb33c45ff969e3838447388e408f555e2a45b1f19b13fcf9bca9bac5a'
+            '7fd64564513a56caf2d6041763bc6ce593ecb3a35364e6f1d174931d3d8d44197b0360b5e73dc63377aca28e6a49e253c9a91c305b80a8171f253534549820be')
+
+prepare() {
+  export LC_CTYPE=en_US.UTF-8
+
+  cd sure
+  # Based on the first two commits in https://github.com/gabrielfalcao/sure/pull/161
+  patch -Np1 -i ../use-unittest-mock.diff
+
+  # unittest.TestCase.assertEquals is removed in Python 3.12 [1], and thus nose.tools no longer exports assert_equals [2]
+  # Upstream completely drops nose in 3.x pre-releases [3]. Here is just a quick-and-dirty workaround.
+  # [1] https://docs.python.org/3/whatsnew/3.12.html#id3
+  # [2] https://github.com/nose-devs/nose/blob/master/nose/tools/trivial.py#L33
+  # [1] https://github.com/gabrielfalcao/sure/commit/b65631f9bf2074702d2e582a7702307353cf447e
+  patch -Np1 -i ../python-3.12.diff
+
+  sed -i 's#--cov=sure##' setup.cfg
+
+  patch -p1 -i ../python-3.14.patch
+}
+
+build() {
+  cd sure
+  python setup.py build
+}
+
+check() {
+  cd sure
+  PYTHONPATH="$PWD" pytest
+}
+
+package() {
+  cd sure
+  python setup.py install --root="$pkgdir" --optimize=1
+}
