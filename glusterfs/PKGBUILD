@@ -6,11 +6,11 @@
 
 pkgname=glusterfs
 epoch=1
-pkgver=11.1
+pkgver=11.2
 _major=${pkgver%%.*}
-pkgrel=5
+pkgrel=2
 pkgdesc='a cluster file-system capable of scaling to several peta-bytes.'
-arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+arch=(x86_64 powerpc64le powerpc64)
 url='https://www.gluster.org/'
 license=(GPL2 LGPL3)
 install=glusterfs.install
@@ -21,21 +21,40 @@ backup=('etc/glusterfs/glusterd.vol'
         'etc/glusterfs/glusterd.vol'
         'etc/glusterfs/glusterfs-georep-logrotate'
         'etc/glusterfs/glusterfs-logrotate')
-depends=(fuse3 python libxml2 libaio liburcu attr rpcbind liburing gperftools)
+depends=(fuse3 python libxml2 libaio attr rpcbind liburcu liburing gperftools)
 makedepends=(rpcsvc-proto)
 optdepends=('glib2: qemu-block'
-	    'python-prettytable: gluster-georep-sshkey')
-source=(https://download.gluster.org/pub/gluster/glusterfs/${_major}/$pkgver/glusterfs-$pkgver.tar.gz
-        glusterfs.sysusers)
-sha256sums=('6a31b8450d02cd12f47f4571c031e9d6b8705279a0e8970ae9a05e1c87dffb76'
-            'dd5422c42d977348e0054328d5672bbb6624d856946f9be9c656449132da81ee')
+            'python-prettytable: gluster-georep-sshkey')
+#source=(https://download.gluster.org/pub/gluster/glusterfs/${_major}/$pkgver/glusterfs-$pkgver.tar.gz
+source=(glusterfs-$pkgver.tar.gz::https://github.com/gluster/glusterfs/archive/refs/tags/v$pkgver.tar.gz
+        glusterfs.sysusers
+        glusterfs-11.0-extras-defer-invoking-of-gluster-volume-set-help-as-.patch
+        glusterfs-11.2-sys-types.h-for-off64_t.patch
+        glusterfs-11.2-remove-use-systemd-guards-around-several.diff)
+sha256sums=('540683ab1acdc95c7fe940061fb24464e1d3d0955a8610d79376911b73ed4ce4'
+            'dd5422c42d977348e0054328d5672bbb6624d856946f9be9c656449132da81ee'
+            'cb142caab62c46f5b23a1b9e3aa00513cc4d5f2ed579369e699db8548070705f'
+            '94fd8e698716a4b89dca68e0c07c19faa67b39eddec363bfbf2c6eec4631e1d8'
+            '34ada7435dd35ef2cf072a826b62efae2160b53523679a8a203d510865e44a6e')
+
+options=(!lto)
 
 prepare() {
   cd "$srcdir"/$pkgname-$pkgver
+
+  patch -Np1 -i ${srcdir}/glusterfs-11.0-extras-defer-invoking-of-gluster-volume-set-help-as-.patch
+  patch -Np1 -i ${srcdir}/glusterfs-11.2-sys-types.h-for-off64_t.patch
+  patch -Np1 -i ${srcdir}/glusterfs-11.2-remove-use-systemd-guards-around-several.diff
+
   autoreconf -fi
 }
 
 build() {
+  case "${CARCH}" in
+    powerpc64*) _configure_flags=(--disable-gnfs --disable-lto) ;;
+    x86_64)   _configure_flags=(--enable-gnfs) ;;
+  esac
+
   cd "$srcdir"/$pkgname-$pkgver
   ./configure \
     --prefix=/usr \
@@ -46,8 +65,7 @@ build() {
     --mandir=/usr/share/man \
     --libexecdir=/usr/lib/$pkgname \
     --with-systemddir=/usr/lib/systemd/system \
-    --with-tmpfilesdir=/usr/lib/tmpfiles.d \
-    --enable-gnfs \
+    --with-tmpfilesdir=/usr/lib/tmpfiles.d ${_configure_flags[@]} \
     LEXLIB=
   make
 }
