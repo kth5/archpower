@@ -5,9 +5,12 @@
 # Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
 # Contributor: Jonathan Wiersma <archaur at jonw dot org>
 
-pkgname=(libvirt libvirt-storage-gluster libvirt-storage-iscsi-direct)
+pkgname=(libvirt libvirt-storage-iscsi-direct)
+case "${CARCH}" in
+  powerpc64*|x86_64) pkgname+=(libvirt-storage-gluster) ;;
+esac
 epoch=1
-pkgver=11.10.0
+pkgver=12.0.0
 pkgrel=1
 pkgdesc="API for controlling virtualization engines (openvz,kvm,qemu,virtualbox,xen,etc)"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
@@ -48,20 +51,21 @@ depends=(
 makedepends=(
   bash-completion
   git
-  glusterfs
   libiscsi
   libxslt
   meson
   python-docutils
   systemd
 )
+makedepends_powerpc64=(glusterfs)
+makedepends_powerpc64le=(glusterfs)
+makedepends_x86_64=(glusterfs)
 optdepends=(
   'dmidecode: DMI system info support'
   'dnsmasq: required for default NAT/DHCP for guests'
   'gettext: required for libvirt-guests.service'
   'iptables-nft: required for default NAT networking'
   'libvirt-python: for virt-qemu-qmp-proxy and virt-qemu-sev-validate commands'
-  'libvirt-storage-gluster: Gluster storage backend'
   'libvirt-storage-iscsi-direct: iSCSI-direct storage backend'
   'lvm2: Logical Volume Manager support'
   'openbsd-netcat: for remote management over ssh'
@@ -74,6 +78,9 @@ optdepends=(
   'radvd: IPv6 RAD support'
   'swtpm: TPM emulator support'
 )
+optdepends_powerpc64=('libvirt-storage-gluster: Gluster storage backend')
+optdepends_powerpc64le=('libvirt-storage-gluster: Gluster storage backend')
+optdepends_x86_64=('libvirt-storage-gluster: Gluster storage backend')
 
 backup=(
   'etc/libvirt/libvirt-admin.conf'
@@ -131,7 +138,7 @@ backup=(
 source=(
   "git+https://gitlab.com/libvirt/libvirt.git#tag=v${pkgver}"
 )
-sha256sums=('24e5e20169037352cd9f2a53f0a3b02f585464727731cda2e61f9bd487928631')
+sha256sums=('00d3df8f165b52d5c1b1f36a3b90bf50d309f2317482e56bbec633ec45442001')
 
 prepare() {
   cd ${pkgname}
@@ -151,6 +158,7 @@ build() {
 
   case "${CARCH}" in
     x86_64) _meson_options=(-Ddriver_ch=enabled) ;;
+    powerpc) _meson_options=(-Ddriver_ch=disabled -Dglusterfs=disabled -Dstorage_gluster=disabled) ;;
     *) _meson_options=(-Ddriver_ch=disabled) ;;
   esac
 
@@ -217,10 +225,14 @@ package_libvirt() {
 
   rm -f "${pkgdir}"/etc/libvirt/qemu/networks/autostart/default.xml
 
-  # move split modules
-  mv "${pkgdir}"/usr/lib/libvirt/storage-backend/libvirt_storage_backend_gluster.so "${pkgdir}"/../
+  case "${CARCH}" in
+    powerpc64*|x86_64)
+      # move split modules
+      mv "${pkgdir}"/usr/lib/libvirt/storage-backend/libvirt_storage_backend_gluster.so "${pkgdir}"/../
+      mv "${pkgdir}"/usr/lib/libvirt/storage-file/libvirt_storage_file_gluster.so "${pkgdir}"/../
+    ;;
+  esac
   mv "${pkgdir}"/usr/lib/libvirt/storage-backend/libvirt_storage_backend_iscsi-direct.so "${pkgdir}"/../
-  mv "${pkgdir}"/usr/lib/libvirt/storage-file/libvirt_storage_file_gluster.so "${pkgdir}"/../
 }
 
 package_libvirt-storage-gluster() {
