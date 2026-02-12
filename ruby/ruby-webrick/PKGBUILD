@@ -3,8 +3,8 @@
 
 _gemname=webrick
 pkgname=ruby-$_gemname
-pkgver=1.9.1
-pkgrel=4
+pkgver=1.9.2
+pkgrel=1
 pkgdesc='An HTTP server toolkit that can be configured as an HTTPS server'
 arch=(any)
 url='https://github.com/ruby/webrick'
@@ -24,8 +24,8 @@ checkdepends=(
 )
 options=(!emptydirs)
 source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('c680e30275dabc309b03f6353410b69e7c543701ad322cb32cf938fc42bf234ca17d26ddd0da09c8484ec78661897ce5bcf99d94dcf1856b31d4803793ef7ab3')
-b2sums=('04a89f982e8e6e77ec2ef29bebc14beb6212e111874c45c1ca65fab5e685c328e909040d69f4c0bb5d5e5081e5616bf0df33d3173054ebc042960056e7476a21')
+sha512sums=('4db8d8d6fbe051b8d8a377c9a2fc7991c7239cc24fa082bfcfe568c99bd006bfebb36068c6b9816abc6182a14cccbe4684e8caf9fd218d2674237748f40225a5')
+b2sums=('2e6c1ff39144e01fc48186e056b1aecc2c456da0076bfbd2ac04b95fb6d7b685489d5573a12430e3543548df72c78854b99f0793bab150d497ae220e40988749')
 
 prepare() {
   cd "${_gemname}-${pkgver}"
