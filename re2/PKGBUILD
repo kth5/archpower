@@ -1,27 +1,41 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Evangelos Foutras <foutrelis@archlinux.org>
+# Maintainer: Christian Heusel <gromit@archlinux.org>
 # Contributor: Anatol Pomozov <anatol.pomozov@gmail.com>
 # Contributor: Gustavo Alvarez <sl1pkn07@gmail.com>
 # Contributor: Alexandre Bique <bique.alexandre@gmail.com>
 
 pkgname=re2
-_re2ver=2024-07-02
-pkgrel=7
-epoch=1
-pkgver=${_re2ver//-}
+pkgrel=1
+epoch=2
+pkgver=2025.11.05
 pkgdesc="Fast, safe, thread-friendly regular expression engine"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://github.com/google/re2"
 license=('BSD-3-Clause')
-depends=('gcc-libs' 'abseil-cpp')
+depends=('gcc-libs' 'glibc' 'abseil-cpp')
 checkdepends=('gtest' 'benchmark')
+makedepends=('git' 'cmake')
 provides=('libre2.so')
-source=(re2-$pkgver.tar.gz::https://github.com/google/re2/archive/$_re2ver.tar.gz)
-sha256sums=('eb2df807c781601c14a260a507a5bb4509be1ee626024cb45acbd57cb9d4032b')
+source=("$pkgname::git+https://github.com/google/re2.git#tag=${pkgver//./-}")
+sha256sums=('13cb4ba61567d496fc8ed0bc31369e81bbe9ef34ce8c7dffe5219093a576e385')
 
 build() {
-  cd $pkgname-$_re2ver
-  make
+  case "${CARCH}" in
+    powerpc) export CXXFLAGS+=' -latomic' ;;
+  esac
+
+  local cmake_options=(
+    -B build
+    -S $pkgname
+    -W no-dev
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D BUILD_SHARED_LIBS=ON
+    -D RE2_BUILD_TESTING=ON
+  )
+  cmake "${cmake_options[@]}"
+  cmake --build build
 }
 
 check() {
@@ -29,12 +43,20 @@ check() {
     powerpc) return 0 ;;
   esac
 
-  cd $pkgname-$_re2ver
-  make test
+  local excluded_tests=""
+  local ctest_flags=(
+    --test-dir build
+    # show the stdout and stderr when the test fails
+    --output-on-failure
+    # execute tests in parallel
+    --parallel $(nproc)
+    # exclude problematic tests
+    --exclude-regex "$excluded_tests"
+  )
+  ctest "${ctest_flags[@]}"
 }
 
 package() {
-  cd $pkgname-$_re2ver
-  make prefix=/usr DESTDIR="$pkgdir" install
-  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  DESTDIR="$pkgdir" cmake --install build
+  install -Dm644 $pkgname/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
