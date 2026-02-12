@@ -4,7 +4,7 @@
 
 _gemname='thor'
 pkgname="ruby-${_gemname}"
-pkgver=1.4.0
+pkgver=1.5.0
 pkgrel=1
 pkgdesc='Toolkit for building powerful command-line interfaces'
 url='https://github.com/erikhuda/thor'
@@ -24,8 +24,8 @@ checkdepends=(
 )
 options=('!emptydirs')
 source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('6f1fe42212583be1fc963c852524795967a725eac65d27a8597b81d52ba22ea35ab0ea69e37df2a81c0280957444851be45861ba86f90cd0c794c0151ea84fd4')
-b2sums=('94a8973f62d683be6c7089798be3ad3f3b90c2fe6aa391a28624f3672d83bb1b95865aa7c0719aec7f01481c5c0826ae94b92c146131f8f7c2f5227e1376fc1f')
+sha512sums=('48a64494eecd3ae1d1b0b7c487b639d759c38211139d96286535d96f967886e9d2eab952fd0edcf4e2ed762854fe8154a350272a2675cd1727000c7e6befedcd')
+b2sums=('804c4d7cdbdda344f9516814ee5d648107eb3867da78dcaab1ecc81db9fb819f19be88dc2b8b81cabe9a8f3f1bea4febdcf531eccfee7990d790915c37c90e98')
 
 prepare() {
   cd "${_gemname}-${pkgver}"
