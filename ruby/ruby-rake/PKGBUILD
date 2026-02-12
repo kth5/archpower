@@ -3,7 +3,7 @@
 
 _gemname=rake
 pkgname=ruby-$_gemname
-pkgver=13.3.0
+pkgver=13.3.1
 pkgrel=1
 pkgdesc='Make-like build tool implemented in Ruby'
 provides=(rake)
@@ -24,8 +24,8 @@ checkdepends=(
 )
 options=(!emptydirs)
 source=("git+https://github.com/ruby/rake#tag=v${pkgver}")
-sha512sums=('06c7401032de3e3cae2d6e4a55fa69e7e27294098cd04d66f9dce1330b6aaaa177db297afc32ee4fa7c8f2ec26d20b39ad1c42e67961d5bae897eee3143e9289')
-b2sums=('5a664f30d44f80673da979df3101a49f4f4db5c91eaaa5cb824464679fb55636a4ebdcc43abb3fe84beeaaab5df808f8ede9ae9dcc4ced03bd4f07a9958c72b9')
+sha512sums=('5eb827e5e8837478c300e4ce37157861a99b9b58595dc4bb96afa274f8d829cd435376626f1594ea427d093cd446224d3c699ef7dfa76efbba424ba1d6bc1e00')
+b2sums=('6f43b38a0a0d7e89a19273a6a769c08e5f117fad71a7febb331a24120bcd7d9e4bd5d3ca1c38675f9c6684b9fe42590308f00ea02888e0985ad5d561422e8a4f')
 
 prepare() {
   cd "${_gemname}"
