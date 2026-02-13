@@ -1,61 +1,80 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Bruno Pagani <archange@archlinux.org>
 
-_pkg=Fiona
-pkgname=python-${_pkg,,}
+pkgname=python-fiona
 pkgver=1.10.1
-pkgrel=2
-pkgdesc="Read and write geographic data files"
+pkgrel=5
+pkgdesc='Read and write geographic data files'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-url="https://github.com/Toblerity/Fiona"
+url='https://github.com/Toblerity/Fiona'
 license=(BSD-3-Clause)
 depends=(
-    gdal
-    python-attrs
-    python-certifi
-    python-click
-    python-click-plugins
-    python-cligj
-    python-munch
-)
-optdepends=(
-    'python-shapely: fio-calc functionnality'
-    'python-boto3: s3 support'
+  gdal
+  python-attrs
+  python-certifi
+  python-click
+  python-cligj
 )
 makedepends=(
-    cython
-    python-build
-    python-installer
-    python-setuptools
-    python-wheel
+  git
+  cython
+  python-build
+  python-installer
+  python-setuptools
+  python-wheel
 )
-checkdepends=(python-pytest python-boto3 python-pytz python-shapely)
-#source=(https://files.pythonhosted.org/packages/source/${_pkg::1}/${_pkg}/${_pkg}-${pkgver}.tar.gz)
-source=(https://github.com/Toblerity/Fiona/archive/${pkgver}/${pkgname}-${pkgver}.tar.gz)
-sha256sums=('308e12c33d34141c2ff2ba94ebcc7c9226f5d17882a5b51ef064f0283d67dc88')
+checkdepends=(
+  python-pytest
+  python-boto3
+  python-pytz
+  python-shapely
+  python-fsspec
+  python-pyparsing
+)
+optdepends=(
+  'python-shapely: fio-calc functionnality'
+  'python-boto3: s3 support'
+)
+source=("$pkgname::git+https://github.com/Toblerity/Fiona#tag=$pkgver")
+sha512sums=('cec6105e0d5b34e395aec9aaeeb1c6bbcb73c2f91000732a1236b4dc1fdc7123ca25c9fe73acdd854a4dabf12f5a8edb7346242dfc1c3c9e6b89ebeccb621306')
+b2sums=('85984110635e0145d89a0f89412a0c46a154b0145dfc8b316ac43ac1587a82448a7708137eb84aeee92d0dc362ff882c62ac0a1ab8efb54cf6362bd55f577471')
 
 prepare() {
-  sed -i '/oldest-supported-numpy/d' ${_pkg}-${pkgver}/pyproject.toml
-  sed -i 's|\~=|>=|' ${_pkg}-${pkgver}/pyproject.toml # Fix build with cython 3.1
+  cd "$pkgname"
+
+  # vendor unmaintained click-plugins
+  # https://github.com/Toblerity/Fiona/pull/1498
+  git cherry-pick --no-commit cc3a5fcdec6d48daa48830087d115202406e16bd
+
+  sed -e '/oldest-supported-numpy/d' -i pyproject.toml
+
+  # Fix build with cython 3.1
+  sed -e 's|\~=|>=|' -i pyproject.toml
 }
 
 build() {
-  cd ${_pkg}-${pkgver}
+  cd "$pkgname"
+
   CFLAGS+=" -Wno-incompatible-pointer-types" \
   python -m build --wheel --no-isolation
 }
 
 check() {
-  cd ${_pkg}-${pkgver}
-  mv fiona{,.bak} # Avoid non-working local import
-  local python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-  # Currently they are 66 failing tests but no time to investigate
-  PYTHONPATH="${PWD}"/build/lib.linux-${CARCH}-${python_version}/ pytest -vv --color=yes -m "not wheel" || echo "Warning: failed tests"
-  mv fiona{.bak,}
+  cd "$pkgname"
+
+  # temporary install
+  python -m installer --destdir="$(pwd)/tmp" dist/*.whl
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  export PYTHONPATH="$(pwd)/tmp/$site_packages"
+
+  pytest -vv --color=yes -m "not wheel" || echo "Warning: failed tests"
 }
 
 package() {
-  cd ${_pkg}-${pkgver}
+  cd "$pkgname"
+
   python -m installer --destdir="$pkgdir" dist/*.whl
-  install -Dm644 LICENSE.txt -t "${pkgdir}"/usr/share/licenses/${pkgname}
+
+  # license
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE.txt
 }
