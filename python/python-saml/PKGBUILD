@@ -4,7 +4,7 @@
 _name=python3-saml
 pkgname=python-saml
 pkgver=1.16.0
-pkgrel=3
+pkgrel=4
 pkgdesc="Python SAML Toolkit"
 arch=(any)
 url="https://github.com/SAML-Toolkits/python3-saml"
@@ -22,6 +22,10 @@ makedepends=(
   python-setuptools
   python-wheel
 )
+checkdepends=(
+  python-freezegun
+  python-pytest
+)
 provides=(python-python3-saml)
 source=($_name-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz)
 sha512sums=('77e779a3d3190f3164105bbc2943b54729dfef12c71b0303a523acada95da291bc77b331a83726f00c503ef09040a05180c234620e5a65d4ea4fd88da24eeade')
@@ -36,6 +40,22 @@ prepare() {
 build() {
   cd $_name-$pkgver
   python -m build --wheel --no-isolation
+}
+
+check() {
+  local pytest_options=(
+    -vv
+    # broken with Python 3.12
+    --deselect tests/src/OneLogin/saml2_tests/idp_metadata_parser_test.py::OneLogin_Saml2_IdPMetadataParser_Test::testGetMetadataWithHeaders
+    --deselect tests/src/OneLogin/saml2_tests/idp_metadata_parser_test.py::OneLogin_Saml2_IdPMetadataParser_Test::testParseRemoteWithHeaders
+    --deselect tests/src/OneLogin/saml2_tests/response_test.py::OneLogin_Saml2_Response_Test::testIsInValidEncIssues_2
+    --deselect tests/src/OneLogin/saml2_tests/response_test.py::OneLogin_Saml2_Response_Test::testValidateTimestamps
+    --deselect tests/src/OneLogin/saml2_tests/utils_test.py::OneLogin_Saml2_Utils_Test::testAddSign
+  )
+
+  cd $_name-$pkgver
+  export PYTHONPATH="$PWD/src:$PYTHONPATH"
+  pytest "${pytest_options[@]}"
 }
 
 package() {
