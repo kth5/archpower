@@ -12,9 +12,10 @@
 pkgbase='protobuf'
 pkgname=('protobuf' 'python-protobuf' 'ruby-google-protobuf')
 pkgver=33.1
-pkgrel=1
+pkgrel=3
 pkgdesc="Protocol Buffers - Google's data interchange format"
-arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+#arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+arch=(powerpc espresso)
 url='https://developers.google.com/protocol-buffers/'
 license=('BSD-3-Clause')
 depends=(
@@ -62,6 +63,7 @@ prepare() {
   cd "$pkgname"
   patch -p1 < ../protobuf-fix-build-type-none.patch # Fix cmake config compatibility mode
   patch -p1 < ../protobuf-33-patch-enum-traits-impl.patch
+
   patch -p1 < ../protobuf-28.0-disable-test_upb-lto.patch
 }
 
@@ -86,20 +88,11 @@ build() {
   cmake "${cmake_options[@]}"
   cmake --build build --verbose
 
-  cd "$pkgbase"
-  local bazel_options=(
-    --noenable_bzlmod
-    --enable_workspace
-  )
-
-  # protobuf has both osx-aarch_64 and linux-aarch_64 platforms
-  # so we need to explicitly specify the target CPU when building
-  # for aarch64
-  [[ $CARCH == "aarch64" ]] && bazel_options+=(--cpu=linux-aarch_64)
-
-  cd ruby
+  cd "$pkgbase"/ruby
   local _gemdir="$(gem env gemdir)"
   local _gemver=4.$pkgver
+  local _gemplatform=$(ruby -e "puts Gem::Platform.local")
+  local _rubyapi=$(ruby -e 'require "rbconfig"; puts RbConfig::CONFIG["RUBY_API_VERSION"]')
 
   PROTOC="$srcdir"/build/protoc \
     rake
@@ -114,8 +107,24 @@ build() {
     --bindir "tmp_install/usr/bin" \
     "pkg/${_gemname}-${_gemver}.gem"
 
-  install -D lib/google/protobuf_c.so \
-    "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}"/lib/google/$(ruby -e 'require "rbconfig"; puts RbConfig::CONFIG["RUBY_API_VERSION"]')/protobuf_c.so
+  # install shared libraries to standard location and symlink to that location from custom location Gem requires
+   install -D lib/google/protobuf_c.so \
+    "tmp_install${_gemdir}/extensions/${_gemplatform}/${_rubyapi}/${_gemname}-${_gemver}"/protobuf_c.so
+  install -d "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}"/lib/google/${_rubyapi}
+  ln -s "${_gemdir}/extensions/${_gemplatform}/${_rubyapi}/${_gemname}-${_gemver}"/protobuf_c.so \
+    "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}"/lib/google/${_rubyapi}/protobuf_c.so
+  #FIXME: powerpc64le builds properly files in the wrong place
+  case "${CARCH}" in
+    powerpc64le)
+      mkdir -vp "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}"/ext/google/protobuf_c/${_gemplatform}
+      find "tmp_install/" -type f -name libprotobuf_c_ffi.so \
+           -exec cp -av {} "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}"/ext/google/protobuf_c/${_gemplatform}/libprotobuf_c_ffi.so \;
+    ;;
+  esac
+  mv "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}"/ext/google/protobuf_c/${_gemplatform}/libprotobuf_c_ffi.so \
+    "tmp_install${_gemdir}/extensions/${_gemplatform}/${_rubyapi}/${_gemname}-${_gemver}"
+  ln -s "${_gemdir}/extensions/${_gemplatform}/${_rubyapi}/${_gemname}-${_gemver}"/libprotobuf_c_ffi.so \
+    "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}"/ext/google/protobuf_c/${_gemplatform}/libprotobuf_c_ffi.so
 
   # remove unrepreducible files
   rm --force --recursive --verbose \
