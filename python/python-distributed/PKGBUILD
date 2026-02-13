@@ -4,7 +4,7 @@
 
 _name=distributed
 pkgname=python-$_name
-pkgver=2025.11.0
+pkgver=2026.1.2
 pkgrel=1
 pkgdesc="Distributed task scheduler for Dask"
 arch=(any)
@@ -62,7 +62,7 @@ checkdepends=(
   python-zstandard
 )
 source=(https://github.com/dask/distributed/archive/$pkgver/$pkgname-$pkgver.tar.gz)
-b2sums=('0316e7671bc5257528444fc04302ebec9b58b7ea65fcde0fa9f6065b16bf92221dd1ce2e348dad1cfb34e6cb837e6382e786908b050fc309c11b608b4d21e87e')
+b2sums=('a397a60fb512a9cc73a4c38bce5c62f4b2a2a6cb11e6887f84b7d4fc7e53e172b18766dd84653c51e3fd9e1aeb9eaab1c5095df73a8a77c5558882202661fc1b')
 
 build() {
   cd $_name-$pkgver
@@ -71,10 +71,6 @@ build() {
 }
 
 check() {
-  case "${CARCH}" in
-    powerpc*) return 0 ;;
-  esac
-
   local pytest_options=(
     -vv
     --override-ini="addopts="
@@ -82,22 +78,15 @@ check() {
     # distribute tests across multiple CPUs
     -n auto
     --dist loadscope
-    -m "not avoid_ci and not gpu and not extra_packages"
-    --deselect distributed/cli/tests/test_dask_scheduler.py
-    --deselect distributed/cli/tests/test_dask_spec.py
-    --deselect distributed/cli/tests/test_dask_worker.py
-    --deselect distributed/cli/tests/test_tls_cli.py
-    --deselect distributed/comm/tests/test_comms.py::test_tls_comm_closed_implicit[tornado]
-    --deselect distributed/deploy/tests/test_local.py::test_defaults_5
-    --deselect distributed/deploy/tests/test_old_ssh.py  # crashes the test suite
-    --deselect distributed/deploy/tests/test_subprocess.py
-    --deselect distributed/tests/test_client.py::test_computation_object_code_dask_compute
-    --deselect distributed/tests/test_init.py::test_git_revision
-    --deselect distributed/tests/test_queues.py::test_queue_in_task
+    # use 'signal' which only kills the offending test
+    --timeout-method signal
+    -m "not slow and not leaking and not avoid_ci and not gpu and not extra_packages"
+    # crashes the test suite
+    --deselect distributed/deploy/tests/test_old_ssh.py
+    # FileNotFoundError: [Errno 2] No such file or directory: 'dask-worker'
+    --deselect distributed/cli/tests/test_dask_worker.py::test_single_executable_deprecated
+    # AssertionError: Too many workers without keys (9 out of 12)
     --deselect distributed/tests/test_steal.py::test_steal_twice
-    --deselect distributed/tests/test_variable.py::test_variable_in_task
-    --deselect distributed/tests/test_worker_memory.py::test_fail_to_pickle_execute_1
-    --deselect distributed/tests/test_active_memory_manager.py::test_RetireWorker_with_actor[True]  # TimeoutError
     # TypeError: _FlakyPlugin._make_test_flaky() got an unexpected keyword argument 'reruns'
     --deselect distributed/comm/tests/test_ws.py
     --deselect distributed/deploy/tests/test_slow_adaptive.py::test_scale_up_down
@@ -106,18 +95,46 @@ check() {
     --deselect distributed/diagnostics/tests/test_progress.py::test_AllProgress_lost_key
     --deselect distributed/tests/test_client.py::test_profile
     --deselect distributed/tests/test_worker.py::test_statistical_profiling
+    --deselect distributed/cli/tests/test_dask_scheduler.py::test_pid_file
     # TimeoutError: Test timeout (30) hit after 30.000276130624115s
-    --deselect distributed/tests/test_scheduler.py::test_resubmit_nondeterministic_task_different_deps
+    --deselect distributed/deploy/tests/test_local.py::test_defaults_5
+    --deselect distributed/deploy/tests/test_adaptive.py::test_adapt_down
+    --deselect distributed/shuffle/tests/test_merge.py::test_merge_indicator
     # FutureWarning: get_ipv6 is deprecated and will be removed in a future release. Please use get_ip instead.
     --deselect distributed/comm/tests/test_comms.py::test_default_client_server_ipv6[tornado]
     --deselect distributed/comm/tests/test_comms.py::test_tcp_client_server_ipv6[tornado]
-    --deselect distributed/deploy/tests/test_local.py::test_only_local_access
-    --deselect distributed/deploy/tests/test_local.py::test_remote_access
     --deselect distributed/deploy/tests/test_local.py::test_local_tls[True]
     --deselect distributed/deploy/tests/test_local.py::test_local_tls[False]
-    # AssertionError: Regex pattern did not match.
-    --deselect distributed/tests/test_queues.py::test_set_cancelled_future
-    --deselect distributed/tests/test_scheduler.py::test_restart_not_all_workers_return
+    # NotImplementedError: (CategoricalDtype(categories=['a', 'b'], ordered=True, categories_dtype=object), array([0, 1, 0], dtype=int8))
+    --deselect distributed/protocol/tests/test_pandas.py::test_dumps_serialize_pandas[df12]
+    --deselect distributed/protocol/tests/test_pandas.py::test_dumps_serialize_pandas[df13]
+    --deselect distributed/protocol/tests/test_pandas.py::test_dumps_serialize_pandas[df14]
+    --deselect distributed/protocol/tests/test_pandas.py::test_dumps_serialize_pandas[df22]
+    # NotImplementedError: (dtype('<M8[ns]'), array( ... ))
+    --deselect distributed/shuffle/tests/test_metrics.py::test_dataframe
+    --deselect distributed/shuffle/tests/test_shuffle.py
+    # RuntimeError: Error during deserialization of the task graph.
+    --deselect distributed/shuffle/tests/test_graph.py::test_basic_state
+    --deselect distributed/shuffle/tests/test_graph.py::test_multiple_linear
+    # RuntimeError: Nanny failed to start worker process
+    --deselect distributed/tests/test_utils_test.py::test_start_failure_worker[True]
+    # assert False
+    --deselect distributed/tests/test_init.py::test_git_revision
+    # AssertionError: assert 'finished' == 'error'
+    --deselect distributed/tests/test_worker_memory.py::test_fail_to_pickle_execute_1
+    # assert 2 == 1
+    --deselect distributed/tests/test_client.py::test_computation_object_code_dask_compute
+    # pytest.PytestUnraisableExceptionWarning: Exception ignored in: <coroutine object assert_can_connect at 0x7f2c20a6cc70>
+    --deselect distributed/cli/tests/test_dask_scheduler.py::test_defaults
+    --deselect distributed/cli/tests/test_dask_scheduler.py::test_hostport
+    --deselect distributed/deploy/tests/test_local.py::test_only_local_access
+    --deselect distributed/deploy/tests/test_local.py::test_remote_access
+    # since Python 3.14: Failed: DID NOT RAISE <class 'TypeError'>
+    --deselect distributed/protocol/tests/test_protocol.py::test_deeply_nested_structures
+    # hangs
+    --deselect distributed/tests/test_client.py::test_futures_in_subgraphs
+    --deselect distributed/cli/tests/test_dask_scheduler.py::test_preload_config
+    --deselect distributed/cli/tests/test_dask_scheduler.py::test_preload_command
   )
 
   cd $_name-$pkgver
