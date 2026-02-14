@@ -1,0 +1,669 @@
+From ea70b2dff6bbcedc8c339f4f016cf6862e20d1e7 Mon Sep 17 00:00:00 2001
+From: fujiwarat <takao.fujiwara1@gmail.com>
+Date: Tue, 7 Oct 2025 14:24:54 +0900
+Subject: [PATCH] Revert "bus: Update gdm bits based on new gdm changes"
+
+Unfortunately this patch(4a45bf1) enables ibus-daemon in gdm by default
+and I'm reverting it for ibus 1.5.33.
+The GDM default has been disable IBus.
+
+Fixes: https://github.com/ibus/ibus/commit/4a45bf1
+BUG=https://github.com/ibus/ibus/pull/2804
+---
+ bus/main.c                                    | 33 +------------------
+ ....freedesktop.IBus.session.GNOME.service.in |  3 ++
+ configure.ac                                  |  2 +-
+ 3 files changed, 5 insertions(+), 33 deletions(-)
+
+diff --git a/bus/main.c b/bus/main.c
+index e0db15b3..63ec5536 100644
+--- a/bus/main.c
++++ b/bus/main.c
+@@ -39,7 +39,6 @@
+ 
+ #ifdef G_OS_UNIX
+ #include <glib-unix.h>
+-#include <grp.h>
+ #endif
+ 
+ #include "global.h"
+@@ -57,12 +56,10 @@ static gchar *config = "default";
+ static gchar *desktop = "gnome";
+ 
+ static gchar *panel_extension_disable_users[] = {
++    "gdm",
+     "gnome-initial-setup",
+     "liveuser"
+ };
+-static gchar *panel_extension_disable_groups[] = {
+-    "gdm",
+-};
+ 
+ static void
+ show_version_and_quit (void)
+@@ -187,11 +184,6 @@ main (gint argc, gchar **argv)
+ {
+     int i;
+     const gchar *username = ibus_get_user_name ();
+-    const gchar *groupname = NULL;
+-#ifdef HAVE_GETGRGID_R
+-    char buffer[4096];
+-    struct group gbuf;
+-#endif
+ 
+     setlocale (LC_ALL, "");
+ 
+@@ -224,23 +216,6 @@ main (gint argc, gchar **argv)
+         }
+     }
+ 
+-    /* get group name */
+-    {
+-        struct group *grp = NULL;
+-#ifdef HAVE_GETGRGID_R
+-        /* MT-Safe locale */
+-        getgrgid_r (getgid (), &gbuf, buffer, sizeof(buffer), &grp);
+-#else
+-        /* MT-Unsafe race:grgid locale */
+-        grp = getgrgid (getgid ());
+-#endif
+-
+-        if (grp && grp->gr_name && grp->gr_name[0])
+-            groupname = grp->gr_name;
+-        else
+-            g_warning ("Couldn't get group name");
+-    }
+-
+     /* daemonize process */
+     if (daemonize) {
+         if (daemon (1, 0) != 0) {
+@@ -284,12 +259,6 @@ main (gint argc, gchar **argv)
+             break;
+         }
+     }
+-    for (i = 0; i < G_N_ELEMENTS(panel_extension_disable_groups); i++) {
+-        if (g_strcmp0 (groupname, panel_extension_disable_groups[i]) == 0) {
+-            emoji_extension = "disable";
+-            break;
+-        }
+-    }
+     if (!single) {
+         /* execute config component */
+         if (g_strcmp0 (config, "default") == 0) {
+diff --git a/bus/services/org.freedesktop.IBus.session.GNOME.service.in b/bus/services/org.freedesktop.IBus.session.GNOME.service.in
+index f0debb37..858cf10d 100644
+--- a/bus/services/org.freedesktop.IBus.session.GNOME.service.in
++++ b/bus/services/org.freedesktop.IBus.session.GNOME.service.in
+@@ -12,6 +12,9 @@ Before=gnome-session.target
+ After=gnome-session-initialized.target
+ PartOf=gnome-session-initialized.target
+ 
++# Never run in GDM
++Conflicts=gnome-session@gnome-login.target
++
+ [Service]
+ Type=dbus
+ # Only pull --xim in X11 session, it is done via Xwayland-session.d on Wayland
+diff --git a/configure.ac b/configure.ac
+index ad4f1929..b353a654 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -178,7 +178,7 @@ AC_MSG_RESULT([$enable_product_build])
+ AC_CHECK_HEADERS([sys/prctl.h])
+ 
+ # Check functions.
+-AC_CHECK_FUNCS(daemon getgrgid_r)
++AC_CHECK_FUNCS(daemon)
+ 
+ # Check dlclose() in libc.so.
+ AC_CHECK_LIB(c, dlclose, LIBDL="", [AC_CHECK_LIB(dl, dlclose, LIBDL="-ldl")])
+-- 
+2.51.0
+
+From 4a45bf155c968bcc2f711d6b4827788802de18d1 Mon Sep 17 00:00:00 2001
+From: Joan Torres Lopez <joantolo@redhat.com>
+Date: Sun, 5 Oct 2025 10:39:50 +0900
+Subject: [PATCH] bus: Update gdm bits based on new gdm changes
+
+Since GDM 49 version, gdm user doesn't exist and for each greeter
+there's a dynamic user creation, e.g. gdm-greeter-1, gdm-greeter-2.
+All of them are part of gdm group, so instead of checking for a specific
+user, we check for a specific group.
+
+Also, remove Conflicts in systemd service to allow ibus in GDM sessions.
+This covers some cases where users might have special characters in their
+password or username.
+
+BUG=https://gitlab.gnome.org/GNOME/gdm/-/issues/1018
+BUG=https://github.com/ibus/ibus/pull/2804
+---
+ bus/main.c                                    | 33 ++++++++++++++++++-
+ ....freedesktop.IBus.session.GNOME.service.in |  3 --
+ configure.ac                                  |  2 +-
+ 3 files changed, 33 insertions(+), 5 deletions(-)
+
+diff --git a/bus/main.c b/bus/main.c
+index 63ec5536..e0db15b3 100644
+--- a/bus/main.c
++++ b/bus/main.c
+@@ -39,6 +39,7 @@
+ 
+ #ifdef G_OS_UNIX
+ #include <glib-unix.h>
++#include <grp.h>
+ #endif
+ 
+ #include "global.h"
+@@ -56,10 +57,12 @@ static gchar *config = "default";
+ static gchar *desktop = "gnome";
+ 
+ static gchar *panel_extension_disable_users[] = {
+-    "gdm",
+     "gnome-initial-setup",
+     "liveuser"
+ };
++static gchar *panel_extension_disable_groups[] = {
++    "gdm",
++};
+ 
+ static void
+ show_version_and_quit (void)
+@@ -184,6 +187,11 @@ main (gint argc, gchar **argv)
+ {
+     int i;
+     const gchar *username = ibus_get_user_name ();
++    const gchar *groupname = NULL;
++#ifdef HAVE_GETGRGID_R
++    char buffer[4096];
++    struct group gbuf;
++#endif
+ 
+     setlocale (LC_ALL, "");
+ 
+@@ -216,6 +224,23 @@ main (gint argc, gchar **argv)
+         }
+     }
+ 
++    /* get group name */
++    {
++        struct group *grp = NULL;
++#ifdef HAVE_GETGRGID_R
++        /* MT-Safe locale */
++        getgrgid_r (getgid (), &gbuf, buffer, sizeof(buffer), &grp);
++#else
++        /* MT-Unsafe race:grgid locale */
++        grp = getgrgid (getgid ());
++#endif
++
++        if (grp && grp->gr_name && grp->gr_name[0])
++            groupname = grp->gr_name;
++        else
++            g_warning ("Couldn't get group name");
++    }
++
+     /* daemonize process */
+     if (daemonize) {
+         if (daemon (1, 0) != 0) {
+@@ -259,6 +284,12 @@ main (gint argc, gchar **argv)
+             break;
+         }
+     }
++    for (i = 0; i < G_N_ELEMENTS(panel_extension_disable_groups); i++) {
++        if (g_strcmp0 (groupname, panel_extension_disable_groups[i]) == 0) {
++            emoji_extension = "disable";
++            break;
++        }
++    }
+     if (!single) {
+         /* execute config component */
+         if (g_strcmp0 (config, "default") == 0) {
+diff --git a/bus/services/org.freedesktop.IBus.session.GNOME.service.in b/bus/services/org.freedesktop.IBus.session.GNOME.service.in
+index 858cf10d..f0debb37 100644
+--- a/bus/services/org.freedesktop.IBus.session.GNOME.service.in
++++ b/bus/services/org.freedesktop.IBus.session.GNOME.service.in
+@@ -12,9 +12,6 @@ Before=gnome-session.target
+ After=gnome-session-initialized.target
+ PartOf=gnome-session-initialized.target
+ 
+-# Never run in GDM
+-Conflicts=gnome-session@gnome-login.target
+-
+ [Service]
+ Type=dbus
+ # Only pull --xim in X11 session, it is done via Xwayland-session.d on Wayland
+diff --git a/configure.ac b/configure.ac
+index a9396d7e..fc32398c 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -178,7 +178,7 @@ AC_MSG_RESULT([$enable_product_build])
+ AC_CHECK_HEADERS([sys/prctl.h])
+ 
+ # Check functions.
+-AC_CHECK_FUNCS(daemon)
++AC_CHECK_FUNCS(daemon getgrgid_r)
+ 
+ # Check dlclose() in libc.so.
+ AC_CHECK_LIB(c, dlclose, LIBDL="", [AC_CHECK_LIB(dl, dlclose, LIBDL="-ldl")])
+-- 
+2.51.0
+
+From 94c6ede4289666782d860ae964f9a09cbdc78554 Mon Sep 17 00:00:00 2001
+From: fujiwarat <takao.fujiwara1@gmail.com>
+Date: Thu, 13 Nov 2025 20:15:37 +0900
+Subject: [PATCH] engine: Update simple.xml with xkeyboard-config 2.46
+
+---
+ engine/gensimple.py  |  8 ++---
+ engine/simple.xml.in | 70 ++++++++++++++++++++++++++++++++++++++++----
+ 2 files changed, 69 insertions(+), 9 deletions(-)
+
+diff --git a/engine/gensimple.py b/engine/gensimple.py
+index de6d7ff5..4e331732 100755
+--- a/engine/gensimple.py
++++ b/engine/gensimple.py
+@@ -248,7 +248,7 @@ class GenerateEngineXML():
+                                   self._AUTHOR,
+                                   self.__first)
+         parser.setContentHandler(self.__handler)
+-        f = codecs.open(self.__path, 'r', encoding='utf-8')
++        f = open(self.__path, 'r', encoding='utf-8')
+         try:
+             parser.parse(f)
+         except SAXParseException:
+@@ -257,7 +257,7 @@ class GenerateEngineXML():
+             f.close()
+     def write(self, output=None):
+         if output != None:
+-            od = codecs.open(output, 'w', encoding='utf-8')
++            od = open(output, 'w', encoding='utf-8')
+         else:
+             if PY3K:
+                 od = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+@@ -311,7 +311,7 @@ class ISO639XML(XMLFilterBase):
+ 
+ 
+ def parse_iso639(path):
+-    f = codecs.open(path, 'r', encoding='utf-8')
++    f = open(path, 'r', encoding='utf-8')
+     parser = sax_make_parser()
+     parser.setFeature(sax_feature_namespaces, 0)
+     handler = ISO639XML(parser)
+@@ -327,7 +327,7 @@ def parse_iso639(path):
+ 
+ def parse_denylist(denyfile):
+     denylist = []
+-    f = codecs.open(denyfile, 'r', encoding='utf-8')
++    f = open(denyfile, 'r', encoding='utf-8')
+     for line in f.readlines():
+         if line == '\n' or line[0] == '#':
+             continue
+diff --git a/engine/simple.xml.in b/engine/simple.xml.in
+index 92fea8a8..c39d4134 100644
+--- a/engine/simple.xml.in
++++ b/engine/simple.xml.in
+@@ -3,7 +3,7 @@
+     <name>org.freedesktop.IBus.Simple</name>
+     <description>A table based simple engine</description>
+     <exec>@libexecdir@/ibus-engine-simple</exec>
+-    <version>1.5.33-beta1.20250916</version>
++    <version>1.5.33.20251113</version>
+     <author>Peng Huang &lt;shawn.p.huang@gmail.com&gt;</author>
+     <license>GPL</license>
+     <homepage>https://github.com/ibus/ibus/wiki</homepage>
+@@ -2738,8 +2738,20 @@
+             <author>Peng Huang &lt;shawn.p.huang@gmail.com&gt;</author>
+             <layout>us</layout>
+             <layout_variant>mac</layout_variant>
+-            <longname>English (Macintosh)</longname>
+-            <description>English (Macintosh)</description>
++            <longname>English (Macintosh, ABC, ANSI)</longname>
++            <description>English (Macintosh, ABC, ANSI)</description>
++            <icon>ibus-keyboard</icon>
++            <rank>1</rank>
++        </engine>
++        <engine>
++            <name>xkb:us:mac-iso:eng</name>
++            <language>en</language>
++            <license>GPL</license>
++            <author>Peng Huang &lt;shawn.p.huang@gmail.com&gt;</author>
++            <layout>us</layout>
++            <layout_variant>mac-iso</layout_variant>
++            <longname>English (Macintosh, ABC, ISO)</longname>
++            <description>English (Macintosh, ABC, ISO)</description>
+             <icon>ibus-keyboard</icon>
+             <rank>1</rank>
+         </engine>
+@@ -2906,8 +2918,20 @@
+             <author>Peng Huang &lt;shawn.p.huang@gmail.com&gt;</author>
+             <layout>us</layout>
+             <layout_variant>dvorak-mac</layout_variant>
+-            <longname>English (Dvorak, Macintosh)</longname>
+-            <description>English (Dvorak, Macintosh)</description>
++            <longname>English (Dvorak, Macintosh, ANSI)</longname>
++            <description>English (Dvorak, Macintosh, ANSI)</description>
++            <icon>ibus-keyboard</icon>
++            <rank>1</rank>
++        </engine>
++        <engine>
++            <name>xkb:us:dvorak-mac-iso:eng</name>
++            <language>en</language>
++            <license>GPL</license>
++            <author>Peng Huang &lt;shawn.p.huang@gmail.com&gt;</author>
++            <layout>us</layout>
++            <layout_variant>dvorak-mac-iso</layout_variant>
++            <longname>English (Dvorak, Macintosh, ISO)</longname>
++            <description>English (Dvorak, Macintosh, ISO)</description>
+             <icon>ibus-keyboard</icon>
+             <rank>1</rank>
+         </engine>
+@@ -11041,6 +11065,18 @@
+             <icon>ibus-keyboard</icon>
+             <rank>1</rank>
+         </engine>
++        <engine>
++            <name>xkb:th:mnc:tha</name>
++            <language>th</language>
++            <license>GPL</license>
++            <author>Peng Huang &lt;shawn.p.huang@gmail.com&gt;</author>
++            <layout>th</layout>
++            <layout_variant>mnc</layout_variant>
++            <longname>Thai (Manoonchai)</longname>
++            <description>Thai (Manoonchai)</description>
++            <icon>ibus-keyboard</icon>
++            <rank>1</rank>
++        </engine>
+         <engine>
+             <name>xkb:bw::tsn</name>
+             <language>tn</language>
+@@ -11217,6 +11253,18 @@
+             <icon>ibus-keyboard</icon>
+             <rank>1</rank>
+         </engine>
++        <engine>
++            <name>xkb:ua:winkeysenhanced:ukr</name>
++            <language>uk</language>
++            <license>GPL</license>
++            <author>Peng Huang &lt;shawn.p.huang@gmail.com&gt;</author>
++            <layout>ua</layout>
++            <layout_variant>winkeysenhanced</layout_variant>
++            <longname>Ukrainian (Windows Enhanced)</longname>
++            <description>Ukrainian (Windows Enhanced)</description>
++            <icon>ibus-keyboard</icon>
++            <rank>1</rank>
++        </engine>
+         <engine>
+             <name>xkb:ua:macOS:ukr</name>
+             <language>uk</language>
+@@ -11324,6 +11372,18 @@
+             <icon>ibus-keyboard</icon>
+             <rank>1</rank>
+         </engine>
++        <engine>
++            <name>xkb:pk:pak_urdu_phonetic:urd</name>
++            <language>ur</language>
++            <license>GPL</license>
++            <author>Peng Huang &lt;shawn.p.huang@gmail.com&gt;</author>
++            <layout>pk</layout>
++            <layout_variant>pak_urdu_phonetic</layout_variant>
++            <longname>Urdu (Pak Urdu Phonetic)</longname>
++            <description>Urdu (Pak Urdu Phonetic)</description>
++            <icon>ibus-keyboard</icon>
++            <rank>1</rank>
++        </engine>
+         <engine>
+             <name>xkb:pk:ara:ara</name>
+             <language>ar</language>
+-- 
+2.51.0
+
+From 8720838d7f59de485e6769bb939b6eef0c985276 Mon Sep 17 00:00:00 2001
+From: fujiwarat <takao.fujiwara1@gmail.com>
+Date: Fri, 14 Nov 2025 02:39:56 +0900
+Subject: [PATCH] src: Load EN compose file in pt-BR locale
+
+- The EN compose table is enabled in case that language compose files,
+  el-GR, fi-FI, pt-BR languages, are loaded but the user has no
+  user compose file.
+- Output double dead keys with the well-known chars likes the EN compose
+  table in case that the user has a user compose file but not enable
+  the EN compose table.
+- Load language compose files in case the user compose file is loaded
+  with the 'include "%L"' keyword.
+
+Fixes: https://github.com/ibus/ibus/commit/7c2b32b4
+BUG=https://github.com/ibus/ibus/issues/2825
+---
+ src/ibuscomposetable.c | 32 ++++++++++++++--
+ src/ibuscomposetable.h |  1 +
+ src/ibusenginesimple.c | 85 +++++++++++++++++++++++++-----------------
+ 3 files changed, 81 insertions(+), 37 deletions(-)
+
+diff --git a/src/ibuscomposetable.c b/src/ibuscomposetable.c
+index e60ad091..8e1785ca 100644
+--- a/src/ibuscomposetable.c
++++ b/src/ibuscomposetable.c
+@@ -1576,6 +1576,20 @@ ibus_compose_table_new_with_list (GList   *compose_list,
+ }
+ 
+ 
++static gboolean
++_datafile_is_system (const gchar *compose_file)
++{
++    g_assert (compose_file);
++    if (!g_ascii_strncasecmp (compose_file, "/usr", 4) ||
++        !g_ascii_strncasecmp (compose_file, "/etc", 4) ||
++        !g_ascii_strncasecmp (compose_file, "/usr", 4) ||
++        !g_ascii_strncasecmp (compose_file, "/opt", 4)) {
++        return TRUE;
++    }
++    return FALSE;
++}
++
++
+ IBusComposeTableEx *
+ ibus_compose_table_new_with_file (const gchar *compose_file,
+                                   GSList      *compose_tables)
+@@ -1632,6 +1646,7 @@ ibus_compose_table_new_with_file (const gchar *compose_file,
+             } else {
+                 compose_table->id = g_str_hash (compose_file);
+                 compose_table->can_load_en_us = can_load_en_us;
++                compose_table->is_system = _datafile_is_system (compose_file);
+                 return compose_table;
+             }
+         }
+@@ -1647,8 +1662,10 @@ ibus_compose_table_new_with_file (const gchar *compose_file,
+             max_compose_len,
+             n_index_stride,
+             g_str_hash (compose_file));
+-    if (compose_table)
++    if (compose_table) {
+         compose_table->can_load_en_us = can_load_en_us;
++        compose_table->is_system = _datafile_is_system (compose_file);
++    }
+ 
+     g_list_free_full (compose_list,
+                       (GDestroyNotify) ibus_compose_list_element_free);
+@@ -1793,8 +1810,10 @@ ibus_compose_table_list_add_file (GSList      *compose_tables,
+ 
+     compose_table = ibus_compose_table_load_cache (compose_file,
+                                                    &saved_version);
+-    if (compose_table != NULL)
++    if (compose_table != NULL) {
++        compose_table->is_system = _datafile_is_system (compose_file);
+         return g_slist_prepend (compose_tables, compose_table);
++    }
+ 
+ parse:
+     if ((compose_table = ibus_compose_table_new_with_file (compose_file,
+@@ -2138,8 +2157,15 @@ ibus_check_algorithmically (const guint   *compose_buffer,
+ 
+     for (i = 0; i < n_compose && IS_DEAD_KEY (compose_buffer[i]); i++)
+         ;
+-    if (i == n_compose)
++    if (i == n_compose) {
++        /* If no EN compose, double dead keys should be output? */
++        if (i == 2 && compose_buffer[0] == compose_buffer[1]) {
++            *output_char = ibus_keysym_to_unicode (compose_buffer[0],
++                                                   FALSE,
++                                                   NULL);
++        }
+         return TRUE;
++    }
+ 
+     if (i > 0 && i == n_compose - 1) {
+         combination_buffer[0] = ibus_keyval_to_unicode (compose_buffer[i]);
+diff --git a/src/ibuscomposetable.h b/src/ibuscomposetable.h
+index 2068657d..ce4cdae1 100644
+--- a/src/ibuscomposetable.h
++++ b/src/ibuscomposetable.h
+@@ -65,6 +65,7 @@ struct _IBusComposeTableEx
+     guint32 id;
+     char *rawdata;
+     gboolean can_load_en_us;
++    gboolean is_system;
+ };
+ 
+ 
+diff --git a/src/ibusenginesimple.c b/src/ibusenginesimple.c
+index baef9508..ac7ffc41 100644
+--- a/src/ibusenginesimple.c
++++ b/src/ibusenginesimple.c
+@@ -173,7 +173,9 @@ ibus_engine_simple_class_init (IBusEngineSimpleClass *class)
+                                                        length,
+                                                        &saved_version);
+     g_bytes_unref (data);
+-    if (!en_compose_table && saved_version) {
++    if (en_compose_table) {
++        en_compose_table->is_system = TRUE;
++    } else if (!en_compose_table && saved_version) {
+         g_warning ("Failed to parse the builtin compose due to the different "
+                    "version %u. Please rebuild IBus resource files.",
+                    saved_version);
+@@ -1023,6 +1025,7 @@ ibus_engine_simple_check_all_compose_table (IBusEngineSimple *simple,
+     GString *output = g_string_new ("");
+     gboolean success = FALSE;
+     gboolean is_32bit = FALSE;
++    gboolean all_is_system = TRUE;
+     gboolean can_load_en_us = FALSE;
+     gunichar output_char = '\0';
+ 
+@@ -1034,18 +1037,27 @@ ibus_engine_simple_check_all_compose_table (IBusEngineSimple *simple,
+ 
+     G_LOCK (global_tables);
+     tmp_list = global_tables;
++    while (tmp_list) {
++        IBusComposeTableEx *compose_table = tmp_list->data;
++        if (!compose_table->is_system) {
++            all_is_system = FALSE;
++            break;
++        }
++        tmp_list = tmp_list->next;
++    }
++    tmp_list = global_tables;
+     while (tmp_list) {
+         IBusComposeTableEx *compose_table = tmp_list->data;
+         if (compose_table->can_load_en_us)
+             can_load_en_us = TRUE;
+-        /* If global_tables includes en_compose_table only, i.e. no user
+-         * or locale compose tables, en_compose_table is used.
+-         * If not, en_compose_table is used in case one of the other compose
+-         * tables has can_load_en_us = %TRUE, i.e. the table file has
+-         * the line of 'include "%L"'.
++        /* If global_tables includes system compose tables only, i.e. no user
++         * compose tables, en_compose_table is used.
++         * If user compose table is included in global_tables, en_compose_table
++         * is used in case that the user compose table has can_load_en_us =
++         * %TRUE, i.e. the compose file has the line of 'include "%L"'.
+          * en_compose_table is always appended to the last of global_tables.
+          */
+-        if ((compose_table == en_compose_table) && global_tables->next != NULL
++        if ((compose_table == en_compose_table) && !all_is_system
+             && !can_load_en_us) {
+             tmp_list = tmp_list->next;
+             continue;
+@@ -1102,7 +1114,12 @@ ibus_engine_simple_check_all_compose_table (IBusEngineSimple *simple,
+     g_string_free (output, TRUE);
+     output = NULL;
+ 
+-    if (ibus_check_algorithmically (priv->compose_buffer,
++    /* TODO: priv->tentative_match should not be used in case
++     * success == %TRUE? Now ibus_check_algorithmically() hits double dead
++     * keys.
++     */
++    if (!success &&
++        ibus_check_algorithmically (priv->compose_buffer,
+                                     n_compose,
+                                     &output_char)) {
+         priv->in_compose_sequence = TRUE;
+@@ -1689,42 +1706,42 @@ ibus_engine_simple_add_table_by_locale (IBusEngineSimple *simple,
+     if (locale == NULL) {
+         path = g_build_filename (g_get_user_config_dir (),
+                                  "ibus", "Compose", NULL);
+-        if (g_file_test (path, G_FILE_TEST_EXISTS)) {
++        if (g_file_test (path, G_FILE_TEST_EXISTS))
+             ibus_engine_simple_add_compose_file (simple, path);
+-            g_free (path);
+-            return retval;
+-        }
+         g_clear_pointer(&path, g_free);
+ 
+-        path = g_build_filename (g_get_user_config_dir (),
+-                                 "gtk-4.0", "Compose", NULL);
+-        if (g_file_test (path, G_FILE_TEST_EXISTS)) {
+-            ibus_engine_simple_add_compose_file (simple, path);
+-            g_free (path);
+-            return retval;
++        /* If user compose is not loaded except for en_compose_table */
++        if (global_tables && !global_tables->next) {
++            path = g_build_filename (g_get_user_config_dir (),
++                                     "gtk-4.0", "Compose", NULL);
++            if (g_file_test (path, G_FILE_TEST_EXISTS))
++                ibus_engine_simple_add_compose_file (simple, path);
++            g_clear_pointer(&path, g_free);
+         }
+-        g_clear_pointer(&path, g_free);
+ 
+-        path = g_build_filename (g_get_user_config_dir (),
+-                                 "gtk-3.0", "Compose", NULL);
+-        if (g_file_test (path, G_FILE_TEST_EXISTS)) {
+-            ibus_engine_simple_add_compose_file (simple, path);
+-            g_free (path);
+-            return retval;
++        if (global_tables && !global_tables->next) {
++            path = g_build_filename (g_get_user_config_dir (),
++                                     "gtk-3.0", "Compose", NULL);
++            if (g_file_test (path, G_FILE_TEST_EXISTS))
++                ibus_engine_simple_add_compose_file (simple, path);
++            g_clear_pointer(&path, g_free);
+         }
+-        g_clear_pointer(&path, g_free);
+ 
+         home = g_get_home_dir ();
+-        if (home == NULL)
+-            return retval;
+ 
+-        path = g_build_filename (home, ".XCompose", NULL);
+-        if (g_file_test (path, G_FILE_TEST_EXISTS)) {
+-            ibus_engine_simple_add_compose_file (simple, path);
+-            g_free (path);
+-            return retval;
++        if (home && global_tables && !global_tables->next) {
++            path = g_build_filename (home, ".XCompose", NULL);
++            if (g_file_test (path, G_FILE_TEST_EXISTS))
++                ibus_engine_simple_add_compose_file (simple, path);
++            g_clear_pointer(&path, g_free);
++        }
++
++        /* Decide if both user compose and locale compose is loaded. */
++        if (global_tables && global_tables->next) {
++            IBusComposeTableEx *compose_table = global_tables->data;
++            if (!compose_table->can_load_en_us)
++                return retval;
+         }
+-        g_clear_pointer(&path, g_free);
+ 
+ #if GLIB_CHECK_VERSION (2, 58, 0)
+         langs = g_get_language_names_with_category ("LC_CTYPE");
+-- 
+2.51.0
+
