@@ -1,43 +1,77 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Kyle Keen <keenerd@gmail.com>
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+# Contributor: Kyle Keen <keenerd@gmail.com>
 
 pkgname=libftdi
 pkgver=1.5
-pkgrel=7
-pkgdesc="A library to talk to FTDI chips, optional python bindings."
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-url="https://www.intra2net.com/en/developer/libftdi/download.php"
-license=('GPL2' 'LGPL2.1')
-depends=('libusb' 'confuse')
+pkgrel=9
+pkgdesc='A library to talk to FTDI chips'
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url='https://www.intra2net.com/en/developer/libftdi/'
+license=(GPL-2.0-only LGPL-2.1-only)
+depends=(
+  glibc
+  gcc-libs
+  sh
+  libusb
+  confuse
+)
+makedepends=(
+  boost
+  cmake
+  ninja
+  swig
+  python
+  python-setuptools
+)
 optdepends=('python: library bindings')
-makedepends=('boost' 'cmake' 'python' 'swig' 'python-setuptools')
-# doxygen for docs, confuse for eeprom
-source=(https://www.intra2net.com/en/developer/libftdi/download/${pkgname}1-$pkgver.tar.bz2{,.sig}
-        fix_includes_path.patch
-        "https://src.fedoraproject.org/rpms/libftdi/raw/rawhide/f/libftdi-1.5-swig-4.3.patch")
-sha256sums=('7c7091e9c86196148bd41177b4590dccb1510bfe6cea5bf7407ff194482eb049'
+#source=("$pkgname::git+")
+source=(
+  https://www.intra2net.com/en/developer/libftdi/download/${pkgname}1-$pkgver.tar.bz2{,.sig}
+  fix_includes_path.patch
+  https://src.fedoraproject.org/rpms/libftdi/raw/rawhide/f/libftdi-1.5-swig-4.3.patch
+)
+sha512sums=('c525b2ab6aff9ef9254971ae7d57f3549a36a36875765c48f947d52532814a2a004de1232389d4fe824a8c8ab84277b08427308573476e1da9b7db83db802f6f'
             'SKIP'
-            '065a157326f28c61d1ec470a3064b0cb2fd3c13497a9b496ca76a9dac573de07'
-            '78d434d4aa1d38ab6b71f7cbd60b9be44afa59bf434a57be556ef820bfa13c3d')
+            '11e6ff5f5a0f1a53a4815bb1cfc49cbfbb13eca2f7ecbe6c08b105d04910d58cdb7ed1a116bffdaa7c541e23c25b1f1d48f1dd13320d1d3c207a8e31bc52533f'
+            'e7ff9aba9b50b5d0caae656d5db6ef68b247ac7a05e8758b0753a9289b5a3ebed4329c3692b9073907635a3a2fbcff00de52787e9c75eb47ec002a1b56fb69d4')
+b2sums=('460ab93026e14a452e31fcc6930d305638fdc0ed06cb44fb9d50ad8f80199b17057d2f48a27b8295b43b956934289c872a2ef1ddb7f93fa93c6816511ef7607d'
+        'SKIP'
+        '377613cf9f22ac76df24d1aa5aba09c811aba182b6d20df3d61d60eb27512199ee919a2dad9c6d8424834495d49e9d4555fc1cd42733ff286138c842691f73a5'
+        '09c10e98ae0ee5f5dbc68110a79c1097a3621c53e2779fe1b632bcc916f1696694ad58f5a81c91c1a620dc555f66e5dded4225eafbe2608bd6712586becc8aec')
 validpgpkeys=('3CEA9B8868BC3852618EB5B4707F91A424F006F5')  # Intra2net open source
 
 prepare() {
   cd "${pkgname}1-$pkgver"
+
   sed -i 's|LIB_SUFFIX 64|LIB_SUFFIX ""|' CMakeLists.txt
   sed -i "s|MODE=\"0664\", GROUP=\"plugdev\"|TAG+=\"uaccess\"|g" packages/99-libftdi.rules
 
-  patch -p1 < ../fix_includes_path.patch
-  patch -p1 < ../libftdi-1.5-swig-4.3.patch
+  patch -p1 -i "$srcdir/fix_includes_path.patch"
+  patch -p1 -i "$srcdir/libftdi-1.5-swig-4.3.patch"
 }
 
 build() {
-  cd "$srcdir/${pkgname}1-$pkgver"
-  mkdir -p build
-  cd build
-  cmake .. -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_SKIP_BUILD_RPATH=ON \
-    -DCMAKE_BUILD_TYPE=Release -DEXAMPLES=OFF -DFTDI_EEPROM=ON \
-    -DFTDIPP=ON -DPYTHON_BINDINGS=ON -DLINK_PYTHON_LIBRARY=ON
-  make
+  local cmake_options=(
+    -B build
+    -S "${pkgname}1-$pkgver"
+    -G Ninja
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_SKIP_BUILD_RPATH=ON
+    -D CMAKE_BUILD_TYPE=Release
+    -D CMAKE_POLICY_VERSION_MINIMUM=3.5
+    -D EXAMPLES=OFF
+    -D FTDI_EEPROM=ON
+    -D FTDIPP=ON
+    -D PYTHON_BINDINGS=ON
+    -D LINK_PYTHON_LIBRARY=ON
+    -W no-dev
+  )
+
+  cmake "${cmake_options[@]}"
+
+  cmake --build build
 }
 
 # needs yet unknown dependencies
@@ -47,11 +81,14 @@ build() {
 #}
 
 package() {
-  cd "${pkgname}1-$pkgver/build"
+  DESTDIR="$pkgdir" cmake --install build
 
-  make DESTDIR="$pkgdir" install
-  install -Dm644 "../packages/99-libftdi.rules" "$pkgdir/usr/lib/udev/rules.d/69-libftdi.rules"
-  # FS#45053
-  install -d "$pkgdir/usr/share/libftdi/examples" 
-  cp -r ../examples/* "$pkgdir/usr/share/libftdi/examples"
+  cd "${pkgname}1-$pkgver"
+
+  # udev rules
+  install -Dm644 "packages/99-libftdi.rules" "$pkgdir/usr/lib/udev/rules.d/69-libftdi.rules"
+
+  # examples
+  install -vd "$pkgdir/usr/share/libftdi/examples"
+  cp -r examples/* "$pkgdir/usr/share/libftdi/examples"
 }
