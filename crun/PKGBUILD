@@ -2,35 +2,66 @@
 # Maintainer: Morten Linderud <foxboron@archlinux.org>
 # Contributor: hexchian <i at hexchain dot org>
 
-pkgname=crun
-pkgver=1.24
-pkgrel=1
+pkgbase=crun
+pkgname=(crun)
+case "${CARCH}" in
+  x86_64) pkgname+=(krun) ;;
+esac
+pkgver=1.26
+pkgrel=3
 pkgdesc="A fast and lightweight fully featured OCI runtime and C library for running containers"
 url="https://github.com/containers/crun"
 license=('LGPL-2.1-or-later')
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 provides=('oci-runtime')
-depends=('yajl' 'systemd-libs' 'libcap' 'libseccomp')
-depends_powerpc64le=('criu')
-depends_riscv64=('criu')
-depends_x86_64=('criu')
-makedepends=('libtool' 'python' 'go-md2man' 'systemd' 'git')
+makedepends=('libtool' 'python' 'go-md2man' 'systemd' 'git' 'yajl' 'libcap' 'libseccomp')
+makedepends_powerpc64le=('criu')
+makedepends_x86_64=('criu' 'libkrun')
 source=("git+https://github.com/containers/crun.git#tag=$pkgver?signed")
 validpgpkeys=('AC404C1C0BF735C63FF4D562263D6DF2E163E1EA')
-sha256sums=('9e0cdb3e2b660620ec70c5a31bc934a33cf48fa30ec7c1cd3a241cc9c3a7a854')
+sha256sums=('c42d4baf9a8f2e337b3b54f8659357fcd2697ef36f32bf6d41e8d0c91613632c')
 
 build() {
     cd "$pkgname"
     ./autogen.sh
+
+    case "${CARCH}" in
+      x86_64) _configure_options=(--with-libkrun) ;;
+    esac
+
     ./configure \
         --prefix=/usr \
         --enable-shared \
         --enable-dynamic \
-        --with-python-bindings
+        --with-python-bindings ${_configure_options[@]}
     make
 }
 
-package() {
+package_crun() {
+    depends=('yajl' 'systemd-libs' 'libcap' 'libseccomp')
+    depends_powerpc64le=('criu')
+    depends_x86_64=('criu')
+
+    make -C "$pkgname" DESTDIR="$pkgdir" install
+
+    case "${CARCH}" in
+      x86_64)
+        rm -v "$pkgdir/usr/bin/krun"
+
+        mkdir -vp "krun/"
+        mv -v "$pkgdir/usr/share/man/man1"/krun.1* "krun/"
+      ;;
+    esac
+}
+
+package_krun() {
+    depends=('crun' 'libkrun')
+    pkgdesc="crun based OCI runtime using libkrun to run containerized programs in isolated KVM environments"
+
+    mkdir -pv "$pkgdir/usr/bin"
+    ln -sv crun "$pkgdir/usr/bin/krun"
+
     cd "$pkgname"
-    make DESTDIR="$pkgdir" install
+    mkdir -pv "$pkgdir/usr/share/man/man1/"
+    mv -v krun.1* "$pkgdir/usr/share/man/man1/"
 }
