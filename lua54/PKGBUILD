@@ -1,0 +1,82 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Caleb Maclennan <caleb@alerque.com>
+
+pkgname=lua54
+pkgver=5.4.8
+_majorver=${pkgver%.*}
+pkgrel=5
+pkgdesc='Powerful lightweight programming language designed for extending applications'
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url='https://www.lua.org/'
+depends=('readline')
+license=('MIT')
+options=('!emptydirs')
+source=(https://www.lua.org/ftp/lua-$pkgver.tar.gz
+        liblua.so.patch
+        paths.patch
+        lua.pc
+        license-from-upstream)
+sha256sums=('4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae'
+            '644fba6f3e03c4d0c394d241149fc558da79d0114e7816c2a597097304249cb7'
+            '6bb84383498a96514d4c7deb79fd45bf484fa5e3253a1574a3311ee0bb7c24fa'
+            'ca9252633e782b8f85d6a94ea4f6babd4fe30bd759085b373160b1878e36ff78'
+            '142fb08b41a807b192b4b2c166696a1830a1c97967e5099ad0e579bf500e1da4')
+
+prepare() {
+  patch -d lua-$pkgver -p1 -i ../liblua.so.patch
+  patch -d lua-$pkgver -p1 -i ../paths.patch
+  cp -r lua-$pkgver lua++-$pkgver
+
+  sed "s/%VER%/$_majorver/g;s/%REL%/$pkgver/g" lua.pc > lua-$pkgver/lua.pc
+  sed "s/%VER%/$_majorver/g;s/%REL%/$pkgver/g;s/-llua/-llua++/g" lua.pc > lua++-$pkgver/lua.pc
+  sed -e "s:llua:llua$_majorver:" -e "s:/include:/include/lua$_majorver:" -i lua{,++}-$pkgver/lua.pc
+  sed -r -e "/^LUA_(SO|A|T)=/ s/lua/lua$_majorver/" -e "/^LUAC_T=/ s/luac/luac$_majorver/" -i lua{,++}-$pkgver/src/Makefile
+}
+
+build() {
+  cd lua-$pkgver
+
+  make MYCFLAGS="$CFLAGS -fPIC" MYLDFLAGS="$LDFLAGS" linux-readline
+
+  cd ../lua++-$pkgver
+
+  make MYCFLAGS="$CXXFLAGS -fPIC" MYLDFLAGS="$LDFLAGS" CC=g++ LUA_A=liblua++$_majorver.a LUA_SO=liblua++$_majorver.so linux-readline
+}
+
+package() {
+  cd lua-$pkgver
+
+  make \
+    TO_BIN="lua$_majorver luac$_majorver" \
+    TO_LIB="liblua$_majorver.so liblua$_majorver.so.$_majorver liblua$_majorver.so.$pkgver" \
+    INSTALL_DATA='cp -d' \
+    INSTALL_TOP="$pkgdir"/usr \
+    INSTALL_INC="$pkgdir/usr/include/lua$_majorver" \
+    INSTALL_MAN="$pkgdir"/usr/share/man/man1 \
+    install
+
+  install -Dm644 lua.pc "$pkgdir"/usr/lib/pkgconfig/lua54.pc
+  ln -sf lua54.pc "$pkgdir/usr/lib/pkgconfig/lua$_majorver.pc"
+  ln -sf lua54.pc "$pkgdir/usr/lib/pkgconfig/lua-$_majorver.pc"
+
+  install -d "$pkgdir/usr/share/doc/$pkgname"
+  install -m644 doc/*.{gif,png,css,html} "$pkgdir/usr/share/doc/$pkgname"
+  install -Dm644 ../license-from-upstream "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+  cd ../lua++-$pkgver
+  make \
+    TO_BIN="lua$_majorver luac$_majorver" \
+    TO_LIB="liblua++$_majorver.so liblua++$_majorver.so.$_majorver liblua++$_majorver.so.$pkgver" \
+    INSTALL_BIN=null INSTALL_INC=null INSTALL_MAN=../null \
+    INSTALL_DATA='cp -d' \
+    INSTALL_TOP="$pkgdir"/usr \
+    install
+
+  install -Dm644 lua.pc "$pkgdir"/usr/lib/pkgconfig/lua++54.pc
+  ln -sf lua++54.pc "$pkgdir"/usr/lib/pkgconfig/lua++$_majorver.pc
+  ln -sf lua++54.pc "$pkgdir"/usr/lib/pkgconfig/lua++-$_majorver.pc
+
+  pushd "$pkgdir/usr/share/man/man1"
+  mv lua{,5.4}.1
+  mv luac{,5.4}.1
+}
