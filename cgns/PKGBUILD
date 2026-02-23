@@ -1,49 +1,62 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Bruno Pagani <archange@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 
 _pkgname=CGNS
 pkgname=cgns
-pkgver=4.5.0
+pkgver=4.5.1
 pkgrel=1
 pkgdesc="Standard for recording and recovering computer data associated with the numerical solution of fluid dynamics equations"
 arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
 url="https://cgns.github.io/"
-license=(custom)
-depends=(tk hdf5 libxmu glu)
-makedepends=(gcc-fortran cmake)
-options=(!makeflags)
-source=(https://github.com/${_pkgname}/${_pkgname}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz)
-sha256sums=('c72355219318755ba0a8646a8e56ee1c138cf909c1d738d258d2774fa4b529e9')
-
+license=(Zlib)
+depends=(
+  gcc-libs
+  glibc
+  glu
+  hdf5
+  libglvnd
+  libx11
+  libxmu
+  tcl
+  tk
+)
+makedepends=(
+  cmake
+  gcc-fortran
+)
+source=("https://github.com/$_pkgname/$_pkgname/archive/v$pkgver/$pkgname-$pkgver.tar.gz")
+sha512sums=('f0a3f82824d81e2db4c992fc41e91c53158898fbf0b342c0c857e5e3f02d081df3822035b9eb558fe12c48ce36e4123810adc11f9b85e60e76e7de7f35a56162')
 
 build() {
-    CFLAGS+=" -Wno-implicit-function-declaration -Wno-incompatible-pointer-types" \
-    cmake -B build -S ${_pkgname}-${pkgver} \
-        -DCGNS_BUILD_CGNSTOOLS=ON \
-        -DCGNS_BUILD_SHARED=ON \
-        -DCGNS_ENABLE_64BIT=ON \
-        -DCGNS_ENABLE_FORTRAN=ON \
-        -DCGNS_ENABLE_HDF5=ON \
-        -DCGNS_ENABLE_LEGACY=ON \
-        -DCGNS_ENABLE_SCOPING=OFF \
-        -DCGNS_ENABLE_TESTS=ON \
-        -DCMAKE_BUILD_TYPE="Release" \
-        -DCMAKE_INSTALL_PREFIX=/usr \
-        -DCMAKE_SKIP_RPATH=ON
-    make -C build
+  cmake -B build -S ${_pkgname}-${pkgver} \
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -Wno-dev \
+    -DCGNS_BUILD_CGNSTOOLS=ON \
+    -DCGNS_BUILD_SHARED=ON \
+    -DCGNS_ENABLE_64BIT=ON \
+    -DCGNS_ENABLE_FORTRAN=ON \
+    -DCGNS_ENABLE_HDF5=ON \
+    -DCGNS_ENABLE_LEGACY=ON \
+    -DCGNS_ENABLE_SCOPING=OFF \
+    -DCGNS_ENABLE_TESTS=ON \
+    -DCMAKE_SKIP_RPATH=ON
+  cmake --build build
 }
 
-
 check() {
-    case "${CARCH}" in
-      powerpc64) return 0 ;;
-    esac
-    LD_LIBRARY_PATH="${srcdir}"/build/src/ make -C build test
+  case "${CARCH}" in
+    powerpc64) return 0 ;;
+  esac
+
+  LD_LIBRARY_PATH="$srcdir/build/src" \
+    ctest --test-dir build --output-on-failure
 }
 
 package() {
-    make -C build DESTDIR="${pkgdir}" install
-    install -Dm644 ${_pkgname}-${pkgver}/license.txt -t "${pkgdir}"/usr/share/licenses/${pkgname}/
-    # Remove broken .desktop files
-    rm "${pkgdir}"/usr/bin/*.desktop
+  DESTDIR="$pkgdir" cmake --install build
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" $_pkgname-$pkgver/license.txt
+  # Remove broken .desktop files
+  rm "$pkgdir/usr/bin/"*.desktop
 }
