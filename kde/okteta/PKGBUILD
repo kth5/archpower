@@ -4,8 +4,8 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=okteta
-pkgver=0.26.24
-pkgrel=2
+pkgver=0.26.25
+pkgrel=1
 epoch=1
 pkgdesc='KDE hex editor for viewing and editing the raw data of files'
 url='https://apps.kde.org/okteta/'
@@ -39,7 +39,7 @@ makedepends=(extra-cmake-modules
              qt5-tools)
 optdepends=('konsolepart5: terminal plugin')
 source=(https://download.kde.org/stable/$pkgname/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('31b2323f02f4d4fc872c3fc135d54bb90925825681e591dd25f4a680c0d2656a'
+sha256sums=('2be1891bf498cb38030ca5db1ad022c502557c1c0b8ff6ac3fdac8254a5bb76b'
             'SKIP')
 validpgpkeys=(E191FD5BE6F46870F09E82B2024E7FB43D015474  # Friedrich W. H. Kossebau <kossebau@kde.org>
               0A48BC961075B4BA8523E3790A345FB086E797D9  # https://share.kde.org/s/8dKaJTw8pR8iiwJ
