@@ -8,7 +8,7 @@
 
 pkgname=ufw
 pkgver=0.36.2
-pkgrel=5
+pkgrel=7
 pkgdesc="Uncomplicated and easy to use CLI tool for managing a netfilter firewall"
 arch=(any)
 url="https://launchpad.net/ufw"
@@ -25,23 +25,22 @@ backup=('etc/ufw/before.rules'
         'etc/default/ufw'
         'etc/ufw/user6.rules')
 source=("git+https://git.launchpad.net/ufw?signed#tag=${pkgver}"
-        "service")
+        "01-move-from-lib-to-usr-lib.patch"
+        "02-correct-iptables-location.patch"
+        "03-tcp-selective-acks.patch"
+        "ufw.service")
 sha256sums=('c2b36d70d003050e54310b55a6bf6a7d17c649a8f056eba09b6a24f3500ed8c5'
+            'a024698e008ed88744f7ca827309e089e439afcfb73204082c3a4c2deb8ae8aa'
+            '199a3445f90bfdb6c132c8068cf1a5f1ddda795c1d5a819ffb6aab013d59c070'
+            '61fe124caa3295f0e9a119658b50e1acc20a2993f79b069c7a427f8e62cbb3db'
             'fdface6f4690e4748fbbd5661c02e1967a8750fdb23581d35516174017a3fe39')
 validpgpkeys=('4C20C06B5D8BDE688854D28A51DBDC58CC559573')
 
 prepare() {
   cd $pkgname
-  # FS#28769 - move from /lib to /usr/lib
-  sed -i -e 's|/lib|/usr/lib|' \
-         -e 's|sbin|bin|g' setup.py
-
-  # FS#35458, FS#54110 - correct iptables location
-  sed -i -e 's|sbin|bin|g' setup.py
-  sed -i -e 's|sbin|bin|g' src/util.py
-
-  # don't force-enable tcp selective acks
-  sed -i -e '/net\/ipv4\/tcp_sack/s/^/#/g' conf/sysctl.conf
+  patch -Np1 -i ../01-move-from-lib-to-usr-lib.patch
+  patch -Np1 -i ../02-correct-iptables-location.patch
+  patch -Np1 -i ../03-tcp-selective-acks.patch
 }
 
 package() {
@@ -50,7 +49,7 @@ package() {
   python3 setup.py install --root="$pkgdir"
 
   install -Dm644 shell-completion/bash "$pkgdir/usr/share/bash-completion/completions/ufw"
-  install -Dm644 "$srcdir/service" "$pkgdir/usr/lib/systemd/system/ufw.service"
+  install -Dm644 "$srcdir/ufw.service" "$pkgdir/usr/lib/systemd/system/ufw.service"
   chmod 644 "$pkgdir/etc/ufw/"*.rules
   rm -rf "$pkgdir/usr/share/ufw/messages"
 }
