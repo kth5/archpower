@@ -1,0 +1,54 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Morten Linderud <foxboron@archlinux.org>
+# Maintainer: Alexander F. Rødseth <xyproto@archlinux.org>
+# Contributor: loqs
+# Contributor: Fredy García <frealgagu at gmail dot com>
+# Contributor: Youngbin Han <sukso96100@gmail.com>
+# Contributor: blainester <theblainestory@gmail.com>
+# Contributor: mar77i <mar77i at protonmail dot ch>
+
+# Arch POWER don't update beyond 2.0.14 due to gcc-go compatibility
+
+pkgname=micro
+pkgver=2.0.14
+pkgrel=1
+# manually set date instead of "go run tools/build-date.go", for reproducible builds
+_build_date='January 28, 2026'
+pkgdesc='Modern and intuitive terminal-based text editor'
+arch=(x86_64 powerpc64le powerpc64)
+url='https://micro-editor.github.io/'
+license=(MIT)
+depends=('glibc' 'hicolor-icon-theme')
+makedepends=(git)
+makedepends_powerpc64=(gcc-go)
+makedepends_powerpc64le=(go)
+makedepends_x86_64=(go)
+optdepends=('wl-clipboard: for copying/pasting text using Wayland'
+            'xclip: for copying/pasting text using X')
+source=("git+https://github.com/zyedidia/micro#tag=v${pkgver}")
+b2sums=('6c1d0fbf3b6830de95cc5bf1bd3905af36dc7a204fc353c8424848015c7ef6056e6d803e998f8dc397322168dc83a2861c75af29ff846c50435a2e5524c1632c')
+
+prepare() {
+  cd $pkgname
+  # Let tools/build-date.go always return the same date, to make the build reproducible
+  echo -e '//+build ignore\npackage main\nimport "fmt"\nfunc main() { fmt.Println("'$_build_date'") }' > tools/build-date.go
+  # Modify Go build flags
+  sed -i 's/-trimpath/-buildmode=pie -trimpath/g;s/GS)/GS) -linkmode=external -extldflags \\"$(LDFLAGS)\\"/g' Makefile
+}
+
+build() {
+  CGO_ENABLED=1 make -C $pkgname
+}
+
+check() {
+  make -C $pkgname test
+}
+
+package() {
+  cd $pkgname
+  install -Dm755 $pkgname "$pkgdir/usr/bin/$pkgname"
+  install -Dm644 assets/packaging/micro.1 -t "$pkgdir/usr/share/man/man1"
+  install -Dm644 assets/packaging/micro.desktop -t "$pkgdir/usr/share/applications"
+  install -Dm644 assets/micro-logo-mark.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/$pkgname.svg"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE LICENSE-THIRD-PARTY
+}
