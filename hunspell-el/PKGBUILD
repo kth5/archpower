@@ -1,0 +1,61 @@
+# Maintainer: Johannes Löthberg <johannes@kyriasis.com>
+# Contributor: birdflesh <antkoul at gmail dot com>
+
+pkgname=hunspell-el
+pkgver=0.9
+pkgrel=11
+
+pkgdesc="Greek hunspell dictionary"
+url="https://www.elspell.gr/"
+arch=(any)
+license=('MPL' 'GPL' 'LGPL')
+
+optdepends=('hunspell: the spell checking libraries and apps')
+makedepends_x86_64=('qt6-webengine')
+provides=('hunspell-dictionary')
+
+source=("http://elspell.math.upatras.gr/files/ooffice/el_GR-$pkgver.zip")
+
+sha1sums=('c1b2539b3e18d78f7408db820bf834aaffff21ea')
+sha256sums=('638984ed883a313ee1633bfe87ba6260b4c7771f22c1a0113d3d49138be8eead')
+
+package() {
+	install -dm755 "$pkgdir"/usr/share/hunspell
+	install -m644 el_GR.aff "$pkgdir/usr/share/hunspell"
+	install -m644 el_GR.dic "$pkgdir/usr/share/hunspell"
+
+	# the symlinks
+	install -dm755 "$pkgdir"/usr/share/myspell/dicts
+	pushd "$pkgdir/usr/share/myspell/dicts"
+	for file in "$pkgdir"/usr/share/hunspell/*; do
+		ln -sv /usr/share/hunspell/$(basename $file) .
+	done
+	popd
+
+	# docs
+	install -Dm644 README_el_GR.txt "$pkgdir"/usr/share/doc/"$pkgname"
+	sed -n '/^The new Licence:/,$p' README_el_GR.txt | install -vDm644 /dev/stdin "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+	case "${CARCH}" in
+          x86_64)
+            # Install webengine dictionaries
+            install -d "$pkgdir"/usr/share/qt{,6}/qtwebengine_dictionaries/ /usr/lib/qt6/qwebengine_convert_dict "$pkgdir"/usr/share/hunspell/el_GR.dic \
+            "$pkgdir"/usr/share/qt6/qtwebengine_dictionaries/el_GR.bdic
+            ln -rs "$pkgdir"/usr/share/qt6/qtwebengine_dictionaries/el_GR.bdic "$pkgdir"/usr/share/qt/qtwebengine_dictionaries/
+          ;;
+        esac
+
+	# fix file encoding - FS#68481
+  	# check for broken files using
+  	# file -i  $(pacman -Ql hunspell-el | sed "s/hunspell-el//") | grep iso
+        # this can't be done earlier in build or would lead to an error:
+        # ERROR: Cannot encode command 'TRY ÜüßúÀÝÞýûàþéçõùïåáôíñóêìðëòãäèöâæîø÷' to utf8.
+	cd "$pkgdir"/usr/share/hunspell
+  	for file in el_GR.aff el_GR.dic; do
+          mv $file $file.ISO-8859
+          iconv -f iso-8859-7 -t utf-8 $file.ISO-8859 -o $file
+          # fix encoding in .aff files
+          sed -i "s/SET ISO8859-7/SET UTF-8/" $file
+          rm $file.ISO-8859
+        done
+}
