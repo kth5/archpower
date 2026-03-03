@@ -5,7 +5,7 @@
 # Contributor: Josip <josipponjavic@gmail.com>
 
 pkgname=elementary-icon-theme
-pkgver=8.1.0
+pkgver=8.2.0
 pkgrel=1
 pkgdesc='Named, vector icons for elementary OS'
 arch=(any)
@@ -19,9 +19,9 @@ makedepends=(
   meson
   xorg-xcursorgen
 )
-_tag=241be59c7f75ba186d0beba376ae44574f52372b
+_tag=6ddbb535af70a5ceeff5e1fec05d9b0562641b2a
 source=(elementary-icon-theme::git+https://github.com/elementary/icons.git#tag=${_tag})
-sha256sums=('f93189bc29f59474c4a90dc2ee6e298d05aeae3604fea3b9bc4fe85daf994ba7')
+sha256sums=('910e2e8cb75cc9d5a66e69fc9b2d5a40e98cdb2fd001d18b65e7b86281f07122')
 
 pkgver() {
   cd elementary-icon-theme
