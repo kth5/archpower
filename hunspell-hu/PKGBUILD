@@ -1,0 +1,52 @@
+# Maintainer: Balló György <ballogyor+arch at gmail dot com>
+# Contributor: AndyRTR <andyrtr@archlinux.org>
+
+pkgname=hunspell-hu
+pkgver=1.9
+pkgrel=1
+pkgdesc='Hungarian hunspell dictionary'
+arch=(any)
+url='https://magyarispell.sourceforge.net/'
+license=('LGPL-3.0-or-later OR MPL-2.0')
+makedepends=(
+  git
+)
+makedepends_x86_64=(
+  qt6-webengine
+)
+optdepends=('hunspell: the spell checking libraries and apps')
+provides=(hunspell-dictionary)
+_commit=74b6ae2a2df22fd9d6e253f0391ac3a67cb7b3f8
+source=("libreoffice-dictionaries::git+https://git.libreoffice.org/dictionaries#commit=$_commit")
+b2sums=(ef3f3db6edc51b09828955bb11422af2f1746f6af72b419bc394aebd31d708bde5f8734e3b1b39b0599e531cfea07e32ecd0edd1859ee2072efb232bad17c68a)
+
+pkgver() {
+  cd libreoffice-dictionaries/hu_HU/
+  sed -n "s/.*Hungarian Hunspell dictionaries version \(.*\) with morphological data.*/\1/p" README_hu_HU.txt
+}
+
+package() {
+  cd libreoffice-dictionaries/hu_HU/
+  install -Dm644 -t "$pkgdir/usr/share/hunspell/" hu_HU.{aff,dic}
+
+  case "${CARCH}" in
+    x86_64)
+      # Install webengine dictionary; the IGNORE command is not supported by bdic
+      install -dm755 "$pkgdir"/usr/share/qt{,6}/qtwebengine_dictionaries
+      sed -i '/^IGNORE/d' hu_HU.aff
+      /usr/lib/qt6/qwebengine_convert_dict hu_HU.dic "$pkgdir/usr/share/qt6/qtwebengine_dictionaries/hu_HU.bdic"
+      ln -rs "$pkgdir"/usr/share/qt6/qtwebengine_dictionaries/hu_HU.bdic "$pkgdir"/usr/share/qt/qtwebengine_dictionaries/
+    ;;
+  esac
+
+  # the symlinks
+  install -dm755 "$pkgdir/usr/share/myspell/dicts"
+  pushd "$pkgdir/usr/share/myspell/dicts"
+    for file in "$pkgdir"/usr/share/hunspell/*; do
+      ln -sv "/usr/share/hunspell/$(basename "$file")" .
+    done
+  popd
+
+  # docs
+  install -Dm644 -t "$pkgdir/usr/share/doc/$pkgname/" README_hu_HU.txt
+}
