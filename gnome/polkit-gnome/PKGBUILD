@@ -5,51 +5,73 @@
 
 pkgname=polkit-gnome
 pkgver=0.105
-pkgrel=11
+pkgrel=12
 pkgdesc='Legacy polkit authentication agent for GNOME'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://gitlab.gnome.org/Archive/policykit-gnome'
-license=('LGPL')
-depends=('gtk3' 'polkit')
-makedepends=('intltool')
-source=("https://download.gnome.org/sources/$pkgname/$pkgver/$pkgname-$pkgver.tar.xz"
-        'polkit-gnome-authentication-agent-1.desktop'
-        '0001-Select-the-current-user-to-authenticate-with-by-defa.patch'
-        '0002-Auth-dialog-Make-the-label-wrap-at-70-chars.patch'
-        '0003-Get-user-icon-from-accountsservice-instead-of-lookin.patch'
-        '0004-Use-fresh-X11-timestamps-when-displaying-authenticat.patch')
-sha256sums=('1784494963b8bf9a00eedc6cd3a2868fb123b8a5e516e66c5eda48df17ab9369'
-            '5074c723a4eab274830587d799ba781ff57f4fbe4ac99fbdc5aac5009c441ee7'
-            'b989f1c7e30f2f9f9ef03f1a06db708d83c4945ee242ca573e7d66b64bf7037f'
-            '41afbd11bdf4633dc619675862078c23e4b200c888da1569d030c502999b25d8'
-            '4ee38d2dae6e592040c41ba07caa284135dc232feef5a30acb42c0e28340adce'
-            '8d278f773f1815cf6d384518749643404fed444bb764305ebba081965152fa9e')
+license=(LGPL-2.0-or-later)
+depends=(
+  gdk-pixbuf2
+  glib2
+  glibc
+  gtk3
+  polkit
+)
+makedepends=(
+  git
+  intltool
+)
+source=(
+  "git+https://gitlab.gnome.org/Archive/policykit-gnome.git?signed#tag=$pkgver"
+  polkit-gnome-authentication-agent-1.desktop
+  0001-Select-the-current-user-to-authenticate-with-by-defa.patch
+  0002-Auth-dialog-Make-the-label-wrap-at-70-chars.patch
+  0003-Get-user-icon-from-accountsservice-instead-of-lookin.patch
+  0004-Use-fresh-X11-timestamps-when-displaying-authenticat.patch
+)
+b2sums=(
+  f2681273454dff42c25c8ed4a7b5ae78ed37f83c67f78553cac508a9d46d1e9c62b328ee5d662f6a531e1908c9792acb4fce0765a26efd3ead9a311cac7e0f89
+  3b6f9373de04efa94edaaf4f979d0c3998c2e5f4c7f01a0ba02877646ab42f31e2c738cce91d276aabdee14e9126d98e2e18435c6982cf109b1b3050cb9626cd
+  546781f4a63a219c482c489c004d8e5f56c0b7b7197e270fe4f719f4f77b32695167f8f9f6aa68fd2ec6da852bd3fcce774f4e4dc7810fc2f89d1e7a2aedc8e3
+  c995d5729a6c9902af1fbf7ede630c6517af463725813b1161826f62a4ee30dc476e5a82ce9df4c070fe52c336af533b78b9eba0e4b8e8e373adcd512111c3af
+  c37976767c11ae457cb308274c8860b2c82c2fe0b91c8df429539d8c016c149f828cdad96318040ced6ce29c972f93a075ed61bfc5fa330f8d505cd540f1b09f
+  1fc66dfb1d44488349b103cd93f5449d212ee614c8775675c190805e0fb57e45928325ccfd7f4a8ca2a16c02ba7a17dd6294aad3048fe86d096f692e0cfcba99
+)
+validpgpkeys=(0F1695DBEA2752AD0716CF01E79092CC3418A891) # David Zeuthen <zeuthen@gmail.com>
 
 prepare() {
-  cd $pkgname-$pkgver
+  cd policykit-gnome
 
   # Select the current user to authenticate with by default
-  patch -Np1 -i ../0001-Select-the-current-user-to-authenticate-with-by-defa.patch
+  git apply -3 ../0001-Select-the-current-user-to-authenticate-with-by-defa.patch
 
   # Auth dialog: Make the label wrap at 70 chars
-  patch -Np1 -i ../0002-Auth-dialog-Make-the-label-wrap-at-70-chars.patch
+  git apply -3 ../0002-Auth-dialog-Make-the-label-wrap-at-70-chars.patch
 
   # Get user icon from accountsservice instead of looking in ~/.face
-  patch -Np1 -i ../0003-Get-user-icon-from-accountsservice-instead-of-lookin.patch
+  git apply -3 ../0003-Get-user-icon-from-accountsservice-instead-of-lookin.patch
 
   # Use fresh X11 timestamps when displaying authentication dialog
-  patch -Np1 -i ../0004-Use-fresh-X11-timestamps-when-displaying-authenticat.patch
+  git apply -3 ../0004-Use-fresh-X11-timestamps-when-displaying-authenticat.patch
+
+  # Remove dependency on gnome-common
+  sed -i '/GNOME_/d' configure.ac
+
+  autoreconf -fi
 }
 
 build() {
-  cd $pkgname-$pkgver
-  ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var --libexecdir=/usr/lib/$pkgname --build=${CHOST}
+  cd policykit-gnome
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --libexecdir=/usr/lib/$pkgname
   make
 }
 
 package() {
-  cd $pkgname-$pkgver
+  cd policykit-gnome
   make DESTDIR="$pkgdir" install
-  install -Dm644 "$srcdir/polkit-gnome-authentication-agent-1.desktop" \
-      "$pkgdir/usr/share/applications/polkit-gnome-authentication-agent-1.desktop"
+  install -Dm644 -t "$pkgdir/usr/share/applications/" "$srcdir/polkit-gnome-authentication-agent-1.desktop"
 }
