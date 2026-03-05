@@ -3,17 +3,17 @@
 # Maintainer: Robin Candau <antiz@archlinux.org>
 
 pkgname=libxfce4windowing
-pkgver=4.20.4
-pkgrel=2
+pkgver=4.20.5
+pkgrel=3
 pkgdesc="Windowing concept abstraction library for X11 and Wayland"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://docs.xfce.org/xfce/libxfce4windowing/start"
 license=('LGPL-2.1-only')
 depends=('gdk-pixbuf2' 'glib2' 'gtk3' 'libwnck3' 'libdisplay-info' 'libx11' 'wayland')
-makedepends=('git' 'glib2-devel' 'gobject-introspection' 'gtk-doc' 'wayland-protocols' 'xfce4-dev-tools')
+makedepends=('git' 'glib2-devel' 'gobject-introspection' 'gtk-doc' 'meson' 'vala' 'wayland-protocols' 'xfce4-dev-tools')
 source=("git+https://gitlab.xfce.org/xfce/libxfce4windowing.git#tag=$pkgname-$pkgver"
         git+https://gitlab.freedesktop.org/wlroots/wlr-protocols.git)
-sha256sums=('fbe3588d3eeddf1d23cfc365959e687811f350e59c2ba7360a65c5dfd6e1537b'
+sha256sums=('d5398e111c02a6896fefdf5d732abff14ba4396d540fcaa706723819056fa9d0'
             'SKIP')
 
 prepare() {
@@ -22,26 +22,23 @@ prepare() {
   git submodule init
   git config submodule.mate-submodules.url "$srcdir/protocols/wlr-protocols"
   git -c protocol.file.allow=always submodule update
-  NOCONFIGURE=1 ./autogen.sh
+
+  # Don't depend on wayland-scanner and wayland-protocols
+  # https://gitlab.xfce.org/xfce/libxfce4windowing/-/merge_requests/96
+  git cherry-pick -n 9b1e7e18343f927f9946960977804230f3fbc16d
 }
 
 build() {
-  cd $pkgname
-
-  ./configure \
-    --prefix=/usr \
-    --sysconfdir=/etc \
-    --enable-gtk-doc \
-    --enable-wayland \
-    --enable-x11 \
-    --disable-debug
-  make
+  arch-meson $pkgname build \
+  	-Dgtk-doc=true \
+  	-Dvala=enabled \
+  	-Dwayland=enabled \
+  	-Dx11=enabled
+  meson compile -C build
 }
 
 package() {
-  cd $pkgname
-
-  make DESTDIR="$pkgdir" install
+  meson install -C build --destdir "$pkgdir"
 }
 
 # vim:set ts=2 sw=2 et:
