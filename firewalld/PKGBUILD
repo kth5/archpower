@@ -5,17 +5,17 @@
 # Contributor: speed145a <jonathan@tagchapter.com>
 
 pkgbase=firewalld
-pkgname=('firewalld' 'firewalld-test')
-pkgver=2.3.1
-pkgrel=1
+pkgname=('firewalld' 'python-firewall' 'firewall-config' 'firewall-applet' 'firewalld-test')
+pkgver=2.4.0
+pkgrel=5
 url="https://firewalld.org"
 arch=(any)
 license=('GPL-2.0-or-later')
-makedepends=('docbook-xsl' 'git' 'intltool' 'python')
+makedepends=('docbook-xsl' 'git' 'intltool' 'podman')
 source=("git+https://github.com/firewalld/firewalld.git#tag=v${pkgver}"
         'firewalld-sysconfigdir.patch'
         'fix_gettext_macros_path.patch')
-sha256sums=('33d598c45be508e2f085b9dbe5d82820fe8d6b856a7ed7d7111e76e9f1cde3c9'
+sha256sums=('8107cf1bbaf2b4679a24132e19f8099c4836882e1ba76e20872129b1cf878a62'
             '3b2e00f67680c2e620804eb28620d7370b4096851bcb5f6fec22460a21941ad9'
             '49f793aeaf2e87c834c734b37dc926c9579cc2ec0782e5fe297ee286df6c7ef6')
 
@@ -40,31 +40,114 @@ build() {
 		--disable-schemas-compile \
 		--disable-sysconfig
 	make
+
+	# Install to a temporary / fake installation path to separate files in split packages
+	# Can be dropped in favor of https://gitlab.archlinux.org/-/snippets/3770 once available
+	make DESTDIR="${srcdir}/fakeinstall" install
+}
+
+
+_install() {
+	# Custom function to move files to each split packages
+	# Can be dropped in favor of https://gitlab.archlinux.org/-/snippets/3770 once available
+	local src f dir
+	for src; do
+		f="${src#fakeinstall/}"
+		dir="${pkgdir}/${f%/*}"
+		install -dm 755 "${dir}"
+		# use copy so a new file is created and fakeroot can track properties such as setuid
+		cp -av "${src}" "${dir}/"
+		rm -rf "${src}"
+	done
 }
 
 package_firewalld() {
 	pkgdesc="Firewall daemon with D-Bus interface"
-	depends=('python-dbus' 'glib2' 'hicolor-icon-theme'
-		 'nftables' 'python-capng' 'python-gobject')
+	depends=('glib2' 'python-firewall' 'python-capng')
 	optdepends=('bash-completion: bash completion'
-	            'gtk3: firewall-config'
-		    'libnotify: firewall-applet'
 		    'networkmanager: NetworkManager support'
 		    'polkit: privileged actions'
-		    'python-pyqt6: firewall-applet')
+		    'firewall-config: Graphical user interface for firewallD configuration'
+		    'firewall-applet: Systray applet for firewallD'
+		    'firewalld-test: firewallD test suite')
 	backup=('etc/conf.d/firewalld'
 	        'etc/firewalld/firewalld.conf')
+	install="${pkgbase}.install"
 
-	make DESTDIR="${pkgdir}" -C "${pkgbase}" install
+	# Selectively install files
+	# Can be dropped in favor of https://gitlab.archlinux.org/-/snippets/3770 once available
+	_install fakeinstall/etc/conf.d/firewalld
+	_install fakeinstall/etc/firewalld/*
+	_install fakeinstall/etc/logrotate.d/firewalld
+	_install fakeinstall/etc/modprobe.d/firewalld-sysctls.conf
+	_install fakeinstall/usr/bin/firewall-cmd
+	_install fakeinstall/usr/bin/firewall-offline-cmd
+	_install fakeinstall/usr/lib/firewalld/*
+	_install fakeinstall/usr/lib/systemd/system/firewalld.service
+	_install fakeinstall/usr/bin/firewalld
+	_install fakeinstall/usr/share/dbus-1/system.d/FirewallD.conf
+	_install fakeinstall/usr/share/bash-completion/completions/firewall-cmd
+	_install fakeinstall/usr/share/zsh/site-functions/_firewalld
+	_install fakeinstall/usr/share/locale/*
+	_install fakeinstall/usr/share/man/man1/firewall-cmd.1
+	_install fakeinstall/usr/share/man/man1/firewall-offline-cmd.1
+	_install fakeinstall/usr/share/man/man1/firewalld.1
+	_install fakeinstall/usr/share/man/man5/*
+	_install fakeinstall/usr/share/polkit-1/*
+}
+
+package_python-firewall() {
+	pkgdesc="Python bindings for firewallD"
+	depends=('python' 'python-dbus' 'python-gobject' 'nftables')
+
+	# Selectively install files
+	# Can be dropped in favor of https://gitlab.archlinux.org/-/snippets/3770 once available
+	_install fakeinstall/usr/lib/python*/*
+
 	python -m compileall -d /usr/lib "${pkgdir}/usr/lib"
 	python -O -m compileall -d /usr/lib "${pkgdir}/usr/lib"
+}
 
-	# Remove test suite
-	rm -rvf "${pkgdir}/usr/share/firewalld/testsuite/"
+package_firewall-config() {
+	pkgdesc="Graphical user interface for firewallD configuration"
+	depends=('firewalld' 'gtk3' 'hicolor-icon-theme')
+
+	# Selectively install files
+	# Can be dropped in favor of https://gitlab.archlinux.org/-/snippets/3770 once available
+	_install fakeinstall/usr/bin/firewall-config
+	_install fakeinstall/usr/share/applications/firewall-config.desktop
+	_install fakeinstall/usr/share/firewalld/firewall-config.glade
+	_install fakeinstall/usr/share/firewalld/gtk3_chooserbutton.py
+	_install fakeinstall/usr/share/firewalld/gtk3_niceexpander.py
+	_install fakeinstall/usr/share/glib-2.0/schemas/org.fedoraproject.FirewallConfig.gschema.xml
+	_install fakeinstall/usr/share/icons/hicolor/*/apps/firewall-config.png
+	_install fakeinstall/usr/share/icons/hicolor/*/apps/firewall-config.svg
+	_install fakeinstall/usr/share/man/man1/firewall-config.1
+	_install fakeinstall/usr/share/metainfo/firewall-config.appdata.xml
+}
+
+package_firewall-applet() {
+	pkgdesc="Systray applet for firewallD"
+	depends=('firewalld' 'firewall-config' 'libnotify' 'python-pyqt6' 'hicolor-icon-theme')
+
+	# Selectively install files
+	# Can be dropped in favor of https://gitlab.archlinux.org/-/snippets/3770 once available
+	_install fakeinstall/etc/firewall/applet.conf
+	_install fakeinstall/etc/xdg/autostart/firewall-applet.desktop
+	_install fakeinstall/usr/bin/firewall-applet
+	_install fakeinstall/usr/share/icons/hicolor/*/apps/firewall-applet*.png
+	_install fakeinstall/usr/share/icons/hicolor/*/apps/firewall-applet*.svg
+	_install fakeinstall/usr/share/man/man1/firewall-applet.1
 }
 
 package_firewalld-test() {
 	pkgdesc="FirewallD test suite"
+	depends=('firewalld')
 
-	make DESTDIR="${pkgdir}" -C "${pkgbase}/src/tests" install
+	# Selectively install files
+	# Can be dropped in favor of https://gitlab.archlinux.org/-/snippets/3770 once available
+	_install fakeinstall/usr/share/firewalld/testsuite/*
+
+	# make sure there are no files left to install
+	find fakeinstall -depth -print0 | xargs -0 rmdir
 }
