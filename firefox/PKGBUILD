@@ -216,7 +216,6 @@ ac_add_options --with-google-safebrowsing-api-keyfile=${PWD@Q}/google-api-key
 
 # System libraries
 ac_add_options --with-system-nspr
-ac_add_options --with-system-nss
 
 # Features
 ac_add_options --enable-alsa
@@ -249,18 +248,27 @@ END
   case "${CARCH}" in
     x86_64)
       cat >>../mozconfig <<END
+ac_add_options --with-system-nss
 ac_add_options --enable-crashreporter
 ac_add_options --with-wasi-sysroot=/usr/share/wasi-sysroot
 END
     ;;
-    powerpc64*)
+    powerpc64)
       cat >>../mozconfig <<END
 ac_add_options --disable-crashreporter
-ac_add_options --with-wasi-sysroot=/usr/share/wasi-sysroot
-#ac_add_options --without-wasm-sandboxed-libraries
+ac_add_options --without-wasm-sandboxed-libraries
 END
       patch -Np1 -i ${srcdir}/hotfix-ppc-not-power8.diff
     ;;
+    powerpc64le)
+      cat >>../mozconfig <<END
+ac_add_options --with-system-nss
+ac_add_options --disable-crashreporter
+ac_add_options --with-wasi-sysroot=/usr/share/wasi-sysroot
+END
+      patch -Np1 -i ${srcdir}/hotfix-ppc-not-power8.diff
+    ;;
+
   esac
 
   sed -i 's/\("files":{[^,]*\),[^}]*}/\1}/' third_party/rust/*/.cargo-checksum.json 
@@ -273,6 +281,7 @@ build() {
   export MOZBUILD_STATE_PATH="$srcdir/mozbuild"
   export MOZ_BUILD_DATE="$(date -u${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH} +%Y%m%d%H%M%S)"
   export MOZ_NOSPAM=1
+  export MOZ_MAKE_FLAGS="${MAKEFLAGS}"
 
   # malloc_usable_size is used in various parts of the codebase
   CFLAGS="${CFLAGS/_FORTIFY_SOURCE=?/_FORTIFY_SOURCE=2}"
