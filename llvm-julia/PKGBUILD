@@ -5,9 +5,10 @@
 
 pkgname=(llvm-julia
          llvm-julia-libs)
-_pkgver=16.0.6-3
-pkgver=${_pkgver/-/.}
-pkgrel=1.1
+pkgver=18.1.7.4
+_pkgver=${pkgver%.*}-${pkgver##*.}
+_majver=${pkgver%.*.*.*}
+pkgrel=2
 arch=(x86_64 powerpc64le)
 url='https://julialang.org/'
 license=('custom:Apache 2.0 with LLVM Exception')
@@ -24,8 +25,15 @@ makedepends=(cmake
              ninja
              python)
 options=(!lto) # https://github.com/llvm/llvm-project/issues/57740
-source=(git+https://github.com/JuliaLang/llvm-project#tag=julia-$_pkgver)
-sha256sums=('6591971f0e4bcff0255d99676c55f9495f3c22c078ea982d10c5211bb53b41f5')
+source=(llvm-julia::git+https://github.com/JuliaLang/llvm-project#tag=julia-$_pkgver)
+sha256sums=('626b1bf1acf34d95dd23bf5f56e715c3975b6ccbf5bf12494b0007b14640da63')
+
+prepare() {
+  cd llvm-julia
+  git cherry-pick -n 20dbc097256ca1bf1cfeb738d7a4610d379da8f5 \
+                     18021ff5420ed1945f9aa1e67679094112680f6b \
+                     7b28655847aa1d37dbf7e09f57a3db0284874115 # Fix build with GCC 15
+}
 
 # Utilizing LLVM_DISTRIBUTION_COMPONENTS to avoid
 # installing static libraries; inspired by Gentoo
@@ -39,8 +47,8 @@ _get_distribution_components() {
       # shared libraries
       LLVM|LLVMgold)
         ;;
-      # libraries needed for clang-tblgen
-      LLVMDemangle|LLVMSupport|LLVMTableGen)
+      # libraries needed for julia
+      LLVMDemangle|LLVMSupport|LLVMTableGen|LLVMTargetParser)
         ;;
       # exclude static libraries
       LLVM*)
@@ -81,7 +89,7 @@ build() {
     -DLLVM_SHLIB_SYMBOL_VERSION=$_symver
   )
 
-  cmake -B build -S llvm-project/llvm \
+  cmake -B build -S llvm-julia/llvm \
      "${cmake_args[@]}"
   pushd build
     local distribution_components=$(_get_distribution_components | paste -sd\;)
@@ -89,7 +97,7 @@ build() {
     cmake_args+=(-DLLVM_DISTRIBUTION_COMPONENTS="$distribution_components")
   popd
 
-  cmake -B build -S llvm-project/llvm \
+  cmake -B build -S llvm-julia/llvm \
     "${cmake_args[@]}"
   cmake --build build
 }
@@ -101,10 +109,10 @@ package_llvm-julia() {
   DESTDIR="$pkgdir" cmake --build build --target install-distribution
 
   # The runtime libraries go into llvm-julia-libs
-  mv -f "$pkgdir"/usr/lib/llvm-julia/lib/libLLVM-{16,${pkgver%.*}}jl.so .
+  mv -f "$pkgdir"/usr/lib/llvm-julia/lib/{libLLVM-${_majver}jl.so,libLLVM.so.${pkgver%.*.*}jl} .
   mv -f "$pkgdir"/usr/lib/llvm-julia/lib/LLVMgold.so "$srcdir/"
 
-  install -Dm644 llvm-project/llvm/LICENSE.TXT "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  install -Dm644 llvm-julia/llvm/LICENSE.TXT "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
 
 package_llvm-julia-libs() {
@@ -115,10 +123,11 @@ package_llvm-julia-libs() {
             ncurses)
 
   install -d "$pkgdir/usr/lib/llvm-julia/lib"
-  cp -P libLLVM-{16,${pkgver%.*}}jl.so "$pkgdir"/usr/lib
-  ln -s ../../libLLVM-16jl.so "$pkgdir/usr/lib/llvm-julia/lib/libLLVM-16jl.so"
-  ln -s ../../libLLVM-16jl.so "$pkgdir/usr/lib/llvm-julia/lib/libLLVM-${pkgver}jl.so"
+  for _lib in libLLVM-${_majver}jl.so libLLVM.so.${pkgver%.*.*}jl; do
+    cp -P $_lib "$pkgdir"/usr/lib
+    ln -s ../../$_lib "$pkgdir"/usr/lib/llvm-julia/lib/$_lib
+  done
   cp -P LLVMgold.so "$pkgdir/usr/lib/llvm-julia/lib/"
 
-  install -Dm644 llvm-project/llvm/LICENSE.TXT "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  install -Dm644 llvm-julia/llvm/LICENSE.TXT "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
