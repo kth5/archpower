@@ -1,0 +1,73 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+
+# NOTE: when updating major or minor version, make sure to upgrade in tandem
+# with the stability guarantees of kubernetes and cri-o
+pkgbase=cri-tools
+pkgname=(
+  crictl
+  critest
+)
+pkgver=1.35.0
+pkgrel=1
+pkgdesc="CLI and validation tools for Kubelet Container Runtime Interface (CRI)"
+arch=(x86_64 powerpc64le)
+url="https://github.com/kubernetes-sigs/cri-tools"
+license=(Apache-2.0)
+groups=(kubernetes-tools)
+depends=(glibc)
+makedepends=(go)
+# with LTO the packages are not reproducible (we want full RELRO and PIE)
+options=(!lto)
+source=($url/archive/v$pkgver/$pkgbase-v$pkgver.tar.gz)
+sha512sums=('ea34e736b457f851b610e8091ebbb608ac0f790c80156ad3e1a7080c76df4ea759091300b7ee6b5812a42ec93e165d71b6fa06f12424f46b4b181f5059b100bb')
+b2sums=('a91dcfc326857e0dc43867189f0c2fac2a12ce112a4439eba61cfe655fba1dec455a3070bd5068cf4934487bf94255cd60197c3f7fd4aa20465ebb1bd4f63b7c')
+
+build() {
+  local common_ldflags=(
+    -compressdwarf=false
+    -linkmode external
+  )
+
+  export CGO_CPPFLAGS="$CPPFLAGS"
+  export CGO_CFLAGS="$CFLAGS"
+  export CGO_CXXFLAGS="$CXXFLAGS"
+  export CGO_LDFLAGS="$LDFLAGS"
+  export CGO_ENABLED=1
+  export GOPATH="${srcdir}"
+  export GOFLAGS="-buildmode=pie -mod=readonly -modcacherw"
+
+  make VERSION=$pkgver GO_LDFLAGS="${common_ldflags[*]}" -C $pkgbase-$pkgver
+
+  mkdir -vp completions
+  $pkgbase-$pkgver/build/bin/linux/*/crictl completion bash > completions/crictl
+  $pkgbase-$pkgver/build/bin/linux/*/crictl completion zsh > completions/_crictl
+  $pkgbase-$pkgver/build/bin/linux/*/crictl completion fish > completions/crictl.fish
+}
+
+package_crictl() {
+  pkgdesc="A CLI for CRI-compatible container runtimes"
+
+  install -vDm 755 $pkgbase-$pkgver/build/bin/linux/*/$pkgname -t "$pkgdir/usr/bin/"
+  # shell completion
+  install -vDm 644 completions/$pkgname -t "$pkgdir/usr/share/bash-completion/completions/"
+  install -vDm 644 completions/_$pkgname -t "$pkgdir/usr/share/zsh/site-functions/"
+  install -vDm 644 completions/$pkgname.fish -t "$pkgdir/usr/share/fish/vendor_completions.d/"
+  # docs
+  install -vDm 644 $pkgbase-$pkgver/docs/$pkgname.md -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -vDm 644 -t "$pkgdir/usr/share/doc/$pkgname/examples/" \
+    $pkgbase-$pkgver/docs/examples/*.{json,yaml}
+  install -vDm 644 -t "$pkgdir/usr/share/doc/$pkgname" \
+    $pkgbase-$pkgver/{{CHANGELOG,CONTRIBUTING,README,code-of-conduct}.md,SECURITY_CONTACTS}
+}
+
+package_critest() {
+  pkgdesc="A benchmarking CLI for CRI-compatible container runtimes"
+
+  install -vDm 755 $pkgbase-$pkgver/build/bin/linux/*/$pkgname -t "$pkgdir/usr/bin/"
+  # docs
+  install -vDm 644 -t "$pkgdir/usr/share/doc/$pkgname/" \
+    $pkgbase-$pkgver/docs/{benchmark,validation}.md
+  install -vDm 644 -t "$pkgdir/usr/share/doc/$pkgname/" \
+    $pkgbase-$pkgver/{{CHANGELOG,CONTRIBUTING,README,code-of-conduct}.md,SECURITY_CONTACTS}
+}
