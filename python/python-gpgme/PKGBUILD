@@ -1,0 +1,47 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer:
+
+pkgname=python-gpgme
+pkgver=2.0.0
+pkgrel=2
+pkgdesc='Python bindings for GPGME'
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url='https://gnupg.org/software/gpgme/index.html'
+license=(GPL-2.0-or-later)
+depends=(gpgme
+         python)
+makedepends=(cmake
+             git
+             python-build
+             python-installer
+             python-setuptools
+             swig)
+source=(git+https://dev.gnupg.org/source/gpgmepy#tag=gpgmepy-$pkgver)
+sha256sums=('d63332dd713eef8b94974a4cdc01c0863fef6abc2f3e7e246c9d0d1693cff13a')
+
+prepare() {
+  cd gpgmepy
+  sed -e 's|, \"swig\"||' -i pyproject.toml
+  autoreconf -fiv
+}
+
+build() {
+  cd gpgmepy
+  ./configure # Required to set the version number
+  mv src gpg
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  case "${CARCH}" in
+    powerpc) return 0 ;;
+  esac
+
+  cd gpgmepy
+  TESTFLAGS="--python-libdir=$PWD/$(ls -d build/lib*)" make -C tests check
+}
+
+package() {
+  cd gpgmepy
+  python -m installer --destdir="$pkgdir" dist/*.whl
+}
