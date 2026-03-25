@@ -13,13 +13,17 @@
 # Contributor: Daniel YC Lin <dlin.tw@gmail.com>
 # Contributor: John Luebs <jkluebs@gmail.com>
 
+# TODO
+# Remember to rebuild go-tools, delve, gopls, golangci-lint, staticcheck on new go versions
+# pkgctl build --offload --rebuild --testing --release go-tools delve gopls golangci-lint staticcheck
+
 pkgname=go
 epoch=2
-pkgver=1.25.7
+pkgver=1.26.1
 pkgrel=1
 pkgdesc='Core compiler tools for the Go programming language'
 arch=(x86_64 powerpc64 powerpc64le)
-url='https://golang.org/'
+url='https://go.dev/'
 license=(BSD-3-Clause)
 makedepends=(git go)
 # Go on PPC64 does not provide go-pie
@@ -28,10 +32,21 @@ replaces_powerpc64le=(go-pie)
 provides_x86_64=(go-pie)
 replaces_x86_64=(go-pie)
 options=(!strip staticlibs)
-source=("https://go.dev/dl/go${pkgver}.src.tar.gz"{,.asc})
+source=("https://go.dev/dl/go${pkgver}.src.tar.gz"{,.asc}
+        fix-avx512ScanPackedReqsMet.patch)
 validpgpkeys=('EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796')
-sha256sums=('178f2832820274b43e177d32f06a3ebb0129e427dd20a5e4c88df2c1763cf10a'
-            'SKIP')
+sha256sums=('3172293d04b209dc1144698e7ba13f0477f6ba8c5ffd0be66c20fdbc9785dfbb'
+            'SKIP'
+            '37909d8154d245b22ea506851bccc71eeffe2ad2756eb6dfb53ab48b58de589b')
+
+prepare() {
+  cd $pkgname
+  # It leaves some traces...
+  rm -vf src/runtime/{os_plan9.go.orig,os_windows.go.orig,proc.go.orig,vgetrandom_linux.go.orig}
+
+  # Fix AMD test failures on build.archlinux.org; see https://github.com/golang/go/issues/77674.
+  patch -p1 -i ../fix-avx512ScanPackedReqsMet.patch
+}
 
 case "${CARCH}" in
   x86_64) export GOARCH=amd64 ;;
@@ -39,27 +54,25 @@ case "${CARCH}" in
   powerpc64le) export GOARCH=ppc64le ;;
 esac
 
-prepare() {
-  cd $pkgname
-  # It leaves some traces...
-  rm -vf src/runtime/{os_plan9.go.orig,os_windows.go.orig,proc.go.orig,vgetrandom_linux.go.orig}
-}
-
 build() {
   export GOAMD64=v1 # make sure we're building for the right x86-64 version
   export GOROOT_FINAL=/usr/lib/go
   export GOROOT_BOOTSTRAP=/usr/lib/go
+
+  # Disable dwarf5 until debugedit catches up
+  export GOEXPERIMENT=nodwarf5
 
   cd "$pkgname/src"
   ./make.bash -v
 }
 
 check() {
-  [ ! "${CARCH}" == 'x86_64' ] && return 0
   export GO_TEST_TIMEOUT_SCALE=3
 
   cd $pkgname/src
-  ./run.bash --no-rebuild -v -v -v -k
+  # TODO: Disable LSAN tests as it's crashing and we don't want to wait for upstream.
+  #       See: https://github.com/golang/go/issues/74476
+  ./run.bash --no-rebuild -v -v -v -k -run "!cmd/cgo/internal/testsanitizers"
 }
 
 package() {
@@ -94,4 +107,3 @@ package() {
 }
 
 # vim: ts=2 sw=2 et
-
