@@ -1,0 +1,425 @@
+diff --git a/src/gallium/drivers/r300/r300_blit.c b/src/gallium/drivers/r300/r300_blit.c
+index 2de5e0a3b45..a4cc11da21b 100644
+--- a/src/gallium/drivers/r300/r300_blit.c
++++ b/src/gallium/drivers/r300/r300_blit.c
+@@ -10,6 +10,7 @@
+ 
+ #include "util/format/u_format.h"
+ #include "util/half_float.h"
++#include "util/u_math.h"
+ #include "util/u_pack_color.h"
+ #include "util/u_surface.h"
+ 
+@@ -108,12 +109,36 @@ static uint32_t r300_depth_clear_cb_value(enum pipe_format format,
+                                           const float* rgba)
+ {
+     union util_color uc;
++
++#if UTIL_ARCH_BIG_ENDIAN
++    switch (format) {
++    case PIPE_FORMAT_A8R8G8B8_UNORM:
++        format = PIPE_FORMAT_B8G8R8A8_UNORM;
++        break;
++    case PIPE_FORMAT_A8R8G8B8_SRGB:
++        format = PIPE_FORMAT_B8G8R8A8_SRGB;
++        break;
++    case PIPE_FORMAT_X8R8G8B8_UNORM:
++        format = PIPE_FORMAT_B8G8R8X8_UNORM;
++        break;
++    case PIPE_FORMAT_X8R8G8B8_SRGB:
++        format = PIPE_FORMAT_B8G8R8X8_SRGB;
++        break;
++    default:
++        break;
++    }
++#endif
++
+     util_pack_color(rgba, format, &uc);
+ 
+-    if (util_format_get_blocksizebits(format) == 32)
+-        return uc.ui[0];
+-    else
+-        return uc.us | (uc.us << 16);
++    if (util_format_get_blocksizebits(format) == 32) {
++        /* CBZB clears reuse ZB_DEPTHCLEARVALUE, which expects the 32-bit
++         * payload in little-endian byte order.
++         */
++        return util_cpu_to_le32(uc.ui[0]);
++    }
++
++    return uc.us | (uc.us << 16);
+ }
+ 
+ static bool r300_cbzb_clear_allowed(struct r300_context *r300,
+diff --git a/src/gallium/drivers/r300/r300_render.c b/src/gallium/drivers/r300/r300_render.c
+index d4f0e2b6a4d..c8f89fb64e2 100644
+--- a/src/gallium/drivers/r300/r300_render.c
++++ b/src/gallium/drivers/r300/r300_render.c
+@@ -12,6 +12,7 @@
+ 
+ #include "util/u_inlines.h"
+ 
++#include "util/u_endian.h"
+ #include "util/format/u_format.h"
+ #include "util/u_draw.h"
+ #include "util/u_memory.h"
+@@ -1103,6 +1104,45 @@ static void r300_render_draw_arrays(struct vbuf_render* render,
+     END_CS;
+ }
+ 
++static bool r300_upload_swtcl_indices(struct r300_context *r300,
++                                      const uint16_t *indices,
++                                      unsigned count,
++                                      unsigned *index_size,
++                                      unsigned *index_buffer_offset,
++                                      struct pipe_resource **index_buffer)
++{
++#if UTIL_ARCH_BIG_ENDIAN
++    uint32_t *indices32 = NULL;
++
++    /* On BE, SWTCL vertices still use the fetcher's global 32-bit swap mode.
++     * Use 32-bit indices too, because INDEX_SIZE is the only index-specific
++     * control the VAP exposes.
++     */
++    *index_size = 4;
++    u_upload_alloc_ref(r300->uploader, 0, count * sizeof(*indices32), 4,
++                       index_buffer_offset, index_buffer,
++                       (void **)&indices32);
++
++    if (!*index_buffer || !indices32) {
++        return false;
++    }
++
++    for (unsigned i = 0; i < count; ++i) {
++        indices32[i] = indices[i];
++    }
++#else
++    *index_size = 2;
++    u_upload_data_ref(r300->uploader, 0, count * sizeof(*indices), 4, indices,
++                      index_buffer_offset, index_buffer);
++
++    if (!*index_buffer) {
++        return false;
++    }
++#endif
++
++    return true;
++}
++
+ static void r300_render_draw_elements(struct vbuf_render* render,
+                                       const uint16_t* indices,
+                                       uint count)
+@@ -1111,15 +1151,15 @@ static void r300_render_draw_elements(struct vbuf_render* render,
+     struct r300_context* r300 = r300render->r300;
+     unsigned max_index = (r300->vbo->size - r300->draw_vbo_offset) /
+                          (r300render->r300->vertex_info.size * 4) - 1;
++    unsigned index_size;
+     struct pipe_resource *index_buffer = NULL;
+     unsigned index_buffer_offset;
+ 
+     CS_LOCALS(r300);
+     DBG(r300, DBG_DRAW, "r300: render_draw_elements (count: %d)\n", count);
+ 
+-    u_upload_data_ref(r300->uploader, 0, count * 2, 4, indices,
+-                  &index_buffer_offset, &index_buffer);
+-    if (!index_buffer) {
++    if (!r300_upload_swtcl_indices(r300, indices, count, &index_size,
++                                   &index_buffer_offset, &index_buffer)) {
+         return;
+     }
+ 
+@@ -1137,13 +1177,15 @@ static void r300_render_draw_elements(struct vbuf_render* render,
+     OUT_CS_REG(R300_VAP_VF_MAX_VTX_INDX, max_index);
+ 
+     OUT_CS_PKT3(R300_PACKET3_3D_DRAW_INDX_2, 0);
+-    OUT_CS(R300_VAP_VF_CNTL__PRIM_WALK_INDICES | (count << 16) |
++    OUT_CS(R300_VAP_VF_CNTL__PRIM_WALK_INDICES |
++           (index_size == 4 ? R300_VAP_VF_CNTL__INDEX_SIZE_32bit : 0) |
++           (count << 16) |
+            r300render->hwprim);
+ 
+     OUT_CS_PKT3(R300_PACKET3_INDX_BUFFER, 2);
+     OUT_CS(R300_INDX_BUFFER_ONE_REG_WR | (R300_VAP_PORT_IDX0 >> 2));
+     OUT_CS(index_buffer_offset);
+-    OUT_CS((count + 1) / 2);
++    OUT_CS(index_size == 4 ? count : (count + 1) / 2);
+     OUT_CS_RELOC(r300_resource(index_buffer));
+     END_CS;
+ 
+diff --git a/src/gallium/drivers/r300/r300_state_inlines.h b/src/gallium/drivers/r300/r300_state_inlines.h
+index 3aa6b97016c..c26d2fc7de0 100644
+--- a/src/gallium/drivers/r300/r300_state_inlines.h
++++ b/src/gallium/drivers/r300/r300_state_inlines.h
+@@ -334,6 +334,14 @@ r300_translate_vertex_data_type(enum pipe_format format) {
+         return R300_INVALID_FORMAT;
+     }
+ 
++#if UTIL_ARCH_BIG_ENDIAN
++    /* On big-endian, the VAP has only a global swap mode, not per-attribute
++     * endian control. Keep TCL vertex attributes at 32-bit.
++     */
++    if (desc->channel[i].size < 32)
++        return R300_INVALID_FORMAT;
++#endif
++
+     switch (desc->channel[i].type) {
+         /* Half-floats, floats, doubles */
+         case UTIL_FORMAT_TYPE_FLOAT:
+diff --git a/src/gallium/drivers/r300/r300_texture.c b/src/gallium/drivers/r300/r300_texture.c
+index e66015f5d58..52c1c0ab424 100644
+--- a/src/gallium/drivers/r300/r300_texture.c
++++ b/src/gallium/drivers/r300/r300_texture.c
+@@ -650,6 +650,13 @@ static uint32_t r300_translate_out_fmt(enum pipe_format format)
+     if (uniform_sign)
+         modifier |= R300_OUT_SIGN(0xf);
+ 
++    if (PIPE_ENDIAN_NATIVE == PIPE_ENDIAN_BIG &&
++        format == PIPE_FORMAT_B5G6R5_UNORM) {
++        return modifier |
++            R300_C0_SEL_R | R300_C1_SEL_G |
++            R300_C2_SEL_B | R300_C3_SEL_A;
++    }
++
+     /* Add swizzles and return. */
+     switch (format) {
+         /*** Special cases (non-standard channel mapping) ***/
+@@ -765,6 +772,10 @@ static uint32_t r300_translate_colormask_swizzle(enum pipe_format format)
+ {
+     format = r300_unbyteswap_array_format(format);
+ 
++    if (PIPE_ENDIAN_NATIVE == PIPE_ENDIAN_BIG &&
++        format == PIPE_FORMAT_B5G6R5_UNORM)
++        return COLORMASK_RGBA;
++
+     switch (format) {
+     case PIPE_FORMAT_A8_UNORM:
+     case PIPE_FORMAT_A8_SNORM:
+diff --git a/src/gallium/drivers/r300/r300_transfer.c b/src/gallium/drivers/r300/r300_transfer.c
+index 7ff89303f20..60a62744bbb 100644
+--- a/src/gallium/drivers/r300/r300_transfer.c
++++ b/src/gallium/drivers/r300/r300_transfer.c
+@@ -11,6 +11,7 @@
+ #include "util/u_memory.h"
+ #include "util/format/u_format.h"
+ #include "util/box.h"
++#include "util/u_math.h"
+ 
+ struct r300_transfer {
+     /* Parent class */
+@@ -18,8 +19,59 @@ struct r300_transfer {
+ 
+     /* Linear texture. */
+     struct r300_resource *linear_texture;
++
++    /* Temporary CPU-visible map for endian-transformed formats. */
++    void *map;
++    void *gpu_map;
++    bool be_rgb565;
+ };
+ 
++static inline uint16_t
++r300_b5g6r5_swap_rb(uint16_t value)
++{
++    return ((value & 0xf800) >> 11) |
++           (value & 0x07e0) |
++           ((value & 0x001f) << 11);
++}
++
++static inline uint16_t
++r300_be_b5g6r5_cpu_to_gpu(uint16_t value)
++{
++    return util_bswap16(r300_b5g6r5_swap_rb(value));
++}
++
++static inline uint16_t
++r300_be_b5g6r5_gpu_to_cpu(uint16_t value)
++{
++    return r300_b5g6r5_swap_rb(util_bswap16(value));
++}
++
++static void
++r300_copy_b5g6r5_map(void *dst, unsigned dst_stride,
++                     const void *src, unsigned src_stride,
++                     unsigned width, unsigned height, unsigned depth,
++                     unsigned dst_layer_stride, unsigned src_layer_stride,
++                     bool cpu_to_gpu)
++{
++    unsigned z, y, x;
++
++    for (z = 0; z < depth; z++) {
++        const uint8_t *src_layer = (const uint8_t *)src + z * src_layer_stride;
++        uint8_t *dst_layer = (uint8_t *)dst + z * dst_layer_stride;
++
++        for (y = 0; y < height; y++) {
++            const uint16_t *src_row = (const uint16_t *)(src_layer + y * src_stride);
++            uint16_t *dst_row = (uint16_t *)(dst_layer + y * dst_stride);
++
++            for (x = 0; x < width; x++) {
++                dst_row[x] = cpu_to_gpu ?
++                    r300_be_b5g6r5_cpu_to_gpu(src_row[x]) :
++                    r300_be_b5g6r5_gpu_to_cpu(src_row[x]);
++            }
++        }
++    }
++}
++
+ /* Convenience cast wrapper. */
+ static inline struct r300_transfer*
+ r300_transfer(struct pipe_transfer* transfer)
+@@ -92,6 +144,8 @@ r300_texture_transfer_map(struct pipe_context *ctx,
+     struct r300_transfer *trans;
+     bool referenced_cs, referenced_hw;
+     enum pipe_format format = tex->b.format;
++    bool be_rgb565 = PIPE_ENDIAN_NATIVE == PIPE_ENDIAN_BIG &&
++                     format == PIPE_FORMAT_B5G6R5_UNORM;
+     char *map;
+ 
+     referenced_cs =
+@@ -206,6 +260,32 @@ r300_texture_transfer_map(struct pipe_context *ctx,
+             FREE(trans);
+             return NULL;
+         }
++        if (be_rgb565) {
++            unsigned size = trans->transfer.layer_stride * box->depth;
++
++            trans->map = MALLOC(size);
++            if (!trans->map) {
++                pipe_resource_reference(
++                    (struct pipe_resource**)&trans->linear_texture, NULL);
++                FREE(trans);
++                return NULL;
++            }
++
++            trans->gpu_map = map;
++            trans->be_rgb565 = true;
++
++            if (usage & PIPE_MAP_READ) {
++                r300_copy_b5g6r5_map(trans->map, trans->transfer.stride,
++                                     trans->gpu_map, trans->transfer.stride,
++                                     box->width, box->height, box->depth,
++                                     trans->transfer.layer_stride,
++                                     trans->transfer.layer_stride,
++                                     false);
++            }
++
++            *transfer = &trans->transfer;
++            return trans->map;
++        }
+ 	*transfer = &trans->transfer;
+         return map;
+     } else {
+@@ -215,11 +295,37 @@ r300_texture_transfer_map(struct pipe_context *ctx,
+             FREE(trans);
+             return NULL;
+         }
+-
+-	*transfer = &trans->transfer;
+-        return map + trans->transfer.offset +
++        map = map + trans->transfer.offset +
+             box->y / util_format_get_blockheight(format) * trans->transfer.stride +
+             box->x / util_format_get_blockwidth(format) * util_format_get_blocksize(format);
++
++        if (be_rgb565) {
++            unsigned size = trans->transfer.layer_stride * box->depth;
++
++            trans->map = MALLOC(size);
++            if (!trans->map) {
++                FREE(trans);
++                return NULL;
++            }
++
++            trans->gpu_map = map;
++            trans->be_rgb565 = true;
++
++            if (usage & PIPE_MAP_READ) {
++                r300_copy_b5g6r5_map(trans->map, trans->transfer.stride,
++                                     trans->gpu_map, trans->transfer.stride,
++                                     box->width, box->height, box->depth,
++                                     trans->transfer.layer_stride,
++                                     trans->transfer.layer_stride,
++                                     false);
++            }
++
++            *transfer = &trans->transfer;
++            return trans->map;
++        }
++
++	*transfer = &trans->transfer;
++        return map;
+     }
+ }
+ 
+@@ -228,6 +334,16 @@ void r300_texture_transfer_unmap(struct pipe_context *ctx,
+ {
+     struct r300_transfer *trans = r300_transfer(transfer);
+ 
++    if (trans->be_rgb565 && (transfer->usage & PIPE_MAP_WRITE)) {
++        r300_copy_b5g6r5_map(trans->gpu_map, transfer->stride,
++                             trans->map, transfer->stride,
++                             transfer->box.width, transfer->box.height,
++                             transfer->box.depth,
++                             transfer->layer_stride,
++                             transfer->layer_stride,
++                             true);
++    }
++
+     if (trans->linear_texture) {
+         if (transfer->usage & PIPE_MAP_WRITE) {
+             r300_copy_into_tiled_texture(ctx, trans);
+@@ -236,5 +352,6 @@ void r300_texture_transfer_unmap(struct pipe_context *ctx,
+         pipe_resource_reference(
+             (struct pipe_resource**)&trans->linear_texture, NULL);
+     }
++    FREE(trans->map);
+     FREE(transfer);
+ }
+diff --git a/src/gallium/frontends/dri/dri_helpers.c b/src/gallium/frontends/dri/dri_helpers.c
+index 9cf6d73315a..9f084ef079b 100644
+--- a/src/gallium/frontends/dri/dri_helpers.c
++++ b/src/gallium/frontends/dri/dri_helpers.c
+@@ -427,12 +427,16 @@ static const struct dri2_format_mapping dri2_format_table[] = {
+         PIPE_FORMAT_R10G10B10X2_UNORM, 1, },
+       { DRM_FORMAT_ARGB8888,      __DRI_IMAGE_FORMAT_ARGB8888,
+         PIPE_FORMAT_BGRA8888_UNORM, 1, },
++      { DRM_FORMAT_BGRA8888,      __DRI_IMAGE_FORMAT_BGRA8888,
++        PIPE_FORMAT_A8R8G8B8_UNORM, 1, },
+       { DRM_FORMAT_ABGR8888,      __DRI_IMAGE_FORMAT_ABGR8888,
+         PIPE_FORMAT_RGBA8888_UNORM, 1, },
+       { __DRI_IMAGE_FOURCC_SARGB8888,     __DRI_IMAGE_FORMAT_SARGB8,
+         PIPE_FORMAT_BGRA8888_SRGB, 1, },
+       { DRM_FORMAT_XRGB8888,      __DRI_IMAGE_FORMAT_XRGB8888,
+         PIPE_FORMAT_BGRX8888_UNORM, 1, },
++      { DRM_FORMAT_BGRX8888,      __DRI_IMAGE_FORMAT_BGRX8888,
++        PIPE_FORMAT_X8R8G8B8_UNORM, 1, },
+       { DRM_FORMAT_RGB888,        __DRI_IMAGE_FORMAT_RGB888,
+         PIPE_FORMAT_B8G8R8_UNORM, 1, },
+       { DRM_FORMAT_XBGR8888,      __DRI_IMAGE_FORMAT_XBGR8888,
+diff --git a/src/gallium/frontends/dri/loader_dri3_helper.c b/src/gallium/frontends/dri/loader_dri3_helper.c
+index 8898bd23fdf..be6a6274a72 100644
+--- a/src/gallium/frontends/dri/loader_dri3_helper.c
++++ b/src/gallium/frontends/dri/loader_dri3_helper.c
+@@ -1317,6 +1317,10 @@ dri3_cpp_for_fourcc(uint32_t format) {
+    case DRM_FORMAT_ARGB8888:
+    case DRM_FORMAT_ABGR8888:
+    case DRM_FORMAT_XBGR8888:
++   case DRM_FORMAT_RGBX8888:
++   case DRM_FORMAT_RGBA8888:
++   case DRM_FORMAT_BGRX8888:
++   case DRM_FORMAT_BGRA8888:
+    case DRM_FORMAT_XRGB2101010:
+    case DRM_FORMAT_ARGB2101010:
+    case DRM_FORMAT_XBGR2101010:
+diff --git a/src/loader/loader_dri_helper.h b/src/loader/loader_dri_helper.h
+index 169e36b5d80..c2a96d4054a 100644
+--- a/src/loader/loader_dri_helper.h
++++ b/src/loader/loader_dri_helper.h
+@@ -75,7 +75,9 @@ struct loader_screen_resources {
+ #define __DRI_IMAGE_FORMAT_RGB565       PIPE_FORMAT_B5G6R5_UNORM
+ #define __DRI_IMAGE_FORMAT_XRGB8888     PIPE_FORMAT_B8G8R8X8_UNORM
+ #define __DRI_IMAGE_FORMAT_ARGB8888     PIPE_FORMAT_B8G8R8A8_UNORM
++#define __DRI_IMAGE_FORMAT_BGRA8888     PIPE_FORMAT_A8R8G8B8_UNORM
+ #define __DRI_IMAGE_FORMAT_ABGR8888     PIPE_FORMAT_R8G8B8A8_UNORM
++#define __DRI_IMAGE_FORMAT_BGRX8888     PIPE_FORMAT_X8R8G8B8_UNORM
+ #define __DRI_IMAGE_FORMAT_XBGR8888     PIPE_FORMAT_R8G8B8X8_UNORM
+ #define __DRI_IMAGE_FORMAT_RGB888       PIPE_FORMAT_B8G8R8_UNORM
+ #define __DRI_IMAGE_FORMAT_BGR888       PIPE_FORMAT_R8G8B8_UNORM
