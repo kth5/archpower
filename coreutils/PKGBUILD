@@ -6,7 +6,7 @@
 # Contributor: judd <jvinet@zeroflux.org>
 
 pkgname=coreutils
-pkgver=9.9
+pkgver=9.10
 pkgrel=1
 pkgdesc='The basic file, shell and text manipulation utilities of the GNU operating system'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
@@ -16,7 +16,7 @@ license=(
 )
 url='https://www.gnu.org/software/coreutils/'
 depends=( 
-  acl  
+  acl
   attr
   glibc
   gmp
@@ -32,16 +32,23 @@ makedepends=(
 source=(
   git+https://git.savannah.gnu.org/git/coreutils.git?signed#tag=v${pkgver}
   git+https://git.savannah.gnu.org/git/gnulib.git
+  https://ftp.gnu.org/gnu/${pkgname}/${pkgname}-${pkgver}.tar.gz{,.sig}
 )
 validpgpkeys=(
  6C37DC12121A5006BC1DB804DF6FD971306037D9 # Pádraig Brady
 )
 options=(!lto)
-b2sums=('7798d7ba5f9d7f336ad4f9dfd2ae67244e335c898743f0f4fcd735ab6a6799c25bb4fa8ad7bf1fba5ef8a9da832d3d44863bb9fcadcfc2a20ab53c0172b47210'
+b2sums=('7f78aa9c87f4faebc7ae9b07a18c550fb34d63dfeaeede8e55e29bfe0bedc909959eac5f1c8d91bb9ca3f78ec0bc4b9d02a8f2cb96eb31c92d66bdd0d02c0e2e'
+        'SKIP'
+        '31614bbd57ff4f569b646f89e6f16f26d14d8293b316c3321587699bd25ee71b8e79fa96fbe6cef4f0b3e3ed5c9c67a7920d9ec6140b6b30fd83d9eb1bf0f282'
         'SKIP')
 
 prepare() {
   cd "${pkgname}"
+  # Skip downloading unstable po files in bootstrap scripts to avoid non-deterministic builds
+  export SKIP_PO="1"
+  # The $SKIP_PO environment variable is only honored by the gnulib submodule if using its "sh" implementation
+  export GNULIB_TOOL_IMPL="sh"
 
   git submodule init
   git config submodule.gnulib.url ../gnulib
@@ -65,14 +72,19 @@ build() {
   ./configure \
     --prefix=/usr \
     --libexecdir=/usr/lib \
-    --with-openssl \
-    --enable-no-install-program=hostname,kill,uptime
+    --with-openssl
   make
+
+  # Generate coreutils mo files from dist tarball
+  cd "${srcdir}/${pkgname}-${pkgver}/po"
+  for po in *.po; do
+    msgfmt "${po}" -o "${po%.po}.mo"
+  done
 }
 
 check() {
   case "${CARCH}" in
-    powerpc64le) return 0 ;; # tests/od/od-endian
+    powerpc64le) return 0 ;;
   esac
 
   cd "${pkgname}"
@@ -82,5 +94,12 @@ check() {
 package() {
   cd "${pkgname}"
   make DESTDIR="${pkgdir}" install
+
+  # Install coreutils mo files from dist tarball
+  cd "${srcdir}/${pkgname}-${pkgver}/po"
+  for mo in *.mo; do
+    install -Dm 644 "${mo}" "${pkgdir}/usr/share/locale/${mo%.mo}/LC_MESSAGES/${pkgname}.mo"
+    install -Dm 644 "${mo}" "${pkgdir}/usr/share/locale/${mo%.mo}/LC_TIME/${pkgname}.mo"
+  done
 }
 
