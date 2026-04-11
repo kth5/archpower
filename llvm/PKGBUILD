@@ -3,31 +3,24 @@
 # Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
 
 pkgname=('llvm' 'llvm-libs')
-pkgver=21.1.6
-pkgrel=2
+pkgver=22.1.3
+pkgrel=1
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://llvm.org/"
 license=('Apache-2.0 WITH LLVM-exception')
 makedepends=('cmake' 'ninja' 'zlib' 'zstd' 'curl' 'libffi' 'libedit' 'libxml2'
              'python-setuptools' 'python-psutil' 'python-sphinx'
              'python-myst-parser' 'python-build' 'python-installer' 'python-wheel')
+checkdepends=('llvm-libs')
 options=('staticlibs' '!lto') # tools/llvm-shlib/typeids.test fails with LTO
-case "${CARCH}" in
-  powerpc) options+=('!debug') ;;
-esac
 _source_base=https://github.com/llvm/llvm-project/releases/download/llvmorg-$pkgver
-source=($_source_base/llvm-$pkgver.src.tar.xz{,.sig}
-        $_source_base/cmake-$pkgver.src.tar.xz{,.sig}
-        $_source_base/third-party-$pkgver.src.tar.xz{,.sig}
+source=($_source_base/llvm-project-$pkgver.src.tar.xz{,.sig}
         elf-section-diag.patch
         hotfix-abi-powerpc64-elfv2.patch
         espresso-cpu.patch
-        hotfix-ppc-jit.patch)
-sha256sums=('908bce97be0275943414b45af2e2b20e8f6d5d9266fdc120bd59f096ebc547ad'
-            'SKIP'
-            'e364f135fa14c343d70cac96f577f44e8e20bf026682f647f8c3c5687a0bebd1'
-            'SKIP'
-            '8d09dc219cdb3da7dafd2161836aacdd6e02c1a113498ab5f37688599406dc8a'
+        hotfix-ppc-jit.patch
+)
+sha256sums=('2488c33a959eafba1c44f253e5bbe7ac958eb53fa626298a3a5f4b87373767cd'
             'SKIP'
             '3dee6891cbe043e31c7d0a88114144ca5ca9c5acfaedc49f392ec9f020618f0d'
             '046d562c2dcad24c3c8174f1c8109b28714b65dfbaa8e3ede7d3373ea3206c83'
@@ -74,8 +67,7 @@ _get_distribution_components() {
 }
 
 prepare() {
-  rename -v -- "-$pkgver.src" '' {cmake,third-party}-$pkgver.src
-  cd llvm-$pkgver.src
+  cd llvm-project-$pkgver.src/llvm
   mkdir build
 
   # we use elfv2 on powerpc64
@@ -91,7 +83,7 @@ prepare() {
 }
 
 build() {
-  cd llvm-$pkgver.src/build
+  cd llvm-project-$pkgver.src/llvm/build
 
   # Build only minimal debug info to reduce size
   CFLAGS=${CFLAGS/-g /-g1 }
@@ -119,6 +111,7 @@ build() {
     -DLLVM_LINK_LLVM_DYLIB=ON
     -DLLVM_USE_PERF=ON
     -DSPHINX_WARNINGS_AS_ERRORS=OFF
+    -DPACKAGE_BUGREPORT=https://github.com/kth5/archpower/issues
   )
 
   cmake .. "${cmake_args[@]}"
@@ -139,15 +132,15 @@ check() {
   case "${CARCH}" in
     powerpc*) return 0 ;;
   esac
-  cd llvm-$pkgver.src/build
+  cd llvm-project-$pkgver.src/llvm/build
   LD_LIBRARY_PATH=$PWD/lib ninja check
 }
 
 package_llvm() {
   pkgdesc="Compiler infrastructure"
-  depends=('llvm-libs' 'curl' 'perl')
+  depends=('llvm-libs' 'curl' 'perl' 'libstdc++' 'glibc' 'libgcc')
 
-  cd llvm-$pkgver.src/build
+  cd llvm-project-$pkgver.src/llvm/build
 
   DESTDIR="$pkgdir" ninja install-distribution
 
@@ -168,7 +161,7 @@ package_llvm() {
 
 package_llvm-libs() {
   pkgdesc="LLVM runtime libraries"
-  depends=('gcc-libs' 'zlib' 'zstd' 'libffi' 'libedit' 'libxml2')
+  depends=('libgcc' 'glibc' 'libstdc++' 'zlib' 'zstd' 'libffi' 'libedit' 'libxml2')
   provides=('libLLVM.so' 'libLTO.so' 'libRemarks.so')
 
   install -d "$pkgdir/usr/lib"
@@ -182,7 +175,7 @@ package_llvm-libs() {
   install -d "$pkgdir/usr/lib/bfd-plugins"
   ln -s ../LLVMgold.so "$pkgdir/usr/lib/bfd-plugins/LLVMgold.so"
 
-  install -Dm644 "$srcdir/llvm-$pkgver.src/LICENSE.TXT" \
+  install -Dm644 "$srcdir/llvm-project-$pkgver.src/llvm/LICENSE.TXT" \
     "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
 
