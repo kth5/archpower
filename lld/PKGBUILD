@@ -3,27 +3,18 @@
 # Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
 
 pkgname=lld
-pkgver=21.1.6
+pkgver=22.1.3
 pkgrel=1
 pkgdesc="Linker from the LLVM project"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://lld.llvm.org/"
 license=('Apache-2.0 WITH LLVM-exception')
-depends=('llvm-libs' 'gcc-libs' 'zlib' 'zstd')
+depends=('llvm-libs' 'libstdc++' 'glibc' 'zlib' 'zstd' )
 makedepends=('llvm' 'cmake' 'ninja' 'python-sphinx')
 _source_base=https://github.com/llvm/llvm-project/releases/download/llvmorg-$pkgver
-source=($_source_base/lld-$pkgver.src.tar.xz{,.sig}
-        $_source_base/llvm-$pkgver.src.tar.xz{,.sig}
-        $_source_base/libunwind-$pkgver.src.tar.xz{,.sig}
-        $_source_base/cmake-$pkgver.src.tar.xz{,.sig}
-        llvm-ppc64-elfv2.patch)
-sha256sums=('5b297faecdddc9581c260a1570b4c0ec8810d1213e23d7aa84732c0e2feea85f'
-            'SKIP'
-            '908bce97be0275943414b45af2e2b20e8f6d5d9266fdc120bd59f096ebc547ad'
-            'SKIP'
-            '25d8bf5bd0d95641c738ea690b18564f5fc9fb7e7bbab17329b391988e71ae8c'
-            'SKIP'
-            'e364f135fa14c343d70cac96f577f44e8e20bf026682f647f8c3c5687a0bebd1'
+source=($_source_base/llvm-project-$pkgver.src.tar.xz{,.sig}
+       llvm-ppc64-elfv2.patch)
+sha256sums=('2488c33a959eafba1c44f253e5bbe7ac958eb53fa626298a3a5f4b87373767cd'
             'SKIP'
             '8c4e8db0b80b1a86f8cff9aa678b70458503bc8926ecc41e0df953ea14ab3559')
 validpgpkeys=('474E22316ABF4785A88C6E8EA2C794A986419D8A'  # Tom Stellard <tstellar@redhat.com>
@@ -33,20 +24,14 @@ validpgpkeys=('474E22316ABF4785A88C6E8EA2C794A986419D8A'  # Tom Stellard <tstell
 )
 
 prepare() {
-  # https://bugs.llvm.org/show_bug.cgi?id=49228
-  mv libunwind{-$pkgver.src,}
-
-  mv cmake{-$pkgver.src,}
-  cd lld-$pkgver.src
-
-  patch -Np2 -d "$srcdir/llvm-$pkgver.src" -i ../llvm-ppc64-elfv2.patch
-
-
+  cd llvm-project-$pkgver.src/lld
   mkdir build
+
+  patch -Np2 -d "../llvm" -i "$srcdir/llvm-ppc64-elfv2.patch"
 }
 
 build() {
-  cd lld-$pkgver.src/build
+  cd llvm-project-$pkgver.src/lld/build
 
   local cmake_args=(
     -G Ninja
@@ -60,7 +45,7 @@ build() {
     -DLLVM_EXTERNAL_LIT=/usr/bin/lit
     -DLLVM_INCLUDE_TESTS=ON
     -DLLVM_LINK_LLVM_DYLIB=ON
-    -DLLVM_MAIN_SRC_DIR="$srcdir/llvm-$pkgver.src"
+    -DLLVM_MAIN_SRC_DIR="$srcdir/llvm-project-$pkgver.src/llvm"
     -DSPHINX_WARNINGS_AS_ERRORS=OFF
   )
   cmake .. "${cmake_args[@]}"
@@ -68,15 +53,15 @@ build() {
 }
 
 check() {
-  cd lld-$pkgver.src/build
+  cd llvm-project-$pkgver.src/lld/build
   ninja check-lld
 }
 
 package() {
-  cd lld-$pkgver.src/build
+  cd llvm-project-$pkgver.src/lld/build
 
   DESTDIR="$pkgdir" ninja install
-  install -Dm644 ../LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$srcdir/llvm-project-$pkgver.src/lld/LICENSE.TXT" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 
   # https://bugs.llvm.org/show_bug.cgi?id=42455
   install -Dm644 -t "$pkgdir/usr/share/man/man1" ../docs/ld.lld.1
