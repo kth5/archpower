@@ -5,26 +5,24 @@
 apb_output_timeout=7200
 
 pkgname=clang
-pkgver=21.1.6
-pkgrel=3
+pkgver=22.1.3
+pkgrel=1
 pkgdesc="C language family frontend for LLVM"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://clang.llvm.org/"
 license=('Apache-2.0 WITH LLVM-exception')
-depends=('llvm-libs' 'gcc' 'compiler-rt')
+depends=('llvm-libs' 'gcc' 'compiler-rt' 'libgcc' 'libxml2')
 makedepends=("llvm=$pkgver" 'cmake' 'ninja' 'python-sphinx' 'python-myst-parser')
 optdepends=('openmp: OpenMP support in clang with -fopenmp'
             'python: for scan-view and git-clang-format'
             'llvm: referenced by some clang headers')
+#checkdepends=('clang')
 provides=("clang-analyzer=$pkgver" "clang-tools-extra=$pkgver")
 conflicts=('clang-analyzer' 'clang-tools-extra')
 replaces=('clang-analyzer' 'clang-tools-extra')
+options=(!lto)
 _source_base=https://github.com/llvm/llvm-project/releases/download/llvmorg-$pkgver
-source=($_source_base/clang-$pkgver.src.tar.xz{,.sig}
-        $_source_base/clang-tools-extra-$pkgver.src.tar.xz{,.sig}
-        $_source_base/llvm-$pkgver.src.tar.xz{,.sig}
-        $_source_base/cmake-$pkgver.src.tar.xz{,.sig}
-        $_source_base/third-party-$pkgver.src.tar.xz{,.sig}
+source=($_source_base/llvm-project-$pkgver.src.tar.xz{,.sig}
         0001-Revert-clang-driver-When-fveclib-ArmPL-flag-is-in-us.patch
         enable-fstack-protector-strong-by-default.patch
         clang-disable-float128-diagnostics-for-device-compilation.patch::https://github.com/llvm/llvm-project/commit/318bff6811e7.patch
@@ -33,20 +31,12 @@ source=($_source_base/clang-$pkgver.src.tar.xz{,.sig}
         clang-ppc64-dynamic-linker-path.patch
         ppc-dirwatcher.patch
         clang-mcpu-espresso.patch)
-sha256sums=('348ace5d715c4caa6fb89b4c6fe07c21650e10b2fac37d8b0db75c0b11be9011'
-            'SKIP'
-            'ca1834f3140adc1ed2ffc05b1272855626bf340f91313a001e2eab932a74c1f0'
-            'SKIP'
-            '908bce97be0275943414b45af2e2b20e8f6d5d9266fdc120bd59f096ebc547ad'
-            'SKIP'
-            'e364f135fa14c343d70cac96f577f44e8e20bf026682f647f8c3c5687a0bebd1'
-            'SKIP'
-            '8d09dc219cdb3da7dafd2161836aacdd6e02c1a113498ab5f37688599406dc8a'
+sha256sums=('2488c33a959eafba1c44f253e5bbe7ac958eb53fa626298a3a5f4b87373767cd'
             'SKIP'
             '6f3cc7a4847e03d16ed90341bb71fec98427763ff2351f5344b2ca2ce62a604c'
-            '65c2b77693b9380c4e9c08977bed163932fbd72eaaa4dc666bb7310d426f6887'
+            '93713470709ad0fbcf04aad29adb269478027c25e5a45e0ef3ca807dff409c12'
             '6a0c72fffeb165ba1ccac62a5265f441c627982f122d92f699dd630eea40fd4b'
-            '65c2b77693b9380c4e9c08977bed163932fbd72eaaa4dc666bb7310d426f6887'
+            '93713470709ad0fbcf04aad29adb269478027c25e5a45e0ef3ca807dff409c12'
             '046d562c2dcad24c3c8174f1c8109b28714b65dfbaa8e3ede7d3373ea3206c83'
             '654b9eafcd20125319b3c319ab6674a940ddef400821c80813c16011ef8b6086'
             '307d7db5118647b84570c92c87f097e1a4616794f7d3966261b1e92829a020dc'
@@ -77,27 +67,26 @@ _get_distribution_components() {
 }
 
 prepare() {
-  rename -v -- "-$pkgver.src" '' {cmake,clang-tools-extra}-$pkgver.src
-  cd clang-$pkgver.src
+  cd llvm-project-$pkgver.src/clang
   mkdir build
-  patch -Np2 -i ../enable-fstack-protector-strong-by-default.patch
+  patch -Np2 -i "$srcdir/enable-fstack-protector-strong-by-default.patch"
 
   # Revert always linking against libamath when -fveclib=ArmPL
-  patch -Np2 -i ../0001-Revert-clang-driver-When-fveclib-ArmPL-flag-is-in-us.patch
+  patch -Np2 -i "$srcdir/0001-Revert-clang-driver-When-fveclib-ArmPL-flag-is-in-us.patch"
 
   # powerpc64 uses ELFv2
-  patch -Np2 -i ../clang-ppc64-dynamic-linker-path.patch
-  patch -Np1 -d "$srcdir/llvm-$pkgver.src" -i ../hotfix-abi-powerpc64-elfv2.patch
+  patch -Np2 -i "$srcdir/clang-ppc64-dynamic-linker-path.patch"
+  patch -Np1 -d ../llvm -i "$srcdir/hotfix-abi-powerpc64-elfv2.patch"
 
   # enable -mcpu=espresso and map to 750
-  patch -Np1 -i ../clang-mcpu-espresso.patch
+  patch -Np1 -i "$srcdir/clang-mcpu-espresso.patch"
 
   # various Adelie lifted
-  patch -Np1 -i ${srcdir}/ppc-dirwatcher.patch
+  patch -Np1 -i "$srcdir/ppc-dirwatcher.patch"
 }
 
 build() {
-  cd clang-$pkgver.src/build
+  cd llvm-project-$pkgver.src/clang/build
 
   # Build only minimal debug info to reduce size
   CFLAGS=${CFLAGS/-g /-g1 }
@@ -113,13 +102,14 @@ build() {
     -DCLANG_LINK_CLANG_DYLIB=ON
     -DENABLE_LINKER_BUILD_ID=ON
     -DLLVM_BUILD_DOCS=ON
+    -DLLVM_BUILD_TESTS=ON
     -DLLVM_ENABLE_RTTI=ON
     -DLLVM_ENABLE_SPHINX=ON
-    -DLLVM_EXTERNAL_CLANG_TOOLS_EXTRA_SOURCE_DIR="$srcdir/clang-tools-extra"
+    -DLLVM_EXTERNAL_CLANG_TOOLS_EXTRA_SOURCE_DIR="$srcdir/llvm-project-$pkgver.src/clang-tools-extra"
     -DLLVM_EXTERNAL_LIT=/usr/bin/lit
     -DLLVM_INCLUDE_DOCS=ON
     -DLLVM_LINK_LLVM_DYLIB=ON
-    -DLLVM_THIRD_PARTY_DIR="$srcdir/third-party-$pkgver.src"
+    -DLLVM_THIRD_PARTY_DIR="$srcdir/llvm-project-$pkgver.src/third-party"
     -DSPHINX_WARNINGS_AS_ERRORS=OFF
     -DLLVM_PACKAGE_BUGREPORT=https://gitlab.archlinux.org/archlinux/packaging/packages/clang/-/issues
   )
@@ -148,7 +138,7 @@ check() {
     powerpc*) return 0 ;;
   esac
 
-  cd clang-$pkgver.src/build
+  cd llvm-project-$pkgver.src/clang/build
   LD_LIBRARY_PATH=$PWD/lib ninja check-clang{,-tools}
 }
 
@@ -159,10 +149,10 @@ _python_optimize() {
 }
 
 package() {
-  cd clang-$pkgver.src/build
+  cd llvm-project-$pkgver.src/clang/build
 
   DESTDIR="$pkgdir" ninja install-distribution
-  install -Dm644 ../LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$srcdir/llvm-project-$pkgver.src/clang/LICENSE.TXT" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 
   # Remove documentation sources
   rm -r "$pkgdir"/usr/share/doc/clang{,-tools}/html/{_sources,.buildinfo}
