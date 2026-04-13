@@ -423,3 +423,40 @@ index 169e36b5d80..c2a96d4054a 100644
  #define __DRI_IMAGE_FORMAT_XBGR8888     PIPE_FORMAT_R8G8B8X8_UNORM
  #define __DRI_IMAGE_FORMAT_RGB888       PIPE_FORMAT_B8G8R8_UNORM
  #define __DRI_IMAGE_FORMAT_BGR888       PIPE_FORMAT_R8G8B8_UNORM
+commit 81275df9dde5a51e62f0be7086782f5913246304 (HEAD -> r300_BE_hacks, origin/r300_BE_hacks)
+Author: Pavel Ondračka <pavel.ondracka@gmail.com>
+Date:   Sun Mar 29 15:50:13 2026 +0200
+
+    st/bitmap: release the temporary bitmap sampler view
+    
+    st_cb_bitmap appends a temporary bitmap sampler view to the sampler
+    view array passed to set_sampler_views().
+    
+    1a5c660ef5b8 changed this path to only release the extra YUV views
+    returned by st_get_sampler_views(), but the temporary bitmap view is
+    created locally and is not part of extra_sampler_views. It therefore
+    stopped being released.
+    
+    That leaks bitmap sampler views and the tiny textures they reference.
+    Applications that still use glBitmap heavily, such as fire, show memory
+    growth with llvmpipe and severe performance degradation on r300 because
+    tiny VRAM allocations stop being reused.
+    
+    Release the temporary bitmap sampler view explicitly after drawing the
+    bitmap quad.
+    
+    Fixes: 1a5c660ef5b8 ("st/bitmap: only release YUV samplerviews")
+
+diff --git a/src/mesa/state_tracker/st_cb_bitmap.c b/src/mesa/state_tracker/st_cb_bitmap.c
+index a05dc6369cf..02fffa735ae 100644
+--- a/src/mesa/state_tracker/st_cb_bitmap.c
++++ b/src/mesa/state_tracker/st_cb_bitmap.c
+@@ -468,6 +468,7 @@ st_flush_bitmap_cache(struct st_context *st)
+                           cache->fp,
+                           cache->scissor_enabled,
+                           cache->clamp_frag_color);
++         pipe->sampler_view_release(pipe, sv);
+       }
+ 
+       /* release/free the texture */
+
