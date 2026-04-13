@@ -9,7 +9,7 @@ pkgname=(
   fmt-docs
 )
 pkgver=12.1.0
-pkgrel=1
+pkgrel=2
 pkgdesc='Open-source formatting library for C++'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url=https://fmt.dev
@@ -28,33 +28,36 @@ makedepends=(
 makedepends_powerpc64=(npm)
 makedepends_powerpc64le=(npm)
 makedepends_x86_64=(npm)
-_tag=407c905e45ad75fc29bf0f9bb7c5c2fd3475976f
-source=("git+https://github.com/fmtlib/fmt.git#tag=$_tag")
-b2sums=('75eb322bb23e10fc8d698fedf775fa1313e5699ab81a8a1193b7f1ec7e10b4ba92631ffffddeefe0c4390676e8412a684e98717a94bafdb662b25111cc0d8e00')
+source=(
+  "git+https://github.com/fmtlib/fmt.git#tag=$pkgver"
+  "$pkgbase-mkdocstrings-1.0-compat.patch"
+)
+b2sums=('75eb322bb23e10fc8d698fedf775fa1313e5699ab81a8a1193b7f1ec7e10b4ba92631ffffddeefe0c4390676e8412a684e98717a94bafdb662b25111cc0d8e00'
+        '58e9e4733d780c260732d71613910d25cc0ddd8c4efc95a27e4f81405687c3a7c465f6bc68a1e345a1c6d843c7db16cf41f9065ad5adb3b59ffa6ef04c974a7e')
 
-pkgver() {
-  cd fmt
-  git describe --tags
+prepare() {
+  patch -d $pkgbase -Np1 < $pkgbase-mkdocstrings-1.0-compat.patch
 }
 
 build() {
-  cmake -S fmt -B build -G Ninja \
+  cmake -S $pkgbase -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DBUILD_SHARED_LIBS=ON \
-    -Wno-dev
+    -Wno-dev \
+    -DBUILD_SHARED_LIBS=ON
   cmake --build build
   cmake --build build --target doc
 }
 
 check() {
-  cmake --build build --target test
+  ctest --test-dir build --output-on-failure
 }
 
 package_fmt() {
   depends=(
-    gcc-libs
     glibc
+    libgcc
+    libstdc++
   )
   provides=(libfmt.so)
 
@@ -68,5 +71,3 @@ package_fmt-docs() {
   DESTDIR="$pkgdir" cmake --install build --component fmt_doc
   install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" fmt/LICENSE
 }
-
-# vim: ts=2 sw=2 et:

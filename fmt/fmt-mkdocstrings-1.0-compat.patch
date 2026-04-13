@@ -1,0 +1,94 @@
+From bd0025526767870006a5589b0b8a03a87af8503c Mon Sep 17 00:00:00 2001
+From: Carl Smedstad <carsme@archlinux.org>
+Date: Sun, 15 Feb 2026 07:00:39 +0100
+Subject: [PATCH] Fix mkdocstrings handler for mkdocstrings >= 1.0.0
+
+mkdocstrings 1.0.0 moved BaseHandler from mkdocstrings.handlers.base to
+mkdocstrings._internal.handlers.base and changed its API:
+
+- handler name is now a class variable instead of a constructor argument
+- collect() and render() have updated signatures
+- get_handler() must pass mdx and mdx_config kwargs
+
+See: https://github.com/mkdocstrings/mkdocstrings/releases/tag/1.0.0
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .../mkdocstrings_handlers/cxx/__init__.py     | 23 ++++++++++++-------
+ 1 file changed, 15 insertions(+), 8 deletions(-)
+
+diff --git a/support/python/mkdocstrings_handlers/cxx/__init__.py b/support/python/mkdocstrings_handlers/cxx/__init__.py
+index 85d52a58..370a1a0e 100644
+--- a/support/python/mkdocstrings_handlers/cxx/__init__.py
++++ b/support/python/mkdocstrings_handlers/cxx/__init__.py
+@@ -8,7 +8,7 @@ from pathlib import Path
+ from subprocess import PIPE, STDOUT, CalledProcessError, Popen
+ from typing import Any, List, Mapping, Optional
+ 
+-from mkdocstrings.handlers.base import BaseHandler
++from mkdocstrings._internal.handlers.base import BaseHandler
+ 
+ 
+ class Definition:
+@@ -167,8 +167,10 @@ def render_decl(d: Definition) -> str:
+ 
+ 
+ class CxxHandler(BaseHandler):
++    name: str = 'cxx'
++
+     def __init__(self, **kwargs: Any) -> None:
+-        super().__init__(handler='cxx', **kwargs)
++        super().__init__(**kwargs)
+ 
+         headers = [
+             'args.h', 'base.h', 'chrono.h', 'color.h', 'compile.h', 'format.h',
+@@ -258,7 +260,7 @@ class CxxHandler(BaseHandler):
+                 d.members.append(member)
+             return d
+ 
+-    def collect(self, identifier: str, _config: Mapping[str, Any]) -> Definition:
++    def collect(self, identifier: str, options: Any) -> Definition:
+         qual_name = 'fmt::' + identifier
+ 
+         param_str = None
+@@ -311,7 +313,7 @@ class CxxHandler(BaseHandler):
+             raise Exception(f'Cannot find {identifier}. Candidates: {candidates}')
+         return self.collect_compound(identifier, cls)
+ 
+-    def render(self, d: Definition, config: dict) -> str:
++    def render(self, d: Definition, options: Any, *, locale: Optional[str] = None) -> str:
+         if d.id is not None:
+             self.do_heading('', 0, id=d.id)
+         text = '<div class="docblock">\n'
+@@ -320,19 +322,24 @@ class CxxHandler(BaseHandler):
+         text += doxyxml2html(d.desc)
+         if d.members is not None:
+             for m in d.members:
+-                text += self.render(m, config)
++                text += self.render(m, options)
+         text += '</div>\n'
+         text += '</div>\n'
+         return text
+ 
+ 
+ def get_handler(theme: str, custom_templates: Optional[str] = None,
+-                **_config: Any) -> CxxHandler:
++                **config: Any) -> CxxHandler:
+     """Return an instance of `CxxHandler`.
+ 
+     Arguments:
+         theme: The theme to use when rendering contents.
+         custom_templates: Directory containing custom templates.
+-        **_config: Configuration passed to the handler.
++        **config: Configuration passed to the handler.
+     """
+-    return CxxHandler(theme=theme, custom_templates=custom_templates)
++    return CxxHandler(
++        theme=theme,
++        custom_templates=custom_templates,
++        mdx=config.get('mdx', []),
++        mdx_config=config.get('mdx_config', {}),
++    )
+-- 
+2.53.0
+
