@@ -1,5 +1,7 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Timothy Redaelli <timothy.redaelli@gmail.com>
+# Maintainer: Johannes Löthberg <johannes@kyriasis.com>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
+# Contributor: Timothy Redaelli <timothy.redaelli@gmail.com>
 # Contributor: Michael P <ptchinster@archlinux.us>
 # Contributor: Roberto Alsina <ralsina@kde.org>
 # Contributor: Will Chappell <mr.chapendi@gmail.com>
@@ -7,28 +9,64 @@
 # Contributor: Gustavo Alvarez <sl1pkn07@gmail.com>
 
 pkgname=ragel
-pkgver=6.10
-pkgrel=4
-pkgdesc="Compiles finite state machines from regular languages into executable C, C++, Objective-C, or D code."
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+pkgver=7.0.4
+pkgrel=1
+pkgdesc="Compiles finite state machines from regular languages into executable C, C++, Objective-C, or D code"
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://www.colm.net/open-source/ragel/"
-license=('GPL-2.0-only')
-depends=('gcc-libs')
-source=(https://www.colm.net/files/$pkgname/$pkgname-$pkgver.tar.gz{,.asc})
-validpgpkeys=(C3260F001EE3780F1BC3D4F650FE47277DC196FB)
-sha256sums=('5f156edb65d20b856d638dd9ee2dfb43285914d9aa2b6ec779dac0270cd56c3f'
-            'SKIP')
+license=('MIT')
+depends=(
+  'colm'
+  'glibc'
+  'libgcc'
+  'libstdc++'
+)
+makedepends=(
+  'asciidoc'
+  'dblatex'
+  'fig2dev'
+  'python-pygments'
+  'texlive-bin'
+)
+provides=('libragel.so')
+source=(
+  "https://www.colm.net/files/ragel/$pkgname-$pkgver.tar.gz"{,.asc}
+  "$pkgname-fallback-no-la.patch::https://github.com/adrian-thurston/ragel/commit/463f4914057b0193c6ca025e9233c17035bc0448.patch"
+)
+b2sums=('d96444f6b8dc356b9effa6c5032952ffb2526833f90fcb63c7f6c293a73a70ba057995426ba789d237c61dee5e3aa1ab53ec3193bd31c9c4b994193910219d13'
+        'SKIP'
+        'bbe947d1daa0ad6c8c455d56e4ae49d7d0ae9624b4a6ea2e45d590d03d3f9ca1965a08ecb765b7b39a82e8259a4bc735bee34435454cc7ed05361dda743ed054')
+validpgpkeys=(C3260F001EE3780F1BC3D4F650FE47277DC196FB) # Adrian Thurston <thurston@cs.queensu.ca>
+
+prepare() {
+  cd $pkgname-$pkgver
+  patch -Np1 < ../$pkgname-fallback-no-la.patch
+
+  # Fix test segfaults: const char buffer is placed in read-only memory but
+  # used as a writable NFA stack, causing segfaults with modern toolchains.
+  sed -i 's/^const char s\[4096\];/char s[4096];/' test/ragel.d/{genrep{1,2,5,6,7,8},nfa3}.rl
+
+  autoreconf -fiv
+}
 
 build() {
-  cd "$srcdir/$pkgname-$pkgver"
-
-  ./configure --prefix=/usr CXXFLAGS="$CXXFLAGS -std=gnu++98" 
+  cd $pkgname-$pkgver
+  ./configure --prefix=/usr --with-colm=/usr
   make
 }
 
-package() {
-  cd "$srcdir/$pkgname-$pkgver"
+check() {
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
 
-  make DESTDIR="$pkgdir/" install
-  install -m0644 -D ragel.vim "$pkgdir"/usr/share/vim/vimfiles/syntax/ragel.vim
+  cd $pkgname-$pkgver/test
+  ./runtests
+}
+
+package() {
+  cd $pkgname-$pkgver
+  make DESTDIR="$pkgdir" install
+  install -vDm644 -t "$pkgdir/usr/share/vim/vimfiles/syntax" ragel.vim
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" COPYING
 }
