@@ -9,12 +9,13 @@ pkgname=(
   gtk4-docs
   gtk-update-icon-cache
 )
-pkgver=4.20.2
-pkgrel=3
+pkgver=4.22.2
+pkgrel=1
 epoch=1
 pkgdesc="GObject-based multi-platform GUI toolkit"
 url="https://www.gtk.org/"
-arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+#arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+arch=(powerpc espresso)
 license=(LGPL-2.1-or-later)
 depends=(
   adwaita-fonts
@@ -26,7 +27,6 @@ depends=(
   desktop-file-utils
   fontconfig
   fribidi
-  gcc-libs
   gdk-pixbuf2
   glib2
   glibc
@@ -42,6 +42,7 @@ depends=(
   libcups
   libegl
   libepoxy
+  libgcc
   libgl
   libjpeg-turbo
   libpng
@@ -83,23 +84,19 @@ source=(
   "git+https://gitlab.gnome.org/GNOME/gtk.git#tag=$pkgver"
   gtk-update-icon-cache.{hook,script}
   gtk4-querymodules.{hook,script}
-  0001-HACK-Don-t-use-objcopy-for-resource-embedding.patch
 )
-b2sums=('ead89ae2d48b6f31d22bf811013fa48b8cdabba45ad7d9abb8cd0e86d9cacfcf4041f09be348105669ca38b8ac742074aa7082765cc0a138a7954fa37f630390'
+b2sums=('af80460da793d7d4d93e3b0277d28393d60fbf6cfca9a659c96f184453fb3ae4dde4e3d8ba5240175183f157ada37be89a5cab114aad9fb14f412aec04115d84'
         '136bdb410c46daf769175e8e8837286576391797a4762b8cf388217e893dd6c5087c5c91c347cbdf7d3e9dcd2c978c2fb275b5af1f3425c9f7979fbc65a81324'
         '6bcd839ef82296d864587e0cc7acc0145bdea8e5235af304747cf3c0e564c2757cc67c0373dc044bec83dccfc57dc899546c2fccea96cff2bba22f09978a3814'
         'dd589bd1ad2b13f0e06f6899776a083f20a1aac24d4308d666ffd0d1cff38457b8257b8366f92e767b4233b3d86b6b54fa50339faf84c4801a824986366dce30'
-        '4b90eb8d582509b09aab401313d4399cc139ad21b5dd7d45d79860d0764c7494c60714e0794e09823e51d1894ac032a994f27d79d1499abf24ee6f59bdb0c243'
-        '4db5571be715561f56ecc58c23dad422be42923ef293e5636088c75761e7cffd3fc2fc5585cfbd2980d15faa7984ce23c4d0a8a486df4b380e7f3b96d0bba98d')
+        '4b90eb8d582509b09aab401313d4399cc139ad21b5dd7d45d79860d0764c7494c60714e0794e09823e51d1894ac032a994f27d79d1499abf24ee6f59bdb0c243')
 
-export LDFLAGS="${LDFLAGS/-flto=auto/-flto}" # don't bomb cpu (nproc * nproc LTO)
+case "${CARCH}" in
+  powerpc) options=(!lto) ;;
+esac
 
 prepare() {
   cd gtk
-
-  # Allow -fcf-protection to work
-  # https://gitlab.gnome.org/GNOME/gtk/-/issues/6153
-  git apply -3 ../0001-HACK-Don-t-use-objcopy-for-resource-embedding.patch
 }
 
 build() {
@@ -111,17 +108,19 @@ build() {
     -D man-pages=true
     -D sysprof=enabled
     -D tracker=enabled
-    -D build-testsuite=false
-    -D build-tests=false
-   )
- 
+  )
+
   case "${CARCH}" in
-    powerpc) meson_options+=(-D vulkan=disabled) ;;
+    powerpc) meson_options+=(
+               -D vulkan=disabled
+               #-D build-testsuite=false
+               #-D build-tests=false
+             ) ;;
   esac
 
   CFLAGS+=" -DG_DISABLE_CAST_CHECKS"
   arch-meson gtk build "${meson_options[@]}"
-  meson compile -C build
+  meson compile -C build -j "$(($(nproc)/2))"
 }
 
 _pick() {
@@ -155,10 +154,10 @@ END
 
   cd "$pkgdir"
 
-  _pick demo usr/bin/gtk4-{demo,demo-application,node-editor,print-editor,widget-factory}
-  _pick demo usr/share/applications/org.gtk.{Demo4,PrintEditor4,WidgetFactory4,gtk4.NodeEditor}.desktop
+  _pick demo usr/bin/gtk4-{demo,demo-application,node-editor,print-editor,widget-factory,icon-editor}
+  _pick demo usr/share/applications/org.gtk.{Demo4,PrintEditor4,WidgetFactory4,gtk4.NodeEditor,Shaper}.desktop
   _pick demo usr/share/glib-2.0/schemas/org.gtk.Demo4.gschema.xml
-  _pick demo usr/share/icons/hicolor/*/apps/org.gtk.{Demo4,PrintEditor4,WidgetFactory4,gtk4.NodeEditor}[-.]*
+  _pick demo usr/share/icons/hicolor/*/apps/org.gtk.{Demo4,PrintEditor4,WidgetFactory4,gtk4.NodeEditor,Shaper}[-.]*
   _pick demo usr/share/man/man1/gtk4-{demo,demo-application,node-editor,widget-factory}.1
   _pick demo usr/share/metainfo/org.gtk.{Demo4,PrintEditor4,WidgetFactory4,gtk4.NodeEditor}.appdata.xml
 
@@ -174,16 +173,39 @@ package_gtk4-demos() {
   depends=(
     cairo
     dconf
+    fontconfig
+    fribidi
     gdk-pixbuf2
     glib2
     glibc
     graphene
+    gst-plugins-bad-libs
+    gst-plugins-base-libs
+    gstreamer
     gtk4
     harfbuzz
     hicolor-icon-theme
+    libcloudproviders
+    libcolord
+    libcups
     libepoxy
-    librsvg
+    libgcc
+    libjpeg-turbo
+    libpng
+    libtiff
+    libx11
+    libxcursor
+    libxdamage
+    libxext
+    libxfixes
+    libxi
+    libxinerama
+    libxkbcommon
+    libxrandr
     pango
+    tinysparql
+    vulkan-icd-loader
+    wayland
   )
   mv demo/* "$pkgdir"
 }
