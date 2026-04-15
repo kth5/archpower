@@ -1,57 +1,70 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Maxime Gauduin <alucryd@archlinux.org>
 # Contributor: Ray Rashif <schiv@archlinux.org>
 # Contributor:  Ionut Biru <ibiru@archlinux.org>
 # Contributor: Hugo Doria <hugo@archlinux.org>
 
 pkgname=lame
-pkgver=3.100
-pkgrel=6
+pkgver=3.101.r6531
+pkgrel=1
 pkgdesc='A high quality MPEG Audio Layer III (MP3) encoder'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url=http://lame.sourceforge.net/
 license=(LGPL-2.0-only)
 depends=(
   glibc
+  mpg123
   ncurses
 )
-makedepends_x86_64=(nasm)
-provides=(libmp3lame.so)
-source=(
-  https://downloads.sourceforge.net/lame/lame-${pkgver}.tar.gz
-  lame.pc.in
+makedepends=(
+  subversion
 )
-sha256sums=('ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e'
-            '5b746f51caeb202ae4fe3f09fc2db0b38096598d9496945d7fdfdd23c5868e93')
-b2sums=('6954d30cfd3951ea07762ba5dd7ff27038b78455f423099a225ebf748abddf9970e444456ca5a6179bd381e2205b32293392cb757c203901674860710fe2c183'
-        '1a56722d730f0dff06fe756b089239d28781ec0300cb90fb014d25a7f92d40febff6ba18b621b6cbc4af7babfea90c7382e34787271b1cf2d82d239416837776')
+makedepends_x86_64=(
+  nasm
+)
+provides=(libmp3lame.so)
+_revision=6531
+source=(
+  svn+https://svn.code.sf.net/p/lame/svn/trunk/lame#revision=6531
+  lame-symbols.patch
+  lame-cbr-abr-quality-settings-clamp.patch
+)
+b2sums=('SKIP'
+        'c8cc00f560515231dba1bf9393d056ecb11c2268bafae4923e8c2594b92de473b94e6e5cbef1e52b4843ddd36bb4e06ea6b24ac4a18aa682b2ab7c5ef6deb73c'
+        '217cf6611f13cb91997856c3af9c30b7c23fa3744126d27f71768001b6799a4a100c9c0baec34beb656fee1c8c519c86b1a9c549e2ea6befe197eb930f70caaa')
 
 prepare() {
-  sed -e "s/VERSION/${pkgver}/" lame.pc.in > lame.pc
+  cd lame
+  patch -Np1 -i ../lame-symbols.patch
+  patch -Np1 -i ../lame-cbr-abr-quality-settings-clamp.patch
+}
+
+pkgver() {
+  echo "3.101.r${_revision}"
 }
 
 build() {
-  cd $pkgname-$pkgver
+  cd lame
+  export CFLAGS+=" -Wno-implicit-function-declaration -Wno-incompatible-pointer-types"
 
   case "${CARCH}" in
     x86_64) configure_flags=(--enable-nasm) ;;
     *)      configure_flags=(--disable-nasm) ;;
   esac
 
-
   ./configure \
-    --build=${CHOST} \
-    --prefix='/usr' \
+    --prefix=/usr \
     --enable-mp3rtp \
     --enable-shared ${configure_flags[@]}
   make
 }
 
 check() {
-  make test -C lame-${pkgver}
+  make test -C lame
 }
 
 package() {
-  make DESTDIR="${pkgdir}" install -C lame-${pkgver}
-  install -Dm 644 lame.pc -t "${pkgdir}"/usr/lib/pkgconfig/
+  make DESTDIR="${pkgdir}" install -C lame
 }
+
 # vim: ts=2 sw=2 et:
