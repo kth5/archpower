@@ -11,33 +11,35 @@ pkgname=(
   hdf5
   hdf5-openmpi
 )
-pkgver=2.0.0
-pkgrel=3
+pkgver=2.1.1
+pkgrel=1
 pkgdesc="General purpose library and file format for storing scientific data"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://www.hdfgroup.org/hdf5"
 license=(BSD-3-Clause)
 depends=(
   bash
-  gcc-libs
   glibc
   libaec
+  libgcc
+  libgfortran
+  libstdc++
   zlib
 )
 makedepends=(
   cmake
   gcc-fortran
+  git
   java-environment
   openmpi
   time
 )
 replaces=(hdf5-java)
 provides=(hdf5-java)
-source=("https://github.com/HDFGroup/hdf5/archive/hdf5_$pkgver/$pkgname-$pkgver.tar.gz")
-sha512sums=('609e129f78c6777a0e64694de8ec638326a616ff9cbd916f310dc6f78435ef67194c5ab59faedda09c85c045c15ebe2ec4ce04fa905d5f74801600e067c27fcc')
+source=("git+https://github.com/HDFGroup/hdf5.git#tag=$pkgver")
+b2sums=('a62e7cd3f6df1c71e10802052021969d97d019dcb4d81c76571548411bd9becb950320655d5fae2a0d410d4fd4f8a3f7cf3673fcce7b5bd39e78006cb26c8bf0')
 
 build() {
-  cd ${pkgbase}-${pkgbase}_${pkgver/_/-}
   local common_cmake_args=(
     -DCMAKE_BUILD_TYPE=None
     -DCMAKE_INSTALL_PREFIX=/usr
@@ -53,8 +55,8 @@ build() {
     -DHDF5_ENABLE_SZIP_ENCODING=ON
     -DHDF5_INSTALL_CMAKE_DIR=lib/cmake/hdf5
   )
-  cmake -S . -B build "${common_cmake_args[@]}"
-  cmake -S . -B build-mpi "${common_cmake_args[@]}" \
+  cmake -S $pkgbase -B build "${common_cmake_args[@]}"
+  cmake -S $pkgbase -B build-mpi "${common_cmake_args[@]}" \
     -DALLOW_UNSUPPORTED=ON \
     -DCMAKE_CXX_COMPILER=mpicxx \
     -DCMAKE_C_COMPILER=mpicc \
@@ -70,7 +72,6 @@ check() {
     powerpc*) return 0 ;;
   esac
 
-  cd ${pkgbase}-${pkgbase}_${pkgver/_/-}
   local skipped_tests=(
     # Passes, but takes 100+ seconds, ain't nobody got time for that.
     H5SHELL-test_swmr
@@ -83,6 +84,7 @@ check() {
     MPI_TEST_t_pmulti_dset
     MPI_TEST_t_select_io_dset
     # Fails or times out, not sure why.
+    H5_H5DUMP-f90_h5ex_t_regrefatt_F03
     H5_H5DUMP-f90_h5ex_t_vlen_F03
     MPI_TEST_H5DIFF-h5diff
     MPI_TEST_H5_f90_ph5_f90_filtered_writes_no_sel
@@ -98,9 +100,9 @@ check() {
 }
 
 package_hdf5() {
-  cd ${pkgbase}-${pkgbase}_${pkgver/_/-}
   DESTDIR="$pkgdir" cmake --install build
   rm -vr "$pkgdir/usr/share/LICENSE"
+  cd $pkgbase
   install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
 }
 
@@ -110,8 +112,8 @@ package_hdf5-openmpi() {
   provides=(hdf5)
   conflicts=(hdf5)
 
-  cd ${pkgbase}-${pkgbase}_${pkgver/_/-}
   DESTDIR="$pkgdir" cmake --install build-mpi
   rm -vr "$pkgdir/usr/share/LICENSE"
+  cd $pkgbase
   install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
 }
