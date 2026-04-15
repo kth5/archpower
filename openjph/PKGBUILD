@@ -1,0 +1,70 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Daniel Bermond <dbermond@archlinux.org>
+
+pkgbase=openjph
+pkgname=(
+    'openjph'
+    'openjph-doc')
+pkgver=0.27.0
+pkgrel=1
+pkgdesc='Open-source implementation of JPEG2000 Part-15'
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url='https://github.com/aous72/OpenJPH/'
+license=('BSD-2-Clause')
+makedepends=(
+    'clang'
+    'cmake'
+    'doxygen'
+    'git'
+    'libtiff')
+checkdepends=(
+    'expat')
+source=("git+https://github.com/aous72/OpenJPH#tag=$pkgver")
+sha256sums=('a6e2cb3a39deb447de472cc0513dce43c3cf819a001f8a732b613456f12eeb21')
+
+build() {
+    if [[ "${CFLAGS}" != *"mcpu=espresso"* ]]; then
+      # https://github.com/aous72/OpenJPH/issues/186 https://github.com/aous72/OpenJPH/issues/186
+      export CC='clang'
+      export CXX='clang++'
+    fi
+    
+    cmake -B build -S OpenJPH \
+        -G 'Unix Makefiles' \
+        -DCMAKE_BUILD_TYPE:STRING='None' \
+        -DCMAKE_INSTALL_PREFIX:PATH='/usr' \
+        -DOJPH_BUILD_TESTS:BOOL='ON' \
+        -Wno-dev
+    cmake --build build
+    
+    cd OpenJPH/docs
+    doxygen
+}
+
+check() {
+  case "${CARCH}" in
+    powerpc|powerpc64)
+      return 0 
+    ;;
+  esac
+    ctest --test-dir build --output-on-failure
+}
+
+package_openjph() {
+    depends=(
+        'glibc'
+        'libgcc'
+        'libstdc++'
+        'libtiff')
+    
+    DESTDIR="$pkgdir" cmake --install build
+    install -D -m644 OpenJPH/LICENSE -t "${pkgdir}/usr/share/licenses/${pkgname}"
+}
+
+package_openjph-doc() {
+    pkgdesc+=' (documentation)'
+    
+    install -d -m755 "${pkgdir}/usr/share/doc"
+    install -D -m644 OpenJPH/LICENSE -t "${pkgdir}/usr/share/licenses/${pkgname}"
+    cp -dr --no-preserve='ownership' OpenJPH/docs/html "${pkgdir}/usr/share/doc/openjph"
+}
