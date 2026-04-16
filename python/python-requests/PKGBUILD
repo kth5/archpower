@@ -1,21 +1,23 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
 # Maintainer: Daniel M. Capella <polyzen@archlinux.org>
 # Contributor: Felix Yan <felixonmars@archlinux.org>
 # Contributor: Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
 
 pkgname=python-requests
-_name=${pkgname#python-}
-pkgver=2.32.5
-pkgrel=3
+pkgver=2.33.1
+pkgrel=1
 pkgdesc='Python HTTP for Humans'
 arch=(any)
 url=https://requests.readthedocs.io/
 license=(Apache-2.0)
 depends=(
   ca-certificates
+  python
   python-charset-normalizer
   python-idna
   python-urllib3
+  python-certifi
 )
 makedepends=(
   git
@@ -33,33 +35,34 @@ optdepends=(
   'python-chardet: alternative character encoding library'
   'python-pysocks: SOCKS proxy support'
 )
-source=(
-  "git+https://github.com/psf/$_name.git#tag=v$pkgver"
-  certs.patch
-)
-b2sums=('ae8446a060643d1f877339e1b4dee103d4999fb6e1cc55d149c0a99158affc7938f0f69177c4fb647a621460d441fdedff7fabc17004ba812baf744f596e69ee'
-        '30fc6f283f2416318a1011bffab1ee23b0551188704eeacac77b28f5709f42fc33755a14a2eeb3ba2dccb2904a97a87021cff1423fe9149c78f2b9560998308d')
+source=("$pkgname::git+https://github.com/psf/requests#tag=v$pkgver")
+sha512sums=('8f6efb24e7267bfe53cb26590b4856009eee49e5a88c45b27c3839b94f408892c912bc36901c7e6a12bb84d522bcab5d8355b04fdcb5e7120867eb209e25548b')
+b2sums=('e8d4496d057a15e9f18c786498de14bc3ed671629fe4d076f28e9fe3eb80a9e4bad9ab38c914e45eb98db59485f5e3b8112b38b870ca05e007c37b2ff8629efb')
 validpgpkeys=(87227E29AD9CFF5CFAC3EA6A44D3FF97B80DC864) # Nathanael Prewitt <nate.prewitt@gmail.com>
 
-prepare() {
-  cd "$_name"
-  sed -i '/certifi/d' setup.py
-  patch -p1 -i ../certs.patch
-}
-
 build() {
-  cd "$_name"
+  cd "$pkgname"
   python -m build --wheel --no-isolation
 }
 
 check() {
-  cd "$_name"
-  # test_unicode_header_name hangs
-  PYTHONPATH="$PWD/src" pytest -v tests --deselect tests/test_requests.py::TestRequests::test_unicode_header_name
+  cd "$pkgname"
+
+  pytest_options=(
+    -v tests
+    # test_unicode_header_name hangs
+    --deselect tests/test_requests.py::TestRequests::test_unicode_header_name
+    # [Errno 111] Connection refused
+    --deselect 'tests/test_requests.py::TestTimeout::test_connect_timeout[timeout0]'
+    --deselect 'tests/test_requests.py::TestTimeout::test_connect_timeout[timeout1]'
+    --deselect 'tests/test_requests.py::TestTimeout::test_total_timeout_connect[timeout0]'
+    --deselect 'tests/test_requests.py::TestTimeout::test_total_timeout_connect[timeout1]'
+  )
+  PYTHONPATH="$PWD/src" pytest "${pytest_options[@]}"
 }
 
 package() {
-  cd "$_name"
+  cd "$pkgname"
   python -m installer --destdir="$pkgdir" dist/*.whl
 }
 
