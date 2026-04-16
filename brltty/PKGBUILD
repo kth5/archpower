@@ -6,9 +6,17 @@
 # Contributor: Giovanni Scafora <giovanni@archlinux.org>
 
 pkgbase=brltty
-pkgname=(brltty brltty-udev-generic)
-pkgver=6.8
-pkgrel=6
+pkgname=(
+  brltty
+  brltty-udev-generic
+  dracut-brltty
+  java-brltty
+  ocaml-brltty
+  python-brltty
+  tcl-brltty
+)
+pkgver=6.9
+pkgrel=3
 pkgdesc="Braille display driver for Linux/Unix"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://brltty.app"
@@ -53,23 +61,27 @@ source=(
   $pkgname-6.8-lock-brltty-user.patch
   $pkgname-6.4-x11_autostart.patch
   $pkgname-6.8-udev-tty-perms.rules
+  $pkgname-6.9-fix-usb-issues.patch::https://github.com/brltty/brltty/commit/c5d64b573c0b02c7110ee769110ad6374a75adfb.patch
 )
-sha512sums=('a7f49850722e65640a3f9690a391d429b3d8658ee55141d9cffc636813ffeedd9eaa1acfa451a0120a9eefcd9b84c6b640eb99aa26357aac9ffda3d48b4fc520'
+sha512sums=('e9ec95b93e31dd13345cc33d8473d8a338f6601ab8ff6a07f66432ce1f69f8f5a687cfaeb174de8c4f5dc28b3b2b38cbc8cfd8a5f99e319b57dde64f00da9f8c'
             '32ba91271e2247b4a330cd213ed75b591268cb99a79c2efd9ae675804faee027c6b2f782768cb2329a65fc914ca2400b2901f35ce1fc2522c6691b343799eb02'
             '2f1dba4fa5495913837972030fbcf1c265c90d481d9e0f96ff89c6cab082f7a6b0594c5c7ca6ea446eb76c8f483c7ed57ede58480898ae003261e6373440862c'
             '4871512affefbc178f4204a1b285fc2b5a05ea2d181163195d695b760e9729b3d2d00b5f052abd71379df609c3859d7cbd64128bdefd16e898bbc4368500a9a0'
-            'dd210599e467a073f891554c7d3991dce90fa0506a7aef28c43a1543d94073e8d561d36c909511778d4bfcc198cac04f146966edf4462d5e553224a72864f6f3')
-b2sums=('e75b2d0d977f88b61f294226f4e7728ffe0a18592a2b331e63c1d486be909a9e5237c6618151a789b9518f327d8fc2a80a975178201318d9284a399fc0571d42'
+            'dd210599e467a073f891554c7d3991dce90fa0506a7aef28c43a1543d94073e8d561d36c909511778d4bfcc198cac04f146966edf4462d5e553224a72864f6f3'
+            'a10984fe30b4a135adab6ab523fe294698c7da8bf51fa86889e7a37b175b493ae88fc621b74df7d9a04710bd39d8093adb3039fe987c84271370debb04506002')
+b2sums=('5e2619a06ae955a5872dc2d8540533510384a28058121fe780c32a62a19f5070ae6220bd76f06a787e7ca923c37d7e740338056edbebc094b714ebef1a0af2e9'
         '036e36d558594bb06af1eb41ff5fc9ae52ccf4bad54556c3f4f81a5e2f31f574039835e5e756455527c327a73d563a3db54a9f32e3478545a2a22c2725aaeee2'
         '76fd46571dab803c39a1663e52293c7e1ee9232b6241528e708bca072c7f9bd270c1961b960bece7f91331a259042b8dfc9a8e77f7dc463944b305700fe0c8f6'
         '4ebc07a725ef8362233a83118e93901e78943e8dae08f9358b668ff13ab88a65eb9e87c49d106a8c3d87eb62007b230e199107eacb01f92dc683335076c01309'
-        '7110448b42799195abbc6f9711ebe25cdbc95056833764332c343a2d6e1201c8b590644db46a2d6612fa96740cb7da8cc7f72bb329127ae3bb6c8351efcde260')
+        '7110448b42799195abbc6f9711ebe25cdbc95056833764332c343a2d6e1201c8b590644db46a2d6612fa96740cb7da8cc7f72bb329127ae3bb6c8351efcde260'
+        'fff1a3b198488d22936c963563e4360e7d59d2f442a118daabbb9ca72b6862e1a42c22aa895740a23c6c6f7906529913e12c356120336414771b98c68f836dbb')
 
 prepare() {
   cd $pkgbase-${pkgbase^^}-$pkgver
   patch -Np1 -i ../$pkgbase-6.2-systemd_sysusers_groups.patch
   patch -Np1 -i ../$pkgbase-6.4-x11_autostart.patch
   patch -Np1 -i ../$pkgname-6.8-lock-brltty-user.patch
+  patch -Np1 -i ../$pkgname-6.9-fix-usb-issues.patch
   ./autogen
 }
 
@@ -96,11 +108,24 @@ build() {
   find . -type f -iname "*.jar" -exec strip-nondeterminism {} \;
 }
 
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
 package_brltty() {
   depends=(
     alsa-lib libasound.so
+    at-spi2-core
+    bash
     bluez-libs
     dbus libdbus-1.so
+    espeak-ng
     expat libexpat.so
     glib2 libgio-2.0.so libglib-2.0.so libgobject-2.0.so
     glibc
@@ -109,25 +134,24 @@ package_brltty() {
     libcap
     liblouis
     libspeechd
+    libxaw
+    libxt
+    libx11
+    libxfixes
+    libxtst
     ncurses libncursesw.so
     pcre2
     polkit
     systemd-libs libsystemd.so
   )
   optdepends=(
-    'at-spi2-core: X11/GNOME Apps accessibility'
     'brltty-udev-generic: for initializing brltty with generic USB devices'
-    'espeak-ng: espeak-ng driver'
-    'java-runtime: Java support'
-    'libxaw: X11 support'
-    'libxt: X11 support'
-    'libx11: for xbrlapi'
-    'libxfixes: for xbrlapi'
-    'libxtst: for xbrlapi'
-    'ocaml: OCaml support'
-    'python: Python support'
+    'dracut-brltty: for dracut modules'
+    'java-brltty: for Java bindings'
+    'ocaml-brltty: for OCaml bindings'
+    'python-brltty: for Python bindings'
     'speech-dispatcher: speech-dispatcher driver'
-    'tcl: tcl support'
+    'tcl-brltty: for TCL bindings'
   )
   provides=(libbrlapi.so)
   backup=(
@@ -145,14 +169,77 @@ package_brltty() {
   make -j1 INSTALL_ROOT="$pkgdir" install-polkit
   install -vDm 644 Documents/$pkgbase.conf -t "$pkgdir/etc/"
 
-  # move generic udev rule, as it applies too broadly
-  mv -v "$pkgdir/usr/lib/udev/rules.d/90-brltty-usb-generic.rules" ../
-  install -vDm 644 ../brltty-6.8-udev-tty-perms.rules "$pkgdir/usr/lib/udev/rules.d/90-brltty-tty-perms.rules"
+  cd "$pkgdir"
+
+  _pick $pkgbase-udev-generic usr/lib/udev/rules.d/90-brltty-usb-generic.rules
+  _pick dracut-$pkgbase usr/lib/dracut/modules.d/
+  _pick java-$pkgbase usr/share/java/brlapi.jar
+  _pick ocaml-$pkgbase usr/lib/ocaml/
+  _pick python-$pkgbase usr/lib/python*/
+  _pick python-$pkgbase usr/share/brltty/Contraction/latex-access.ctb
+  _pick tcl-$pkgbase usr/bin/brltty-prologue.tcl
+  _pick tcl-$pkgbase usr/lib/brlapi-*/libbrlapi_tcl.so
+  _pick tcl-$pkgbase usr/lib/brlapi-*/pkgIndex.tcl
 }
 
 package_brltty-udev-generic() {
   pkgdesc="Generic udev rules for brltty"
-  depends=(brltty)
+  depends=(brltty=$pkgver)
 
-  install -vDm 644 90-brltty-usb-generic.rules -t "$pkgdir/usr/lib/udev/rules.d/"
+  mv -v $pkgname/* "$pkgdir"
+}
+
+package_dracut-brltty() {
+  pkgdesc+=" - dracut modules"
+  depends=(
+    bash
+    brltty=$pkgver
+    dracut
+  )
+  groups=(dracut-modules)
+
+  mv -v $pkgname/* "$pkgdir"
+}
+
+package_java-brltty() {
+  pkgdesc+=" - java bindings"
+  depends=(
+    brltty=$pkgver
+    java-runtime
+  )
+
+  mv -v $pkgname/* "$pkgdir"
+}
+
+package_ocaml-brltty() {
+  pkgdesc+=" - OCaml bindings"
+  depends=(
+    brltty=$pkgver
+    glibc
+    ocaml
+  )
+
+  mv -v $pkgname/* "$pkgdir"
+}
+
+package_python-brltty() {
+  pkgdesc+=" - Python bindings"
+  depends=(
+    brltty=$pkgver
+    glibc
+    python
+  )
+
+  mv -v $pkgname/* "$pkgdir"
+}
+
+package_tcl-brltty() {
+  pkgdesc+=" - TCL integration"
+  depends=(
+    brltty=$pkgver
+    glibc
+    tcl
+  )
+
+  mv -v $pkgname/* "$pkgdir"
 }
