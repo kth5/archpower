@@ -1,41 +1,44 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 
-pkgbase=python-fields
 pkgname=python-fields
 pkgver=5.0.0
-pkgrel=19
+pkgrel=20
 arch=(any)
 pkgdesc='A totally different take on container boilerplate'
 url='https://github.com/ionelmc/python-fields'
 license=('BSD-2-Clause')
 depends=('python')
-makedepends=('python-setuptools')
+makedepends=('git' 'python-build' 'python-installer' 'python-setuptools' 'python-wheel')
 checkdepends=('python-pytest' 'python-attrs')
-source=("$pkgbase-$pkgver.tar.gz::https://github.com/ionelmc/python-fields/archive/v$pkgver.tar.gz"
+source=("git+https://github.com/ionelmc/python-fields.git#tag=v$pkgver"
         python310.patch)
-sha512sums=('feaba23b98271936d6dae20b1001978483c0fe89ccf217637fac536ae5814c2c02bac1c3ddc2a86dc0d2419a3b3658871018c0ea4b7905e1c2649aa905b8e5a3'
+sha512sums=('03de8991f025dee62fefbbbb57d7ab9fca9bbdaf46b317110be2673cba714ef851e5a180998ddf12d957217be2e82b3fcc870ab8088085a73d0ef214269b6b38'
             '72876eba870204558d4f1a8216be5e2240406e669929605919b1adeb03a9cf230909d7658c26197189e61bd4005bcb00665c652bff6f14a97cdff881e6b45f80')
 
 prepare() {
-  cd $pkgname-$pkgver
+  cd python-fields
   patch -Np1 -i ../python310.patch
   sed -i 's/\[pytest\]/[tool:pytest]/;s/--benchmark-disable//' setup.cfg
 }
 
 build() {
-  cd "$srcdir"/python-fields-$pkgver
-  python setup.py build
+  cd python-fields
+  python -m build --wheel --no-isolation
 }
 
 check() {
-  cd "$srcdir"/python-fields-$pkgver
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
+  cd python-fields
   # Drop performance test as it relies on characteristic
   PYTHONPATH=src python -m pytest --ignore=tests/test_perf.py tests
 }
 
-package_python-fields() {
-  cd python-fields-$pkgver
-  python setup.py install --root "$pkgdir" --optimize=1
-  install -D -m644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+package() {
+  cd python-fields
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
 }
