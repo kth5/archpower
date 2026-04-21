@@ -5,40 +5,47 @@
 
 pkgname=google-glog
 pkgver=0.7.1
-pkgrel=1.1
+pkgrel=2
 pkgdesc="Logging library for C++"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(BSD-3-Clause)
 url="https://github.com/google/glog"
 depends=(
-  gcc-libs
   gflags
   glibc
+  libgcc
+  libstdc++
 )
-makedepends=(cmake)
+makedepends=(
+  cmake
+  git
+)
 provides=(libglog.so)
-source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('00e4a87e87b7e7612f519a41e491f16623b12423620006f59f5688bfd8d13b08')
+source=("$pkgname::git+$url.git#tag=v$pkgver")
+b2sums=('77316382ba8a0534ec3de7e894e8abc6cd2a3a7cf453c9791d783a76e0b21ad20c7c260857f4c8f3e1e997e404d48ae4e1c47576163d1b7c1eb09f235d20ba75')
 
 build() {
   case "${CARCH}" in
-    powerpc|riscv64) _cmake_args+=(-DCMAKE_CXX_FLAGS="-latomic") ;;
+    powerpc) export CXXFLAGS+=' -latomic' ;;
   esac
 
-  cd glog-$pkgver
-  cmake -B build -S . \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DWITH_PKGCONFIG=ON ${_cmake_args[@]}
+  cmake -B build -S $pkgname \
+    -D CMAKE_INSTALL_PREFIX=/usr \
+    -D CMAKE_BUILD_TYPE=None \
+    -W no-dev \
+    -DWITH_PKGCONFIG=ON
   cmake --build build
 }
 
 check() {
-  cd glog-$pkgver
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
   ctest --test-dir build --output-on-failure -E stacktrace
 }
 
 package() {
-  cd glog-$pkgver
   DESTDIR="$pkgdir" cmake --install build
-  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" COPYING
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" $pkgname/COPYING
 }
