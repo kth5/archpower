@@ -2,23 +2,30 @@
 # Maintainer: Christian Hesse <mail@eworm.de>
 # Contributor: Eric Bélanger <eric@archlinux.org>
 
-pkgname=links
-pkgver=2.30
-pkgrel=1
+pkgbase=links
+pkgname=('links'
+         'xlinks')
 pkgdesc='A text WWW browser, similar to Lynx'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+pkgver=2.30
+pkgrel=2
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='http://links.twibright.com/'
-license=('GPL')
-depends=('brotli' 'libbrotlidec.so' 'bzip2' 'libbz2.so' 'gpm' 'libgpm.so'
-         'libevent' 'openssl' 'xz' 'zstd' 'libzstd.so')
-makedepends=('libtiff' 'libpng' 'libxt' 'librsvg')
-optdepends=('libx11: for using xlinks'
-	    'libtiff: for using xlinks'
-	    'libpng: for using xlinks'
-	    'librsvg: for using xlinks')
-source=("http://links.twibright.com/download/${pkgname}-${pkgver}.tar.bz2"
+license=('GPL-2.0-or-later')
+depends=('brotli' 'libbrotlidec.so'
+         'bzip2' 'libbz2.so'
+         'glibc'
+         'gpm' 'libgpm.so'
+         'libevent' 'libevent-2.1.so'
+         'openssl' 'libcrypto.so' 'libssl.so'
+         'xz' 'liblzma.so'
+         'zstd' 'libzstd.so'
+         'zlib' 'libz.so')
+makedepends=('libgomp' 'libjpeg-turbo' 'libpng' 'libtiff' 'libwebp' 'libx11')
+source=("http://links.twibright.com/download/${pkgbase}-${pkgver}.tar.bz2"
+        '0001-fix-build-with-recent-gcc.patch'
         'links.desktop')
 sha256sums=('c4631c6b5a11527cdc3cb7872fc23b7f2b25c2b021d596be410dadb40315f166'
+            '0b3bd401d9ff6ff1354607e56647ad2cb7ed7c1258c99bef714bdd050d3c64bb'
             'f96bf2638e9c309bfdb857bd62a732b980231b3a683cd585ec872b249c2c1b19')
 
 _configure_options=(
@@ -28,14 +35,16 @@ _configure_options=(
 )
 
 prepare() {
-  cd "${pkgname}-${pkgver}"
+  cd "${pkgbase}-${pkgver}"
+
+  patch -Np1 < ../0001-fix-build-with-recent-gcc.patch
 
   sed -i '/AC_PROG_CC/a AC_PROG_CXX/' configure.in
   autoreconf -fi
 }
 
 build() {
-  cd "${pkgname}-${pkgver}"
+  cd "${pkgbase}-${pkgver}"
 
   ( cd intl
     ./gen-intl
@@ -57,12 +66,11 @@ build() {
   make
 }
 
-package() {
-  cd "${pkgname}-${pkgver}"
-  make DESTDIR="${pkgdir}" install
+package_links() {
+  optdepends=('xlinks: support for X11')
 
-  install -D -m0755 xlinks "${pkgdir}/usr/bin/xlinks"
-  ln -s links.1.gz "${pkgdir}/usr/share/man/man1/xlinks.1.gz"
+  cd "${pkgbase}-${pkgver}"
+  make DESTDIR="${pkgdir}" install
 
   install -D -m0644 "${srcdir}/links.desktop" "${pkgdir}/usr/share/applications/links.desktop"
   install -d "${pkgdir}/usr/share/pixmaps"
@@ -70,4 +78,22 @@ package() {
 
   install -d "${pkgdir}/usr/share/doc/links/calibration"
   install -m0644 doc/links_cal/* "${pkgdir}/usr/share/doc/links/calibration/"
+}
+
+package_xlinks() {
+  pkgdesc='A text WWW browser, similar to Lynx (with support for X11)'
+  depends+=('links'
+            'libgomp' 'libgomp.so'
+            'libjpeg-turbo' 'libjpeg.so'
+            'libpng' 'libpng16.so'
+            'libtiff' 'libtiff.so'
+            'libwebp' 'libwebp.so'
+            'libx11' #'libX11.so'
+  )
+
+  cd "${pkgbase}-${pkgver}"
+
+  install -D -m0755 xlinks "${pkgdir}/usr/bin/xlinks"
+  install -d -m0755 "${pkgdir}/usr/share/man/man1"
+  ln -s links.1.gz "${pkgdir}/usr/share/man/man1/xlinks.1.gz"
 }
