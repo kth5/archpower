@@ -4,8 +4,8 @@
 pkgbase=avogadrolibs
 pkgname=(avogadrolibs
          avogadrolibs-qt)
-pkgver=1.102.1
-pkgrel=6
+pkgver=2.0.0
+pkgrel=1
 pkgdesc='Libraries that provide 3D rendering, visualization, analysis and data processing useful in computational chemistry, molecular modeling, bioinformatics, materials science, and related areas'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://two.avogadro.cc/'
@@ -14,11 +14,10 @@ makedepends=(boost
              cmake
              eigen
              fast_float
-             fmt
              git
-             hdf5
              genxrdpattern
              glew
+             hdf5
              jkqtplotter
              libmsym
              mmtf-cpp
@@ -31,33 +30,15 @@ makedepends=(boost
              qt6-tools
              spglib
              tbb
-             utf8cpp
-             verdict)
-makedepends_x86_64=(
-             vtk
-)
+             utf8cpp)
 source=(git+https://github.com/OpenChemistry/avogadrolibs#tag=$pkgver)
-sha256sums=('1e31404f5087dc0033203e3ae809a5f5c8e6aae0c6e8b11e710a5c6dc161f257')
+sha256sums=('5228c4e6b4eef0ffbcff4d974e5737d67f9e03c38f044b9ec5a2d049232124ce')
 
 prepare() {
   mkdir crystals fragments molecules # Dummy dirs to trick cmake, actually provided by avogadro-{crystals,fragments,molecules}
-
-  git -C $pkgname cherry-pick -n 05c5c472518ee16e79d5cf0afc0dda0a4f927a74 # Find jkqtplotter in cmake config
 }
 
 build() {
-  #case "${CARCH}" in
-  #  powerpc64)
-  #    export CFLAGS='-mcpu=powerpc64 -O2 -pipe'
-  #    export CXXFLAGS='-mcpu=powerpc64 -O2 -pipe'
-  #  ;;
-  #esac
-
-  case "${CARCH}" in
-    powerpc*) cmake_options=(-DUSE_VTK=OFF) ;;
-    *)        cmake_options=(-DUSE_VTK=ON) ;;
-  esac
-
   cmake -B build -S $pkgname \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_C_FLAGS="$CFLAGS -ffat-lto-objects" \
@@ -67,8 +48,7 @@ build() {
     -DUSE_SYSTEM_GENXRDPATTERN=ON \
     -DUSE_EXTERNAL_NLOHMANN=ON \
     -DUSE_EXTERNAL_PUGIXML=ON \
-    -DQT_VERSION=6 \
-    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ${cmake_options[@]}
+    -DQT_VERSION=6
   cmake --build build
 }
 
@@ -76,22 +56,21 @@ package_avogadrolibs() {
   depends=(avogadro-crystals
            avogadro-fragments
            avogadro-molecules
-           gcc-libs
            glew
            glibc
            hdf5
+           libgcc
            libglvnd
+           libstdc++
            pugixml
-           spglib
-           verdict)
-  optdepends=('avogadrolibs-qt: For the VTK and Qt plugins')
+           spglib)
+  optdepends=('avogadrolibs-qt: For the Qt plugins')
 
   DESTDIR="$pkgdir" cmake --install build
-  rm -fr "$pkgdir"/usr/lib/libAvogadroQt* \
+  rm -r "$pkgdir"/usr/lib/libAvogadroQt* \
         "$pkgdir"/usr/lib/libAvogadroMoleQueue* \
-        "$pkgdir"/usr/lib/libAvogadroVtk* \
-        "$pkgdir"/usr/include/avogadro/{molequeue,qt*,vtk} \
-        "$pkgdir"/usr/lib/avogadro2/{scripts,staticplugins}
+        "$pkgdir"/usr/include/avogadro/{molequeue,qt*} \
+        "$pkgdir"/usr/lib/avogadro2/staticplugins
 
   install -Dm644 $pkgname/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
 }
@@ -100,33 +79,22 @@ package_avogadrolibs-qt() {
   pkgdesc="Qt modules for Avogadro"
   depends=(avogadrolibs
            fmt # needed by VTK dependencies
-           gcc-libs
            glew
            glibc
-           libarchive
-           libglvnd
            jkqtplotter
+           libarchive
+           libgcc
+           libglvnd
            libmsym
-           libxcursor # needed by VTK dependencies
-           openmpi # needed by VTK dependencies
+           libstdc++
            qt6-base
-           qt6-svg
-  )
-  depends_x86_64=(
-           vtk
-  )
+           qt6-svg)
   conflicts=(avogadrolibs-qt5)
 
   DESTDIR="$pkgdir" cmake --install build/avogadro/molequeue
   DESTDIR="$pkgdir" cmake --install build/avogadro/qtgui
   DESTDIR="$pkgdir" cmake --install build/avogadro/qtopengl
   DESTDIR="$pkgdir" cmake --install build/avogadro/qtplugins
-  case "${CARCH}" in
-    powerpc*) ;;
-    *)
-      DESTDIR="$pkgdir" cmake --install build/avogadro/vtk
-    ;;
-  esac
 
   install -Dm644 $pkgbase/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
 }
