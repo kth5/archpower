@@ -1,8 +1,9 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Andreas Radke <andyrtr@archlinux.org>
 
-pkgname=man-pages
-pkgver=6.16
+pkgbase=man-pages
+pkgname=('man-pages' 'man-pages-utils')
+pkgver=6.17
 _posixver=2017-a
 pkgrel=1
 pkgdesc="Linux man pages"
@@ -15,8 +16,8 @@ license=(BSD-2-Clause
          GPL-2.0-only
          GPL-2.0-or-later
          GPL-3.0-or-later
-         LGPL-3.0-or-later
          LGPL-3.0-linking-exception
+         LGPL-3.0-or-later
          LicenseRef-Public-Domain
          LicenseRef-UltraPermissive
          Linux-man-pages-1-para
@@ -26,13 +27,12 @@ license=(BSD-2-Clause
          MIT
          Spencer-94)
 url="https://www.kernel.org/doc/man-pages/"
-depends=('sh')
 makedepends=('man2html' 'git')
 # https://git.kernel.org/pub/scm/docs/man-pages/man-pages.git/
 source=(https://www.kernel.org/pub/linux/docs/man-pages/$pkgname-$pkgver.tar.{xz,sign}
         https://www.kernel.org/pub/linux/docs/man-pages/man-pages-posix/$pkgname-posix-${_posixver}.tar.{xz,sign})
 # https://www.kernel.org/pub/linux/docs/man-pages/sha256sums.asc
-sha256sums=('8e247abd75cd80809cfe08696c81b8c70690583b045749484b242fb43631d7a3'
+sha256sums=('d18f21a602b09778a5a9096bf1be8441b7733e998150474accf703d165f4ebf4'
             'SKIP'
             'ce67bb25b5048b20dad772e405a83f4bc70faf051afa289361c81f9660318bc3'
             'SKIP')
@@ -41,7 +41,7 @@ validpgpkeys=('E522595B52EDA4E6BFCCCB5E856199113A35CE5E') # Michael Kerrisk (Lin
 validpgpkeys+=('A9348594CE31283A826FBDD8D57633D441E25BB5') # Alejandro Colomar Andres <alx.manpages@gmail.com>
 
 prepare() {
-  cd "${srcdir}"/$pkgname-$pkgver
+  cd "${srcdir}"/$pkgbase-$pkgver
 
   # included in shadow
   rm man5/passwd.5
@@ -56,19 +56,36 @@ prepare() {
 
 # make -R is required until gnu_make 4.5.x will be released
 
-package() {
-  cd "${srcdir}"/$pkgname-$pkgver
+package_man-pages() {
+  cd "${srcdir}"/$pkgbase-$pkgver
 
   # install man-pages
   make DESTDIR="${pkgdir}" prefix=/usr install -R
 
   # install posix pages
-  pushd "${srcdir}"/$pkgname-posix-${_posixver%-*}
+  pushd "${srcdir}"/$pkgbase-posix-${_posixver%-*}
   make DESTDIR="${pkgdir}" install -R
   popd
   
   # posix pages have a custom license
   install -m755 -d "${pkgdir}/usr/share/licenses/${pkgname}"
-  install -m644 "${srcdir}"/$pkgname-$pkgver/LICENSES/*  "${pkgdir}/usr/share/licenses/${pkgname}"/
-  install -m644 "${srcdir}"/$pkgname-posix-${_posixver%-*}/POSIX-COPYRIGHT "${pkgdir}/usr/share/licenses/${pkgname}/POSIX-COPYRIGHT"
+  install -m644 "${srcdir}"/$pkgbase-$pkgver/LICENSES/*  "${pkgdir}/usr/share/licenses/${pkgname}"/
+  install -m644 "${srcdir}"/$pkgbase-posix-${_posixver%-*}/POSIX-COPYRIGHT "${pkgdir}/usr/share/licenses/${pkgname}/POSIX-COPYRIGHT"
+
+  # split out utils - this cannot be done in prepare() because make install depends on some of these utils
+  mkdir _tools
+  mv "$pkgdir"/usr/bin _tools/
+  mkdir _man1
+  mv "$pkgdir"/usr/share/man/man1/{diffman-git,grepc,grepc_c,mansect,mansectf,pdfman,sortman}.1 _man1/
+}
+
+package_man-pages-utils() {
+  pkgdesc+=" - command line tools"
+  depends=('sh')
+  license=('GPL-3.0-or-later')
+
+  install -m755 -d "$pkgdir"/usr/bin
+  mv "${srcdir}"/$pkgbase-$pkgver/_tools/bin/* "$pkgdir"/usr/bin/
+  install -m755 -d "$pkgdir"/usr/share/man/man1
+  mv "${srcdir}"/$pkgbase-$pkgver/_man1/* "$pkgdir"/usr/share/man/man1/
 }
