@@ -5,7 +5,7 @@
 # Contributor: Tom Newsom <Jeepster@gmx.co.uk>
 
 pkgname=ccache
-pkgver=4.12.2
+pkgver=4.13.2
 pkgrel=1
 pkgdesc='Compiler cache that speeds up recompilation by caching previous compilations'
 url='https://ccache.dev/'
@@ -13,14 +13,13 @@ arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=('GPL-3.0-or-later')
 depends=(
   'fmt'
-  'gcc-libs'
   'glibc'
   'hiredis'
   'libblake3'
-  'libxxhash.so'
-  'libzstd.so'
-  'xxhash'
-  'zstd'
+  'libgcc'
+  'libstdc++'
+  'xxhash' 'libxxhash.so'
+  'zstd' 'libzstd.so'
 )
 makedepends=(
   'asciidoctor'
@@ -29,47 +28,40 @@ makedepends=(
   'tl-expected'
 )
 checkdepends=('doctest')
-source=(https://github.com/ccache/ccache/releases/download/v${pkgver}/ccache-${pkgver}.tar.xz{,.minisig})
-sha512sums=('fc6993a13c22398ba8d80a367bf2cfd2e44fd991d8a83fc829e51a48051fb8208e6a81ce7cff0ed5cd61a070fb20aaedd8e8cb69b51f5195e4973c1c2ae3033a'
-            '27f6b69d7d7b953b4818139e1154cfef1b572154574cea23d9eef3ac26fbca2f4635d23d576b02a57d89260be0391d442bcd4edca7eefaa6eb16ad44faf2dea8')
-b2sums=('cddabb91c8ebcf1c0c819bf65c84bb501b871e78cf3ee2b5aaf3a5f32ae6092be87b8a416ce77e30430499f746e168e5e30b36ad43a7111fe5354b623efe041a'
-        '142c3a0e353dd39d6d313455e8997207054a64319d260d84998b4292742de0663d453e071b875048ccf3793563186c9caafc3c44dd590fcfd7800c5da69e0c43')
+source=("https://github.com/ccache/ccache/releases/download/v$pkgver/ccache-$pkgver.tar.xz"{,.minisig})
+sha512sums=('34d6c34a97a33fe26e9895b164de603bf3cdc62cc84b8b00360077190fa06bdeb9c7caf89a7cb8a6ca675ffc8c118cbfd88875f1c8f5e5be97af1ca9c0e488f0'
+            'fbdb7494a166b7fc308ce0c5fa6e2d5437780aef7600f955dd78fd127ec3fa18bf34ab9bba5a482e9b7762cbd6cd67613f134a22a11e871e5e38d9d5349ac1fe')
+b2sums=('4f6a27153c4aa01a03f7f2df7663f90d049a6cc30e4c4e86829aa8174078396b8647e536ca619be7d020876b0646b13feb3238e70d9bad8494e28169c3eecc0e'
+        'a8c1e659bc2f0221ab95efdda6d684824976c17a61aa9946d76c81ed7c9babff57c3ed934c1c014f9181b0159981157745ae3e281e3f43ccaa70f65a83d71326')
 validpgpkeys=('5A939A71A46792CF57866A51996DDA075594ADB8') # Joel Rosdahl <joel@rosdahl.net>
 
 build() {
-  cd ${pkgname}-${pkgver}
-  cmake \
+  cmake -B build -S $pkgname-$pkgver \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=None \
-    -Wno-dev \
-    -B build \
-    -S .
+    -Wno-dev
   cmake --build build
   cmake --build build --target doc
 }
 
 check() {
-  cd ${pkgname}-${pkgver}
   ctest --test-dir build --output-on-failure
 }
 
 package() {
-  cd ${pkgname}-${pkgver}
+  make DESTDIR="$pkgdir" install -C build
+  make DESTDIR="$pkgdir" install -C build/doc
 
-  make DESTDIR="${pkgdir}" install -C build
-  make DESTDIR="${pkgdir}" install -C build/doc
-
-  install -vDm 644 doc/*.md doc/*.adoc -t "${pkgdir}/usr/share/doc/${pkgname}"
-
-  install -vdm 755 "${pkgdir}/usr/lib/ccache/bin"
-  local _prog
-  for _prog in gcc g++ c++; do
-    ln -vs /usr/bin/ccache "${pkgdir}/usr/lib/ccache/bin/$_prog"
-    ln -vs /usr/bin/ccache "${pkgdir}/usr/lib/ccache/bin/${CHOST}-$_prog"
+  install -vdm 755 "$pkgdir/usr/lib/ccache/bin"
+  local prog
+  for prog in gcc g++ c++; do
+    ln -vs /usr/bin/ccache "$pkgdir/usr/lib/ccache/bin/$prog"
+    ln -vs /usr/bin/ccache "$pkgdir/usr/lib/ccache/bin/$CHOST-$prog"
   done
-  for _prog in cc clang clang++; do
-    ln -vs /usr/bin/ccache "${pkgdir}/usr/lib/ccache/bin/$_prog"
+  for prog in cc clang clang++; do
+    ln -vs /usr/bin/ccache "$pkgdir/usr/lib/ccache/bin/$prog"
   done
+
+  cd $pkgname-$pkgver
+  install -vDm 644 -t "$pkgdir/usr/share/doc/$pkgname" doc/*.md doc/*.adoc
 }
-
-# vim: ts=2 sw=2 et:
