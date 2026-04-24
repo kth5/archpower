@@ -5,8 +5,11 @@ pkgbase=libwpe
 pkgname=(
   libwpe
 )
+case "${CARCH}" in
+  x86_64) pkgname+=(libwpe-docs)
+esac
 pkgver=1.16.3
-pkgrel=1
+pkgrel=1.1
 pkgdesc="General-purpose library for WPE WebKit"
 url="https://wpewebkit.org"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
@@ -24,6 +27,7 @@ makedepends=(
   mesa
   meson
 )
+makedepends_x86_64=(hotdoc)
 source=("git+https://github.com/WebPlatformForEmbedded/libwpe?signed#tag=$pkgver")
 b2sums=('2bd7f66864fe465093b6ddf02417392dbf9871c56d8736ca29f107787e0b7d5f58b37c1feb602e0167f16b3d685bd1c65ebe7bf5aad6029b5dba742727b13c21')
 validpgpkeys=(
@@ -35,7 +39,16 @@ prepare() {
 }
 
 build() {
-  arch-meson libwpe build -D build-docs=false
+  local meson_options=(
+    -Denable-xkb=true
+  )
+
+  case "${CARCH}" in
+    x86_64) meson_options+=(-D build-docs=true) ;;
+    *) meson_options+=(-D build-docs=false) ;;
+  esac
+
+  arch-meson libwpe build ${meson_options[@]}
   meson compile -C build
 }
 
@@ -47,6 +60,21 @@ package_libwpe() {
   provides=(libwpe-1.0.so)
 
   meson install -C build --destdir "$pkgdir"
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 libwpe/COPYING
+
+  case "${CARCH}" in
+    x86_64)
+      mkdir -p doc/usr/share
+      mv {"$pkgdir",doc}/usr/share/doc
+    ;;
+  esac
+}
+
+package_libwpe-docs() {
+  pkgdesc+=" (documentation)"
+  depends=()
+
+  mv doc/* "$pkgdir"
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 libwpe/COPYING
 }
 
