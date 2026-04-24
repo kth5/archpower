@@ -4,7 +4,7 @@
 
 pkgname=adios2
 pkgver=2.11.0
-pkgrel=5
+pkgrel=7
 pkgdesc="The Adaptable Input/Output System version 2"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://adios2.readthedocs.io/en/latest/"
@@ -12,17 +12,20 @@ license=(Apache-2.0)
 depends=(
   blosc2
   bzip2 libbz2.so
-  gcc-libs
   glibc
   hdf5
   libfabric
+  libgcc
+  libgfortran
   libpng libpng16.so
   libsodium libsodium.so
+  libstdc++
   mgard
   openmpi libmpi.so
+  openssl libssl.so
+  paraview-catalyst
   pugixml
   python
-  python-yaml
   sqlite libsqlite3.so
   sz
   yaml-cpp libyaml-cpp.so
@@ -32,7 +35,6 @@ depends=(
 )
 depends_x86_64=(
   openucx libucp.so libucs.so
-  paraview-catalyst
 )
 makedepends=(
   cmake
@@ -50,7 +52,13 @@ makedepends_x86_64=(
 optdepends=(
   'python-numpy: for Python bindings'
 )
-source=(https://github.com/ornladios/ADIOS2/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz)
+optdepends_x86_64=(
+  'python-cupy: for CuPy arrays'
+  'python-pytorch: for PyTorch tensors'
+)
+source=(
+  https://github.com/ornladios/ADIOS2/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz
+)
 b2sums=('d79d833ee42a6097b15341729892dde119b9e157ec5f3078a2a842f412ceca064b619fb5b7b4f95bf8134298e50251acd88f9981426b10c00070b33ad4abc8d5')
 
 build() {
@@ -65,7 +73,8 @@ build() {
     -W no-dev
     -DCMAKE_BUILD_TYPE=None
     -DCMAKE_INSTALL_PREFIX=/usr
-    -DCMAKE_CUDA_ARCHITECTURES="$cuda_archs"
+    # CUB requires at least C++17 https://github.com/ornladios/ADIOS2/issues/4620
+    -DCMAKE_CXX_STANDARD=17
     -DADIOS2_USE_EXTERNAL_DEPENDENCIES=ON
     #-DADIOS2_HAVE_HDF5_VOL needs hdf5-openmpi
     -DADIOS2_HAVE_HDF5_VOL=OFF
@@ -90,9 +99,11 @@ build() {
     ;;
     x86_64)
       cmake_options+=(
+        -DADIOS2_USE_CUDA=ON
         -DCMAKE_CUDA_ARCHITECTURES="$cuda_archs"
         # Compile source code for supported GPU archs in parallel
         -DCMAKE_CUDA_FLAGS="--threads $(nproc)"
+
         -DADIOS2_USE_CUDA=ON
       )
     ;;
