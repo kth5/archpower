@@ -6,12 +6,11 @@ pkgname=(
   wpewebkit
   wpewebkit-docs
 )
-pkgver=2.51.1
+pkgver=2.52.3
 pkgrel=1
 pkgdesc="Embeddable web content engine"
 url="https://wpewebkit.org"
-#arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-arch=(powerpc espresso)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(
   # :sort ui /\v^\s*['"]?/
   'AFL-2.0 OR GPL-2.0-or-later'
@@ -47,7 +46,6 @@ depends=(
   expat
   fontconfig
   freetype2
-  gcc-libs
   glib2
   glibc
   gst-plugins-bad-libs
@@ -55,11 +53,14 @@ depends=(
   gstreamer
   harfbuzz
   harfbuzz-icu
+  hyphen
   icu
   lcms2
+  libatomic
   libavif
   libdrm
   libepoxy
+  libgcc
   libgcrypt
   libinput
   libjpeg-turbo
@@ -67,6 +68,7 @@ depends=(
   libpng
   libseccomp
   libsoup3
+  libstdc++
   libsystemd
   libtasn1
   libwebp
@@ -76,8 +78,8 @@ depends=(
   libxslt
   mesa
   openjpeg2
-  simdutf
   sqlite
+  ttf-font
   wayland
   woff2
   wpebackend-fdo
@@ -85,13 +87,14 @@ depends=(
   zlib
 )
 makedepends=(
+  clang
   cmake
-  gettext
   gi-docgen
   glib2-devel
   gobject-introspection
   gperf
   gst-plugins-bad
+  lld
   ninja
   python
   ruby
@@ -100,29 +103,19 @@ makedepends=(
   unifdef
   wayland-protocols
 )
-makedepends_powerpc=(
-  distcc
-)
-makedepends_powerpc64=(
-  gcc14
-)
 makedepends_powerpc64le=(
   gcc14
 )
-makedepends_x86_64=(
-  clang
-  lld
-)
 source=(
   $url/releases/wpewebkit-$pkgver.tar.xz{,.asc}
-  missing-resource.patch
+  2.52.1-documentloader-eventloop-h.patch
 )
-sha256sums=('983a25b20d79863e7b08b0519bb3216d7655b9eeb4af46cfe641a540ca0ce1a7'
+sha256sums=('b51b1db1e6ee99d1771f4a358c128fde27a77984df20ee6cb59858e520662d0b'
             'SKIP'
-            '2c29bc067cce281b5d97e89f91a967668a841714cb33afa965364d2493d48cde')
-b2sums=('ded294cb5d335c25e583ef190a8e07a5a9cba03c80ba1aecffcbc021c3c5bfd65635a2c31f0fc0597950b5f3a4d9222aba86615c7aff759fd5d655e1adfb9439'
+            'b1d58d8181ac4aa3109434135428c2d1b65da07b6e02625e922d9dcf2e451f84')
+b2sums=('5bdfa4646f034590971585e1eab8bf5ee13b0d6ad4075c13a52cd8c3f319cc40f6c75d2cdfbd8c2be7cde34942203654b6681a32fefa6582cd311f5d43d610eb'
         'SKIP'
-        'c854ffd6f2acd1c4a69d119ea19bb2fdfbc158cd9b23dddaba41977118483152b6dc4fcca9b14a950cb45da42d91bd3cce6b3dabcfc69502e4074a7348dcb957')
+        '35a6864180f085b02ff3996a714f691e4ec418e5f391b6cccb740e681a370798c25d64c68e7e3fb0a2ee0718bad30e912562b521ef771fb4d6f2d3844818c595')
 validpgpkeys=(
   # https://wpewebkit.org/release/verify/
   5AA3BC334FD7E3369E7C77B291C559DBE4C9123B # Adrián Pérez de Castro <aperez@igalia.com>
@@ -135,8 +128,7 @@ esac
 
 prepare() {
   cd wpewebkit-$pkgver
-  patch -Np1 -i ${srcdir}/missing-resource.patch
-  sed -i -e "s:--warn-error::" Source/cmake/FindGI.cmake
+  patch -Np1 -i ${srcdir}/2.52.1-documentloader-eventloop-h.patch
 }
 
 build() {
@@ -147,8 +139,9 @@ build() {
     -D CMAKE_INSTALL_PREFIX=/usr
     -D CMAKE_SKIP_RPATH=ON
     -D ENABLE_DOCUMENTATION=ON
-    -D ENABLE_MINIBROWSER=ON
+    -D ENABLE_MINIBROWSER=OFF
     -D ENABLE_SPEECH_SYNTHESIS=OFF
+    -D ENABLE_WPE_PLATFORM=ON
     -D PORT=WPE
     -D USE_FLITE=OFF
     -D USE_LIBBACKTRACE=OFF
@@ -156,28 +149,22 @@ build() {
 
   case "${CARCH}" in
     powerpc64le)
-      cmake_options+=(
-        -DCMAKE_C_COMPILER=gcc-14
-        -DCMAKE_CXX_COMPILER=g++-14
-      )
+      export CC=gcc-14
+      export CXX=g++-14
       export CFLAGS+=' -mminimal-toc'
       export CXXFLAGS+=' -mminimal-toc'
       export LDFLAGS+=' -Wl,--no-keep-memory'
     ;;
 
-    powerpc64*)
+    powerpc64)
       cmake_options+=(
-        -DCMAKE_C_COMPILER=gcc-14
-        -DCMAKE_CXX_COMPILER=g++-14
+        -DENABLE_WEBGL=ON
       )
       export CFLAGS='-O2 -pipe -mminimal-toc'
       export CXXFLAGS='-O2 -pipe -mminimal-toc'
       export LDFLAGS+=' -Wl,--no-keep-memory'
     ;;
     powerpc)
-      cmake_options+=(
-        -DENABLE_WEBGL=OFF
-      )
       export CFLAGS+=' -mminimal-toc'
       export CXXFLAGS+=' -mminimal-toc'
       export LDFLAGS+=" -Wl,--no-keep-memory"
@@ -189,22 +176,17 @@ build() {
       export CC=clang CXX=clang++
       LDFLAGS+=" -fuse-ld=lld"
 
-      # JITted code crashes when CET is used
-      CFLAGS+=' -fcf-protection=none'
-      CXXFLAGS+=' -fcf-protection=none'
     ;;
   esac
 
-  # Produce minimal debug info: 4.3 GB of debug data makes the
-  # build too slow and is too much to package for debuginfod
-  CFLAGS+=' -g1'
-  CXXFLAGS+=' -g1'
+  # JITted code crashes when CET is used
+  CFLAGS+=' -fcf-protection=none'
+  CXXFLAGS+=' -fcf-protection=none'
 
   # Skia uses malloc_usable_size
-  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
-  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=?/_FORTIFY_SOURCE=2}"
+  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=?/_FORTIFY_SOURCE=2}"
 
-  export WK_USE_CCACHE=NO
   cmake -S wpewebkit-$pkgver -B build -G Ninja "${cmake_options[@]}"
   cmake --build build ${MAKEFLAGS}
 }
