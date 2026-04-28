@@ -1,31 +1,25 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Frederik Schwan <freswa at archlinux dot org>
+# Contributor: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
 pkgbase=wasi-libc++
 pkgname=(wasi-libc++ wasi-libc++abi)
-pkgver=21.1.6
+pkgver=22.1.0
 pkgrel=1
-pkgdesc="WASI LLVM C++ standard library"
+pkgdesc="LLVM C++ standard library (WASI)"
 url="https://libcxx.llvm.org/"
 license=('Apache-2.0 WITH LLVM-exception')
 arch=(any)
 depends=('wasi-libc' 'wasi-compiler-rt')
-makedepends=('cmake' 'ninja' 'python' 'clang' 'llvm' 'lld' 'util-linux')
-source=("https://github.com/llvm/llvm-project/releases/download/llvmorg-$pkgver/llvm-project-$pkgver.src.tar.xz"{,.sig}
-        no-normalize-triple.diff
-        WASI.cmake
-        wasi-sdk.cmake)
-b2sums=('eeda7b9903ef59319ad22e5e3a8b66a339cbbb7445ccb75fa09db6823371a22e9b66cb44c084fdeb16054f2e62a149f6e069d9726f269f667dbd6a631cb658c3'
-        'SKIP'
-        'cdf8d39eb9c11ba363159f995bb7236a11fa5c42d2bc92f7253fb3429e552020902f54afe8a93782b004d55387100eaf84d651809e7d171b2a19c7f086ba119e'
-        'c829d807c257921fddb8c4d3752ad2291a2beb116d414dd31e34b7f6b01599d8c4807db87ef9930456ed8c9f30e8648e77028fa0b903c3a5ea840514f6022cf4'
-        '9f20eaa64069d20510a5ba6acdedfa4bbf723e1da13792bbbdfc57cc20d232962f5603a56c9723879624ab65e18f3770fda509dc76e3f099c3744acbfeabafc2')
-options=('!lto' 'staticlibs' '!debug')
-validpgpkeys=(
-  '474E22316ABF4785A88C6E8EA2C794A986419D8A'  # Tom Stellard <tstellar@redhat.com>
-  'D574BD5D1D0E98895E3BF90044F2485E45D59042'  # Tobias Hieta <tobias@hieta.se>
-  'FFB3368980F3E6BB5737145A316C56D064CACBA5'  # Douglas Yung <douglas.yung@sony.com>
-  '71046D1E9C6656BDD61171873E83BABF4A4F9E85'  # Cullen Rhodes <cullen.rhodes@arm.com>
+makedepends=('clang' 'cmake' 'ninja' 'python' 'llvm' 'lld' 'wasm-component-ld')
+options=('!buildflags' 'staticlibs')
+source=("https://github.com/llvm/llvm-project/releases/download/llvmorg-$pkgver/llvm-project-$pkgver.src.tar.xz"{,.sig})
+sha512sums=('588753a26742cfc76ca179398eaac6a31e68b1fa5bfaf7300ce710a89bba1dc9bfe41229bb9277663a3cde4468e74922153e5d1529eb7c6fe4de5ba3cb62ba45'
+            'SKIP')
+validpgpkeys=('474E22316ABF4785A88C6E8EA2C794A986419D8A'  # Tom Stellard <tstellar@redhat.com>
+              'D574BD5D1D0E98895E3BF90044F2485E45D59042'  # Tobias Hieta <tobias@hieta.se>
+              'FFB3368980F3E6BB5737145A316C56D064CACBA5'  # Douglas Yung <douglas.yung@sony.com>
+              '71046D1E9C6656BDD61171873E83BABF4A4F9E85'  # Cullen Rhodes <cullen.rhodes@arm.com>
 )
 
 _targets=(wasm32-wasi wasm32-wasip1 wasm32-wasip1-threads wasm32-wasip2)
@@ -33,149 +27,87 @@ _targets=(wasm32-wasi wasm32-wasip1 wasm32-wasip1-threads wasm32-wasip2)
 prepare() {
   cd llvm-project-$pkgver.src
 
-  # Don't normalize the target triple - causes wrong multiarch dir
-  # (also see getMultiarchTriple in clang/lib/Driver/ToolChains/WebAssembly.cpp)
-  patch -Np1 -i ../no-normalize-triple.diff
-
   # Platform files have been copied from
-  # https://github.com/WebAssembly/wasi-sdk
-  mkdir -p cmake/Platform
-  cp ../WASI.cmake cmake/Platform
+  # https://github.com/WebAssembly/wasi-sdk/tree/main/cmake/Platform
+  cd cmake
+  mkdir Platform
+  echo 'set(WASI 1)' > Platform/WASI.cmake
 }
 
 build() {
   # Build options are derived from
-  # https://github.com/WebAssembly/wasi-sdk/blob/main/Makefile
+  # https://github.com/WebAssembly/wasi-sdk/blob/main/cmake/wasi-sdk-sysroot.cmake
 
-  # remove compiler options not supported by the wasi targets
-  local sanitize_flags=(
-    -r
-    -e 's/-fcf-protection ?//'
-    -e 's/-fexceptions ?//'
-    -e 's/-fstack-clash-protection ?//'
-    -e 's/-march=x86-64 ?//'
-    -e 's/-mtune=generic ?//'
-    -e 's/-mcpu=[a-zA-Z0-9]+ //'
-    -e 's/-mabi=[a-zA-Z0-9]+ //'
-    -e 's/-maltivec//g'
-  )
-  CFLAGS="$(<<<"$CFLAGS" sed "${sanitize_flags[@]}")"
-  CXXFLAGS="$(<<<"$CXXFLAGS" sed "${sanitize_flags[@]}")"
-
-  local target threads_flag threads_cflags
+  local target pic_flag extra_cflags
   for target in "${_targets[@]}"; do
-    if [[ ${target} == *-threads ]]; then
-      threads_flag=ON
-      threads_cflags=-pthread
-    else
-      threads_flag=OFF
-      threads_cflags=
+    pic_flag=ON
+    extra_cflags="-Wno-deprecated -fno-exceptions --target=$target --sysroot /usr/share/wasi-sysroot"
+
+    if [[ ${target} = *threads* ]]; then
+      pic_flag=OFF
+      extra_cflags+=" -pthread"
     fi
 
     local cmake_options=(
       -S llvm-project-$pkgver.src/runtimes
       -B build-$target
       -G Ninja
-      -DCMAKE_C_COMPILER_WORKS=ON
+      -DCMAKE_AR=/usr/bin/llvm-ar
+      -DCMAKE_ASM_COMPILER=/usr/bin/clang
+      -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      -DCMAKE_CXX_COMPILER=/usr/bin/clang++
       -DCMAKE_CXX_COMPILER_WORKS=ON
-      -DCMAKE_AR=/usr/bin/ar
-      -DCMAKE_TOOLCHAIN_FILE="$srcdir/wasi-sdk.cmake"
-      -DCMAKE_STAGING_PREFIX=/usr/share/wasi-sysroot
-      -DLIBCXXABI_USE_LLVM_UNWINDER:BOOL=OFF
-      -DLIBCXX_ENABLE_THREADS:BOOL=$threads_flag
-      -DLIBCXX_HAS_PTHREAD_API:BOOL=$threads_flag
-      -DLIBCXX_HAS_EXTERNAL_THREAD_API:BOOL=OFF
-      -DLIBCXX_BUILD_EXTERNAL_THREAD_LIBRARY:BOOL=OFF
-      -DLIBCXX_HAS_WIN32_THREAD_API:BOOL=OFF
-      -DLLVM_COMPILER_CHECKED:BOOL=ON
-      -DLLVM_RUNTIMES_LINKING_WORKS:BOOL=ON
-      -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR:BOOL=ON
-      -DLLVM_DEFAULT_TARGET_TRIPLE=$target
-      -DCMAKE_BUILD_TYPE=Release
-      -DLIBCXX_ENABLE_SHARED:BOOL=OFF
-      -DLIBCXX_ENABLE_EXCEPTIONS:BOOL=OFF
-      -DLIBCXX_ENABLE_FILESYSTEM:BOOL=ON
-      -DLIBCXX_ENABLE_ABI_LINKER_SCRIPT:BOOL=OFF
-      -DLIBCXX_CXX_ABI=libcxxabi
-      -DLIBCXX_HAS_MUSL_LIBC:BOOL=ON
-      -DLIBCXX_ABI_VERSION=2
-      -DLIBCXXABI_ENABLE_EXCEPTIONS:BOOL=OFF
-      -DLIBCXXABI_ENABLE_SHARED:BOOL=OFF
-      -DLIBCXXABI_SILENT_TERMINATE:BOOL=ON
-      -DLIBCXXABI_ENABLE_THREADS:BOOL=$threads_flag
-      -DLIBCXXABI_HAS_PTHREAD_API:BOOL=$threads_flag
-      -DLIBCXXABI_HAS_EXTERNAL_THREAD_API:BOOL=OFF
-      -DLIBCXXABI_BUILD_EXTERNAL_THREAD_LIBRARY:BOOL=OFF
-      -DLIBCXXABI_HAS_WIN32_THREAD_API:BOOL=OFF
-      -DLIBCXXABI_USE_LLVM_UNWINDER:BOOL=OFF
-      -DWASI_SDK_PREFIX=/usr
-      -DUNIX:BOOL=ON
-      -DLIBCXX_INCLUDE_TESTS:BOOL=OFF
-      -DLIBCXX_INCLUDE_BENCHMARKS:BOOL=OFF
+      -DCMAKE_CXX_FLAGS=-fno-exceptions
+      -DCMAKE_CXX_LINKER_DEPFILE_SUPPORTED=OFF
+      -DCMAKE_C_COMPILER=/usr/bin/clang
+      -DCMAKE_C_COMPILER_WORKS=ON
+      -DCMAKE_C_FLAGS=-fno-exceptions
+      -DCMAKE_C_LINKER_DEPFILE_SUPPORTED=OFF
+      -DCMAKE_INSTALL_PREFIX=/usr/share/wasi-sysroot
+      -DCMAKE_RANLIB=/usr/bin/llvm-ranlib
       -DCMAKE_SYSROOT=/usr/share/wasi-sysroot
-      -DCMAKE_C_FLAGS="$CFLAGS $threads_cflags --target=$target"
-      -DCMAKE_CXX_FLAGS="$CXXFLAGS $threads_cflags --target=$target"
+      -DCMAKE_SYSTEM_NAME=WASI
+      -DCMAKE_SYSTEM_PROCESSOR=wasm32
+      -DCMAKE_SYSTEM_VERSION=1
+      -DCMAKE_ASM_COMPILER_TARGET=$target
+      -DCMAKE_CXX_COMPILER_TARGET=$target
+      -DCMAKE_C_COMPILER_TARGET=$target
+      -DCMAKE_INSTALL_INCLUDEDIR=/usr/share/wasi-sysroot/include/$target
+      -DCMAKE_STAGING_PREFIX=/usr/share/wasi-sysroot
+      -DCMAKE_POSITION_INDEPENDENT_CODE=$pic_flag
+      -DLIBCXX_ENABLE_THREADS=ON
+      -DLIBCXX_HAS_PTHREAD_API=ON
+      -DLIBCXX_HAS_EXTERNAL_THREAD_API=OFF
+      -DLIBCXX_HAS_WIN32_THREAD_API=OFF
+      -DLLVM_COMPILER_CHECKED=ON
+      -DLIBCXX_ENABLE_SHARED=$pic_flag
+      -DLIBCXX_ENABLE_EXCEPTIONS=OFF
+      -DLIBCXX_ENABLE_FILESYSTEM=ON
+      -DLIBCXX_ENABLE_ABI_LINKER_SCRIPT=OFF
+      -DLIBCXX_CXX_ABI=libcxxabi
+      -DLIBCXX_HAS_MUSL_LIBC=OFF
+      -DLIBCXX_ABI_VERSION=2
+      -DLIBCXXABI_ENABLE_EXCEPTIONS=OFF
+      -DLIBCXXABI_ENABLE_SHARED=$pic_flag
+      -DLIBCXXABI_SILENT_TERMINATE=ON
+      -DLIBCXXABI_ENABLE_THREADS=ON
+      -DLIBCXXABI_HAS_PTHREAD_API=ON
+      -DLIBCXXABI_HAS_EXTERNAL_THREAD_API=OFF
+      -DLIBCXXABI_HAS_WIN32_THREAD_API=OFF
+      -DLIBCXXABI_USE_LLVM_UNWINDER=OFF
+      -DUNIX=ON
+      -DCMAKE_C_FLAGS="$extra_cflags"
+      -DCMAKE_ASM_FLAGS="$extra_cflags"
+      -DCMAKE_CXX_FLAGS="$extra_cflags"
+      -DLIBCXX_LIBDIR_SUFFIX=/$target
+      -DLIBCXXABI_LIBDIR_SUFFIX=/$target
+      -DLIBCXX_INCLUDE_TESTS=OFF
+      -DLIBCXX_INCLUDE_BENCHMARKS=OFF
       -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi"
-      -DCXX_SUPPORTS_CLASS_MEMACCESS_FLAG:BOOL=OFF
-      -DCXX_SUPPORTS_COVERED_SWITCH_DEFAULT_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_CXX11:BOOL=ON
-      -DCXX_SUPPORTS_EHA_FLAG:BOOL=OFF
-      -DCXX_SUPPORTS_EHS_FLAG:BOOL=OFF
-      -DCXX_SUPPORTS_FALIGNED_ALLOCATION_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_FDATA_SECTIONS:BOOL=ON
-      -DCXX_SUPPORTS_FNO_EXCEPTIONS_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_FSTRICT_ALIASING_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_FVISIBILITY_EQ_HIDDEN_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_IMPLICIT_FALLTHROUGH_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_MISLEADING_INDENTATION_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_MISSING_FIELD_INITIALIZERS_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_NOEXCEPT_TYPE_FLAG:BOOL=OFF
-      -DCXX_SUPPORTS_NOSTDINCXX_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_NOSTDLIBXX_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_PEDANTIC_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_STRING_CONVERSION_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_SUGGEST_OVERRIDE_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_UNWINDLIB_EQ_NONE_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WALL_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WCHAR_SUBSCRIPTS_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WCONVERSION_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WERROR_DATE_TIME:BOOL=ON
-      -DCXX_SUPPORTS_WERROR_EQ_RETURN_TYPE_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WERROR_UNGUARDED_AVAILABILITY_NEW:BOOL=ON
-      -DCXX_SUPPORTS_WEXTRA_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WEXTRA_SEMI_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WFORMAT_NONLITERAL_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WMISMATCHED_TAGS_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WMISSING_BRACES_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WNEWLINE_EOF_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WNO_COVERED_SWITCH_DEFAULT_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WNO_ERROR_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WNO_LONG_LONG_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WNO_SUGGEST_OVERRIDE_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WNO_UNUSED_PARAMETER_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WNO_USER_DEFINED_LITERALS_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WSHADOW_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WSHORTEN_64_TO_32_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WSIGN_COMPARE_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WSIGN_CONVERSION_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WSTRICT_ALIASING_EQ_2_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WSTRICT_OVERFLOW_EQ_4_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WUNDEF_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WUNUSED_FUNCTION_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WUNUSED_PARAMETER_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WUNUSED_VARIABLE_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WWRITE_STRINGS_FLAG:BOOL=ON
-      -DCXX_SUPPORTS_WX_FLAG:BOOL=OFF
-      -DCXX_SUPPORTS_W_FLAG:BOOL=ON
-      -DCXX_WONT_WARN_ON_FINAL_NONVIRTUALDTOR:BOOL=ON
-      -DCXX_WSUGGEST_OVERRIDE_ALLOWS_ONLY_FINAL:BOOL=ON
-      -DLINKER_SUPPORTS_COLOR_DIAGNOSTICS:BOOL=ON
-      -DSUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG:BOOL=ON
     )
 
     cmake "${cmake_options[@]}"
-    ninja -C build-$target cxx cxxabi
+    ninja -C build-$target
   done
 }
 
@@ -183,6 +115,8 @@ build() {
 # accidentally to run this function on the system (!!!)
 package_wasi-libc++ () {
   depends+=("wasi-libc++abi=$pkgver-$pkgrel")
+
+  mkdir -p "$pkgdir/usr/share/wasi-sysroot/include/c++/v1"
 
   local target
   for target in "${_targets[@]}"; do
