@@ -1,22 +1,30 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Jaroslav Lichtblau <svetlemodry@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 # Contributor: flu
 
 pkgname=sqlcipher
-pkgver=4.6.1
+pkgver=4.14.0
 pkgrel=1
 pkgdesc="SQLite extension that provides transparent 256-bit AES encryption of database files"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64 espresso)
-url="https://www.zetetic.net/sqlcipher/"
-license=('BSD')
-depends=('openssl' 'sqlite' 'tcl' 'readline' 'zlib')
-source=(https://www.zetetic.net/$pkgname/verify/$pkgver/$pkgname-$pkgver.zip{,.sig})
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url="https://www.zetetic.net/sqlcipher"
+license=('BSD-3-Clause')
+depends=(
+  'glibc'
+  'openssl'
+  'readline'
+  'tcl'
+  'zlib'
+)
+makedepends=('patchelf')
+source=("https://www.zetetic.net/downloads/sqlcipher/verify/$pkgver/$pkgname-$pkgver.zip"{,.sig})
+b2sums=('cf35d228cd0e726674de51be5ffd55517d625d68174c6af6df068dcc7e076cf812b1822f9fef6b163d883beccd821e5a8dceef0f198cfcbc2ec569ee6ade9e1d'
+        'SKIP')
 validpgpkeys=('D83F5F9EB811D6E6B4A0D9C5D1FA3A2A97ED25C2') # Zetetic LLC <support@zetetic.net>
-sha256sums=('759adee03f53b46f07c9c0be51a0be3a6fe31640e81d0777b919c8df8d40f6d8'
-            'SKIP')
 
 build() {
-  cd "${srcdir}"/$pkgname-$pkgver
+  cd $pkgname-$pkgver
 
   # this uses malloc_usable_size, which is incompatible with fortification level 3
   export CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
@@ -33,32 +41,62 @@ build() {
     -DSQLITE_MAX_EXPR_DEPTH=10000 \
     -DSQLITE_ENABLE_MATH_FUNCTIONS"
 
-  export CFLAGS="$CFLAGS -DSQLITE_HAS_CODEC -DSQLITE_TEMP_STORE=2 -DSQLCIPHER_TEST"
-  export LDFLAGS="$LDFLAGS -lcrypto"
+  export CFLAGS="$CFLAGS \
+    -DSQLITE_HAS_CODEC \
+    -DSQLITE_TEMP_STORE=2 \
+    -DSQLCIPHER_TEST \
+    -DSQLITE_EXTRA_INIT=sqlcipher_extra_init \
+    -DSQLITE_EXTRA_SHUTDOWN=sqlcipher_extra_shutdown"
+  export LDFLAGS="$LDFLAGS -lcrypto -Wl,-soname,libsqlcipher.so.0"
 
+  # Use sqlcipher naming to avoid conflicts with sqlite package
   ./configure --prefix=/usr \
-    --enable-tempstore=yes \
+    --with-tempstore=yes \
     --disable-static \
-    --enable-fts3 \
-    --enable-fts4 \
-    --enable-fts5 \
-    --enable-rtree \
-    --enable-json1
-  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+    --dll-basename=libsqlcipher \
+    --fts3 \
+    --fts4 \
+    --fts5 \
+    --rtree
   make
   make testfixture
 }
 
 check() {
-  cd "${srcdir}"/$pkgname-$pkgver
+  cd $pkgname-$pkgver
   ./testfixture test/sqlcipher.test
 }
 
 package() {
-  cd "${srcdir}"/$pkgname-$pkgver
+  cd $pkgname-$pkgver
+  make DESTDIR="$pkgdir" install
 
-  make DESTDIR="${pkgdir}" install
+  # Rename binary to avoid conflict with sqlite
+  mv -v "$pkgdir/usr/bin/sqlite3" "$pkgdir/usr/bin/sqlcipher"
 
-  #license
-  install -Dm644 LICENSE.md "${pkgdir}"/usr/share/licenses/$pkgname/LICENSE
+  # Move headers to sqlcipher subdirectory to avoid conflict with sqlite
+  install -vd "$pkgdir/usr/include/sqlcipher"
+  mv -v "$pkgdir/usr/include/sqlite3.h" "$pkgdir/usr/include/sqlcipher/"
+  mv -v "$pkgdir/usr/include/sqlite3ext.h" "$pkgdir/usr/include/sqlcipher/"
+
+  # Fix TCL module: rename to match old package layout and fix soname
+  local sqlitever=$(sed -n 's/#define SQLITE_VERSION *"\(.*\)"/\1/p' sqlite3.h)
+  mv -v "$pkgdir/usr/lib/tcl8.6/sqlite$sqlitever" \
+    "$pkgdir/usr/lib/tcl8.6/sqlite3"
+  mv -v "$pkgdir/usr/lib/tcl8.6/sqlite3/libsqlite$sqlitever.so" \
+    "$pkgdir/usr/lib/tcl8.6/sqlite3/libtclsqlite3.so"
+  patchelf --set-soname libtclsqlite3.so \
+    "$pkgdir/usr/lib/tcl8.6/sqlite3/libtclsqlite3.so"
+
+  # Install sqlcipher man page instead of sqlite3
+  rm -v "$pkgdir/usr/share/man/man1/sqlite3.1"
+  install -vDm644 sqlcipher.1 "$pkgdir/usr/share/man/man1/sqlcipher.1"
+
+  # Fix pkg-config file: rename and update references
+  mv -v "$pkgdir/usr/lib/pkgconfig/sqlite3.pc" "$pkgdir/usr/lib/pkgconfig/sqlcipher.pc"
+  sed -i -e 's/-lsqlite3/-lsqlcipher/g' \
+    -e 's|includedir=.*|includedir=${prefix}/include/sqlcipher|' \
+    "$pkgdir/usr/lib/pkgconfig/sqlcipher.pc"
+
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE.md
 }
