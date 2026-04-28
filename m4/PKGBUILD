@@ -4,25 +4,60 @@
 # Contributor: Andreas Radke <andyrtr@archlinux.org>
 
 pkgname=m4
-pkgver=1.4.20
-pkgrel=1
+pkgver=1.4.21
+pkgrel=2
 pkgdesc="The GNU macro processor"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://www.gnu.org/software/m4"
-license=('GPL3')
-depends=('glibc' 'bash')
-source=("https://ftp.gnu.org/gnu/m4/$pkgname-$pkgver.tar.xz"{,.sig})
-sha256sums=('e236ea3a1ccf5f6c270b1c4bb60726f371fa49459a8eaaebc90b216b328daf2b'
-            'SKIP')
+license=('GPL-3.0-or-later')
+depends=('glibc')
+makedepends=('git' 'gperf' 'help2man' 'python')
 validpgpkeys=('71C2CC22B1C4602927D2F3AAA7A16B4A2527436A')   # Eric Blake
+source=("git+https://git.savannah.gnu.org/git/${pkgname}.git#tag=v${pkgver}?signed"
+        "git+https://git.savannah.gnu.org/git/gnulib.git"
+        "https://ftp.gnu.org/gnu/${pkgname}/${pkgname}-${pkgver}.tar.xz"{,.sig})
+sha256sums=('e14e79fa4b627df597fa773766658291830ae404cb6ce67bf2015531db193fc6'
+            'SKIP'
+            'f25c6ab51548a73a75558742fb031e0625d6485fe5f9155949d6486a2408ab66'
+            'SKIP')
+
+prepare() {
+	cd $pkgname
+
+	git submodule init
+	git config submodule.gnulib.url "${srcdir}/gnulib"
+	git -c protocol.file.allow=always submodule update
+
+	./bootstrap \
+		--skip-po # don't pull in unstable translations, we'll get them from the release tarball
+}
 
 build() {
-	cd "$pkgname-$pkgver"
-	./configure --prefix=/usr
+	cd $pkgname
+	./configure \
+		--prefix=/usr \
+		--disable-gcc-warnings # git builds set -Werror and -fanalyzer, both which fail
 	make
+
+	# Generate m4 mo files from dist tarball
+	cd "${srcdir}/${pkgname}-${pkgver}/po"
+	for po in *.po; do
+		msgfmt "${po}" -o "${po%.po}.mo"
+	done
+}
+
+check() {
+	cd "$pkgname"
+	make check
 }
 
 package() {
-	cd "$pkgname-$pkgver"
-	make prefix="${pkgdir}"/usr install
+	cd $pkgname
+	make DESTDIR="${pkgdir}" install
+
+	# Install m4 mo files from dist tarball
+	cd "${srcdir}/${pkgname}-${pkgver}/po"
+	for mo in *.mo; do
+		install -Dm 644 "${mo}" "${pkgdir}/usr/share/locale/${mo%.mo}/LC_MESSAGES/${pkgname}.mo"
+	done
 }
