@@ -1,0 +1,492 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 85938f6..875f91a 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1030,7 +1030,6 @@ dependencies = [
+  "lcms2",
+  "lcms2-sys",
+  "libc",
+- "libseccomp",
+  "memfd",
+  "memmap2",
+  "nix",
+@@ -1161,7 +1160,6 @@ dependencies = [
+  "half",
+  "image",
+  "libc",
+- "libseccomp",
+  "log",
+  "memmap2",
+  "nix",
+@@ -1731,24 +1729,6 @@ dependencies = [
+  "system-deps",
+ ]
+ 
+-[[package]]
+-name = "libseccomp"
+-version = "0.4.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0e5310a2c5b6ffbc094b5f70a2ca7b79ed36ad90e6f90994b166489a1bce3fcc"
+-dependencies = [
+- "bitflags",
+- "libc",
+- "libseccomp-sys",
+- "pkg-config",
+-]
+-
+-[[package]]
+-name = "libseccomp-sys"
+-version = "0.3.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "60276e2d41bbb68b323e566047a1bfbf952050b157d8b5cdc74c07c1bf4ca3b6"
+-
+ [[package]]
+ name = "linux-raw-sys"
+ version = "0.12.1"
+diff --git a/Cargo.toml b/Cargo.toml
+index 8dc7407..6183bfc 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -97,7 +97,6 @@ lcms2 = "6.0.3"
+ lcms2-sys = "4.0.4"
+ libc = "0.2.152"
+ gly = { package = "libglycin-rebind", version = "0.1.0", path = "libglycin-rebind/libglycin-rebind/" }
+-libseccomp = "0.4.0"
+ log = "0.4.0"
+ memfd = "0.6.3"
+ memmap = { package = "memmap2", version = "0.9.0" }
+diff --git a/glycin-loaders/meson.build b/glycin-loaders/meson.build
+index 805a646..6ee04d1 100644
+--- a/glycin-loaders/meson.build
++++ b/glycin-loaders/meson.build
+@@ -2,8 +2,6 @@ if not get_option('glycin-loaders')
+   subdir_done()
+ endif
+ 
+-dependency('libseccomp', version: seccomp_req)
+-
+ if 'glycin-heif' in get_option('loaders')
+   dependency('libheif', version: '>= 1.17.0')
+ endif
+diff --git a/glycin-utils/Cargo.toml b/glycin-utils/Cargo.toml
+index b04301b..eee85e5 100644
+--- a/glycin-utils/Cargo.toml
++++ b/glycin-utils/Cargo.toml
+@@ -22,7 +22,6 @@ gufo-common = { workspace = true, features = ["zvariant"] }
+ half.workspace = true
+ image = { workspace = true, optional = true }
+ libc.workspace = true
+-libseccomp.workspace = true
+ log.workspace = true
+ memmap.workspace = true
+ nix = { workspace = true, features = ["fs", "signal"] }
+diff --git a/glycin-utils/src/instruction_handler.rs b/glycin-utils/src/instruction_handler.rs
+index deb2bc8..8d8bb52 100644
+--- a/glycin-utils/src/instruction_handler.rs
++++ b/glycin-utils/src/instruction_handler.rs
+@@ -128,13 +128,7 @@ extern "C" fn sigsys_handler(_: c_int, info: *mut siginfo_t, _: *mut c_void) {
+     let info: *mut siginfo_t = info.cast();
+     let syscall = unsafe { info.as_ref().unwrap()._sifields._syscall };
+ 
+-    let name = libseccomp::ScmpSyscall::from(syscall).get_name().ok();
+-
+     libc_eprint("glycin sandbox: Blocked syscall used: ");
+-    libc_eprint(&name.unwrap_or_else(|| String::from("Unknown Syscall")));
+-    libc_eprint(" (");
+-    libc_eprint(&syscall.to_string());
+-    libc_eprint(")\n");
+ 
+     unsafe {
+         libc::exit(128 + libc::SIGSYS);
+diff --git a/glycin/Cargo.toml b/glycin/Cargo.toml
+index 7fb0a67..e123dd2 100644
+--- a/glycin/Cargo.toml
++++ b/glycin/Cargo.toml
+@@ -54,7 +54,6 @@ gufo-exif.workspace = true
+ lcms2-sys.workspace = true
+ lcms2.workspace = true
+ libc.workspace = true
+-libseccomp.workspace = true
+ memfd.workspace = true
+ memmap.workspace = true
+ nix = { workspace = true, features = ["fs", "resource", "signal"] }
+diff --git a/glycin/src/error.rs b/glycin/src/error.rs
+index 9030710..2cdf06f 100644
+--- a/glycin/src/error.rs
++++ b/glycin/src/error.rs
+@@ -6,7 +6,6 @@ use futures_channel::oneshot;
+ use gio::glib;
+ use gio::prelude::CancellableExt;
+ use glycin_utils::{DimensionTooLargerError, RemoteError};
+-use libseccomp::error::SeccompError;
+ 
+ use crate::config;
+ use crate::dbus::{MAX_TEXTURE_SIZE, RemoteProcess, ZbusProxy};
+@@ -181,8 +180,6 @@ pub enum Error {
+     WidgthOrHeightZero(String),
+     #[error("Memfd: {0}")]
+     MemFd(Arc<memfd::Error>),
+-    #[error("Seccomp: {0}")]
+-    Seccomp(Arc<SeccompError>),
+     #[error("ICC profile: {0}")]
+     IccProfile(#[from] lcms2::Error),
+     #[error("Operation was explicitly canceled.\nOriginal error: {0:?}")]
+@@ -246,12 +243,6 @@ impl From<memfd::Error> for Error {
+     }
+ }
+ 
+-impl From<SeccompError> for Error {
+-    fn from(err: SeccompError) -> Self {
+-        Self::Seccomp(Arc::new(err))
+-    }
+-}
+-
+ impl From<oneshot::Canceled> for Error {
+     fn from(_err: oneshot::Canceled) -> Self {
+         Self::InternalCommunicationCanceled
+diff --git a/glycin/src/sandbox.rs b/glycin/src/sandbox.rs
+index 2e6d5a1..7a95c19 100644
+--- a/glycin/src/sandbox.rs
++++ b/glycin/src/sandbox.rs
+@@ -2,7 +2,7 @@
+ 
+ use std::ffi::{c_int, c_void};
+ use std::fs::{DirEntry, File, canonicalize};
+-use std::io::{self, BufRead, BufReader, Seek};
++use std::io::{self, BufRead, BufReader};
+ use std::os::fd::{AsRawFd, BorrowedFd};
+ use std::os::unix::net::UnixStream;
+ use std::os::unix::process::{CommandExt, ExitStatusExt};
+@@ -11,9 +11,6 @@ use std::process::{Command, Stdio};
+ use std::sync::Arc;
+ 
+ use gio::glib;
+-use libseccomp::error::SeccompError;
+-use libseccomp::{ScmpAction, ScmpFilterContext, ScmpSyscall};
+-use memfd::{Memfd, MemfdOptions};
+ use nix::libc::siginfo_t;
+ use nix::sys::resource;
+ 
+@@ -25,151 +22,6 @@ type SystemSetupStore = Arc<Result<SystemSetup, Arc<io::Error>>>;
+ 
+ static SYSTEM_SETUP: AsyncMutex<Option<SystemSetupStore>> = new_async_mutex(None);
+ 
+-/// List of allowed syscalls
+-///
+-/// All syscalls are blocked by default via seccomp. Only the following syscalls
+-/// are allowed. The feature is only available for sandboxes using bubblewrap.
+-const ALLOWED_SYSCALLS: &[&str] = &[
+-    "access",
+-    "arch_prctl",
+-    "arm_fadvise64_64",
+-    "brk",
+-    "capget",
+-    "capset",
+-    "chdir",
+-    "clock_getres",
+-    "clock_gettime",
+-    "clock_gettime64",
+-    "clone",
+-    "clone3",
+-    "close",
+-    "connect",
+-    "creat",
+-    "dup",
+-    "epoll_create",
+-    "epoll_create1",
+-    "epoll_ctl",
+-    "epoll_pwait",
+-    "epoll_wait",
+-    "eventfd",
+-    "eventfd2",
+-    "execve",
+-    "exit",
+-    "exit_group",
+-    "faccessat",
+-    "fadvise64",
+-    "fadvise64_64",
+-    "fchdir",
+-    "fcntl",
+-    "fcntl",
+-    "fcntl64",
+-    "fstat",
+-    "fstatfs",
+-    "fstatfs64",
+-    "ftruncate",
+-    "ftruncate64",
+-    "futex",
+-    "futex_time64",
+-    "get_mempolicy",
+-    "getcwd",
+-    "getdents64",
+-    "getegid",
+-    "getegid32",
+-    "geteuid",
+-    "geteuid32",
+-    "getgid",
+-    "getgid32",
+-    "getpid",
+-    "getppid",
+-    "getpriority",
+-    "getrandom",
+-    "gettid",
+-    "gettimeofday",
+-    "getuid",
+-    "getuid32",
+-    "ioctl",
+-    "madvise",
+-    "membarrier",
+-    "memfd_create",
+-    "mmap",
+-    "mmap2",
+-    "mprotect",
+-    "mremap",
+-    "munmap",
+-    "newfstatat",
+-    "open",
+-    "openat",
+-    "pipe",
+-    "pipe2",
+-    "pivot_root",
+-    "poll",
+-    "ppoll",
+-    "ppoll_time64",
+-    "prctl",
+-    "pread64",
+-    "prlimit64",
+-    "read",
+-    "readlink",
+-    "readlinkat",
+-    "recv",
+-    "recvfrom",
+-    "recvmsg",
+-    "restart_syscall",
+-    "riscv_hwprobe",
+-    "rseq",
+-    "rt_sigaction",
+-    "rt_sigprocmask",
+-    "rt_sigreturn",
+-    "sched_getaffinity",
+-    "sched_yield",
+-    "sendmsg",
+-    "sendto",
+-    "set_mempolicy",
+-    "set_mempolicy",
+-    "set_robust_list",
+-    "set_thread_area",
+-    "set_tid_address",
+-    "set_tls",
+-    "setpriority",
+-    "sigaltstack",
+-    "signalfd4",
+-    "socket",
+-    "socketcall",
+-    "stat",
+-    "statfs",
+-    "statfs64",
+-    "statx",
+-    "sysinfo",
+-    "tgkill",
+-    "time",
+-    "timerfd_create",
+-    "timerfd_settime",
+-    "timerfd_settime64",
+-    "ugetrlimit",
+-    "uname",
+-    "unshare",
+-    "wait4",
+-    "write",
+-    "writev",
+-];
+-
+-/// Extra syscalls only allowed with fontconfig
+-///
+-/// We are only allowing them for fontconfig since generally we don't want to
+-/// allow such filesystem operations. But seccomp needs them for cache
+-/// operations.
+-const ALLOWED_SYSCALLS_FONTCONFIG: &[&str] = &[
+-    "chmod",
+-    "fchmodat",
+-    "link",
+-    "linkat",
+-    "rename",
+-    "renameat",
+-    "renameat2",
+-    "unlink",
+-    "unlinkat",
+-];
+-
+ const INHERITED_ENVIRONMENT_VARIABLES: &[&str] = &["RUST_BACKTRACE", "RUST_LOG", "XDG_RUNTIME_DIR"];
+ 
+ pub struct Sandbox {
+@@ -183,8 +35,6 @@ static_assertions::assert_impl_all!(Sandbox: Send, Sync);
+ 
+ pub struct SpawnedSandbox {
+     pub command: Command,
+-    // Keep seccomp fd alive until process exits
+-    pub _seccomp_fd: Option<Memfd>,
+     pub _dbus_socket: UnixStream,
+ }
+ 
+@@ -217,25 +67,14 @@ impl Sandbox {
+ 
+         let mut shared_fds = Vec::new();
+ 
+-        let (mut command, seccomp_fd) = match self.sandbox_mechanism {
+-            SandboxMechanism::Bwrap => {
+-                let seccomp_memfd = Self::seccomp_export_bpf(&self.seccomp_filter()?)?;
+-                let command = self.bwrap_command(&seccomp_memfd).await?;
+-
+-                shared_fds.push(seccomp_memfd.as_raw_fd());
+-
+-                (command, Some(seccomp_memfd))
+-            }
+-            SandboxMechanism::FlatpakSpawn => {
+-                let command = self.flatpak_spawn_command();
+-
+-                (command, None)
+-            }
++        let mut command = match self.sandbox_mechanism {
++            SandboxMechanism::Bwrap => self.bwrap_command().await?,
++            SandboxMechanism::FlatpakSpawn => self.flatpak_spawn_command(),
+             SandboxMechanism::NotSandboxed => {
+                 eprintln!("WARNING: Glycin running without sandbox.");
+                 let command = self.no_sandbox_command();
+ 
+-                (command, None)
++                command
+             }
+         };
+ 
+@@ -279,12 +118,11 @@ impl Sandbox {
+ 
+         Ok(SpawnedSandbox {
+             command,
+-            _seccomp_fd: seccomp_fd,
+             _dbus_socket: self.dbus_socket,
+         })
+     }
+ 
+-    async fn bwrap_command(&self, seccomp_memfd: &Memfd) -> Result<Command, Error> {
++    async fn bwrap_command(&self) -> Result<Command, Error> {
+         let mut command = Command::new("bwrap");
+ 
+         command.args([
+@@ -471,10 +309,6 @@ impl Sandbox {
+         // Reset to original caps
+         drop(caps_reset_guard);
+ 
+-        // Configure seccomp
+-        command.arg("--seccomp");
+-        command.arg(seccomp_memfd.as_raw_fd().to_string());
+-
+         // Loader binary
+         command.arg(self.exec());
+ 
+@@ -635,53 +469,6 @@ impl Sandbox {
+         }
+     }
+ 
+-    fn seccomp_filter(&self) -> Result<ScmpFilterContext, SeccompError> {
+-        // Using `KillProcess` allows rejected syscalls to be logged by auditd. But it
+-        // doesn't work with tools like valgrind. That's why it's not used by default.
+-        let mut filter = if std::env::var("GLYCIN_SECCOMP_DEFAULT_ACTION")
+-            .ok()
+-            .as_deref()
+-            == Some("KILL_PROCESS")
+-        {
+-            ScmpFilterContext::new(ScmpAction::KillProcess)?
+-        } else {
+-            ScmpFilterContext::new(ScmpAction::Trap)?
+-        };
+-
+-        let mut syscalls = vec![ALLOWED_SYSCALLS];
+-        if self.config_entry.fontconfig() {
+-            // Enable some write operations for fontconfig to update its cache
+-            syscalls.push(ALLOWED_SYSCALLS_FONTCONFIG);
+-        }
+-
+-        for syscall_name in syscalls.into_iter().flatten() {
+-            match ScmpSyscall::from_name(syscall_name) {
+-                Ok(syscall) => {
+-                    filter.add_rule(ScmpAction::Allow, syscall)?;
+-                }
+-                Err(err) => tracing::warn!("Failed to allow syscall '{syscall_name}': {err}"),
+-            }
+-        }
+-
+-        Ok(filter)
+-    }
+-
+-    /// Make seccomp filters available under FD
+-    ///
+-    /// Bubblewrap supports taking an fd to seccomp filters in the BPF format.
+-    fn seccomp_export_bpf(filter: &ScmpFilterContext) -> Result<Memfd, Error> {
+-        let memfd = MemfdOptions::default()
+-            .close_on_exec(false)
+-            .create("seccomp-bpf-filter")?;
+-        let mut file = memfd.as_file();
+-
+-        filter.export_bpf(file)?;
+-
+-        file.rewind()?;
+-
+-        Ok(memfd)
+-    }
+-
+     /// Returns `true` if bwrap syscalls are blocked
+     pub async fn check_bwrap_syscalls_blocked() -> bool {
+         match Self::check_bwrap_syscalls_blocked_internal().await {
+@@ -710,8 +497,7 @@ impl Sandbox {
+         let (dbus_socket, _) = UnixStream::pair()?;
+         let sandbox = Self::new(SandboxMechanism::Bwrap, config_entry, dbus_socket);
+ 
+-        let seccomp_memfd = Self::seccomp_export_bpf(&sandbox.seccomp_filter()?)?;
+-        let mut command = sandbox.bwrap_command(&seccomp_memfd).await?;
++        let mut command = sandbox.bwrap_command().await?;
+ 
+         unsafe {
+             command.pre_exec(|| {
+diff --git a/libglycin/meson.build b/libglycin/meson.build
+index 12cbd5f..979ecf4 100644
+--- a/libglycin/meson.build
++++ b/libglycin/meson.build
+@@ -5,7 +5,6 @@ endif
+ libglycin_deps = [
+     dependency('fontconfig', version: fontconfig_req),
+     dependency('gio-2.0', version: gio_req),
+-    dependency('libseccomp', version: seccomp_req),
+     dependency('lcms2', version: lcms2_req),
+ ]
+ 
+diff --git a/meson.build b/meson.build
+index 9412dfd..27d98ff 100644
+--- a/meson.build
++++ b/meson.build
+@@ -11,7 +11,6 @@ project(
+ lcms2_req = '>= 2.14'
+ gio_req = '>=2.60'
+ gtk4_req = '>= 4.16.0'
+-seccomp_req = '>= 2.5.0'
+ fontconfig_req = '>= 2.13.0'
+ 
+ compat_version = '2+'
+diff --git a/supply-chain/config.toml b/supply-chain/config.toml
+index 61dd78b..7d7bda8 100644
+--- a/supply-chain/config.toml
++++ b/supply-chain/config.toml
+@@ -203,14 +203,6 @@ criteria = "safe-to-deploy"
+ version = "0.1.0"
+ criteria = "safe-to-deploy"
+ 
+-[[exemptions.libseccomp]]
+-version = "0.3.0"
+-criteria = "safe-to-deploy"
+-
+-[[exemptions.libseccomp-sys]]
+-version = "0.2.1"
+-criteria = "safe-to-deploy"
+-
+ [[exemptions.memmap2]]
+ version = "0.5.4"
+ criteria = "safe-to-deploy"
