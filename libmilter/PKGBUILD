@@ -6,50 +6,79 @@
 
 _pkgname=sendmail # libmilter is bundled with the sendmail source
 pkgname=libmilter
-pkgver=8.18.1
-pkgrel=1.1
+pkgver=8.18.2
+pkgrel=1
 pkgdesc='Implementation of the sendmail Mail Filter API'
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://www.proofpoint.com/us/sendmail-open-source'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-options=('staticlibs')
-license=('Sendmail')
-# Signing keys sourced from upstream. Current version is signed with the 2024 keys.
-# https://www.proofpoint.com/us/products/email-protection/open-source-email-solution
-validpgpkeys=('8AB063D7A4C5939DA9C01E38C4065A87C71F6844')
+license=(Sendmail-8.23)
+depends=(glibc)
 source=(
   "https://ftp.sendmail.org/$_pkgname.$pkgver.tar.gz"{,.sig}
-  'fd-passing-libmilter.patch'
-  'site.config.m4'
+  "https://ftp.sendmail.org/mfapi.h.p1"{,.sig}
+  site.config.m4
+  Patch01-fd-passing-libmilter.patch
+  Patch02-Allow-setting-local-CFLAGS-devtools-M4-UNIX-defines.patch
+  Patch03-libmilter-Makefile-m4.patch
 )
-sha512sums=('9ce713b44439d4de6faa9e3cdfa2226b44b4fbeb352a5f81584c062570e9472da244158287e489aabe258d28fe54ca4964565c7b0adc7e1763d212be42f98061'
+# Signing keys sourced from upstream. Current version is signed with the 2025 keys.
+# https://www.proofpoint.com/us/products/email-protection/open-source-email-solution
+validpgpkeys=('032312C7C0C2B1973D5013180C19D37CB7E6543E')
+sha512sums=('55515220ea84db4b56b8154efbf21aeb7161943c92bd63527cfc20169ea566e299cc289f0a6e160dc5637f656bdc451707003750d4b42a7894d40f35f51f6040'
             'SKIP'
+            'c37ffb98c9e3cddd92c436a124b85857437b085d5902b1558d0683f79dc353fe1898331350edd38305b4b578e82f251e63851e99d7f749770fb9dac49a5e10f0'
+            'SKIP'
+            '5c03737393849e9b1841f8dc0b5d81623a4f6dee694d39ce80cb7a40c4e6e7377f3460613de90e459f7b8a423e7465550419ece612d0a4e8ca144c856810eca5'
             '438dfb94d4b884a08abbb20849a8b309b251b9d48c098575e67603d9d4d23d8ac799287cedd975b8aae61c550b987a9bf8dd7c9343ed289185b7e2ca72cbc82a'
-            '01c8f7f9f7a20888604fdbf5696c563dc42e75642f9857cb3cfd3593c058a3a6c84f86250c8459b6dcc1d2b71cfcc5c84e717f8d86df5f9f468086d4d94810bd')
-b2sums=('3afa36073fd611c7fdb43ef0ab9f02d5fb8ae388e9471bdc7275c6c9dcee0a654f46ddef505b70e978cb1b818b0da375250678e501676d8bace534d59ee40d90'
+            '1ec11f97049a7bb19aed75e6a1ab94153732a5699584d221d4e5048da5eedce948cf8885c67ef3d5edb2f14cd68981b46b7e6e7b699745a68c9a95bb3d790da4'
+            '45ed6f2dfe0a1cb795403c2aa7f186844b10eb2b2d34a0efe069061cbec5d05e3bfab249bfae941170142c52e70315f9feaaac23df45c4ed4e91aac6d138eb06')
+b2sums=('a291006fd498d61b8fe19eb02cdeb92f83cef68b5c3db0c8b6479edb8e4722ed2d2ae03cf39553c0631224a1dfa00754cf4ea32bb7bc762ad8152ccaebe606dc'
         'SKIP'
+        '3b0e12a63debe17120145b9230ec67252b74e8baf4d15dbf24473106b68486e92a4d19c9f29bf9f6e3f4eb09c29b6148e9a58c1a0362924108171b7f9e7f03cc'
+        'SKIP'
+        'affe5237612e7687c979ad92a1d0baf19c17379bb2a56b36a4637d19b92a08b423d255b8c420f1949be611ee960539941f5debff897c89e9f6e74fb52eaa1b3b'
         'ea2f1811666ce1b2c7532794845de9ec1f1e72d6c58a02c4c5800e93359c1c1cd4a0353fee572c258c378b0fea776d03ba19d794da7ed3295d9432b47ceb2481'
-        '4173a1abd272908faeef7f44b5d033f639101f0494be0bcb7e43e29b087f436f082e05a3065fc89f428b91e94cfa0c4b4abf92be77bd722a646012a1f428300a')
+        '3ce6d5c4cef02596a7a629d560f92f2b63bbf10b7cae02cf2f4801d90af1b0221ab4ad06d31b6fc693159479ad3758860efa28ab3074ff2537de171a66fc5f90'
+        'daa2478a9b741a3fdd2c14bce787d37b3574872dfc4b09a2c30020778f38276042874caf0ee1f47ad903099844fe745ba31ccf510435201d508af3c6848de5e2')
 
 prepare() {
   cd "$_pkgname-$pkgver"
-  patch -p1 -i ../fd-passing-libmilter.patch # FS#49421
-  cp ../site.config.m4 devtools/Site
+
+  # FS#49421
+  patch -p1 -i "$srcdir/Patch01-fd-passing-libmilter.patch"
+
+  # Set Arch Linux specific options
+  cp "$srcdir/site.config.m4" devtools/Site
+
+  # Prevent circular reference to CFLAGS when local CFLAGS are set via 'confOPTIMIZE' in site.config.m4
+  patch -p1 -i "$srcdir/Patch02-Allow-setting-local-CFLAGS-devtools-M4-UNIX-defines.patch"
+
+  # Patch for libmilter dynamic shared object by Edmund Lodewijks - Based on libmilter patch by Fedora
+  patch -p1 -i "$srcdir/Patch03-libmilter-Makefile-m4.patch"
+
+  # Patch for C23+: 'bool' now keyword in C (Patch from Sendmail - License: Sendmail-8.23)
+  patch -p1 -i "$srcdir/mfapi.h.p1"
 }
 
 build() {
   cd "$_pkgname-$pkgver/$pkgname"
+
   ./Build
 }
 
 package() {
-  cd "$_pkgname-$pkgver/$pkgname"
+  cd "$_pkgname-$pkgver"
 
   # create install directory
   install -vd "$pkgdir/usr/lib"
+
+  # install library files
+  pushd "$pkgname"
   ./Build DESTDIR="$pkgdir" install
+  popd
 
   # license
-  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" ../LICENSE
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
 
   # correct permissions
   chown -R root:root "$pkgdir"
