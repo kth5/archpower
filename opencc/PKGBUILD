@@ -3,17 +3,17 @@
 
 pkgbase=opencc
 pkgname=(opencc opencc-doc)
-pkgver=1.1.9
+pkgver=1.2.0
 pkgrel=3
 pkgdesc="Library for Open Chinese Convert"
 url="https://github.com/BYVoid/OpenCC"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=('Apache-2.0')
 makedepends=('git' 'chrpath' 'cmake' 'darts' 'doxygen' 'marisa' 'pybind11' 'python-setuptools'
-             'python-wheel' 'rapidjson' 'tclap' 'gtest')
+             'python-build' 'python-installer' 'python-wheel' 'rapidjson' 'tclap' 'gtest')
 source=("git+https://github.com/BYVoid/OpenCC.git#tag=ver.$pkgver"
         8f3a5b4b201f091713cb4e2b1b5883a4b12d10b2.patch)
-sha512sums=('0b84d51c530ea79d327c3e0cd7c0a5ed0dbb53a45826d4dfc96b6beaac1e3a023872670bc7a363b18f0481f08f6c12d51fa42991fae7f9471dd7342e47e00bd3'
+sha512sums=('59e0ebf97ff630f10c46e594715cdf91629b053d23417df6d86bb3f051f17e3570b3d989420d03346efceeeb0bedd4cc37bdb4562e3342c818e2b1393e75b4f8'
             'febade61cc1734db891234484893128519dffc198f80883fc4838534684f91db2a21641252615820ae9bedffce52451535ea2717a40958b80ea82590850b90ac')
 
 prepare() {
@@ -24,8 +24,8 @@ prepare() {
   # let's revert the offending commit for now.
   patch -Rp1 -i ../8f3a5b4b201f091713cb4e2b1b5883a4b12d10b2.patch
 
-  git cherry-pick -n 72cae18cfe4272f2b11c9ec1c44d6af7907abcab # Fix build with GCC 15
-  sed -e '/-std=c++14/d' -i CMakeLists.txt # Don't enforce old C++ standard
+  # Fix: GNUInstallDirs sets CMAKE_INSTALL_LIBDIR to relative "lib", causing DIR_LIBRARY to be "lib" instead of "/usr/lib"
+  sed -i 's/set (DIR_LIBRARY ${LIB_INSTALL_DIR})/set (DIR_LIBRARY ${DIR_PREFIX}\/${LIB_INSTALL_DIR})/' CMakeLists.txt
 }
 
 build() {
@@ -37,7 +37,7 @@ build() {
   make
 
   cp opencc_clib.*.so python/opencc/clib/
-  python setup.py build
+  python -m build --wheel --no-isolation
 }
 
 check() {
@@ -48,10 +48,11 @@ check() {
 package_opencc() {
   pkgdesc="Library for Open Chinese Convert"
   depends=('marisa')
+  provides=('libopencc.so')
 
   cd OpenCC
   make DESTDIR="$pkgdir" install
-  python setup.py install --root="$pkgdir" --optimize=1
+  python -m installer --destdir="$pkgdir" dist/*.whl
 
   # Hack to make opencc's python binding to use system opencc's configs
   local python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
