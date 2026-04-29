@@ -4,68 +4,73 @@
 
 pkgbase=marisa
 pkgname=('marisa' 'perl-marisa' 'python-marisa' 'ruby-marisa')
-pkgver=0.2.6
-pkgrel=20
+pkgver=0.3.1
+pkgrel=1
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://github.com/s-yata/marisa-trie"
 license=('BSD-2-Clause OR LGPL-2.1-or-later')
-makedepends=('python' 'ruby' 'perl' 'swig' 'python-setuptools')
-source=("marisa-trie-$pkgver.tar.gz::https://github.com/s-yata/marisa-trie/archive/v$pkgver.tar.gz"
-        fix-format-security.patch)
-sha512sums=('c094e4b22e1457efdd20f2b978ee421b53e36ed94e4fdbd8944136c0ba23da4f6ba9fe3a2c64729c1426aee4dbe8098bfa5eebb943ae7fdaa4eec760485c564d'
-            '3583f23c55ccd46cefbd757ef3f82dc7a90f14c64ecf69a99ab3467ca1e6aeddf9822be4c4dffcdbb8841d79fe116cfb8eff0e9b44abaadbcbf8d50a10ab1ec9')
+makedepends=('git' 'cmake' 'python' 'ruby' 'perl' 'swig' 'python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+source=("git+https://github.com/s-yata/marisa-trie.git#tag=v$pkgver")
+sha512sums=('6d9e2290f6985a6e6232dd586d90c60350edd3bac7f3d145542722862750667ebcee1f69f37d035fb0632f4a111c15ff1f88805c3229eb2c3e79f474e1b589ad')
 
 prepare() {
-  cd marisa-trie-$pkgver
-  autoreconf -i
+  cd marisa-trie
 
-  # https://github.com/s-yata/marisa-trie/pull/45
-  patch -Np1 -i ../fix-format-security.patch
+  # Fix binding build after upstream exception API changes.
+  git cherry-pick -n cf4602f08df49861d987d122bd85bfdb456fe7a0
+
+  # Upstream installs targets only for the Release configuration, but Arch
+  # builds with CMAKE_BUILD_TYPE=None.
+  sed -i '/^[[:space:]]*CONFIGURATIONS Release$/d' CMakeLists.txt
 }
 
 build() {
-  cd marisa-trie-$pkgver
-  ./configure --prefix=/usr --disable-static
-  make
+  cd marisa-trie
+  cmake -B build -S . \
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DBUILD_SHARED_LIBS=ON \
+    -DBUILD_TESTING=ON
+
+  cmake --build build
 
   # Regenerate swig bindings
-  # remove ruby because it's broken for now
-  make -C bindings -j1 swig-perl swig-python
+  make -C bindings -j1
 
   # Perl bindings
-  cd "$srcdir"/marisa-trie-$pkgver/bindings/perl
+  cd "$srcdir"/marisa-trie/bindings/perl
   perl Makefile.PL \
-    INC=-I"$srcdir"/marisa-trie-$pkgver/include \
-    LIBS=-L"$srcdir"/marisa-trie-$pkgver/lib/marisa/.libs \
+    INC=-I"$srcdir"/marisa-trie/include \
+    LIBS=-L"$srcdir"/marisa-trie/build \
     INSTALLDIRS=vendor
   make
 
   # Python bindings
-  cd "$srcdir"/marisa-trie-$pkgver/bindings/python
-  python setup.py build_ext \
-    --include-dirs="$srcdir"/marisa-trie-$pkgver/include \
-    --library-dirs="$srcdir"/marisa-trie-$pkgver/lib/marisa/.libs
-  python setup.py build
+  cd "$srcdir"/marisa-trie/bindings/python3
+  python -m build --wheel --no-isolation \
+    -C="--build-option=build_ext" \
+    -C="--build-option=--include-dirs=$srcdir/marisa-trie/include" \
+    -C="--build-option=--library-dirs=$srcdir/marisa-trie/build"
 
   # Ruby bindings
-  cd "$srcdir"/marisa-trie-$pkgver/bindings/ruby
+  cd "$srcdir"/marisa-trie/bindings/ruby
   ruby extconf.rb \
-    --with-opt-include="$srcdir"/marisa-trie-$pkgver/include \
-    --with-opt-lib="$srcdir"/marisa-trie-$pkgver/lib/marisa/.libs \
+    --with-opt-include="$srcdir"/marisa-trie/include \
+    --with-opt-lib="$srcdir"/marisa-trie/build \
     --vendor
-  make
+  make V=1
 }
 
 check() {
-  make -C marisa-trie-$pkgver check
+  ctest --test-dir marisa-trie/build --output-on-failure
 }
 
 package_marisa() {
   pkgdesc="Static and space-efficient trie data structure library"
   depends=('gcc-libs')
 
-  cd marisa-trie-$pkgver
-  make DESTDIR="$pkgdir" install
+  cd marisa-trie
+  DESTDIR="$pkgdir" cmake --install build
 
   install -d "$pkgdir"/usr/share/doc/$pkgbase-$pkgver
   install -m 644 docs/* "$pkgdir"/usr/share/doc/$pkgbase-$pkgver/
@@ -78,7 +83,7 @@ package_perl-marisa() {
   pkgdesc="Perl language binding for marisa"
   depends=('perl' 'marisa')
 
-  cd marisa-trie-$pkgver/bindings/perl
+  cd marisa-trie/bindings/perl
   make DESTDIR="$pkgdir" install
 
   cd ../..
@@ -90,8 +95,8 @@ package_python-marisa() {
   pkgdesc="Python language binding for marisa"
   depends=('python' 'marisa')
 
-  cd marisa-trie-$pkgver/bindings/python
-  python setup.py install -O1 --root="$pkgdir"
+  cd marisa-trie/bindings/python3
+  python -m installer --destdir="$pkgdir" dist/*.whl
 
   cd ../..
   install -d "$pkgdir"/usr/share/licenses/$pkgname
@@ -105,7 +110,7 @@ package_ruby-marisa() {
   # ruby version without the patch number, e.g. 2.4
   local _rubyver=$(ruby -e"puts Gem.ruby_version.to_s.split('.')[0..1].join('.')")
 
-  cd marisa-trie-$pkgver/bindings/ruby
+  cd marisa-trie/bindings/ruby
     _hdrdir=$(pkg-config --variable=rubyhdrdir ruby-$_rubyver)
     _arch=$(pkg-config --variable=arch ruby-$_rubyver)
   make DESTDIR="$pkgdir" install \
