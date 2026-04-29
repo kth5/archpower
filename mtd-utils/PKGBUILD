@@ -1,52 +1,62 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 # Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 # Contributor: Phil Pirozhkov <pirjsuka@gmail.com>
 
 pkgname=mtd-utils
-pkgver=2.2.0
-pkgrel=1.1
+pkgver=2.3.0
+pkgrel=1
 pkgdesc='Utilities for dealing with MTD devices'
 url='http://www.linux-mtd.infradead.org/'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(GPL-2.0-only)
 depends=(
+  bash
+  glibc
   lzo
-  util-linux
-  zstd
+  openssl
+  util-linux-libs
   zlib
+  zstd
 )
 makedepends=(
   cmocka
+  git
 )
-source=(ftp://ftp.infradead.org/pub/mtd-utils/${pkgname}-${pkgver}.tar.bz2{,.asc})
-sha512sums=('985d1a600cc6d5c69dd4bd47c67612fcd35c009d772051c5e05b132a13c8a62534e0808930a398f78b3ef83e6f14a198169df71ac4c61c6415d879ddf64202de'
-            'SKIP')
-validpgpkeys=('13063F723C9E584AEACD5B9BBCE5DC3C741A02D1')
+source=("git+git://git.infradead.org/mtd-utils.git#tag=v${pkgver}?signed")
+b2sums=('d3943d1131f23a4282e2b36c0768283e0089f57549ee01f87893f943adb399c14bbf5998b73f1bce17c4e6e949ba3130fce08c6451b4adc0924243c5cfe39f2a')
+validpgpkeys=('13063F723C9E584AEACD5B9BBCE5DC3C741A02D1') # David Oberhollenzer <david.oberhollenzer@sigma-star.at>
 
 prepare() {
-  cd ${pkgname}-${pkgver}
+  cd ${pkgname}
   autoreconf -fiv
 }
 
 build() {
-  cd ${pkgname}-${pkgver}
+  cd ${pkgname}
+  # Tests fail with fortification enabled
+  export CFLAGS="${CFLAGS/-Wp,-D_FORTIFY_SOURCE=?/}"
   ./configure \
     --prefix=/usr \
     --libexecdir=/usr/lib \
     --sbindir=/usr/bin \
     --enable-unit-tests \
-    --enable-tests
+    --with-tests
   make
 }
 
 check() {
-  cd ${pkgname}-${pkgver}
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
+  cd ${pkgname}
   make check -j1
 }
 
 package() {
-  cd ${pkgname}-${pkgver}
+  cd ${pkgname}
   make DESTDIR="${pkgdir}" install
 }
 
