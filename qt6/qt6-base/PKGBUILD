@@ -6,10 +6,11 @@
 pkgbase=qt6-base
 pkgname=(qt6-base
          qt6-xcb-private-headers)
-_pkgver=6.10.2
+_pkgver=6.11.0
 pkgver=${_pkgver/-/}
-pkgrel=1
-arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+pkgrel=2
+#arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+arch=(x86_64 powerpc64le powerpc64)
 url='https://www.qt.io'
 license=(GPL-3.0-only
          LGPL-3.0-only
@@ -36,6 +37,7 @@ depends=(brotli
          libpng
          libproxy
          libsm
+         liburing
          libx11
          libxcb
          libxkbcommon
@@ -49,6 +51,7 @@ depends=(brotli
          sqlite
          systemd-libs
          tslib
+         wayland
          xcb-util-cursor
          xcb-util-image
          xcb-util-keysyms
@@ -84,7 +87,6 @@ optdepends=('freetds: MS SQL driver'
             'pango: GTK platform plugin'
             'perl: for syncqt'
             'postgresql-libs: PostgreSQL driver'
-            'qt6-wayland: to run Qt6 applications in a Wayland session'
             'unixodbc: ODBC driver')
 optdepends_x86_64=(
             'libfbclient: Firebird/iBase driver'
@@ -93,22 +95,26 @@ groups=(qt6)
 _pkgfn=${pkgbase/6-/}
 source=(git+https://code.qt.io/qt/$_pkgfn#tag=v$_pkgver
         qt6-base-cflags.patch
-        qt6-base-nostrip.patch)
-sha256sums=('568e53ff276e8abe051c62269679886bb9efb56b6ac7949889ebe335e22e760f'
+        qt6-base-nostrip.patch
+        qtestsupport-32bit-not-lock-free.patch)
+sha256sums=('2223c075e95d86f8dbf6395b025a74d996c418f094453c903290e3c2663fbed2'
             '5411edbe215c24b30448fac69bd0ba7c882f545e8cf05027b2b6e2227abc5e78'
-            '4b93f6a79039e676a56f9d6990a324a64a36f143916065973ded89adc621e094')
+            '4b93f6a79039e676a56f9d6990a324a64a36f143916065973ded89adc621e094'
+            'f10b8a8bfcc8310bb2dd28f0430bc345025a65b376174bf1f20a343710bf68e2')
 
 prepare() {
   patch -d $_pkgfn -p1 < qt6-base-cflags.patch # Use system CFLAGS
   patch -d $_pkgfn -p1 < qt6-base-nostrip.patch # Don't strip binaries with qmake
-  git -C $_pkgfn cherry-pick -n 2974b3d740a705767a1b6ca0779eb0d989364769 # Fix window positioning
+
+  git -C $_pkgfn cherry-pick -n 8b54513cdcf62047376a5d27d784ad68a8f235bf # Fix qdbus crashes
+
+  patch -d $_pkgfn -p1 < qtestsupport-32bit-not-lock-free.patch
 }
 
 build() {
   case "${CARCH}" in
-    powerpc) _cmake_options=(-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF) ;;
-    powerpc64|powerpc64le) _cmake_options=(-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON) ;;
-    riscv64) _cmake_options=(-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DFEATURE_reduce_relocations=OFF) ;;
+    powerpc) _cmake_options=(-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DQT_BUILD_TESTS=OFF) ;;
+    powerpc64|powerpc64le) _cmake_options=(-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DQT_BUILD_TESTS=OFF) ;;
     x86_64) _cmake_options=(-DFEATURE_no_direct_extern_access=ON -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON) ;;
   esac
 
@@ -116,7 +122,7 @@ build() {
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DINSTALL_BINDIR=lib/qt6/bin \
-    -DINSTALL_PUBLICBINDIR=usr/bin \
+    -DINSTALL_PUBLICBINDIR=bin \
     -DINSTALL_LIBEXECDIR=lib/qt6 \
     -DINSTALL_DOCDIR=share/doc/qt6 \
     -DINSTALL_ARCHDATADIR=lib/qt6 \
@@ -129,6 +135,7 @@ build() {
     -DFEATURE_openssl_linked=ON \
     -DFEATURE_system_sqlite=ON \
     -DFEATURE_system_xcb_xinput=ON \
+    -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
     -DCMAKE_MESSAGE_LOG_LEVEL=STATUS ${_cmake_options[@]}
   cmake --build build
 }
@@ -139,13 +146,6 @@ package_qt6-base() {
   DESTDIR="$pkgdir" cmake --install build
 
   install -Dm644 $_pkgfn/LICENSES/* -t "$pkgdir"/usr/share/licenses/$pkgbase
-
-# Install symlinks for user-facing tools
-  cd "$pkgdir"
-  mkdir usr/bin
-  while read _line; do
-    ln -s $_line
-  done < "$srcdir"/build/user_facing_tool_links.txt
 }
 
 package_qt6-xcb-private-headers() {
@@ -156,8 +156,7 @@ package_qt6-xcb-private-headers() {
   groups=()
 
   cd $_pkgfn
-  install -d -m755 "$pkgdir"/usr/include/qt6xcb-private/{gl_integrations,nativepainting}
+  install -d -m755 "$pkgdir"/usr/include/qt6xcb-private/gl_integrations
   cp -r src/plugins/platforms/xcb/*.h "$pkgdir"/usr/include/qt6xcb-private/
   cp -r src/plugins/platforms/xcb/gl_integrations/*.h "$pkgdir"/usr/include/qt6xcb-private/gl_integrations/
-  cp -r src/plugins/platforms/xcb/nativepainting/*.h "$pkgdir"/usr/include/qt6xcb-private/nativepainting/
 }
