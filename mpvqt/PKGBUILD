@@ -3,7 +3,7 @@
 
 pkgname=mpvqt
 pkgver=1.1.1
-pkgrel=1
+pkgrel=2
 pkgdesc='A libmpv wrapper for QtQuick2 and QML'
 license=(LGPL-2.1-only
          LGPL-3.0-only)
