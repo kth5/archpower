@@ -4,8 +4,8 @@
 # Contributor: SpepS <dreamspepser at yahoo dot it>
 
 pkgname=ardour
-pkgver=8.12
-pkgrel=4
+pkgver=9.2
+pkgrel=3
 pkgdesc="Professional-grade digital audio workstation"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://ardour.org/"
@@ -18,9 +18,10 @@ license=(
 groups=(pro-audio)
 depends=(
   cairo
-  gcc-libs
   glibc
   hicolor-icon-theme
+  libgcc
+  libstdc++
   libsigc++
   libx11
   libxext
@@ -46,7 +47,7 @@ makedepends=(
   graphviz
   hidapi
   itstool
-  jack
+  jack2
   libarchive
   liblo
   liblrdf
@@ -90,10 +91,10 @@ source=(
   $pkgname-7.0-re-vendor_qm-dsp.patch
 )
 noextract=($pkgname-midi-$pkgver.zip)
-sha512sums=('fe9d92402b13e5cea13d1bee097ee7e153e8965eb64cb9cd59fcc53b1f4959131e5c611acff3da268f113a03be30f89c8b46558ddea587f42b354a982368bf59'
+sha512sums=('3aa8e9ce980545f0c3ec1d62182a715e5a181dc8223eec0a7455c3989a068b4f2b55312a6b522f7279d25c7c104661012ff25b44c6e5c70e1427c55a3aaf1436'
             '94b681f989e834f5de25ce87da9c174b11d90617063f8c96147d7eb470391b35f6d54b85de16da8d963cacb01b50d1c1fab0fddd18eb3b086fe17124ecfa4f65'
             'a3da14925bc25d8a57ba3e137c4b2b04010054667ac4ae2aec116ce6c157b03c9dd76bf4d73c313022282362d19b91683f062d6ab2ee0c73a576d3fa6272bd1d')
-b2sums=('d0d18ad1f48bfa34a9e6400f83140e587f7d6068d572bc3a39de04fe40880772154d576c5235c9a53f35a8a8bf71fa6fad9e6828bafc7245a7494963a0315f22'
+b2sums=('bae6945923fe1e2986f22c13f9be998da8b07754332b1c9d45956d7778d3fdee16310e02763d7c389531ea16a67b8583f4a691141e95528bda78c730bda61ed0'
         'e31be6b51a217e2f7f799aa1d6e8c3cd024d80ab2d8d4371496a2b8bf0215749979217b565909841a346d6b3128fbfd674d2fae64b9fe741a5b418cd184c23be'
         '73845adce9a48938cd7aef5fbc65f492e470de316620d278365d247c80caef44531e850fbd3d2f5de65a8562e67aabfd982c938439bd3670726a27bc003be017')
 
@@ -107,9 +108,6 @@ prepare() {
   patch -Np1 -d $pkgname -i ../$pkgname-7.0-re-vendor_qm-dsp.patch
 
   cd $pkgname
-  # Fix crash when pressing spacebar: https://gitlab.archlinux.org/archlinux/packaging/packages/ardour/-/issues/3 
-  git cherry-pick -n 49ff88fd75abba5e2b658ffdedff9ed5a16335ce
-
   # unsetting gtk2 rc (FS#54389)
   sed -e '8iexport GTK2_RC_FILES=/dev/null' -i gtk2_ardour/ardour.sh.in
 
@@ -128,6 +126,14 @@ prepare() {
 }
 
 build() {
+  case "${CARCH}" in
+    powerpc)
+      export CFLAGS+=' -latomic'
+      export CXXFLAGS+=' -latomic'
+      export LDFLAGS+=' -latomic'
+    ;;
+  esac
+
   local waf_configure_options=(
     --prefix=/usr
     --configdir=/etc
@@ -140,15 +146,9 @@ build() {
     --with-backends="alsa,dummy,jack,pulseaudio"
   )
 
-  case "${CARCH}" in
-    powerpc)
-      export CFLAGS+=' -latomic'
-      export CXXFLAGS+=' -latomic'
-      export LDFLAGS+=' -latomic'
-    ;;
-  esac
-
   cd $pkgname
+  # NOTE: The ardour binaries allow executable stack, as otherwise dynamically linked plugins are not able to load anymore with newer versions of the toolchain:
+  # https://discourse.ardour.org/t/tls-1295-lea-so-linux-vers-doesnt-work/111778/17
   export LINKFLAGS="$LDFLAGS"
   ./waf configure "${waf_configure_options[@]}"
   ./waf build -v
