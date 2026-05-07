@@ -1,0 +1,141 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+
+pkgbase=malcontent
+pkgname=(
+  malcontent
+  libmalcontent
+  malcontent-docs
+)
+pkgver=0.14.0
+pkgrel=3
+pkgdesc="Parental control support for applications"
+url="https://gitlab.freedesktop.org/pwithnall/malcontent"
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+license=(LGPL-2.1-or-later)
+depends=(
+  accountsservice
+  appstream
+  dbus
+  flatpak
+  glib2
+  glibc
+  graphene
+  gtk4
+  hicolor-icon-theme
+  json-glib
+  libadwaita
+  libgcc
+  libgsystemservice
+  libsoup3
+  pam
+  pango
+  polkit
+  python
+  python-gobject
+)
+makedepends=(
+  git
+  gi-docgen
+  glib2-devel
+  gnome-desktop-4
+  gobject-introspection
+  libglib-testing
+  meson
+  python-packaging
+  yelp-tools
+)
+checkdepends=(
+  python-dbusmock
+)
+source=(
+  "git+https://gitlab.freedesktop.org/pwithnall/malcontent.git#tag=${pkgver/[a-z]/.&}"
+  "git+https://gitlab.gnome.org/GNOME/gvdb.git"
+  "https://www.corpit.ru/mjt/tinycdb/tinycdb-0.81.tar.gz"
+  0001-meson-Statically-link-against-libgcc.patch
+)
+b2sums=('7258122f1b593c7352b1847e2fecb29da7a1cf7438575d0050202977e0d35b925fc85d202bee093c20f86bd8471bf9e645792c637b82e6aede6cc49c31b40949'
+        'SKIP'
+        '6b5b1167bd7e58a02b9a3a1ff2d58adb0e522ef65a13384051d9a037358ed7586f7d567e543099adec6322f9c60d38525fed586488510215bf72d12a60c67684'
+        '1c49ae7ab9bffbf556191fdec67c2e8b4541477e162eddd552db4a69f149ac085bfb8d8add572ca16cb20eabac93c0406d711a155d189103bf4d8071d026919a')
+validpgpkeys=(
+  923B7025EE03C1C59F42684CF0942E894B2EAFA0 # Philip Withnall <pwithnall@gnome.org>
+)
+
+prepare() {
+  cd $pkgname
+
+  # With -fexceptions, an unexpected dependency is created
+  # that fails the "nss - malcontent:nss-objdump.py" test.
+  # To avoid this, we link libgcc statically.
+  git apply -3 ../0001-meson-Statically-link-against-libgcc.patch
+
+  git submodule init
+  git submodule set-url subprojects/gvdb "$srcdir/gvdb"
+  git -c protocol.file.allow=always -c protocol.allow=never submodule update
+}
+
+build() {
+  # Inject tinycdb
+  export MESON_PACKAGE_CACHE_DIR="$srcdir"
+
+  arch-meson $pkgname build
+  meson compile -C build
+}
+
+check() {
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
+  meson test -C build --no-suite lint --print-errorlogs
+}
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_malcontent() {
+  depends+=("libmalcontent=$pkgver-$pkgrel")
+  provides=(libmalcontent-ui-1.so)
+  groups=(gnome)
+
+  meson install -C build --destdir "$pkgdir"
+
+  cd "$pkgdir"
+
+  _pick libs usr/include/malcontent-0
+  _pick libs usr/lib/girepository-1.0/Malcontent-0.typelib
+  _pick libs usr/lib/libmalcontent-0.so*
+  _pick libs usr/lib/pkgconfig/malcontent-0.pc
+  _pick libs usr/share/gir-1.0/Malcontent-0.gir
+  _pick doc usr/share/doc
+}
+
+package_libmalcontent() {
+  pkgdesc="Parental control library"
+  depends=(
+    accountsservice
+    glibc
+    libgcc
+    libg{lib,object,io}-2.0.so
+  )
+  provides=(libmalcontent-0.so)
+
+  mv libs/* "$pkgdir"
+}
+
+package_malcontent-docs() {
+  pkgdesc+=" (documentation)"
+  depends=()
+
+  mv doc/* "$pkgdir"
+}
+
+# vim:set sw=2 sts=-1 et:
