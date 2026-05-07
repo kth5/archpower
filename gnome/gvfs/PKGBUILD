@@ -9,7 +9,6 @@ pkgname=(
   gvfs-afc
   gvfs-dnssd
   gvfs-goa
-  gvfs-google
   gvfs-gphoto2
   gvfs-mtp
   gvfs-nfs
@@ -17,7 +16,7 @@ pkgname=(
   gvfs-smb
   gvfs-wsdd
 )
-pkgver=1.58.0
+pkgver=1.60.0
 pkgrel=2
 pkgdesc="Virtual filesystem implementation for GIO"
 url="https://gitlab.gnome.org/GNOME/gvfs"
@@ -26,7 +25,6 @@ license=(LGPL-2.0-only)
 depends=(
   dconf
   fuse3
-  gcc-libs
   gcr-4
   glib2
   glibc
@@ -35,6 +33,7 @@ depends=(
   libbluray
   libcdio
   libcdio-paranoia
+  libgcc
   libgcrypt
   libgudev
   libsecret
@@ -51,7 +50,6 @@ makedepends=(
   docbook-xsl
   git
   glib2-devel
-  libgdata
   libgoa
   libgphoto2
   libimobiledevice
@@ -69,18 +67,12 @@ groups=(gnome)
 source=(
   "git+https://gitlab.gnome.org/GNOME/gvfs.git#tag=$pkgver"
   gvfsd.hook
-  0001-monitor-Do-not-load-monitors-when-GIO_USE_VFS-local.patch
 )
-b2sums=('61e5fb1948fdb8bab03f930712072ca9feeae033110003677b2e604628d6457252ebbd5f77b27d0d07ad8cbf6379b49c281303b8b1a92e975487b7746a82c474'
-        'a0356a49c419dc69466c591d5e69701b865bb97ca336ea6d8bca0f0d9173b832b73d9f2c701d572a0245957d39c9a38ab6dff4ea7c737c34f2a1a28d93c0427f'
-        '0f49b0c2425521f79c48ea092b7a26b601a18f9c2559cbfef6f2a1e338fa2f8d44e75edb85445248f4f35f41e2636836d398019fae0f908689385bf0171bd023')
+b2sums=('79865df854d878ecac23b8ea2cbbf594accb581a5c824a66314955374c8a633a3ed70ed752903f1369151dba86d6e9df4b2fdc390e0cde9052427f79953ad234'
+        'a0356a49c419dc69466c591d5e69701b865bb97ca336ea6d8bca0f0d9173b832b73d9f2c701d572a0245957d39c9a38ab6dff4ea7c737c34f2a1a28d93c0427f')
 
 prepare() {
   cd gvfs
-
-  # https://gitlab.archlinux.org/archlinux/packaging/packages/systemd/-/issues/39
-  # https://gitlab.gnome.org/GNOME/gvfs/-/merge_requests/193
-  git apply -3 ../0001-monitor-Do-not-load-monitors-when-GIO_USE_VFS-local.patch
 }
 
 build() {
@@ -111,7 +103,6 @@ package_gvfs() {
     'gvfs-afc: AFC support (Apple mobile devices)'
     'gvfs-dnssd: DNS-SD and WebDAV support (macOS file sharing)'
     'gvfs-goa:  Gnome Online Accounts support (e.g. OwnCloud)'
-    'gvfs-google: Google Drive support'
     'gvfs-gphoto2: gphoto2 support (PTP camera, MTP media player)'
     'gvfs-mtp: MTP support (Android, media player)'
     'gvfs-nfs: NFS support'
@@ -119,10 +110,8 @@ package_gvfs() {
     'gvfs-smb: SMB/CIFS support (Windows file sharing)'
     'gvfs-wsdd: Web Services Dynamic Discovery support (Windows discovery)'
   )
-  replaces=(
-    gvfs-afp
-    gvfs-obexftp
-  )
+  conflicts=('gvfs-google<=1.58.3-1')
+  replaces=('gvfs-google<=1.58.3-1')
 
   meson install -C build --destdir "$pkgdir"
 
@@ -146,10 +135,6 @@ package_gvfs() {
       usr/lib/systemd/user/gvfs-goa-volume-monitor.service \
       usr/share/dbus-1/services/org.gtk.vfs.GoaVolumeMonitor.service \
       usr/share/gvfs/remote-volume-monitors/goa.monitor
-
-    _pick google \
-      usr/lib/gvfsd-google \
-      usr/share/gvfs/mounts/google.mount
 
     _pick gphoto2 \
       usr/lib/gvfs{-gphoto2-volume-monitor,d-gphoto2} \
@@ -223,23 +208,11 @@ package_gvfs-goa() {
     "gvfs=$pkgver"
     glib2
     glibc
+    libgcc
     libgoa
   )
 
   mv goa/* "$pkgdir"
-}
-
-package_gvfs-google() {
-  pkgdesc+=" - Google Drive backend"
-  depends=(
-    "gvfs-goa=$pkgver"
-    glib2
-    glibc
-    libgdata
-    libgoa
-  )
-
-  mv google/* "$pkgdir"
 }
 
 package_gvfs-gphoto2() {
@@ -248,6 +221,7 @@ package_gvfs-gphoto2() {
     "gvfs=$pkgver"
     glib2
     glibc
+    libgcc
     libgphoto2
     libgudev
   )
@@ -261,6 +235,7 @@ package_gvfs-mtp() {
     "gvfs=$pkgver"
     glib2
     glibc
+    libgcc
     libgudev
     libmtp
     libusb
@@ -273,9 +248,9 @@ package_gvfs-nfs() {
   pkgdesc+=" - NFS backend"
   depends=(
     "gvfs=$pkgver"
-    gcc-libs
     glib2
     glibc
+    libgcc
     libnfs
   )
   install=gvfs-nfs.install
@@ -287,9 +262,9 @@ package_gvfs-onedrive() {
   pkgdesc+=" - Microsoft OneDrive backend"
   depends=(
     "gvfs-goa=$pkgver"
-    gcc-libs
     glib2
     glibc
+    libgcc
     libgoa
     msgraph
   )
@@ -303,9 +278,9 @@ package_gvfs-smb() {
     "gvfs=$pkgver"
     'smbclient>=4.12.0'
     dconf
-    gcc-libs
     glib2
     glibc
+    libgcc
   )
 
   mv smb/* "$pkgdir"
@@ -316,9 +291,9 @@ package_gvfs-wsdd() {
   depends=(
     "gvfs=$pkgver"
     dconf
-    gcc-libs
     glib2
     glibc
+    libgcc
     wsdd
   )
 
