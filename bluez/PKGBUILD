@@ -7,23 +7,34 @@
 
 pkgbase=bluez
 pkgname=('bluez' 'bluez-utils' 'bluez-libs' 'bluez-cups' 'bluez-deprecated-tools' 'bluez-hid2hci' 'bluez-mesh' 'bluez-obex')
-pkgver=5.85
-pkgrel=1
+pkgver=5.86
+pkgrel=4
 url="http://www.bluez.org/"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=('GPL-2.0-only')
 makedepends=('dbus' 'libical' 'systemd' 'alsa-lib' 'json-c' 'ell' 'python-docutils' 'python-pygments' 'cups')
 source=(https://www.kernel.org/pub/linux/bluetooth/${pkgname}-${pkgver}.tar.{xz,sign}
-        bluetooth.modprobe)
+        bluetooth.modprobe
+        fix-broken-stdin-handling.patch::https://github.com/bluez/bluez/commit/21e13976f2e375d701b8b7032ba5c1b2e56c305f.patch?full_index=1
+	revert_e73bf58.patch::https://github.com/bluez/bluez/commit/b33e923b55e4d0e9d78a83cfcb541fd1f687ef54.patch?full_index=1)
 # see https://www.kernel.org/pub/linux/bluetooth/sha256sums.asc
-sha256sums=('ad028e49254bc4551a13f08fe7904c63d02ba650d77be8ae15bb3b0a0ad94a6f'
+sha256sums=('99f144540c6070591e4c53bcb977eb42664c62b7b36cb35a29cf72ded339621d'
             'SKIP'
-            '46c021be659c9a1c4e55afd04df0c059af1f3d98a96338236412e449bf7477b4')
+            '46c021be659c9a1c4e55afd04df0c059af1f3d98a96338236412e449bf7477b4'
+            'e042d131206c2080f32b7f0d954092e8be34ecd8892fe9f2b7d26d90313bf2af'
+            'd4256f1a29abc50e4116e3ab6d31a75f2f69f3704e662e59656c10ee2276c92e')
 validpgpkeys=('E932D120BC2AEC444E558F0106CA9F5D1DCF2659') # Marcel Holtmann <marcel@holtmann.org>
 
 prepare() {
   # Remove the vendored ell to avoid conflicts in header search paths
   rm -r "${pkgname}-${pkgver}"/ell
+
+  # Fix bt_shell_printf in non-interactive mode
+  # See https://github.com/bluez/bluez/issues/1896
+  # and https://gitlab.archlinux.org/archlinux/packaging/packages/bluez/-/issues/17#note_423645
+  cd "${pkgname}-${pkgver}"
+  patch -Np1 -i "${srcdir}/fix-broken-stdin-handling.patch"
+  patch -Np1 -i "${srcdir}/revert_e73bf58.patch"
 }
 
 build() {
@@ -54,6 +65,14 @@ build() {
     filename=$(basename $files)
     install -Dm755 "${srcdir}"/"${pkgbase}"-${pkgver}/tools/$filename "${srcdir}/fakeinstall"/usr/bin/$filename
   done
+
+  # add man pages for the above tools
+  # https://github.com/bluez/bluez/commit/44e3dd321e4be052bcde40939552b93b734538d3
+  for manfile in `find doc/ -type f -regex '.*\.[1-8]'`; do
+    section=$(echo $manfile | sed -E 's/.*\.([1-8])$/\1/')
+    filename=$(basename $manfile)
+    install -Dm644 "${srcdir}"/"${pkgbase}"-${pkgver}/doc/$filename "${srcdir}/fakeinstall"/usr/share/man/man${section}/$filename
+  done
 }
 
 _install() {
@@ -70,7 +89,7 @@ _install() {
 
 check() {
   case "${CARCH}" in
-    powerpc) return 0 ;;
+    powerpc64le|powerpc) return 0 ;;
   esac
 
   cd "$pkgname"-$pkgver
@@ -114,11 +133,11 @@ package_bluez-utils() {
   provides=('bluez-plugins')
   replaces=('bluez-plugins')
 
-  _install fakeinstall/usr/bin/{advtest,avinfo,avtest,bcmfw,bdaddr,bluemoon,bluetoothctl,bluetooth-player,bneptest,btattach,btconfig,btgatt-client,btgatt-server,btinfo,btiotest,btmgmt,btmon,btpclient,btpclientctl,btproxy,btsnoop,check-selftest,cltest,create-image,eddystone,gatt-service,hcieventmask,hcisecfilter,hex2hcd,hid2hci,hwdb,ibeacon,isotest,l2ping,l2test,mcaptest,mpris-proxy,nokfw,oobtest,rctest,rtlfw,scotest,seq2bseq,test-runner}
+  _install fakeinstall/usr/bin/{advtest,avinfo,avtest,bcmfw,bdaddr,bluemoon,bluetoothctl,bluetooth-player,bneptest,btattach,btconfig,btgatt-client,btgatt-server,btinfo,btiotest,btmgmt,btmon,btpclient,btpclientctl,btproxy,btsnoop,check-selftest,cltest,create-image,eddystone,gatt-service,hcieventmask,hcisecfilter,hex2hcd,hid2hci,hwdb,ibeacon,isotest,l2ping,l2test,mpris-proxy,nokfw,oobtest,rctest,rtlfw,scotest,seq2bseq,test-runner}
   _install fakeinstall/usr/lib/systemd/user/mpris-proxy.service
   _install fakeinstall/usr/share/man/man1/bluetoothctl*.1
-  _install fakeinstall/usr/share/man/man1/{btattach,btmgmt,btmon,isotest,l2ping,rctest}.1
-  _install fakeinstall/usr/share/man/man5/org.bluez.{A,B,D,G,I,L,M,N,P}*.5
+  _install fakeinstall/usr/share/man/man1/{bdaddr,btattach,btmgmt,btmon,isotest,l2ping,rctest}.1
+  _install fakeinstall/usr/share/man/man5/org.bluez.{A,B,C,D,G,I,L,M,N,P,T}*.5
   _install fakeinstall/usr/share/man/man7/{hci,l2cap,mgmt,sco,iso}.7
   _install fakeinstall/usr/share/zsh/site-functions/_bluetoothctl
 }
