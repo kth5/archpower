@@ -2,7 +2,7 @@
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
 pkgname=js140
-pkgver=140.8.0
+pkgver=140.9.1
 pkgrel=1
 pkgdesc="JavaScript interpreter and libraries - Version 140"
 url="https://spidermonkey.dev/"
@@ -46,14 +46,14 @@ validpgpkeys=(
   # https://blog.mozilla.org/security/2025/04/01/updated-gpg-key-for-signing-firefox-releases-2/
   14F26682D0916CDD81E37B6D61B7B526D98F0353
 )
-sha256sums=('57a7f339ef68273f6597d8074a841fa053f63a21d1f609ab0074a26c063282e6'
+sha256sums=('45d2e6c2b3aa4f52815d1a8a4a93e013d19e86e1b06480f13db9e6fdd7148dc2'
             'SKIP'
             'b5178a7b8a603b645cbae61467f3fa1fef6e9f34c90e4a22faf4ea2152a50fba'
             '941db682a37888582eb1608b936d57c73d7ce4377f4831c73cabb56745734013'
             'a8ed1bf4a0e17118fe6e11b33840d9a2ab7023deb377c44d23a51f9daad06d1e'
             '5173051257f4fd8ed7c0811f01126a6a0f17c9ab6e561b4e0a89cc67509ccdc5'
             'ab43fa4fc086926e03bb0fcd2e7a0fac16a9f498461661951d043dc2ba41ca33')
-b2sums=('dbbf560ae20c6eb384cce577d49fc71152dc3c72dde64efadfa12d975dda2e13aa1c6da7517e435d3e72b0501f440a5cb3a35a75796a42256627620572bf85f3'
+b2sums=('2a8babb3060867fbc8d7a9656b514d6046ed748a2370d92d08c27d9db86c55858656d5b60ab5b016abd9b5283678c176664a34cdefbf9a90e5523e79cd662498'
         'SKIP'
         '89f39bd3ef2ca4894d98f860c2296b2afa58e4fe8c68ddb816a0684cc0db3a8e0deec71af5d214fb3ae40f6ad963aefef02d6b71071c41b9b55752c7cf791a9c'
         'dac1b03aadcde42f9ebdfc91e2806a35a2ab78e0c7f1b15bbfb5970700f4d9db34ee1b561470baee4ac1cb3f42a946a01f5afabb53d8ce92a497382b90e21552'
@@ -63,6 +63,13 @@ b2sums=('dbbf560ae20c6eb384cce577d49fc71152dc3c72dde64efadfa12d975dda2e13aa1c6da
 
 # Make sure the duplication between bin and lib is found
 COMPRESSZST+=(--long)
+
+case "${CARCH}" in
+  powerpc*)
+    export CC=${CHOST}-gcc
+    export CXX=${CHOST}-g++
+  ;;
+esac
 
 prepare() {
   mkdir mozbuild
@@ -77,7 +84,7 @@ prepare() {
   patch -Np1 -i ../0004-Bug-1983736-Patch-jsonschema-to-work-with-Python-3.1.patch
   patch -Np1 -i ../0005-Bug-1993797-Fix-AST-parsing-in-DecoratorVisitor-for-.patch
 
-  cat >../mozconfig <<END
+  cat >${srcdir}/mozconfig <<END
 ac_add_options --enable-application=js
 mk_add_options MOZ_OBJDIR=${PWD@Q}/obj
 
@@ -104,23 +111,23 @@ END
 
 case "${CARCH}" in
   powerpc64le)
-    echo 'ac_add_options --enable-lto=full' >> ../mozconfig
-    echo 'ac_add_options --enable-linker=bfd' >> ../mozconfig
-    echo 'ac_add_options --disable-jit' >> ../mozconfig
-    echo 'ac_add_options --with-libclang-path=/usr/lib/' >> ../mozconfig
-    echo "export CXXFLAGS='-O2 -pipe -mcpu=power8 -fpermissive'" >> ../mozconfig
+    echo 'ac_add_options --enable-lto=full' >> ${srcdir}/mozconfig
+    echo 'ac_add_options --enable-linker=bfd' >> ${srcdir}/mozconfig
+    echo 'ac_add_options --disable-jit' >> ${srcdir}/mozconfig
+    echo 'ac_add_options --with-libclang-path=/usr/lib/' >> ${srcdir}/mozconfig
+    echo "export CXXFLAGS='-O2 -pipe -mcpu=power8 -fpermissive'" >> ${srcdir}/mozconfig
   ;;
   x86_64)
-    echo 'ac_add_options --enable-jit' >> ../mozconfig
-    echo 'ac_add_options --enable-linker=lld' >> ../mozconfig
+    echo 'ac_add_options --enable-jit' >> ${srcdir}/mozconfig
+    echo 'ac_add_options --enable-linker=lld' >> ${srcdir}/mozconfig
   ;;
   *)
-    echo 'ac_add_options --disable-jit' >> ../mozconfig
+    echo 'ac_add_options --disable-jit' >> ${srcdir}/mozconfig
     if [[ ! "${CFLAGS}" == *"mcpu=espresso"* ]]; then
-      echo 'ac_add_options --enable-lto=full' >> ../mozconfig
+      echo 'ac_add_options --enable-lto=full' >> ${srcdir}/mozconfig
     fi
-    echo 'ac_add_options --enable-linker=bfd' >> ../mozconfig
-    echo "export CXXFLAGS='-O2 -pipe -fpermissive'" >> ../mozconfig 
+    echo 'ac_add_options --enable-linker=bfd' >> ${srcdir}/mozconfig
+    echo "export CXXFLAGS='-O2 -pipe -fpermissive'" >> ../mozconfig
   ;;
 esac
 
@@ -135,60 +142,52 @@ build() {
   export MOZ_NOSPAM=1
 
   # malloc_usable_size is used in various parts of the codebase
-  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
-  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
-
-  case "${CARCH}" in
-    powerpc*)
-      export CC=${CHOST}-gcc
-      export CXX=${CHOST}-g++
-    ;;
-  esac
+  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=?/_FORTIFY_SOURCE=2}"
+  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=?/_FORTIFY_SOURCE=2}"
 
   case "${CARCH}" in
     x86_64)
-      # Do 3-tier PGO
-      echo "Building instrumented JS..."
-      cat >.mozconfig ../mozconfig - <<END
+  # Do 3-tier PGO
+  echo "Building instrumented JS..."
+  cat >.mozconfig ${srcdir}/mozconfig - <<END
 ac_add_options --enable-profile-generate=cross
 END
-      ./mach build --priority normal
+  ./mach build --priority normal
 
-      echo "Profiling instrumented JS..."
-      (
-        local js="$PWD/obj/dist/bin/js"
-        export LLVM_PROFILE_FILE="$PWD/js-%p-%m.profraw"
+  echo "Profiling instrumented JS..."
+  (
+    local js="$PWD/obj/dist/bin/js"
+    export LLVM_PROFILE_FILE="$PWD/js-%p-%m.profraw"
 
-        cd js/src/octane
-        "$js" run.js
+    cd js/src/octane
+    "$js" run.js
 
-        cd ../../../third_party/webkit/PerformanceTests/ARES-6
-        "$js" cli.js
+    cd ../../../third_party/webkit/PerformanceTests/ARES-6
+    "$js" cli.js
 
-        cd ../SunSpider/sunspider-0.9.1
-        "$js" sunspider-standalone-driver.js
-      )
+    cd ../SunSpider/sunspider-0.9.1
+    "$js" sunspider-standalone-driver.js
+  )
 
-      llvm-profdata merge -o merged.profdata *.profraw
+  llvm-profdata merge -o merged.profdata *.profraw
 
-      stat -c "Profile data found (%s bytes)" merged.profdata
-      test -s merged.profdata
+  stat -c "Profile data found (%s bytes)" merged.profdata
+  test -s merged.profdata
 
-      echo "Removing instrumented JS..."
-     ./mach clobber objdir
+  echo "Removing instrumented JS..."
+  ./mach clobber objdir
 
-     echo "Building optimized JS..."
-     cat >.mozconfig ../mozconfig - <<END
+  echo "Building optimized JS..."
+  cat >.mozconfig ${srcdir}/mozconfig - <<END
 ac_add_options --enable-lto=cross,full
 ac_add_options --enable-profile-use=cross
 ac_add_options --with-pgo-profile-path=${PWD@Q}/merged.profdata
 END
     ;;
   *)
-    cp ../mozconfig .mozconfig
+    cp ${srcdir}/mozconfig .mozconfig
   ;; 
   esac
-
   ./mach build --priority normal
 }
 
