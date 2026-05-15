@@ -33,14 +33,14 @@ pkgname=(
   lto-dump
 )
 case ${CARCH} in
-  x86_64) pkgname+=(gcc-ada gcc-d gcc-gcobol lib32-gcc-libs libcobol libgphobos libtsan) ;;
+  x86_64) pkgname+=(gcc-ada gcc-d gcc-gcobol lib32-gcc-libs libcobol libgphobos libhwasan libtsan) ;;
   powerpc64le) pkgname+=(gcc-ada libtsan) ;;
   powerpc64) pkgname+=(libtsan) ;;
   powerpc) pkgname+=(gcc-ada) ;;
 esac
 pkgver=16.1.1+r12+g301eb08fa2c5
 _commit=301eb08fa2c5b6f3045260bf1294c2e2bacbcd90
-pkgrel=1
+pkgrel=2
 pkgdesc='The GNU Compiler Collection'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(
@@ -274,7 +274,10 @@ package_gcc() {
   )
   depends_powerpc64=("libtsan=$pkgver-$pkgrel")
   depends_powerpc64le=("libtsan=$pkgver-$pkgrel")
-  depends_x86_64=("libtsan=$pkgver-$pkgrel")
+  depends_x86_64=(
+    "libhwasan=$pkgver-$pkgrel"
+    "libtsan=$pkgver-$pkgrel"
+  )
   optdepends_x86_64=(
     'lib32-gcc-libs: for generating code for 32-bit ABI'
   )
@@ -324,6 +327,12 @@ package_gcc() {
     "$pkgdir/usr/share/gdb/auto-load/usr/lib/"
   rm -f "$pkgdir"/usr/lib{,32}/libstdc++.so*
   rm -f "$pkgdir"/usr/lib{,32}/libatomic.so*
+  mv -v "$pkgdir"/usr/lib/libatomic* "$pkgdir/$_libdir/"
+  case "${CARCH}" in
+    x86_64)
+      mv -v "$pkgdir"/usr/lib32/libatomic* "$pkgdir/$_libdir/32"
+    ;;
+  esac
 
   make DESTDIR="$pkgdir" install-fixincludes
   make -C gcc DESTDIR="$pkgdir" install-mkheaders
@@ -344,6 +353,7 @@ package_gcc() {
       make -C $CHOST/libsanitizer/tsan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
     ;;
     x86_64)
+      make -C $CHOST/libsanitizer/hwasan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
       make -C $CHOST/libsanitizer/tsan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
       make -C $CHOST/32/libgomp DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
       make -C $CHOST/32/libitm DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
@@ -609,7 +619,7 @@ package_gcc-libs() {
   )
   depends_powerpc64=(libtsan)
   depends_powerpc64le=(libtsan)
-  depends_x86_64=(libtsan)
+  depends_x86_64=(libhwasan libtsan)
   provides=(
     $pkgname-multilib
   )
@@ -714,6 +724,7 @@ package_lib32-gcc-libs() {
 
   make -C $CHOST/32/libgcc DESTDIR="$pkgdir" install-shared
   rm -f "$pkgdir/$_libdir/32/libgcc_eh.a"
+  mv -v "$pkgdir"/usr/lib32/libgcc_s{,_asneeded}.so "$pkgdir/$_libdir/32"
 
   for lib in libatomic \
              libgcobol \
@@ -769,6 +780,13 @@ package_libatomic() {
 
   make -C $CHOST/libatomic DESTDIR="$pkgdir" install-toolexeclibLTLIBRARIES
 
+  echo '/* GNU ld script
+Add DT_NEEDED entry for -latomic only if needed.  */
+OUTPUT_FORMAT('`gcc -Wl,--print-output-format -nostdlib -r -o /dev/null`')
+INPUT ( AS_NEEDED ( -latomic ) )' > $pkgdir/usr/lib/libatomic_asneeded.so
+	
+  ln -sf libatomic.a $pkgdir/usr/lib/libatomic_asneeded.a
+
   _install_runtime_library_exception
 }
 
@@ -784,6 +802,7 @@ package_libgcc() {
   cd gcc-build
   make -C $CHOST/libgcc DESTDIR="$pkgdir" install-shared
   rm -f "$pkgdir/$_libdir/libgcc_eh.a"
+  mv -v "$pkgdir"/usr/lib/libgcc_s{,_asneeded}.so "$pkgdir/$_libdir/"
 
   _install_runtime_library_exception
 }
@@ -919,6 +938,24 @@ package_libgphobos() {
 
   # remove files provided by lib32-gcc-libs
   rm -rf "$pkgdir"/usr/lib32/
+
+  _install_runtime_library_exception
+}
+
+package_libhwasan() {
+  pkgdesc='Hardware-assisted Address Sanitizer runtime library shipped by GCC'
+  depends=(
+    'glibc>=2.27'
+    libgcc
+    libstdc++
+  )
+  provides=(
+    libhwasan.so
+  )
+
+  cd gcc-build
+
+  make -C $CHOST/libsanitizer/hwasan DESTDIR="$pkgdir" install-toolexeclibLTLIBRARIES
 
   _install_runtime_library_exception
 }
