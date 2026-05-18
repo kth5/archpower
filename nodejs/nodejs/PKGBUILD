@@ -10,14 +10,14 @@
 # Contributor: TIanyi Cui <tianyicui@gmail.com>
 
 pkgname=nodejs
-pkgver=25.4.0
+pkgver=26.1.0
 pkgrel=1
 pkgdesc='Evented I/O for V8 javascript ("Current" release)'
 arch=(x86_64 powerpc64le powerpc64)
 url='https://nodejs.org/'
 license=('MIT')
 depends=(
-#  'ada'
+  'ada'
   'brotli'
   'c-ares'
   'icu'
@@ -31,6 +31,7 @@ depends=(
 #  'simdutf'
 #  'v8'
   'zlib'
+  'zstd'
 )
 makedepends=(
   'git'
@@ -39,48 +40,42 @@ makedepends=(
 )
 optdepends=('npm: nodejs package manager')
 options=('!debug' '!lto')
-source=(
-  "git+https://github.com/nodejs/node.git#tag=v$pkgver?signed"
-  "update-icu-tests.patch"
-  "hotfix-hwy-vsx.patch"
-  "hotfix-ada-inline.patch"
-  "ppc64-linux-big-endian.patch"
-)
+source=("git+https://github.com/nodejs/node.git#tag=v$pkgver?signed"
+        "hotfix-ada-inline.patch"
+        "nodejs-24.11.1-restore-ppc64be.patch"
+        "nodejs-26.1.0-ppc64-big-endian-elfv2.patch")
 
-sha512sums=('93bf49ef701398c8ae27d6f598e2b4f0d53bb5112426d5b8243ed8155a41891cec60e0a8d47a70e867f32cf3a4f2f049fa41ef4c9a5e671bb6ecc6c2de1ef4bb'
-            'ab2edd1d99a6bb53f8f1f2cef8a3155dd1a44dda181040543ded1aef8775461676bba24470e8f2f9ffc5c36a6acdc77ecb2ea8492eda6bad382c9e0a06dca446'
-            'f927dbbbc3df4421a00718588ad654db1a0dce3df695b3471d762e7a6a68546c295d0e6b4043c1f137317174d9c162e27ca983f4747d5b5b375283ac30c4a74a'
+sha512sums=('c8783e427225861397e6dc101e102bae020551fc2a90daea103c334e5592a9af67ce92ce30029788bc6a244b98ead58053f6bad369569fd64934659c72805ab5'
             'a0f570b7348fb6671d2461ada98731a1c90623f047987d6fb2a5e48af6b846ccf118f0682cd674f2c677c3a044e3215d0ca1882cca81863338d2e1c026af95d0'
-            'f5e0a42c3952061be63d5d8fa169d8799c62d7f21d4b2f32a0b93ac7517f65663f7f7153f33eb91725efac71b4bc0a5010a03717652d661b37754a0fb58c2db6')
+            '75fa7ebdf339d13d4b16f16707c1613a44a7bac5376821abbb2edecf888c1a7cb3b035fa3cc1d5abd9769149c1c17f7afc99d1772bb3db5d3f5dcff9a15f8c9e'
+            '7f9100545da23519ba03ee615902eedc1a02ed3a9c2ea82b582f4cb322cd89841aa266b4d325b1d285c833cba1d23770c22e056d235ae6c27dcad44efc67f9ff')
 validpgpkeys=(
   '8FCCA13FEF1D0C2E91008E09770F7A9A5AE15600' # Michaël Zasso (Targos) <targos@protonmail.com>
   '890C08DB8579162FEE0DF9DB8BEAB4DFCF555EF4' # RafaelGSS <rafael.nunu@hotmail.com>
   'C82FA3AE1CBEDC6BE46B9360C43CEC45C17AB93C' # Richard Lau <rlau@redhat.com>
   'C0D6248439F1D5604AAFFB4021D900FFDB233756' # Antoine du Hamel <duhamelantoine1995@gmail.com>
   '5BE8A3F6C8A5C01D106C0AD820B1A390B168D356' # Antoine du Hamel <antoine.duhamel@rosa.be>
+  '108F52B48DB57BB0CC439B2997B01419BD92F80A' # Ruy Adorno <ruyadorno@hotmail.com>
 )
 
 _set_flags() {
   # /usr/lib/libnode.so uses malloc_usable_size, which is incompatible with fortification level 3
-  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
-  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
-}
+  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=?/_FORTIFY_SOURCE=2}"
+  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=?/_FORTIFY_SOURCE=2}"
 
-case "${CARCH}" in
-  powerpc64)
-    export CFLAGS='-mcpu=powerpc64 -O2 -pipe -Wno-deprecated-declarations'
-    export CXXFLAGS='-mcpu=powerpc64 -O2 -pipe -Wno-deprecated-declarations'
-  ;;
-esac
+  case "${CARCH}" in
+    powerpc64)
+      export CFLAGS='-mcpu=powerpc64 -O2 -pipe -Wno-deprecated-declarations'
+      export CXXFLAGS='-mcpu=powerpc64 -O2 -pipe -Wno-deprecated-declarations'
+    ;;
+  esac
+}
 
 prepare() {
   cd node
-  # Update ICU tests https://github.com/nodejs/node/pull/60523
-  patch -Np1 -i ../update-icu-tests.patch
-
-  patch -Np1 -i ${srcdir}/hotfix-hwy-vsx.patch
   patch -Np1 -i ${srcdir}/hotfix-ada-inline.patch
-  patch -Np1 -i ${srcdir}/ppc64-linux-big-endian.patch
+  patch -Np1 -i ${srcdir}/nodejs-24.11.1-restore-ppc64be.patch
+  patch -Np1 -i ${srcdir}/nodejs-26.1.0-ppc64-big-endian-elfv2.patch
 }
 
 build() {
@@ -88,13 +83,14 @@ build() {
   cd node
 
   case "${CARCH}" in
-    powerpc64*) _configure_flags=(--dest-cpu=ppc64) ;;
+    powerpc64*) _configure_flags=(--dest-cpu=ppc64 --without-snapshot --without-lief) ;;
   esac
 
   ./configure \
     --prefix=/usr \
     --with-intl=system-icu \
     --without-npm \
+    --shared-ada \
     --shared-brotli \
     --shared-cares \
     --shared-libuv \
@@ -103,8 +99,8 @@ build() {
     --shared-ngtcp2 \
     --shared-openssl \
     --shared-simdjson \
-    --shared-zlib ${_configure_flags[@]}
-    # --shared-ada
+    --shared-zlib \
+    --shared-zstd ${_configure_flags[@]}
     # --shared-http-parser
     # --shared-simdutf
     # --shared-v8
@@ -114,7 +110,7 @@ build() {
 
 check() {
   case "${CARCH}" in
-    powerpc*) return 0 ;;
+    powerpc64*) return 0 ;;
   esac
 
   _set_flags
@@ -129,9 +125,6 @@ check() {
   rm test/parallel/test-http2-priority-event.js
   rm test/parallel/test-http2-reset-flood.js
   rm test/parallel/test-tls-ocsp-callback.js
-
-  # https://github.com/nodejs/node/pull/60523
-  rm test/parallel/test-datetime-change-notify.js
 
   make test-only
 }
