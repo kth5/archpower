@@ -6,11 +6,11 @@
 pkgbase=qt6-base
 pkgname=(qt6-base
          qt6-xcb-private-headers)
-_pkgver=6.11.0
+_pkgver=6.11.1
 pkgver=${_pkgver/-/}
-pkgrel=2
+pkgrel=1
 #arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-arch=(x86_64 powerpc64le powerpc64)
+arch=(powerpc espresso)
 url='https://www.qt.io'
 license=(GPL-3.0-only
          LGPL-3.0-only
@@ -22,7 +22,6 @@ depends=(brotli
          double-conversion
          fontconfig
          freetype2
-         gcc-libs
          glib2
          glibc
          harfbuzz
@@ -30,6 +29,7 @@ depends=(brotli
          krb5
          libcups
          libdrm
+         libgcc
          libgl
          libice
          libinput
@@ -37,6 +37,7 @@ depends=(brotli
          libpng
          libproxy
          libsm
+         libstdc++
          liburing
          libx11
          libxcb
@@ -97,25 +98,26 @@ source=(git+https://code.qt.io/qt/$_pkgfn#tag=v$_pkgver
         qt6-base-cflags.patch
         qt6-base-nostrip.patch
         qtestsupport-32bit-not-lock-free.patch)
-sha256sums=('2223c075e95d86f8dbf6395b025a74d996c418f094453c903290e3c2663fbed2'
+sha256sums=('2eafe504fae873d20f206b5661e2e10506879455cb2d370f42c5bb72ccf7a8a1'
             '5411edbe215c24b30448fac69bd0ba7c882f545e8cf05027b2b6e2227abc5e78'
             '4b93f6a79039e676a56f9d6990a324a64a36f143916065973ded89adc621e094'
-            'cb888245374cadb36bc153eee3766faab7162a7e081420eaf4ca7117e7f769ba')
+            '0807866968a1cad725720b1802ff37c1a6023d6bfd22bbc70cdb0cc240b93d45')
 
 prepare() {
   patch -d $_pkgfn -p1 < qt6-base-cflags.patch # Use system CFLAGS
   patch -d $_pkgfn -p1 < qt6-base-nostrip.patch # Don't strip binaries with qmake
-
-  git -C $_pkgfn cherry-pick -n 8b54513cdcf62047376a5d27d784ad68a8f235bf # Fix qdbus crashes
-
   patch -d $_pkgfn -p1 < qtestsupport-32bit-not-lock-free.patch
 }
 
 build() {
-  case "${CARCH}" in
-    powerpc) _cmake_options=(-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DQT_BUILD_TESTS=OFF) ;;
-    powerpc64|powerpc64le) _cmake_options=(-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DQT_BUILD_TESTS=OFF) ;;
-    x86_64) _cmake_options=(-DFEATURE_no_direct_extern_access=ON -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON) ;;
+  # Set no_direct_extern_access based on architecture
+  case "$CARCH" in
+    aarch64|riscv64|powerpc*)
+      _no_direct_extern_access=OFF
+    ;;
+    *)
+      _no_direct_extern_access=ON
+    ;;
   esac
 
   cmake -B build -S $_pkgfn -G Ninja \
@@ -135,8 +137,10 @@ build() {
     -DFEATURE_openssl_linked=ON \
     -DFEATURE_system_sqlite=ON \
     -DFEATURE_system_xcb_xinput=ON \
+    -DFEATURE_no_direct_extern_access=$_no_direct_extern_access \
+    -DFEATURE_mimetype_database=OFF \
     -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
-    -DCMAKE_MESSAGE_LOG_LEVEL=STATUS ${_cmake_options[@]}
+    -DCMAKE_MESSAGE_LOG_LEVEL=STATUS
   cmake --build build
 }
 
