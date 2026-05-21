@@ -1,0 +1,94 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+
+pkgname=forgejo
+pkgver=15.0.2
+pkgrel=1
+pkgdesc='A lightweight software forge'
+arch=(x86_64 powerpc64le)
+url='https://forgejo.org'
+license=(GPL-3.0-or-later)
+depends=(
+  glibc
+  git
+)
+makedepends=(
+  go
+  nodejs-lts-iron
+  npm
+)
+checkdepends=(openssh)
+optdepends=(
+  'mariadb: MariaDB support'
+  'memcached: MemCached support'
+  'openssh: GIT over SSH support'
+  'pam: Authentication via PAM support'
+  'postgresql: PostgreSQL support'
+  'valkey: Redis support'
+  'sqlite: SQLite support'
+)
+backup=(etc/forgejo/app.ini)
+options=(!lto !debug)
+source=(
+  "$pkgname::git+https://codeberg.org/forgejo/forgejo#tag=v$pkgver"
+  systemd.service
+  sysusers.conf
+  tmpfiles.conf
+  use-correct-variables.patch
+)
+sha512sums=('3ca4fbe28bb394dbed4559acd6b482375f6679073ac432096cc34aa6912c898996567f7b2206a1642aaaa0e1c5bde6e24753a8dab30a8b7e88e1232f9b65ffb4'
+            'a88aefed4aaee9c4d356444a2b3cbad384e07d738da4c87c7298744222ed784c6d5079d74596b8440605da0ad85699ced20106897c345a12994bd1d3ee84da37'
+            '7eb2766c06bb0e104da5860c16fbb9743220b01eec2760a84353b315d0d91a03a10939a105a8b06c6e074782cb76d26e0af8bf8f10881fef6e942dc43300208a'
+            'f18cbfa60912221b29e3b3b824c77571797ac76b90cacd28f2014f295c90c964990d4d5079822d280681fa6b0bb80248cd98d0479a3ac6441a3eaf8179f640a3'
+            '95437d2e9a27320bde31fbe070c20832a7244552e4add2ee93172653b3717326b71d9f3608776564935f9e3cd182fcc02e88dd1baa70f67c1fd2dc3a32970664')
+b2sums=('8b60455b547f3879807d3437425945063b29e0ce6f01085079c229e4a706a5e1513f2090f44d4915ea4ac6cc3dc05acef4751179ffa52bcc94bf107d4a8fcca4'
+        '8233177c7931b8baa046f58b086f733b3dd36ab42e50173724f6d4ab6be85dda2c674a9d0c6f3d7393a5c4f751af889972a0633828f40dc446f1b276a8c9fba2'
+        '939ba4a1cc6862cbe592b930a613694e79457a51c21c258ec01a0baa84d358286db2a457f78e8cc18daac1f8bb7df170d00e57ce877ab486a31a44e707f5e7e8'
+        '1e1b1fa2d31a87913625f0a235524d9131e26108414d06f91e61bc5134ebf8f570ee599ddb80956821dbbfa565dba09d4b046bafd336d4b0a097bb859da3e183'
+        'dcc93fc744d6791ea21c34a1ce8a4532f7a7f52118010445cae61c2030ec0c5adfbefe02fb0e912a1c8906455a6633928758b8bf90fe3076da0464dcd302290b')
+
+prepare() {
+  cd "$pkgname"
+
+  patch -p1 -i "$srcdir/use-correct-variables.patch"
+
+  make deps-frontend deps-backend deps-tools
+}
+
+build() {
+  cd "$pkgname"
+
+  export CGO_CPPFLAGS="${CPPFLAGS}"
+  export CGO_CFLAGS="${CFLAGS}"
+  export CGO_CXXFLAGS="${CXXFLAGS}"
+  export CGO_LDFLAGS="${LDFLAGS}"
+  export EXTRA_GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
+  case "${CARCH}" in
+    powerpc64)
+      export GOFLAGS="-trimpath -mod=readonly -modcacherw"
+    ;;
+    *)
+      LINKMODE="-linkmode external"
+    ;;
+  esac
+  export LDFLAGS="${LINKMODE} -X 'code.gitea.io/gitea/modules/setting.AppWorkPath=/var/lib/forgejo/' -X 'code.gitea.io/gitea/modules/setting.CustomConf=/etc/forgejo/app.ini'"
+  export TAGS="bindata sqlite sqlite_unlock_notify pam"
+
+  make build
+}
+
+package() {
+  # systemd integration
+  install -vDm644 systemd.service "$pkgdir/usr/lib/systemd/system/$pkgname.service"
+  install -vDm644 sysusers.conf "$pkgdir/usr/lib/sysusers.d/$pkgname.conf"
+  install -vDm644 tmpfiles.conf "$pkgdir/usr/lib/tmpfiles.d/$pkgname.conf"
+
+  cd "$pkgname"
+
+  # binary
+  install -vDm755 gitea "$pkgdir/usr/bin/$pkgname"
+
+  # configuration
+  install -vdm750 "$pkgdir/etc/forgejo"
+  install -vDm660 custom/conf/app.example.ini "$pkgdir/etc/$pkgname/app.ini"
+}
