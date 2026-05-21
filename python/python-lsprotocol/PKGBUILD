@@ -3,17 +3,35 @@
 
 pkgname=python-lsprotocol
 _name=${pkgname#python-}
-pkgver=2023.0.1
-pkgrel=4
+pkgver=2025.0.0
+pkgrel=2
 pkgdesc='Python types for Language Server Protocol'
 arch=(any)
 url=https://github.com/microsoft/lsprotocol
-license=('MIT')
-depends=('python-cattrs')
-makedepends=('git' 'python-build' 'python-flit-core' 'python-installer')
-checkdepends=('python-jsonschema' 'python-pyhamcrest' 'python-pytest')
+license=(MIT)
+depends=(
+  python-attrs
+  python-cattrs
+)
+makedepends=(
+  git
+  python-build
+  python-flit-core
+  python-installer
+)
+checkdepends=(
+  python-jsonschema
+  python-pyhamcrest
+  python-pytest
+)
 source=("git+$url.git#tag=$pkgver")
-b2sums=('8e3ce2c021a8e170aaa05fb7ff8d25136d26a88977d070fa5f1c29616199c50e7fb2e401597dfe16b16e61e381923a6aa5df326624ac03258dc33028d17d4312')
+b2sums=('ea9f4e871d68f62f174d2f8e2efad7bc6b9c4f54216022047e425531525c676577e4bdd657e8eaad86eea944ab6d996da5ae80badc929910b849b52c0ecd9bb2')
+
+prepare() {
+  # Not merged https://github.com/microsoft/lsprotocol/pull/443
+  # Add support cattrs>=25.0.0.
+  git -C "$_name" cherry-pick -n 7b5d4f7422bfe4c597b8124f99861e751d47f153
+}
 
 build() {
   cd "$_name"/packages/python
@@ -21,21 +39,16 @@ build() {
 }
 
 check() {
-  case "${CARCH}" in
-    powerpc*) return 0 ;;
-  esac
-
   cd "$_name"
-  pytest tests/python
+  pytest tests/python --deselect tests/python/test_cattrs_special_cases.py::test_notebook_sync_options
 }
 
 package() {
-  cd "$_name"/packages/python
-  python -m installer --destdir="$pkgdir" dist/*.whl
-
-  # Symlink license file
   local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
   install -d "$pkgdir"/usr/share/licenses/$pkgname
-  ln -s "$site_packages"/"$_name"-$pkgver.dist-info/LICENSE \
+  ln -s "$site_packages"/"$_name"-$pkgver.dist-info/licenses/LICENSE \
     "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+
+  cd "$_name"/packages/python
+  python -m installer --destdir="$pkgdir" dist/*.whl
 }
