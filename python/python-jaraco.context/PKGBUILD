@@ -1,31 +1,53 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
+# Contributor: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=python-jaraco.context
-pkgver=6.0.1
-pkgrel=3
+pkgver=6.1.2
+pkgrel=1
 pkgdesc="Context managers by jaraco"
+arch=(any)
 url="https://github.com/jaraco/jaraco.context"
 license=('MIT')
-arch=(any)
 depends=('python')
-makedepends=('git' 'python-setuptools-scm' 'python-build' 'python-installer' 'python-wheel')
-checkdepends=('python-portend' 'python-pytest')
-source=("git+https://github.com/jaraco/jaraco.context.git#tag=v$pkgver")
-b2sums=('a6fbb0d3b57c883abc3f74e4928792e1c5e41e0fbb7cb39ab5750bcbafb6026976f1db6bd020c4996e7b7e1fdb4775527a414ff849ab690e4062f45eb6e96871')
+makedepends=(
+  'git'
+  'python-build'
+  'python-installer'
+  'python-setuptools-scm'
+  'python-wheel'
+)
+checkdepends=(
+  'python-portend'
+  'python-pytest'
+)
+source=("git+$url.git#tag=v$pkgver")
+b2sums=('abc3dbf22c32e76cf010744ed622004b12293407b89ae767aad320f3c7c6aa99b78806c66acd32d012c933fc52e9bf4ca5fd12ec72b7c6c045e938c0fb8a6b1b')
+
+prepare() {
+  cd ${pkgname#python-}
+  # Undo upstream's license shenanigans, context:
+  # https://github.com/coherent-oss/system/issues/22
+  # https://github.com/pypa/setuptools/issues/5002
+  sed -i '/coherent.licensed/d' pyproject.toml
+  git show v6.0.0:LICENSE > LICENSE
+}
 
 build() {
-  cd jaraco.context
-  python -m build -wn
+  cd ${pkgname#python-}
+  python -m build --wheel --no-isolation
 }
 
 check() {
-  cd jaraco.context
-  python -m pytest
+  cd ${pkgname#python-}
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer dist/*.whl
+  # Deselect doctest that requires missing fixture 'ensure_git'
+  test-env/bin/python -m pytest --deselect jaraco/context/__init__.py::jaraco.context.repo_context
 }
 
 package() {
-  cd jaraco.context
-  python -m installer -d "$pkgdir" dist/*.whl
-  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
+  cd ${pkgname#python-}
+  python -m installer --destdir "$pkgdir" dist/*.whl
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
 }
