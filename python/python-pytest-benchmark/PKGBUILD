@@ -2,38 +2,38 @@
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=python-pytest-benchmark
-pkgver=4.0.0
-pkgrel=9
+pkgver=5.2.0
+pkgrel=1
 pkgdesc='A py.test fixture for benchmarking code'
 arch=(any)
 license=('BSD-2-Clause')
 url='https://github.com/ionelmc/pytest-benchmark'
 depends=('python-pytest' 'python-py-cpuinfo')
-makedepends=('python-setuptools' 'python-build' 'python-installer' 'python-wheel')
+makedepends=('git' 'python-setuptools' 'python-build' 'python-installer' 'python-wheel')
 checkdepends=('python-pygal' 'python-pygaljs' 'python-freezegun' 'mercurial' 'python-aspectlib'
               'python-pytest-xdist' 'python-elasticsearch' 'python-sniffio' 'git')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/ionelmc/pytest-benchmark/archive/v$pkgver.tar.gz"
-        'pytest-benchmark-backport-232.patch::https://github.com/ionelmc/pytest-benchmark/pull/232.patch')
-sha512sums=('88636e44c184f5072ad081a89f08e8838a11397e6b88298d7f235b531f894792001b858fc5c810b1399d41ec55de5db9057552fb7544fb405a04c3ba5ffbe329'
-            'f8a0ea70dd0a29b65b4755e491b3ffc201f4dcc15673d821f1c708ca9a376877a2931fddadbfacbe41f3503b25ad5099fe9bc04bb6fe7399f12ae2b4a6d07257')
+source=("git+https://github.com/ionelmc/pytest-benchmark.git#tag=v$pkgver")
+sha512sums=('ef1e8f9297fed28fee668e3350e38e37f0bd80503eb5dfd0a4e66777e0bc3f199791b269c093da49c44e3471aa9a7700fc4f269476b4f8c18a79faa7f334591e')
 
 prepare() {
-  cd pytest-benchmark-$pkgver
+  cd pytest-benchmark
+  # Fix pytest 9 compatibility in the CLI.
+  git cherry-pick -n -X ours d5c2f7ef9d0bbd67d8bafac1e2a454c8aa95af10
   # Do not treat warnings as errors
   sed -i '/^    error$/d' pytest.ini
-  patch --forward --strip=1 --input=../pytest-benchmark-backport-232.patch
+  # Remove --nbmake option (nbmake plugin not packaged in Arch)
+  sed -i '/--nbmake/d' pytest.ini
 }
 
 build() {
-  cd pytest-benchmark-$pkgver
+  cd pytest-benchmark
   python -m build --wheel --no-isolation
 }
 
 check() {
-  return 0
   # Hack entry points by installing it
 
-  cd pytest-benchmark-$pkgver
+  cd pytest-benchmark
   python setup.py install --root="$PWD/tmp_install" --optimize=1
   local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
   PYTHONPATH="$PWD/tmp_install/$site_packages:$PYTHONPATH" PATH="$PWD/tmp_install/usr/bin:$PATH" \
@@ -41,7 +41,7 @@ check() {
 }
 
 package() {
-  cd "$srcdir"/pytest-benchmark-$pkgver
+  cd pytest-benchmark
   python -m installer --destdir="$pkgdir" dist/*.whl
   install -D -m644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
