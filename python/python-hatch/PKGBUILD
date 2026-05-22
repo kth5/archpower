@@ -5,8 +5,8 @@
 # Contributor: Phillip A. (flying-sheep)
 
 pkgname=python-hatch
-pkgver=1.16.2
-pkgrel=3
+pkgver=1.16.5
+pkgrel=1
 pkgdesc="A modern project, package, and virtual env manager"
 arch=(any)
 url="https://github.com/pypa/hatch"
@@ -45,7 +45,7 @@ checkdepends=(
   'rust'
 )
 source=("$url/archive/hatch-v$pkgver.tar.gz")
-sha512sums=('3dacba2258650cd3ae73e09a0163e8663ca2094ae866b3fb242260da00a79fb429f985b17980f7a8abb457d95a0003d8c84b8d62d19ac40531a8683eee78816c')
+b2sums=('29093273d38024bbac9f9d6fc24ca41cf8ec942eecf9096a2385ea59c3cba403e3ad0d393a6edf68b4e116c28877f7b0a64b5cf594dd049f8547a21ffbf79a6a')
 
 build() {
   cd hatch-hatch-v$pkgver
@@ -66,25 +66,36 @@ check() {
   esac
 
   cd hatch-hatch-v$pkgver
-  # Don't run hatchling tests, the tests in the tagged version of hatch are not
-  # in sync with the tagged version of hatchling.
-  test-env/bin/python -m pytest --ignore=tests/backend \
-    --deselect=tests/cli/build/test_build.py::test_clean \
-    --deselect=tests/cli/build/test_build.py::test_clean_env_var \
-    --deselect=tests/cli/build/test_build.py::test_clean_hooks_after \
-    --deselect=tests/cli/build/test_build.py::test_clean_hooks_after_env_var \
-    --deselect=tests/cli/build/test_build.py::test_default \
-    --deselect=tests/cli/build/test_build.py::test_explicit_directory \
-    --deselect=tests/cli/build/test_build.py::test_explicit_directory_env_var \
-    --deselect=tests/cli/build/test_build.py::test_plugin_dependencies_unmet \
-    --deselect=tests/cli/config/test_set.py::test_project_location_basic_set_first_project \
-    --deselect=tests/cli/config/test_set.py::test_project_location_complex_set_first_project \
+  local pytest_args=(
+    # Don't run hatchling tests, the tests in the tagged version of hatch are not
+    # in sync with the tagged version of hatchling.
+    --deselect=tests/cli/build/test_build.py::test_clean
+    --deselect=tests/cli/build/test_build.py::test_clean_env_var
+    --deselect=tests/cli/build/test_build.py::test_clean_hooks_after
+    --deselect=tests/cli/build/test_build.py::test_clean_hooks_after_env_var
+    --deselect=tests/cli/build/test_build.py::test_default
+    --deselect=tests/cli/build/test_build.py::test_explicit_directory
+    --deselect=tests/cli/build/test_build.py::test_explicit_directory_env_var
+    --deselect=tests/cli/build/test_build.py::test_plugin_dependencies_unmet
+    --deselect=tests/cli/config/test_set.py::test_project_location_basic_set_first_project
+    --deselect=tests/cli/config/test_set.py::test_project_location_complex_set_first_project
     --deselect=tests/cli/self/test_self.py::test
+
+    # Tests broken due to python-rich-14.3 incompatibility
+    # https://github.com/pypa/hatch/issues/2170
+    --deselect=tests/cli/dep/show/test_table.py
+    --deselect=tests/cli/env/test_show.py
+    --deselect=tests/cli/python/test_show.py
+    --deselect=tests/cli/new/test_new.py::test_default_no_license_cache
+    --deselect=tests/env/plugin/test_interface.py::TestDependencies::test_context_formatting
+    --deselect=tests/env/plugin/test_interface.py::TestDependencies::test_project_dependencies_context_formatting
+  )
+  test-env/bin/python -m pytest --ignore=tests/backend "${pytest_args[@]}"
 }
 
 package() {
   cd hatch-hatch-v$pkgver
-  python -m installer --destdir="${pkgdir}" dist/*.whl
+  python -m installer --destdir="$pkgdir" dist/*.whl
   install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE.txt
 
   install -vDm644 completion.bash "$pkgdir/usr/share/bash-completion/completions/hatch"
