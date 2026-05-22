@@ -1,0 +1,59 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Chih-Hsuan Yen <yan12125@archlinux.org>
+# Contributor: Rafael Fontenelle <rafaelff@gnome.org>
+
+pkgname=python-pytest-env
+pkgver=1.6.0
+pkgrel=1
+pkgdesc='pytest plugin to set environment variables in pytest.ini or pyproject.toml file'
+arch=(any)
+url='https://github.com/pytest-dev/pytest-env'
+license=(MIT)
+depends=(
+  python
+  python-pytest
+  python-dotenv
+)
+makedepends=(
+  git
+  python-build
+  python-installer
+  python-hatchling
+  python-hatch-vcs
+)
+checkdepends=(python-pytest-mock)
+source=("$pkgname::git+$url#tag=$pkgver")
+sha512sums=('a4228f1ec925f7cb03d42a7307cee1f63e057270bd116c3e8a0a7f639abd0b55543565782e25b1437c03d9155dfecf18a1dc4e5df4e8dd6728fe629356c729ab')
+b2sums=('da29e5489206f2bff00e02b2488f05ed9c62cf63f48004a3708980666e9ff5b2972983e03c8d928ecf0b94ab606e4eb84aad6aed1a02a28ce34549b6a6beb34a')
+
+build() {
+  cd "$pkgname"
+
+  SETUPTOOLS_SCM_PRETEND_VERSION="$pkgver" python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "$pkgname"
+
+  # temporary install
+  python -m installer --destdir="$(pwd)/tmp" dist/*.whl
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  export PYTHONPATH="$(pwd)/tmp/$site_packages"
+
+  pytest -v \
+    --deselect tests/test_env.py::test_env_via_toml["pyproject toml via tool.pytest"] \
+    --deselect tests/test_env.py::test_env_via_toml["pytest toml over pyproject toml"] \
+    --deselect tests/test_env.py::test_env_via_toml["subdir pytest toml over parent pyproject toml"] \
+    --deselect tests/test_env.py::test_env_via_pyproject_toml_bad["pytest.toml"] \
+    --deselect tests/test_env.py::test_env_via_pyproject_toml_bad[".pytest.toml"]
+
+}
+
+package() {
+  cd "$pkgname"
+
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # license
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
+}
