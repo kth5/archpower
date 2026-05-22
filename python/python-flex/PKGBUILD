@@ -3,38 +3,38 @@
 
 pkgname=python-flex
 pkgver=6.14.1
-pkgrel=15
+pkgrel=16
 pkgdesc="Swagger schema validator"
 url="https://github.com/pipermerriam/flex"
 license=('BSD')
 arch=(any)
 depends=('python-six' 'python-yaml' 'python-validate-email' 'python-rfc3987' 'python-requests'
          'python-strict-rfc3339' 'python-click' 'python-jsonpointer')
-makedepends=('python-setuptools')
+makedepends=('git' 'python-build' 'python-installer' 'python-setuptools' 'python-wheel')
 checkdepends=('python-factory-boy' 'python-responses' 'python-pytest-httpbin')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/pipermerriam/flex/archive/v$pkgver.tar.gz"
-        $pkgname-werkzeug-2.1.patch::https://github.com/pipermerriam/flex/pull/236.patch)
-sha512sums=('7164f70db2095041f878e2be95467aefc7c5b0b38b9792bd74127dc0769f24e99dd6d5df48a076bfb819462aa8216fd16313e5ebfa0e881ea3094d38ad409c40'
-            '8f6dfeddeaa7b30df1e90af0be31382c283f67cc79c1ffb8c5fd22e87b679ce30df4ac82725d70bf2f58104316b169451e7862ccaec6f8f5c8d0f1e1c06cf7b1')
+source=("git+https://github.com/pipermerriam/flex.git#tag=v$pkgver")
+sha512sums=('d932d339f8a798e55c40b193486e08123ef4dc6e2fa9bef3294f760a54852edbad470b947e185d11a3d6444c1eacd99f66004331ab58679b8e833d669d0aec82')
 
 prepare() {
-  patch -d flex-$pkgver -p1 < $pkgname-werkzeug-2.1.patch
-  sed -i 's/<2/<3/' flex-$pkgver/setup.py
+  cd flex
+  git cherry-pick -n 2b8f16c5ff7fe4353eb530048fec52bbf95c5480  # werkzeug 2.1 compatibility
+  git cherry-pick -n 3d4b38aea81d47e228c8f5c9a4f90a8bc9b90ee8  # pkg_resources removal
+  sed -i 's/<2/<3/' setup.py
 }
 
 build() {
-  cd flex-$pkgver
-  python setup.py build
+  cd flex
+  python -m build --wheel --no-isolation
 }
 
 check() {
-  cd flex-$pkgver
+  cd flex
   # https://github.com/pipermerriam/flex/issues/234
   pytest --deselect 'tests/validation/request/test_request_parameter_validation.py::test_request_parameter_array_extraction[tsv-1\t2\t3]'
 }
 
 package() {
-  cd flex-$pkgver
-  python setup.py install --root="$pkgdir" --optimize=1
+  cd flex
+  python -m installer --destdir="$pkgdir" dist/*.whl
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
