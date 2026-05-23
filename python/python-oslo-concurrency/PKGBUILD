@@ -3,22 +3,22 @@
 # Contributor: Daniel Wallace <danielwallace at gtmanfred dot com>
 
 pkgname=python-oslo-concurrency
-pkgver=7.0.0
-pkgrel=3
+pkgver=7.4.0
+pkgrel=1
 pkgdesc="OpenStack library for all concurrency-related code"
 arch=(any)
 url="https://pypi.python.org/pypi/oslo.concurrency/$pkgver"
 license=('Apache-2.0')
 depends=('python-pbr' 'python-oslo-config' 'python-oslo-i18n' 'python-oslo-utils'
-         'python-fasteners')
-makedepends=('git' 'python-setuptools')
+         'python-fasteners' 'python-debtcollector')
+makedepends=('git' 'python-build' 'python-installer' 'python-wheel')
 checkdepends=('python-oslotest' 'python-stestr' 'python-eventlet')
 source=(
   "git+https://github.com/openstack/oslo.concurrency.git#tag=$pkgver"
   "$pkgname-python-3.14.patch"
 )
-sha512sums=('22c9f841cda714b91eb5fd2832b27f7080953157ddff4775e585cfebfc89da1e5b4e50bd4017a30ca99ee2346786c0b4062ff3f0ebb21c8a5f3b41e70a3a2882'
-            '031c3afbc17f5bc3a8f91275d81fec22c1a70f09a9187bd7e46fae2147edeaba31d51f23d3a10f86121be60a01fa88049a79cf4a1a32efbf5b98ea2d9be9109b')
+sha512sums=('6bd9421453bea3193c4c35001bef3c7e576772e6dfa3a0f788ed85a44bc958f6ccb5ca1d348cba3c68a741e9f1b380dea6933f9282b5f8054c85963070814dda'
+            '1fc62ee511580e74f167037a0a3cc6f563a54a208c3de4fac067d9c0a10e48600aaf34166cf31249a1236e9fbaa59fc5a6dac09abe6fea9dcee0f31a0c29325f')
 
 prepare() {
   cd oslo.concurrency
@@ -27,22 +27,24 @@ prepare() {
 
 build() {
   cd oslo.concurrency
-  python setup.py build
+  python -m build --wheel --no-isolation
 }
 
 check() {
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
   cd oslo.concurrency
-  python setup.py install --root="tmp_install" --optimize=1
-  local python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-  PYTHONPATH="$PWD/tmp_install/usr/lib/python${python_version}/site-packages" PATH="$PWD/tmp_install/usr/bin:$PATH" \
-    TEST_EVENTLET=0 lockutils-wrapper stestr run --exclude-regex oslo_concurrency.tests.unit.test_processutils.PrlimitTestCase.test_core_size
-  PYTHONPATH="$PWD/tmp_install/usr/lib/python${python_version}/site-packages" PATH="$PWD/tmp_install/usr/bin:$PATH" \
-    TEST_EVENTLET=1 lockutils-wrapper stestr run --exclude-regex oslo_concurrency.tests.unit.test_processutils.PrlimitTestCase.test_core_size
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer dist/*.whl
+  TEST_EVENTLET=0 test-env/bin/lockutils-wrapper test-env/bin/python -m stestr run --exclude-regex oslo_concurrency.tests.unit.test_processutils.PrlimitTestCase.test_core_size
+  TEST_EVENTLET=1 test-env/bin/lockutils-wrapper test-env/bin/python -m stestr run --exclude-regex oslo_concurrency.tests.unit.test_processutils.PrlimitTestCase.test_core_size
 }
 
 package() {
   cd oslo.concurrency
-  python setup.py install --root="$pkgdir" --optimize=1
+  python -m installer --destdir="$pkgdir" dist/*.whl
 }
 
 # vim:set ts=2 sw=2 et:

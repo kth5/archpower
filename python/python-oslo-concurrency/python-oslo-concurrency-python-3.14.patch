@@ -1,33 +1,71 @@
-diff --git i/oslo_concurrency/tests/unit/test_lockutils.py w/oslo_concurrency/tests/unit/test_lockutils.py
-index 993157b..1ce0eec 100644
---- i/oslo_concurrency/tests/unit/test_lockutils.py
-+++ w/oslo_concurrency/tests/unit/test_lockutils.py
-@@ -427,7 +427,9 @@ class FileBasedLockingTestCase(test_base.BaseTestCase):
+diff --git a/oslo_concurrency/tests/unit/test_lockutils.py b/oslo_concurrency/tests/unit/test_lockutils.py
+index ec64c6b..3fd678b 100644
+--- a/oslo_concurrency/tests/unit/test_lockutils.py
++++ b/oslo_concurrency/tests/unit/test_lockutils.py
+@@ -57,6 +57,22 @@ def lock_files(handles_dir, out_queue):
+         return out_queue.put(count)
+ 
+ 
++def nonblocking_synchronized_external_lock(lock_dir, value, started, release):
++    @lockutils.synchronized(
++        'foo', blocking=False, external=True, lock_path=lock_dir
++    )
++    def foo(param):
++        """Simulate a long-running operation in a process."""
++        started.set()
++        release.wait(5)
++        param.value += 1
++
++    try:
++        foo(value)
++    except lockutils.AcquireLockFailedException:
++        pass
++
++
+ class LockTestCase(test_base.BaseTestCase):
+     def setUp(self):
+         super().setUp()
+@@ -422,30 +438,24 @@ class FileBasedLockingTestCase(test_base.BaseTestCase):
      def test_interprocess_nonblocking_external_lock(self):
          """Check that we're not actually blocking between processes."""
  
 -        nb_calls = multiprocessing.Value('i', 0)
-+        # Use 'fork' context to avoid pickling issues with local functions
-+        ctx = multiprocessing.get_context('fork')
++        ctx = multiprocessing.get_context('spawn')
 +        nb_calls = ctx.Value('i', 0)
++        started = ctx.Event()
++        release = ctx.Event()
  
-         @lockutils.synchronized('foo', blocking=False, external=True,
-                                 lock_path=self.lock_dir)
-@@ -439,7 +441,7 @@ class FileBasedLockingTestCase(test_base.BaseTestCase):
-         def other(param):
-             foo(param)
- 
--        process = multiprocessing.Process(target=other, args=(nb_calls, ))
-+        process = ctx.Process(target=other, args=(nb_calls, ))
+-        @lockutils.synchronized(
+-            'foo', blocking=False, external=True, lock_path=self.lock_dir
++        process = ctx.Process(
++            target=nonblocking_synchronized_external_lock,
++            args=(self.lock_dir, nb_calls, started, release),
+         )
+-        def foo(param):
+-            """Simulate a long-running operation in a process."""
+-            param.value += 1
+-            time.sleep(0.5)
+-
+-        def other(param):
+-            foo(param)
+-
+-        process = multiprocessing.Process(target=other, args=(nb_calls,))
          process.start()
-         # Make sure the other process grabs the lock
-         start = time.time()
-@@ -447,7 +449,7 @@ class FileBasedLockingTestCase(test_base.BaseTestCase):
-             if time.time() - start > 5:
-                 self.fail('Timed out waiting for process to grab lock')
-             time.sleep(0)
--        process1 = multiprocessing.Process(target=other, args=(nb_calls, ))
-+        process1 = ctx.Process(target=other, args=(nb_calls, ))
+-        # Make sure the other process grabs the lock
+-        start = time.time()
+-        while not os.path.exists(os.path.join(self.lock_dir, 'foo')):
+-            if time.time() - start > 5:
+-                self.fail('Timed out waiting for process to grab lock')
+-            time.sleep(0)
+-        process1 = multiprocessing.Process(target=other, args=(nb_calls,))
++        self.assertTrue(started.wait(5), 'Timed out waiting for process to grab lock')
++        process1 = ctx.Process(
++            target=nonblocking_synchronized_external_lock,
++            args=(self.lock_dir, nb_calls, started, release),
++        )
          process1.start()
          process1.join()
++        release.set()
          process.join()
+         self.assertEqual(1, nb_calls.value)
+ 
