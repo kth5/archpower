@@ -5,33 +5,42 @@
 # Contributor: Tom Newsom <Jeepster@gmx.co.uk>
 
 pkgname=dnsmasq
-pkgver=2.92
-pkgrel=1
+pkgver=2.92.rel2
+_pkgver=${pkgver/.rel/rel}
+pkgrel=2
 pkgdesc='Lightweight, easy to configure DNS forwarder and DHCP server'
 url='http://www.thekelleys.org.uk/dnsmasq/doc.html'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-license=('GPL')
+license=('GPL-2.0-or-later')
 depends=('glibc' 'gmp' 'libidn2' 'libidn2.so' 'libdbus' 'libdbus-1.so' 'nftables'
          'libnetfilter_conntrack' 'nettle' 'libnettle.so' 'libhogweed.so')
 backup=('etc/dnsmasq.conf')
 validpgpkeys=('D6EACBD6EE46B834248D111215CDDA6AE19135A2') # Simon Kelley <simon@thekelleys.org.uk>
-source=("http://www.thekelleys.org.uk/$pkgname/$pkgname-$pkgver.tar.xz"{,.asc}
+source=("http://www.thekelleys.org.uk/${pkgname}/${pkgname}-${_pkgver}.tar.xz"{,.asc}
+        '0001-nettle-4-0.patch'
         'dnsmasq.service'
         'dnsmasq.sysusers')
-sha256sums=('4bf50c2c1018f9fbc26037df51b90ecea0cb73d46162846763b92df0d6c3a458'
+sha256sums=('43d72b8c129bdf33d17bafedc98823f63e46b5005128066bf0d2a472a32ce06a'
             'SKIP'
+            'bec0c353e33efcf259a29f2f5a566edfb57b6cf2371c1680d553a62c63006193'
             '297dbae8cfa3d353284820dd87cc65c37d1ef289cac3a5c3ede079413d31eeec'
             'e805d41b291dfe6988d6896d311ff2fa62d8291067572f3db1059b0217f31aff')
 
-_build_copts='-DHAVE_DNSSEC -DHAVE_DBUS -DHAVE_LIBIDN2 -DHAVE_CONNTRACK -DHAVE_NFTSET'
+_build_copts='-DHAVE_CONNTRACK -DHAVE_DBUS -DHAVE_DNSSEC -DHAVE_LIBIDN2 -DHAVE_NFTSET'
+
+prepare() {
+  cd "${pkgname}-${_pkgver}"
+
+  patch -Np1 < ../0001-nettle-4-0.patch
+}
 
 build() {
-  cd "$pkgname-$pkgver"
+  cd "${pkgname}-${_pkgver}"
 
   make \
-    CFLAGS="$CPPFLAGS $CFLAGS" \
-    LDFLAGS="$LDFLAGS" \
-    COPTS="$_build_copts" \
+    CFLAGS="${CPPFLAGS} ${CFLAGS}" \
+    LDFLAGS="${LDFLAGS}" \
+    COPTS="${_build_copts}" \
     PREFIX=/usr \
     BINDIR=/usr/bin \
     all-i18n
@@ -39,34 +48,34 @@ build() {
   cd "contrib/lease-tools"
 
   make \
-    CFLAGS="$CPPFLAGS $CFLAGS" \
-    LDFLAGS="$LDFLAGS" \
-    COPTS="$_build_copts" \
+    CFLAGS="${CPPFLAGS} ${CFLAGS}" \
+    LDFLAGS="${LDFLAGS}" \
+    COPTS="${_build_copts}" \
     all
 }
 
 package() {
-  cd "$pkgname-$pkgver"
+  cd "${pkgname}-${_pkgver}"
 
-  # need to pass COPTS here to avoid rebuilding the binary.
+  # need to pass CFLAGS, LDFLAGS & COPTS here to avoid rebuilding the binary
   make \
-    COPTS="$_build_copts" \
+    CFLAGS="${CPPFLAGS} ${CFLAGS}" \
+    LDFLAGS="${LDFLAGS}" \
+    COPTS="${_build_copts}" \
     PREFIX=/usr \
     BINDIR=/usr/bin \
-    DESTDIR="$pkgdir" \
+    DESTDIR="${pkgdir}" \
     install-i18n
 
-  install -Dm0644 "dbus/dnsmasq.conf" "$pkgdir"/usr/share/dbus-1/system.d/dnsmasq.conf
-  install -Dm0644 "dnsmasq.conf.example" "$pkgdir"/etc/dnsmasq.conf
-  install -Dm0644 "$srcdir/dnsmasq.service" "$pkgdir"/usr/lib/systemd/system/dnsmasq.service
-  install -Dm0644 "$srcdir/dnsmasq.sysusers" "$pkgdir"/usr/lib/sysusers.d/dnsmasq.conf
+  install -Dm0644 "dbus/dnsmasq.conf" "${pkgdir}"/usr/share/dbus-1/system.d/dnsmasq.conf
+  install -Dm0644 "dnsmasq.conf.example" "${pkgdir}"/etc/dnsmasq.conf
+  install -Dm0644 "$srcdir/dnsmasq.service" "${pkgdir}"/usr/lib/systemd/system/dnsmasq.service
+  install -Dm0644 "$srcdir/dnsmasq.sysusers" "${pkgdir}"/usr/lib/sysusers.d/dnsmasq.conf
 
   # DNSSEC setup
-  sed -i 's,%%PREFIX%%,/usr,' "$pkgdir"/etc/dnsmasq.conf
-  install -Dm0644 "trust-anchors.conf" "$pkgdir"/usr/share/dnsmasq/trust-anchors.conf
+  sed -i 's,%%PREFIX%%,/usr,' "${pkgdir}"/etc/dnsmasq.conf
+  install -Dm0644 "trust-anchors.conf" "${pkgdir}"/usr/share/dnsmasq/trust-anchors.conf
 
-  install -Dm0755 -t "$pkgdir"/usr/bin/ 'contrib/lease-tools/dhcp_'{release{,6},lease_time}
-  install -Dm0644 -t "$pkgdir"/usr/share/man/man1 'contrib/lease-tools/dhcp_'{release{,6},lease_time}.1
+  install -Dm0755 -t "${pkgdir}"/usr/bin/ 'contrib/lease-tools/dhcp_'{release{,6},lease_time}
+  install -Dm0644 -t "${pkgdir}"/usr/share/man/man1 'contrib/lease-tools/dhcp_'{release{,6},lease_time}.1
 }
-
-# vim: ts=2 sw=2 et ft=sh

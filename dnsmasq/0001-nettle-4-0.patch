@@ -1,0 +1,115 @@
+commit 4070a74862c3c956a676d2b931ff186e14f5d9f5
+Author: Simon Kelley <simon@thekelleys.org.uk>
+Date:   Sun Mar 1 12:01:12 2026 +0000
+
+    Fix FTBFS with nettle 4.0.
+    
+    Thanks to Andreas Metzler for the heads-up.
+
+diff --git a/src/crypto.c b/src/crypto.c
+index 92de2d9..002aae3 100644
+--- a/src/crypto.c
++++ b/src/crypto.c
+@@ -93,7 +93,15 @@ static void null_hash_update(void *ctxv, size_t length, const uint8_t *src)
+   memcpy(null_hash_buff + ctx->len, src, length);
+   ctx->len += length;
+ }
+- 
++
++/* The prototype changes in nettle 4.0 to omit the length argument */
++#if MIN_VERSION(4, 0)
++static void null_hash_digest(void *ctx, uint8_t *dst)
++{
++  ((struct null_hash_digest *)dst)->buff = null_hash_buff;
++  ((struct null_hash_digest *)dst)->len = ((struct null_hash_ctx *)ctx)->len;
++}
++#else
+ static void null_hash_digest(void *ctx, size_t length, uint8_t *dst)
+ {
+   (void)length;
+@@ -101,6 +109,7 @@ static void null_hash_digest(void *ctx, size_t length, uint8_t *dst)
+   ((struct null_hash_digest *)dst)->buff = null_hash_buff;
+   ((struct null_hash_digest *)dst)->len = ((struct null_hash_ctx *)ctx)->len;
+ }
++#endif
+ 
+ static struct nettle_hash null_hash = {
+   "null_hash",
+@@ -501,4 +510,16 @@ const struct nettle_hash *hash_find(char *name)
+ #endif
+ }
+ 
++/* The prototype changes in nettle 4.0 to omit the length argument */
++void nettle_digest_wrapper(const struct nettle_hash *hash, void *ctx, size_t length, uint8_t *dst)
++{
++#if MIN_VERSION(4, 0)
++  (void)length;
++  hash->digest(ctx, dst);
++#else
++  hash->digest(ctx, length, dst);
++#endif
++}
++
++
+ #endif /* defined(HAVE_DNSSEC) */
+diff --git a/src/dnsmasq.h b/src/dnsmasq.h
+index 510c88f..c5b0887 100644
+--- a/src/dnsmasq.h
++++ b/src/dnsmasq.h
+@@ -1489,6 +1489,7 @@ int verify(struct blockdata *key_data, unsigned int key_len, unsigned char *sig,
+ char *ds_digest_name(int digest);
+ char *algo_digest_name(int algo);
+ char *nsec3_digest_name(int digest);
++void nettle_digest_wrapper(const struct nettle_hash *hash, void *ctx, size_t length, uint8_t *dst);
+ 
+ /* util.c */
+ void rand_init(void);
+diff --git a/src/dnssec.c b/src/dnssec.c
+index 856d792..fddde77 100644
+--- a/src/dnssec.c
++++ b/src/dnssec.c
+@@ -656,7 +656,7 @@ static int validate_rrset(time_t now, struct dns_header *header, size_t plen, in
+ 	    }
+ 	}
+      
+-      hash->digest(ctx, hash->digest_size, digest);
++      nettle_digest_wrapper(hash, ctx, hash->digest_size, digest);
+       
+       /* namebuff used for workspace above, restore to leave unchanged on exit */
+       p = (unsigned char*)(rrset[0]);
+
+commit 1eab169173fc4c8579a3db61186096fe117e6aca
+Author: Simon Kelley <simon@thekelleys.org.uk>
+Date:   Sun Mar 1 12:33:38 2026 +0000
+
+    Fix missed hash->digest calls in 4070a74862c3c956a676d2b931ff186e14f5d9f5
+
+diff --git a/src/dnssec.c b/src/dnssec.c
+index fddde77..66b62bf 100644
+--- a/src/dnssec.c
++++ b/src/dnssec.c
+@@ -836,7 +836,7 @@ int dnssec_validate_by_ds(time_t now, struct dns_header *header, size_t plen, ch
+ 		 rather then O(keys x DSs) */
+ 	      hash->update(ctx, (unsigned int)wire_len, (unsigned char *)name);
+ 	      hash->update(ctx, (unsigned int)rdlen, psave);
+-	      hash->digest(ctx, hash->digest_size, digest);
++	      nettle_digest_wrapper(hash, ctx, hash->digest_size, digest);
+ 	      
+ 	      from_wire(name);
+ 
+@@ -1385,13 +1385,13 @@ static int hash_name(char *in, unsigned char **out, struct nettle_hash const *ha
+  
+   hash->update(ctx, to_wire(in), (unsigned char *)in);
+   hash->update(ctx, salt_len, salt);
+-  hash->digest(ctx, hash->digest_size, digest);
++  nettle_digest_wrapper(hash, ctx, hash->digest_size, digest);
+ 
+   for(i = 0; i < iterations; i++)
+     {
+       hash->update(ctx, hash->digest_size, digest);
+       hash->update(ctx, salt_len, salt);
+-      hash->digest(ctx, hash->digest_size, digest);
++      nettle_digest_wrapper(hash, ctx, hash->digest_size, digest);
+     }
+    
+   from_wire(in);
