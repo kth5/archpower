@@ -1,0 +1,54 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Andreas Radke <andyrtr@archlinux.org>
+# Contributor: bender02 at gmx dot com
+
+pkgname=nettle3
+_pkgname=nettle
+pkgver=3.10.2
+pkgrel=2
+pkgdesc="A low-level cryptographic library, version 3"
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url="https://www.lysator.liu.se/~nisse/nettle"
+license=('LGPL-3.0-or-later OR GPL-2.0-or-later')
+depends=('glibc' 'gmp')
+provides=('libnettle.so' 'libhogweed.so')
+checkdepends=('valgrind')
+source=(https://ftp.gnu.org/gnu/$_pkgname/$_pkgname-$pkgver.tar.gz{,.sig})
+sha256sums=('fe9ff51cb1f2abb5e65a6b8c10a92da0ab5ab6eaf26e7fc2b675c45f1fb519b5'
+            'SKIP')
+validpgpkeys=('343C2FF0FBEE5EC2EDBEF399F3599FF828C67298') # Niels Möller <nisse@lysator.liu.se>
+
+
+build() {
+  cd $_pkgname-$pkgver
+  ./configure --prefix=/usr \
+    --includedir=/usr/include/nettle3 \
+    --libdir=/usr/lib/nettle3 \
+    --disable-static \
+    --disable-documentation
+  make
+}
+
+check() {
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
+  cd $_pkgname-$pkgver
+  make -k check
+}
+
+package() {
+  cd $_pkgname-$pkgver
+  make DESTDIR="$pkgdir/" install
+  rm -r "$pkgdir"/usr/bin
+# Move versioned libraries to /usr/lib
+  cd "$pkgdir"
+  for _lib in usr/lib/nettle3/*; do
+    if [[ $_lib == *.so ]]; then
+      ln -srf -- usr/lib/"$(readlink $_lib)" $_lib
+    elif [[ ! -d $_lib ]]; then
+      mv $_lib usr/lib
+    fi
+  done
+}
