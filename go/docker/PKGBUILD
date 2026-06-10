@@ -3,15 +3,15 @@
 # Maintainer: Morten Linderud <foxboron@archlinux.org>
 
 pkgname=docker
-pkgver=28.0.4
-pkgrel=2
+pkgver=29.5.2
+pkgrel=1
 epoch=1
 pkgdesc='Pack, ship and run any application as a lightweight container'
-arch=(x86_64 aarch64 powerpc64le riscv64)
+arch=(x86_64 aarch64 powerpc64le powerpc64)
 url='https://www.docker.com/'
 license=('Apache-2.0')
 depends=('glibc' 'iproute2' 'device-mapper' 'sqlite' 'systemd-libs'
-         'libseccomp' 'libtool' 'runc' 'containerd')
+         'libseccomp' 'libtool' 'nftables' 'runc' 'containerd')
 makedepends=('git' 'go' 'btrfs-progs' 'cmake' 'systemd' 'go-md2man' 'sed')
 optdepends=('btrfs-progs: btrfs backend support'
             'pigz: parallel gzip compressor support'
@@ -19,11 +19,11 @@ optdepends=('btrfs-progs: btrfs backend support'
 options=(!lto)
 _TINI_COMMIT=de40ad007797e0dcd8b7126f27bb87401d224240
 source=("git+https://github.com/docker/cli.git#tag=v$pkgver"
-        "git+https://github.com/moby/moby.git#tag=v$pkgver"
+        "git+https://github.com/moby/moby.git#tag=docker-v$pkgver"
         "git+https://github.com/krallin/tini.git#commit=$_TINI_COMMIT"
         "$pkgname.sysusers")
-sha256sums=('8c69689fe06539b8f33e6cd370effd63a478caae086aa9f0ea377fd52cc77851'
-            '596b424c56aa1f4e24f93ec49fc69f4b838fa870155628a0d8aeacab5bdcaabe'
+sha256sums=('73e38f8f09e198b4631386bac7fb2569e5330c4c271a74a62437b021dbe60e54'
+            '1a64e5c9b3c32d0a6f0f09fa0d476edc1094fca9b23846fe0960da8a8cc0fd9e'
             '28a6641d508f60d47315efb3c85d97360188750a45bd6d3c8737d3f1a2b44121'
             '541826011a9836d05a2f42293d5f1beadf2ca8d89fb604487d61a013505678eb')
 
@@ -72,7 +72,12 @@ build() {
   export CGO_CXXFLAGS="${CXXFLAGS}"
   export CGO_LDFLAGS="${LDFLAGS}"
   export LDFLAGS=''
-  export GOFLAGS='-buildmode=pie -trimpath -mod=readonly -modcacherw -ldflags=-linkmode=external -ldflags=-compressdwarf=false -ldflags=-B=gobuildid'
+  case "${CARCH}" in
+    powerpc64) BUILDMODE="" ;;
+    *)         BUILDMODE="-buildmode=pie" ;;
+  esac
+
+  export GOFLAGS="${BUILDMODE} -trimpath -mod=readonly -modcacherw -ldflags=-linkmode=external -ldflags=-compressdwarf=false -ldflags=-B=gobuildid"
   export GO111MODULE=off
   export DISABLE_WARN_OUTSIDE_CONTAINER=1
 
@@ -85,7 +90,7 @@ build() {
 
   ### daemon
   echo 'Building daemon'
-  _fake_gopath_pushd moby github.com/docker/docker
+  _fake_gopath_pushd moby github.com/moby/moby/v2
   DOCKER_GITCOMMIT=$(cd "$srcdir"/moby && git rev-parse --short HEAD) \
     DOCKER_BUILDTAGS='seccomp journald apparmor' \
     VERSION=$pkgver \
@@ -112,7 +117,6 @@ package() {
   install -Dm644 'init/systemd/docker.service' "$pkgdir/usr/lib/systemd/system/docker.service"
   install -Dm644 'init/systemd/docker.socket' "$pkgdir/usr/lib/systemd/system/docker.socket"
   # systemd rules
-  install -Dm644 'udev/80-docker.rules' "$pkgdir/usr/lib/udev/rules.d/80-docker.rules"
   install -Dm644 "$srcdir/$pkgname.sysusers" "$pkgdir/usr/lib/sysusers.d/$pkgname.conf"
   ### cli
   cd "$srcdir"/cli
