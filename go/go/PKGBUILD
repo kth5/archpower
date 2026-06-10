@@ -19,7 +19,7 @@
 
 pkgname=go
 epoch=2
-pkgver=1.26.3
+pkgver=1.26.4
 pkgrel=1
 pkgdesc='Core compiler tools for the Go programming language'
 arch=(x86_64 powerpc64 powerpc64le)
@@ -33,11 +33,15 @@ provides_x86_64=(go-pie)
 replaces_x86_64=(go-pie)
 options=(!strip staticlibs)
 source=("https://go.dev/dl/go${pkgver}.src.tar.gz"{,.asc}
-        fix-avx512ScanPackedReqsMet.patch)
+        fix-avx512ScanPackedReqsMet.patch
+        0001-all-switch-linux-ppc64-target-to-ELFv2-ABI.patch
+        0002-ppc64-cgo-enablements.patch)
 validpgpkeys=('EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796')
-sha256sums=('1c646875d0aa8799133184ed57cf79ff24bdefe8c8820470602a9d3d6d9192b8'
+sha256sums=('4f668a32fbfc1132e6a881fb968c2f1dada631492a339211735fbb255a42602d'
             'SKIP'
-            '37909d8154d245b22ea506851bccc71eeffe2ad2756eb6dfb53ab48b58de589b')
+            '37909d8154d245b22ea506851bccc71eeffe2ad2756eb6dfb53ab48b58de589b'
+            '91643cd848ac1ac29265c1746c3445316e9e58fee5fa189d2b3444f218aaf652'
+            'f72520ee58c422b5e8ea477da58daaf8935e9a5d8c50d9d6189812d2b9ab08c0')
 
 prepare() {
   cd $pkgname
@@ -46,6 +50,14 @@ prepare() {
 
   # Fix AMD test failures on build.archlinux.org; see https://github.com/golang/go/issues/77674.
   patch -p1 -i ../fix-avx512ScanPackedReqsMet.patch
+
+  # Backports taken from the fine folks as Alpine Linux namely Aelin
+  patch -p1 -i ../0001-all-switch-linux-ppc64-target-to-ELFv2-ABI.patch
+  patch -p1 -i ../0002-ppc64-cgo-enablements.patch
+
+  # Requires `setarch` which requires priviledged access to
+  # containers, just skip it.
+  rm src/cmd/cgo/internal/testsanitizers/tsan_test.go
 }
 
 case "${CARCH}" in
@@ -67,6 +79,10 @@ build() {
 }
 
 check() {
+  case "${CARCH}" in
+    powerpc64) return 0 ;;
+  esac
+
   export GO_TEST_TIMEOUT_SCALE=3
 
   cd $pkgname/src

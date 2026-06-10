@@ -1,0 +1,189 @@
+From 1cd5ee6ab89975bbd58775f1e2689d59cf340d46 Mon Sep 17 00:00:00 2001
+From: Paul Murphy <murp@redhat.com>
+Date: Wed, 7 Jan 2026 13:48:53 -0600
+Subject: [PATCH 4/5] all: switch linux-ppc64 target to ELFv2 ABI
+
+Go is only capable of producing internally linked, static binaries
+on linux-ppc64. As such, binaries should run in either ELFv1 or
+ELFv2 ppc64 userspaces today.
+
+This opens the door to enabling cgo and external linking which
+will require ELFv2 support and userspace, eventually.
+
+Fixes #76244
+
+Change-Id: I5ca15037cbe546f352e8693dcf14da51a308b8ca
+Reviewed-on: https://go-review.googlesource.com/c/go/+/734540
+LUCI-TryBot-Result: Go LUCI <golang-scoped@luci-project-accounts.iam.gserviceaccount.com>
+Reviewed-by: Cherry Mui <cherryyz@google.com>
+Reviewed-by: Dmitri Shuralyov <dmitshur@google.com>
+---
+ src/cmd/link/internal/ld/elf.go               | 15 +++++-----
+ src/runtime/asm_ppc64x.h                      | 16 -----------
+ src/runtime/rt0_linux_ppc64.s                 | 28 -------------------
+ ...rt0_linux_ppc64le.s => rt0_linux_ppc64x.s} | 14 ++++++++--
+ src/runtime/sys_linux_ppc64x.s                | 12 ++++----
+ 5 files changed, 24 insertions(+), 61 deletions(-)
+ delete mode 100644 src/runtime/rt0_linux_ppc64.s
+ rename src/runtime/{rt0_linux_ppc64le.s => rt0_linux_ppc64x.s} (83%)
+
+diff --git a/src/cmd/link/internal/ld/elf.go b/src/cmd/link/internal/ld/elf.go
+index 12218feb31..8cd9e9f1b4 100644
+--- a/src/cmd/link/internal/ld/elf.go
++++ b/src/cmd/link/internal/ld/elf.go
+@@ -178,14 +178,7 @@ func Elfinit(ctxt *Link) {
+ 
+ 	switch ctxt.Arch.Family {
+ 	// 64-bit architectures
+-	case sys.PPC64, sys.S390X:
+-		if ctxt.Arch.ByteOrder == binary.BigEndian && ctxt.HeadType != objabi.Hopenbsd {
+-			ehdr.Flags = 1 // Version 1 ABI
+-		} else {
+-			ehdr.Flags = 2 // Version 2 ABI
+-		}
+-		fallthrough
+-	case sys.AMD64, sys.ARM64, sys.Loong64, sys.MIPS64, sys.RISCV64:
++	case sys.AMD64, sys.ARM64, sys.Loong64, sys.MIPS64, sys.PPC64, sys.RISCV64, sys.S390X:
+ 		if ctxt.Arch.Family == sys.MIPS64 {
+ 			ehdr.Flags = 0x20000004 // MIPS 3 CPIC
+ 		}
+@@ -195,6 +188,12 @@ func Elfinit(ctxt *Link) {
+ 		if ctxt.Arch.Family == sys.RISCV64 {
+ 			ehdr.Flags = 0x4 // RISCV Float ABI Double
+ 		}
++		if ctxt.Arch.Family == sys.S390X {
++			ehdr.Flags = 1 // Version 1 ABI
++		}
++		if ctxt.Arch.Family == sys.PPC64 {
++			ehdr.Flags = 2 // Version 2 ABI
++		}
+ 		elf64 = true
+ 
+ 		ehdr.Phoff = ELF64HDRSIZE      // Must be ELF64HDRSIZE: first PHdr must follow ELF header
+diff --git a/src/runtime/asm_ppc64x.h b/src/runtime/asm_ppc64x.h
+index 65870fe020..8b8149f97b 100644
+--- a/src/runtime/asm_ppc64x.h
++++ b/src/runtime/asm_ppc64x.h
+@@ -37,19 +37,3 @@
+ 	GLOBL	funcname(SB), NOPTR, $24
+ #endif
+ #endif
+-
+-// linux/ppc64 uses ELFv1 which uses function descriptors.
+-// These must also look like ABI0 functions on linux/ppc64
+-// to work with abi.FuncPCABI0(sigtramp) in os_linux.go.
+-// Only static codegen is supported on linux/ppc64, so TOC
+-// is not needed.
+-#ifdef GOOS_linux
+-#ifdef GOARCH_ppc64
+-#define GO_PPC64X_HAS_FUNCDESC
+-#define DEFINE_PPC64X_FUNCDESC(funcname, localfuncname)	\
+-	TEXT	funcname(SB),NOSPLIT|NOFRAME,$0		\
+-		DWORD	$localfuncname(SB)		\
+-		DWORD	$0				\
+-		DWORD	$0
+-#endif
+-#endif
+diff --git a/src/runtime/rt0_linux_ppc64.s b/src/runtime/rt0_linux_ppc64.s
+deleted file mode 100644
+index f527170ed2..0000000000
+--- a/src/runtime/rt0_linux_ppc64.s
++++ /dev/null
+@@ -1,28 +0,0 @@
+-// Copyright 2016 The Go Authors. All rights reserved.
+-// Use of this source code is governed by a BSD-style
+-// license that can be found in the LICENSE file.
+-
+-#include "textflag.h"
+-#include "asm_ppc64x.h"
+-
+-DEFINE_PPC64X_FUNCDESC(_rt0_ppc64_linux, _main<>)
+-DEFINE_PPC64X_FUNCDESC(main, _main<>)
+-
+-TEXT _main<>(SB),NOSPLIT,$-8
+-	// In a statically linked binary, the stack contains argc,
+-	// argv as argc string pointers followed by a NULL, envv as a
+-	// sequence of string pointers followed by a NULL, and auxv.
+-	// There is no TLS base pointer.
+-	//
+-	// TODO(austin): Support ABI v1 dynamic linking entry point
+-	XOR	R0, R0 // Note, newer kernels may not always set R0 to 0.
+-	MOVD	$runtime·rt0_go(SB), R12
+-	MOVD	R12, CTR
+-	MOVBZ	runtime·iscgo(SB), R5
+-	CMP	R5, $0
+-	BEQ	nocgo
+-	BR	(CTR)
+-nocgo:
+-	MOVD	0(R1), R3 // argc
+-	ADD	$8, R1, R4 // argv
+-	BR	(CTR)
+diff --git a/src/runtime/rt0_linux_ppc64le.s b/src/runtime/rt0_linux_ppc64x.s
+similarity index 83%
+rename from src/runtime/rt0_linux_ppc64le.s
+rename to src/runtime/rt0_linux_ppc64x.s
+index 3a6e8863b2..b1d174dbcd 100644
+--- a/src/runtime/rt0_linux_ppc64le.s
++++ b/src/runtime/rt0_linux_ppc64x.s
+@@ -2,15 +2,25 @@
+ // Use of this source code is governed by a BSD-style
+ // license that can be found in the LICENSE file.
+ 
++//go:build (ppc64 || ppc64le) && linux
++
+ #include "go_asm.h"
+ #include "textflag.h"
+ #include "asm_ppc64x.h"
+ 
+-TEXT _rt0_ppc64le_linux(SB),NOSPLIT,$0
++#ifdef GOARCH_ppc64
++#define ENTRYPOINT	_rt0_ppc64_linux
++#define ENTRYPOINT_LIB	_rt0_ppc64_linux_lib
++#else
++#define ENTRYPOINT	_rt0_ppc64le_linux
++#define ENTRYPOINT_LIB	_rt0_ppc64le_linux_lib
++#endif
++
++TEXT ENTRYPOINT(SB),NOSPLIT,$0
+ 	XOR R0, R0	  // Make sure R0 is zero before _main
+ 	BR _main<>(SB)
+ 
+-TEXT _rt0_ppc64le_linux_lib(SB),NOSPLIT|NOFRAME,$0
++TEXT ENTRYPOINT_LIB(SB),NOSPLIT|NOFRAME,$0
+ 	JMP _rt0_ppc64x_lib(SB)
+ 
+ TEXT _main<>(SB),NOSPLIT,$-8
+diff --git a/src/runtime/sys_linux_ppc64x.s b/src/runtime/sys_linux_ppc64x.s
+index 8735b932ed..5ecfb0ec62 100644
+--- a/src/runtime/sys_linux_ppc64x.s
++++ b/src/runtime/sys_linux_ppc64x.s
+@@ -447,13 +447,12 @@ TEXT runtime·sigfwd(SB),NOSPLIT,$0-32
+ 	MOVD	24(R1), R2
+ 	RET
+ 
+-#ifdef GO_PPC64X_HAS_FUNCDESC
+-DEFINE_PPC64X_FUNCDESC(runtime·sigtramp, sigtramp<>)
++#ifdef GOARCH_ppc64
+ // cgo isn't supported on ppc64, but we need to supply a cgoSigTramp function.
+-DEFINE_PPC64X_FUNCDESC(runtime·cgoSigtramp, sigtramp<>)
+-TEXT sigtramp<>(SB),NOSPLIT|NOFRAME|TOPFRAME,$0
+-#else
+-// ppc64le doesn't need function descriptors
++TEXT runtime·cgoSigtramp(SB),NOSPLIT|NOFRAME,$0
++	BR	runtime·sigtramp(SB)
++#endif
++
+ // Save callee-save registers in the case of signal forwarding.
+ // Same as on ARM64 https://golang.org/issue/31827 .
+ //
+@@ -461,7 +460,6 @@ TEXT sigtramp<>(SB),NOSPLIT|NOFRAME|TOPFRAME,$0
+ // a function pointer) as R2 may not be preserved when calling this
+ // function. In those cases, the caller preserves their R2.
+ TEXT runtime·sigtramp(SB),NOSPLIT|NOFRAME,$0
+-#endif
+ 	// This is called with ELF calling conventions. Convert to Go.
+ 	// Allocate space for argument storage to call runtime.sigtrampgo.
+ 	STACK_AND_SAVE_HOST_TO_GO_ABI(32)
+-- 
+2.53.0
+

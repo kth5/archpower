@@ -1,0 +1,517 @@
+From 74ce9229c44253007b7baa86ea75ee0d56d3eabb Mon Sep 17 00:00:00 2001
+From: Aelin Reidel <aelin@travitia.xyz>
+Date: Sat, 14 Mar 2026 16:16:17 +0100
+Subject: [PATCH 5/5] ppc64 cgo enablements
+
+Signed-off-by: Aelin Reidel <aelin@travitia.xyz>
+---
+ src/cmd/compile/internal/logopt/logopt_test.go |  2 +-
+ src/cmd/compile/internal/noder/reader.go       |  2 +-
+ src/cmd/compile/internal/ssa/regalloc.go       |  1 +
+ src/cmd/compile/internal/ssagen/abi.go         |  2 +-
+ src/cmd/dist/build.go                          |  6 +++---
+ src/cmd/dist/test.go                           | 15 +++++----------
+ src/cmd/go/internal/work/exec.go               |  2 ++
+ src/cmd/go/testdata/script/link_syso_deps.txt  |  4 ----
+ .../testdata/script/link_syso_issue33139.txt   |  4 ----
+ .../script/test_ppc64_linker_funcs.txt         |  2 +-
+ .../script/test_ppc64le_cgo_inline_plt.txt     |  2 ++
+ src/cmd/link/internal/ld/config.go             |  5 -----
+ src/cmd/link/internal/ld/dwarf_test.go         |  5 -----
+ src/cmd/link/internal/ld/elf.go                |  3 +++
+ src/internal/platform/supported.go             | 18 ++++++++----------
+ src/internal/platform/zosarch.go               |  2 +-
+ src/race.bash                                  |  3 ++-
+ src/runtime/asm_ppc64x.s                       |  6 ------
+ src/runtime/crash_cgo_test.go                  |  2 ++
+ src/runtime/runtime-gdb_test.go                |  3 ---
+ src/runtime/sys_linux_ppc64x.s                 | 10 ----------
+ 21 files changed, 33 insertions(+), 66 deletions(-)
+
+diff --git a/src/cmd/compile/internal/logopt/logopt_test.go b/src/cmd/compile/internal/logopt/logopt_test.go
+index 1edabf9fb7..1a91829dea 100644
+--- a/src/cmd/compile/internal/logopt/logopt_test.go
++++ b/src/cmd/compile/internal/logopt/logopt_test.go
+@@ -147,7 +147,7 @@ func s15a8(x *[15]int64) [15]int64 {
+ 		arches := []string{runtime.GOARCH}
+ 		goos0 := runtime.GOOS
+ 		if runtime.GOARCH == "amd64" { // Test many things with "linux" (wasm will get "js")
+-			arches = []string{"arm", "arm64", "386", "amd64", "mips", "mips64", "loong64", "ppc64le", "riscv64", "s390x", "wasm"}
++			arches = []string{"arm", "arm64", "386", "amd64", "mips", "mips64", "loong64", "ppc64", "ppc64le", "riscv64", "s390x", "wasm"}
+ 			goos0 = "linux"
+ 		}
+ 
+diff --git a/src/cmd/compile/internal/noder/reader.go b/src/cmd/compile/internal/noder/reader.go
+index d7dd58d8ca..eaacd01d15 100644
+--- a/src/cmd/compile/internal/noder/reader.go
++++ b/src/cmd/compile/internal/noder/reader.go
+@@ -3995,7 +3995,7 @@ func addTailCall(pos src.XPos, fn *ir.Func, recv ir.Node, method *types.Field) {
+ 	if recv.Type() != nil && recv.Type().IsPtr() && method.Type.Recv().Type.IsPtr() &&
+ 		method.Embedded != 0 && !types.IsInterfaceMethod(method.Type) &&
+ 		!unifiedHaveInlineBody(ir.MethodExprName(dot).Func) &&
+-		!(base.Ctxt.Arch.Name == "ppc64le" && base.Ctxt.Flag_dynlink) {
++		!((base.Ctxt.Arch.Name == "ppc64le" || base.Ctxt.Arch.Name == "ppc64") && base.Ctxt.Flag_dynlink) {
+ 		if base.Debug.TailCall != 0 {
+ 			base.WarnfAt(fn.Nname.Type().Recv().Type.Elem().Pos(), "tail call emitted for the method %v wrapper", method.Nname)
+ 		}
+diff --git a/src/cmd/compile/internal/ssa/regalloc.go b/src/cmd/compile/internal/ssa/regalloc.go
+index 861cf7e011..302dc3e626 100644
+--- a/src/cmd/compile/internal/ssa/regalloc.go
++++ b/src/cmd/compile/internal/ssa/regalloc.go
+@@ -753,6 +753,7 @@ func (s *regAllocState) init(f *Func) {
+ 		case "loong64": // R2 (aka TP) already reserved.
+ 			// nothing to do
+ 		case "ppc64le": // R2 already reserved.
++		case "ppc64":
+ 			// nothing to do
+ 		case "riscv64": // X3 (aka GP) and X4 (aka TP) already reserved.
+ 			// nothing to do
+diff --git a/src/cmd/compile/internal/ssagen/abi.go b/src/cmd/compile/internal/ssagen/abi.go
+index 0e8dbd9445..fb2c9c8ac9 100644
+--- a/src/cmd/compile/internal/ssagen/abi.go
++++ b/src/cmd/compile/internal/ssagen/abi.go
+@@ -314,7 +314,7 @@ func makeABIWrapper(f *ir.Func, wrapperABI obj.ABI) {
+ 	// extra work in typecheck/walk/ssa, might want to add a new node
+ 	// OTAILCALL or something to this effect.
+ 	tailcall := fn.Type().NumResults() == 0 && fn.Type().NumParams() == 0 && fn.Type().NumRecvs() == 0
+-	if base.Ctxt.Arch.Name == "ppc64le" && base.Ctxt.Flag_dynlink {
++	if (base.Ctxt.Arch.Name == "ppc64le" || base.Ctxt.Arch.Name == "ppc64") && base.Ctxt.Flag_dynlink {
+ 		// cannot tailcall on PPC64 with dynamic linking, as we need
+ 		// to restore R2 after call.
+ 		tailcall = false
+diff --git a/src/cmd/dist/build.go b/src/cmd/dist/build.go
+index e4250e12de..f044d9e79a 100644
+--- a/src/cmd/dist/build.go
++++ b/src/cmd/dist/build.go
+@@ -625,8 +625,8 @@ func mustLinkExternal(goos, goarch string, cgoEnabled bool) bool {
+ 			// https://golang.org/issue/14449
+ 			return true
+ 		case "ppc64":
+-			// Big Endian PPC64 cgo internal linking is not implemented for aix or linux.
+-			if goos == "aix" || goos == "linux" {
++			// Big Endian PPC64 cgo internal linking is not implemented for aix.
++			if goos == "aix" {
+ 				return true
+ 			}
+ 		}
+@@ -1780,7 +1780,7 @@ var cgoEnabled = map[string]bool{
+ 	"linux/arm":       true,
+ 	"linux/arm64":     true,
+ 	"linux/loong64":   true,
+-	"linux/ppc64":     false,
++	"linux/ppc64":     true,
+ 	"linux/ppc64le":   true,
+ 	"linux/mips":      true,
+ 	"linux/mipsle":    true,
+diff --git a/src/cmd/dist/test.go b/src/cmd/dist/test.go
+index 48c3aa5efd..61872a26e8 100644
+--- a/src/cmd/dist/test.go
++++ b/src/cmd/dist/test.go
+@@ -1186,9 +1186,6 @@ func (t *tester) extLink() bool {
+ 	if !cgoEnabled[goos+"/"+goarch] {
+ 		return false
+ 	}
+-	if goarch == "ppc64" && goos != "aix" {
+-		return false
+-	}
+ 	return true
+ }
+ 
+@@ -1746,9 +1743,7 @@ func buildModeSupported(compiler, buildmode, goos, goarch string) bool {
+ 			return true
+ 		case "linux":
+ 			switch goarch {
+-			case "386", "amd64", "arm", "armbe", "arm64", "arm64be", "loong64", "ppc64le", "riscv64", "s390x":
+-				// linux/ppc64 not supported because it does
+-				// not support external linking mode yet.
++			case "386", "amd64", "arm", "armbe", "arm64", "arm64be", "loong64", "ppc64", "ppc64le", "riscv64", "s390x":
+ 				return true
+ 			default:
+ 				// Other targets do not support -shared,
+@@ -1766,7 +1761,7 @@ func buildModeSupported(compiler, buildmode, goos, goarch string) bool {
+ 
+ 	case "c-shared":
+ 		switch platform {
+-		case "linux/amd64", "linux/arm", "linux/arm64", "linux/loong64", "linux/386", "linux/ppc64le", "linux/riscv64", "linux/s390x",
++		case "linux/amd64", "linux/arm", "linux/arm64", "linux/loong64", "linux/386", "linux/ppc64", "linux/ppc64le", "linux/riscv64", "linux/s390x",
+ 			"android/amd64", "android/arm", "android/arm64", "android/386",
+ 			"freebsd/amd64",
+ 			"darwin/amd64", "darwin/arm64",
+@@ -1784,7 +1779,7 @@ func buildModeSupported(compiler, buildmode, goos, goarch string) bool {
+ 
+ 	case "pie":
+ 		switch platform {
+-		case "linux/386", "linux/amd64", "linux/arm", "linux/arm64", "linux/loong64", "linux/ppc64le", "linux/riscv64", "linux/s390x",
++		case "linux/386", "linux/amd64", "linux/arm", "linux/arm64", "linux/loong64", "linux/ppc64", "linux/ppc64le", "linux/riscv64", "linux/s390x",
+ 			"android/amd64", "android/arm", "android/arm64", "android/386",
+ 			"freebsd/amd64",
+ 			"darwin/amd64", "darwin/arm64",
+@@ -1798,14 +1793,14 @@ func buildModeSupported(compiler, buildmode, goos, goarch string) bool {
+ 
+ 	case "shared":
+ 		switch platform {
+-		case "linux/386", "linux/amd64", "linux/arm", "linux/arm64", "linux/ppc64le", "linux/s390x":
++		case "linux/386", "linux/amd64", "linux/arm", "linux/arm64", "linux/ppc64", "linux/ppc64le", "linux/s390x":
+ 			return true
+ 		}
+ 		return false
+ 
+ 	case "plugin":
+ 		switch platform {
+-		case "linux/amd64", "linux/arm", "linux/arm64", "linux/386", "linux/loong64", "linux/riscv64", "linux/s390x", "linux/ppc64le",
++		case "linux/amd64", "linux/arm", "linux/arm64", "linux/386", "linux/loong64", "linux/riscv64", "linux/s390x", "linux/ppc64", "linux/ppc64le",
+ 			"android/amd64", "android/386",
+ 			"darwin/amd64", "darwin/arm64",
+ 			"freebsd/amd64":
+diff --git a/src/cmd/go/internal/work/exec.go b/src/cmd/go/internal/work/exec.go
+index 8e30276671..dfd7c32ee0 100644
+--- a/src/cmd/go/internal/work/exec.go
++++ b/src/cmd/go/internal/work/exec.go
+@@ -2781,6 +2781,8 @@ func (b *Builder) gccArchArgs() []string {
+ 	case "ppc64":
+ 		if cfg.Goos == "aix" {
+ 			return []string{"-maix64"}
++		} else {
++			return []string{"-mabi=elfv2", "-m64"}
+ 		}
+ 	}
+ 	return nil
+diff --git a/src/cmd/go/testdata/script/link_syso_deps.txt b/src/cmd/go/testdata/script/link_syso_deps.txt
+index 6bb9005577..097b1a44e5 100644
+--- a/src/cmd/go/testdata/script/link_syso_deps.txt
++++ b/src/cmd/go/testdata/script/link_syso_deps.txt
+@@ -4,10 +4,6 @@
+ [!cgo] skip
+ [short] skip 'invokes system C compiler'
+ 
+-# External linking is not supported on linux/ppc64.
+-# See: https://github.com/golang/go/issues/8912
+-[GOOS:linux] [GOARCH:ppc64] skip
+-
+ cc -c -o syso/x.syso syso/x.c
+ cc -c -o syso2/x.syso syso2/x.c
+ go build m/cgo
+diff --git a/src/cmd/go/testdata/script/link_syso_issue33139.txt b/src/cmd/go/testdata/script/link_syso_issue33139.txt
+index b0d4a7c68c..4e1ebb9b58 100644
+--- a/src/cmd/go/testdata/script/link_syso_issue33139.txt
++++ b/src/cmd/go/testdata/script/link_syso_issue33139.txt
+@@ -6,10 +6,6 @@
+ [!cgo] skip
+ [short] skip 'invokes system C compiler'
+ 
+-# External linking is not supported on linux/ppc64.
+-# See: https://github.com/golang/go/issues/8912
+-[GOOS:linux] [GOARCH:ppc64] skip
+-
+ cc -c -o syso/objTestImpl.syso syso/src/objTestImpl.c
+ go build -ldflags='-linkmode=external' ./cmd/main.go
+ 
+diff --git a/src/cmd/go/testdata/script/test_ppc64_linker_funcs.txt b/src/cmd/go/testdata/script/test_ppc64_linker_funcs.txt
+index d789f89f4e..b60d36414f 100644
+--- a/src/cmd/go/testdata/script/test_ppc64_linker_funcs.txt
++++ b/src/cmd/go/testdata/script/test_ppc64_linker_funcs.txt
+@@ -8,7 +8,7 @@
+ [!GOOS:linux] skip
+ [!compiler:gc] skip
+ [!cgo] skip
+-[!GOARCH:ppc64le] skip
++[!GOARCH:ppc64] [!GOARCH:ppc64le] skip
+ 
+ go build -ldflags='-linkmode=internal'
+ exec ./abitest
+diff --git a/src/cmd/go/testdata/script/test_ppc64le_cgo_inline_plt.txt b/src/cmd/go/testdata/script/test_ppc64le_cgo_inline_plt.txt
+index ef9ff03592..630015c733 100644
+--- a/src/cmd/go/testdata/script/test_ppc64le_cgo_inline_plt.txt
++++ b/src/cmd/go/testdata/script/test_ppc64le_cgo_inline_plt.txt
+@@ -8,6 +8,8 @@
+ #
+ # Note, older gcc/clang may accept this option, but
+ # ignore it if binutils does not support the relocs.
++#
++# FIXME: ppc64 needs fixing
+ [!compiler:gc] skip
+ [!cgo] skip
+ [!GOARCH:ppc64le] skip
+diff --git a/src/cmd/link/internal/ld/config.go b/src/cmd/link/internal/ld/config.go
+index 802fb35aee..1651c2c4b9 100644
+--- a/src/cmd/link/internal/ld/config.go
++++ b/src/cmd/link/internal/ld/config.go
+@@ -218,10 +218,5 @@ func determineLinkMode(ctxt *Link) {
+ 		if extNeeded {
+ 			Exitf("internal linking requested %sbut external linking required: %s", via, extReason)
+ 		}
+-	case LinkExternal:
+-		switch {
+-		case buildcfg.GOARCH == "ppc64" && buildcfg.GOOS == "linux":
+-			Exitf("external linking not supported for %s/ppc64", buildcfg.GOOS)
+-		}
+ 	}
+ }
+diff --git a/src/cmd/link/internal/ld/dwarf_test.go b/src/cmd/link/internal/ld/dwarf_test.go
+index cc493f2c69..fb3d067224 100644
+--- a/src/cmd/link/internal/ld/dwarf_test.go
++++ b/src/cmd/link/internal/ld/dwarf_test.go
+@@ -871,11 +871,6 @@ func TestRuntimeTypeAttrExternal(t *testing.T) {
+ 
+ 	mustHaveDWARF(t)
+ 
+-	// Explicitly test external linking, for dsymutil compatibility on Darwin.
+-	if runtime.GOARCH == "ppc64" {
+-		t.Skip("-linkmode=external not supported on ppc64")
+-	}
+-
+ 	testRuntimeTypeAttr(t, "-ldflags=-linkmode=external")
+ }
+ 
+diff --git a/src/cmd/link/internal/ld/elf.go b/src/cmd/link/internal/ld/elf.go
+index 8cd9e9f1b4..5991bbfa9e 100644
+--- a/src/cmd/link/internal/ld/elf.go
++++ b/src/cmd/link/internal/ld/elf.go
+@@ -185,6 +185,9 @@ func Elfinit(ctxt *Link) {
+ 		if ctxt.Arch.Family == sys.Loong64 {
+ 			ehdr.Flags = 0x43 // DOUBLE_FLOAT, OBJABI_V1
+ 		}
++		if ctxt.Arch.Family == sys.PPC64 {
++			ehdr.Flags = 2 /* Version 2 ABI */
++		}
+ 		if ctxt.Arch.Family == sys.RISCV64 {
+ 			ehdr.Flags = 0x4 // RISCV Float ABI Double
+ 		}
+diff --git a/src/internal/platform/supported.go b/src/internal/platform/supported.go
+index 778d727086..a22de4f35e 100644
+--- a/src/internal/platform/supported.go
++++ b/src/internal/platform/supported.go
+@@ -90,9 +90,9 @@ func MustLinkExternal(goos, goarch string, withCgo bool) bool {
+ 			// https://go.dev/issue/14449
+ 			return true
+ 		case "ppc64":
+-			// Big Endian PPC64 cgo internal linking is not implemented for aix or linux.
++			// Big Endian PPC64 cgo internal linking is not implemented for aix.
+ 			// https://go.dev/issue/8912
+-			if goos == "aix" || goos == "linux" {
++			if goos == "aix" {
+ 				return true
+ 			}
+ 		}
+@@ -144,9 +144,7 @@ func BuildModeSupported(compiler, buildmode, goos, goarch string) bool {
+ 			return true
+ 		case "linux":
+ 			switch goarch {
+-			case "386", "amd64", "arm", "armbe", "arm64", "arm64be", "loong64", "ppc64le", "riscv64", "s390x":
+-				// linux/ppc64 not supported because it does
+-				// not support external linking mode yet.
++			case "386", "amd64", "arm", "armbe", "arm64", "arm64be", "loong64", "ppc64", "ppc64le", "riscv64", "s390x":
+ 				return true
+ 			default:
+ 				// Other targets do not support -shared,
+@@ -164,7 +162,7 @@ func BuildModeSupported(compiler, buildmode, goos, goarch string) bool {
+ 
+ 	case "c-shared":
+ 		switch platform {
+-		case "linux/amd64", "linux/arm", "linux/arm64", "linux/loong64", "linux/386", "linux/ppc64le", "linux/riscv64", "linux/s390x",
++		case "linux/amd64", "linux/arm", "linux/arm64", "linux/loong64", "linux/386", "linux/ppc64", "linux/ppc64le", "linux/riscv64", "linux/s390x",
+ 			"android/amd64", "android/arm", "android/arm64", "android/386",
+ 			"freebsd/amd64",
+ 			"darwin/amd64", "darwin/arm64",
+@@ -182,7 +180,7 @@ func BuildModeSupported(compiler, buildmode, goos, goarch string) bool {
+ 
+ 	case "pie":
+ 		switch platform {
+-		case "linux/386", "linux/amd64", "linux/arm", "linux/arm64", "linux/loong64", "linux/ppc64le", "linux/riscv64", "linux/s390x",
++		case "linux/386", "linux/amd64", "linux/arm", "linux/arm64", "linux/loong64", "linux/ppc64", "linux/ppc64le", "linux/riscv64", "linux/s390x",
+ 			"android/amd64", "android/arm", "android/arm64", "android/386",
+ 			"freebsd/amd64",
+ 			"darwin/amd64", "darwin/arm64",
+@@ -196,14 +194,14 @@ func BuildModeSupported(compiler, buildmode, goos, goarch string) bool {
+ 
+ 	case "shared":
+ 		switch platform {
+-		case "linux/386", "linux/amd64", "linux/arm", "linux/arm64", "linux/ppc64le", "linux/s390x":
++		case "linux/386", "linux/amd64", "linux/arm", "linux/arm64", "linux/ppc64", "linux/ppc64le", "linux/s390x":
+ 			return true
+ 		}
+ 		return false
+ 
+ 	case "plugin":
+ 		switch platform {
+-		case "linux/amd64", "linux/arm", "linux/arm64", "linux/386", "linux/loong64", "linux/riscv64", "linux/s390x", "linux/ppc64le",
++		case "linux/amd64", "linux/arm", "linux/arm64", "linux/386", "linux/loong64", "linux/riscv64", "linux/s390x", "linux/ppc64", "linux/ppc64le",
+ 			"android/amd64", "android/386",
+ 			"darwin/amd64", "darwin/arm64",
+ 			"freebsd/amd64":
+@@ -220,7 +218,7 @@ func InternalLinkPIESupported(goos, goarch string) bool {
+ 	switch goos + "/" + goarch {
+ 	case "android/arm64",
+ 		"darwin/amd64", "darwin/arm64",
+-		"linux/amd64", "linux/arm64", "linux/loong64", "linux/ppc64le",
++		"linux/amd64", "linux/arm64", "linux/loong64", "linux/ppc64", "linux/ppc64le",
+ 		"windows/386", "windows/amd64", "windows/arm64":
+ 		return true
+ 	}
+diff --git a/src/internal/platform/zosarch.go b/src/internal/platform/zosarch.go
+index a2f5b22ea9..94b7911873 100644
+--- a/src/internal/platform/zosarch.go
++++ b/src/internal/platform/zosarch.go
+@@ -87,7 +87,7 @@ var distInfo = map[OSArch]osArchInfo{
+ 	{"linux", "mips64"}:    {CgoSupported: true},
+ 	{"linux", "mips64le"}:  {CgoSupported: true},
+ 	{"linux", "mipsle"}:    {CgoSupported: true},
+-	{"linux", "ppc64"}:     {},
++	{"linux", "ppc64"}:     {CgoSupported: true},
+ 	{"linux", "ppc64le"}:   {CgoSupported: true},
+ 	{"linux", "riscv64"}:   {CgoSupported: true},
+ 	{"linux", "s390x"}:     {CgoSupported: true},
+diff --git a/src/race.bash b/src/race.bash
+index 3ce91a345f..887aa4e450 100755
+--- a/src/race.bash
++++ b/src/race.bash
+@@ -9,7 +9,7 @@
+ set -e
+ 
+ function usage {
+-	echo 'race detector is only supported on linux/amd64, linux/ppc64le, linux/arm64, linux/loong64, linux/riscv64, linux/s390x, freebsd/amd64, netbsd/amd64, openbsd/amd64, darwin/amd64, and darwin/arm64' 1>&2
++	echo 'race detector is only supported on linux/amd64, linux/ppc64, linux/ppc64le, linux/arm64, linux/loong64, linux/riscv64, linux/s390x, freebsd/amd64, netbsd/amd64, openbsd/amd64, darwin/amd64, and darwin/arm64' 1>&2
+ 	exit 1
+ }
+ 
+@@ -17,6 +17,7 @@ case $(uname -s -m) in
+   "Darwin x86_64") ;;
+   "Darwin arm64")  ;;
+   "Linux x86_64")  ;;
++  "Linux ppc64")   ;;
+   "Linux ppc64le") ;;
+   "Linux aarch64") ;;
+   "Linux loongarch64") ;;
+diff --git a/src/runtime/asm_ppc64x.s b/src/runtime/asm_ppc64x.s
+index ffc4b005cb..0a9134e66d 100644
+--- a/src/runtime/asm_ppc64x.s
++++ b/src/runtime/asm_ppc64x.s
+@@ -180,10 +180,8 @@ nocgo:
+ 	BL	runtime·mstart(SB)
+ 	// Prevent dead-code elimination of debugCallV2 and debugPinnerV1, which are
+ 	// intended to be called by debuggers.
+-#ifdef GOARCH_ppc64le
+ 	MOVD	$runtime·debugPinnerV1<ABIInternal>(SB), R31
+ 	MOVD	$runtime·debugCallV2<ABIInternal>(SB), R31
+-#endif
+ 	MOVD	R0, 0(R0)
+ 	RET
+ 
+@@ -1260,7 +1258,6 @@ GLOBL	debugCallFrameTooLarge<>(SB), RODATA, $20	// Size duplicated below
+ //
+ // This is ABIInternal because Go code injects its PC directly into new
+ // goroutine stacks.
+-#ifdef GOARCH_ppc64le
+ TEXT runtime·debugCallV2<ABIInternal>(SB), NOSPLIT|NOFRAME, $0-0
+ 	// save scratch register R31 first
+ 	MOVD	R31, -184(R1)
+@@ -1398,7 +1395,6 @@ restore:
+ 	// Add 32 bytes more to compensate for SP change in saveSigContext
+ 	ADD	$352, R1
+ 	JMP	(CTR)
+-#endif
+ #define DEBUG_CALL_FN(NAME,MAXSIZE)	\
+ TEXT NAME(SB),WRAPPER,$MAXSIZE-0;	\
+ 	NO_LOCAL_POINTERS;		\
+@@ -1420,7 +1416,6 @@ DEBUG_CALL_FN(debugCall16384<>, 16384)
+ DEBUG_CALL_FN(debugCall32768<>, 32768)
+ DEBUG_CALL_FN(debugCall65536<>, 65536)
+ 
+-#ifdef GOARCH_ppc64le
+ // func debugCallPanicked(val interface{})
+ TEXT runtime·debugCallPanicked(SB),NOSPLIT,$32-16
+ 	// Copy the panic value to the top of stack at SP+32.
+@@ -1431,7 +1426,6 @@ TEXT runtime·debugCallPanicked(SB),NOSPLIT,$32-16
+ 	MOVD	$2, R20
+ 	TW	$31, R0, R0
+ 	RET
+-#endif
+ 
+ TEXT runtime·panicBounds<ABIInternal>(SB),NOSPLIT,$88-0
+ 	// Note: frame size is 16 bytes larger than necessary
+diff --git a/src/runtime/crash_cgo_test.go b/src/runtime/crash_cgo_test.go
+index baf4523a7a..2e2a658662 100644
+--- a/src/runtime/crash_cgo_test.go
++++ b/src/runtime/crash_cgo_test.go
+@@ -300,6 +300,7 @@ func TestCgoCrashTraceback(t *testing.T) {
+ 	case "linux/amd64":
+ 	case "linux/arm64":
+ 	case "linux/loong64":
++	case "linux/ppc64":
+ 	case "linux/ppc64le":
+ 	default:
+ 		t.Skipf("not yet supported on %s", platform)
+@@ -325,6 +326,7 @@ func TestCgoCrashTracebackGo(t *testing.T) {
+ 	case "linux/amd64":
+ 	case "linux/arm64":
+ 	case "linux/loong64":
++	case "linux/ppc64":
+ 	case "linux/ppc64le":
+ 	default:
+ 		t.Skipf("not yet supported on %s", platform)
+diff --git a/src/runtime/runtime-gdb_test.go b/src/runtime/runtime-gdb_test.go
+index 47d125bd67..f10b06753b 100644
+--- a/src/runtime/runtime-gdb_test.go
++++ b/src/runtime/runtime-gdb_test.go
+@@ -34,9 +34,6 @@ func checkGdbEnvironment(t *testing.T) {
+ 	case "netbsd":
+ 		t.Skip("gdb does not work with threads on NetBSD; see https://golang.org/issue/22893 and https://gnats.netbsd.org/52548")
+ 	case "linux":
+-		if runtime.GOARCH == "ppc64" {
+-			t.Skip("skipping gdb tests on linux/ppc64; see https://golang.org/issue/17366")
+-		}
+ 		if runtime.GOARCH == "mips" {
+ 			t.Skip("skipping gdb tests on linux/mips; see https://golang.org/issue/25939")
+ 		}
+diff --git a/src/runtime/sys_linux_ppc64x.s b/src/runtime/sys_linux_ppc64x.s
+index 5ecfb0ec62..92ec121c35 100644
+--- a/src/runtime/sys_linux_ppc64x.s
++++ b/src/runtime/sys_linux_ppc64x.s
+@@ -417,7 +417,6 @@ TEXT runtime·rt_sigaction(SB),NOSPLIT|NOFRAME,$0-36
+ 	MOVW	R3, ret+32(FP)
+ 	RET
+ 
+-#ifdef GOARCH_ppc64le
+ // Call the function stored in _cgo_sigaction using the GCC calling convention.
+ TEXT runtime·callCgoSigaction(SB),NOSPLIT,$0
+ 	MOVD    sig+0(FP), R3
+@@ -435,7 +434,6 @@ TEXT runtime·callCgoSigaction(SB),NOSPLIT,$0
+ 	MOVD    24(R1), R2              // Restore R2
+ 	MOVW    R3, ret+24(FP)          // Return result
+ 	RET
+-#endif
+ 
+ TEXT runtime·sigfwd(SB),NOSPLIT,$0-32
+ 	MOVW	sig+8(FP), R3
+@@ -447,12 +445,6 @@ TEXT runtime·sigfwd(SB),NOSPLIT,$0-32
+ 	MOVD	24(R1), R2
+ 	RET
+ 
+-#ifdef GOARCH_ppc64
+-// cgo isn't supported on ppc64, but we need to supply a cgoSigTramp function.
+-TEXT runtime·cgoSigtramp(SB),NOSPLIT|NOFRAME,$0
+-	BR	runtime·sigtramp(SB)
+-#endif
+-
+ // Save callee-save registers in the case of signal forwarding.
+ // Same as on ARM64 https://golang.org/issue/31827 .
+ //
+@@ -486,7 +478,6 @@ TEXT runtime·sigtramp(SB),NOSPLIT|NOFRAME,$0
+ 	UNSTACK_AND_RESTORE_GO_TO_HOST_ABI(32)
+ 	RET
+ 
+-#ifdef GOARCH_ppc64le
+ TEXT runtime·cgoSigtramp(SB),NOSPLIT|NOFRAME,$0
+ 	// The stack unwinder, presumably written in C, may not be able to
+ 	// handle Go frame correctly. So, this function is NOFRAME, and we
+@@ -581,7 +572,6 @@ sigtrampnog:
+ 	MOVD	R12, CTR
+ 	MOVD	R10, LR // restore LR
+ 	JMP	(CTR)
+-#endif
+ 
+ // Used by cgoSigtramp to inspect without clobbering R30/R31 via runtime.load_g.
+ GLOBL runtime·tls_g+0(SB), TLSBSS+DUPOK, $8
+-- 
+2.53.0
+
