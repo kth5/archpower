@@ -1,0 +1,44 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Stefan Agner <stefan@agner.ch>
+# Contributor: Samadi van Koten
+
+pkgname=umoci
+pkgver=0.5.1
+pkgrel=1
+pkgdesc="Umoci Modifies Open Container Images"
+arch=(x86_64 powerpc64le powerpc64)
+url="https://umo.ci/"
+license=('Apache-2.0')
+depends=('glibc')
+makedepends=('git' 'go' 'go-md2man')
+source=("git+https://github.com/opencontainers/$pkgname.git#tag=v$pkgver")
+sha256sums=('9ecf2f82f0018c2e28210db876f2abefe85ddde90cfd6c7dfc0375bd721ee93f')
+
+prepare() {
+  rm -rf "$srcdir/src/github.com/opencontainers/$pkgname"
+  mkdir -p "$srcdir/src/github.com/opencontainers"
+  ln -s "$srcdir/$pkgname" "$srcdir/src/github.com/opencontainers/$pkgname"
+}
+
+build() {
+  export CGO_CPPFLAGS="${CPPFLAGS}"
+  export CGO_CFLAGS="${CFLAGS}"
+  export CGO_CXXFLAGS="${CXXFLAGS}"
+  export CGO_LDFLAGS="${LDFLAGS}"
+  case "${CARCH}" in
+    powerpc64) BUILDMODE="" ;;
+    *)         BUILDMODE="-buildmode=pie" ;;
+  esac
+  export GOFLAGS="${BUILDMODE} -trimpath -ldflags=-linkmode=external -mod=readonly -modcacherw"
+
+  cd "$srcdir/src/github.com/opencontainers/$pkgname"
+  GOPATH="$srcdir" make
+  GOPATH="$srcdir" make docs
+}
+
+package() {
+  cd "$srcdir/src/github.com/opencontainers/$pkgname"
+  install -Dm 755 -t "$pkgdir/usr/bin" umoci
+  install -Dm 644 -t "$pkgdir/usr/share/man/man1" doc/man/*1
+}
