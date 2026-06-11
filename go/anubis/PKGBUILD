@@ -1,0 +1,88 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+
+pkgname=anubis
+pkgver=1.25.0
+pkgrel=1
+pkgdesc="Reverse proxy to protect against scraper bots"
+url="https://anubis.techaro.lol/"
+arch=(x86_64 powerpc64le)
+license=(MIT)
+depends=(glibc)
+makedepends=(
+  brotli
+  git
+  go
+  gzip
+  npm
+  zstd
+)
+backup=(etc/anubis/default.env)
+options=(
+  # Reproducibility fix
+  # https://github.com/golang/go/pull/53528
+  !lto
+)
+source=(
+  "git+https://github.com/TecharoHQ/anubis?signed#tag=v${pkgver/[a-z]/-&}"
+)
+b2sums=('81cfd31b79cdf54a0aa249cdd28b05ef8df8a73f537d71667ab06d9ae20a74e0d47eb7019304f70d89444fbe9491af2012bf6f36156b1d4001e4cf1324f92e12')
+validpgpkeys=(
+  833F64161167B501058C394756375DA2DF02ABFF # Techaro Packages Signatures <gpg+packages@techaro.lol>
+)
+
+prepare() {
+  cd anubis
+
+  make deps
+}
+
+build() {
+  cd anubis
+
+  case "${CARCH}" in
+    powerpc64) BUILDMODE="" ;;
+    *)         BUILDMODE="-buildmode=pie" ;;
+  esac
+
+  local ldflags=(
+    -compressdwarf=false
+    -linkmode=external
+    -X "github.com/TecharoHQ/anubis.Version=$pkgver-arch$pkgrel"
+  ) goflags=(
+    ${BUILDMODE}
+    -trimpath
+    -mod=readonly
+    -modcacherw
+    "\"-ldflags=${ldflags[*]}\""
+  )
+
+  export CGO_CFLAGS="${CFLAGS}"
+  export CGO_CPPFLAGS="${CPPFLAGS}"
+  export CGO_CXXFLAGS="${CXXFLAGS}"
+  export CGO_LDFLAGS="${LDFLAGS}"
+  export GOFLAGS="${goflags[*]}"
+
+  make build
+  go build -o ./var/iplist2rule ./utils/cmd/iplist2rule
+}
+
+package() {
+  cd anubis
+
+  install -D var/anubis -t "$pkgdir/usr/bin"
+  install -D var/robots2policy "$pkgdir/usr/bin/anubis-robots2policy"
+  install -D var/iplist2rule "$pkgdir/usr/bin/anubis-iplist2rule"
+
+  install -Dm644 run/anubis@.service -t "$pkgdir/usr/lib/systemd/system"
+  install -Dm644 run/default.env -t "$pkgdir/etc/anubis"
+
+  local docdir="$pkgdir/usr/share/doc/$pkgname"
+  install -Dm644 README.md -t "$docdir"
+  cp -a docs/docs data -t "$docdir"
+  find "$docdir" \( -name _category_.json -o -name '*.go' \) -delete
+
+  install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
+}
+
+# vim:set sw=2 sts=-1 et:
