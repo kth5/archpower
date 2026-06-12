@@ -1,0 +1,63 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jelle van der Waa <jelle@archlinux.org>
+# Contributor: Daniel Milde <daniel@milde.cz>
+# Contributor: George Rawlinson <george@rawlinson.net.nz>
+
+pkgname=esbuild
+pkgver=0.28.0
+pkgrel=1
+pkgdesc="An extremely fast JavaScript and CSS bundler and minifier."
+arch=(x86_64 powerpc64le powerpc64)
+url="https://esbuild.github.io/"
+license=('MIT')
+depends=(glibc)
+makedepends=(go nodejs-lts-iron)
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/evanw/${pkgname}/archive/v${pkgver}.tar.gz")
+sha512sums=('fd29b78c809bef33de36839f1079ac65a0573ae7e61be479b42e02ada8db023f46257b42451d479e323fa657cbdcfee25cc009647412eb74cc3f581ca8065854')
+
+case "${CARCH}" in
+    powerpc64) BUILDMODE="" ;;
+    *)         BUILDMODE="-buildmode=pie" ;;
+esac 
+
+export CGO_CPPFLAGS="${CPPFLAGS}"
+export CGO_CFLAGS="${CFLAGS}"
+export CGO_CXXFLAGS="${CXXFLAGS}"
+export CGO_LDFLAGS="${LDFLAGS}"
+export GOFLAGS="${BUILDMODE} -trimpath -ldflags=-linkmode=external -mod=readonly -modcacherw"
+
+build() {
+    cd "${pkgname}-${pkgver}"
+
+    go build \
+    -trimpath \
+    -mod=readonly \
+    -modcacherw ${BUILDMODE} \
+    -ldflags "-linkmode external -extldflags \"${LDFLAGS}\"" \
+    ./cmd/esbuild
+
+    # Generate npm/esbuild/*
+    node scripts/esbuild.js ./esbuild --neutral
+}
+
+package() {
+    cd "${pkgname}-${pkgver}"
+    install -Dm755 "${pkgname}" "${pkgdir}/usr/bin/${pkgname}"
+    install -Dm644 -t "${pkgdir}/usr/share/licenses/${pkgname}" "LICENSE.md"
+
+    # Detect node platform name (e.g., "linux-x64")
+    node_platform=$(node -p 'process.platform + "-" + process.arch')
+    node_dir="${pkgdir}/usr/lib/node_modules"
+    npm_dir="${node_dir}/${pkgname}"
+    install -Dm755 -d ${npm_dir}/lib
+    install -Dm644 -t ${npm_dir}/lib npm/esbuild/lib/main.d.ts
+    install -Dm644 -t ${npm_dir}/lib npm/esbuild/lib/main.js
+    install -Dm644 -t ${npm_dir} npm/esbuild/package.json
+
+    # Install the @esbuild/platform module
+    install -m755 -d ${node_dir}/@esbuild/${node_platform}/bin
+    ln -s /usr/bin/esbuild ${node_dir}/@esbuild/${node_platform}/bin/esbuild
+
+    # Testing the node module
+    # NODE_PATH=/usr/lib/node_modules node -e 'const esbuild = require("esbuild"); esbuild.transformSync("const x=1",{loader:"js"}); console.log("esbuild works")
+}
