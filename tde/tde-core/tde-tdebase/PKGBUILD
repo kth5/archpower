@@ -7,8 +7,8 @@ _cat=core/
 _kdemod="${_mod/tde/kde}"
 
 pkgname="tde-${_mod}"
-pkgver=14.1.5
-pkgrel=2
+pkgver=14.1.6
+pkgrel=1
 pkgdesc="Trinity Desktop Enviroment base components"
 arch=(i686 x86_64 aarch64 armv7h powerpc64le powerpc64 powerpc espresso)
 url="https://scm.trinitydesktop.org/scm/git/${_mod}"
@@ -53,29 +53,23 @@ options=('staticlibs' 'libtool' '!strip' '!debug')
 install="trinity-${_mod}.install"
 
 source=("https://mirror.ppa.trinitydesktop.org/trinity/releases/R${pkgver}/main/${_cat}${_mod}-trinity-${pkgver}.tar.xz"
-        'bp000-fix-tiling-of-maximized-windows.diff'
         'agent-shutdown.sh'
         'agent-startup.sh'
-        'tdm-trinity'
         'trinity.desktop'
-        'tdm.service'
-        'xsession.patch')
+        "${pkgname}-${pkgver}-gcc16.patch::https://mirror.git.trinitydesktop.org/gitea/TDE/tdebase/pulls/736.patch")
 
-md5sums=('d411d22bbce474ece21cf838e7491f41'
-         '235431ac1f009c0db8a34ddd22b034f8'
+md5sums=('f471a3ef691fd5e8342a8c8f6598f123'
          '18e8d01124b19f7df2937c06e177bf7f'
          'c963ef6e37c9051119972a58c67f05fb'
-         'bb4c25e560fa719e8e8f49ef80bd1c99'
          '091f4e1045867bbbc15bf323731aae82'
-         'e0ddb96fc86bd081ce691744a68d2f9a'
-         'a761787a4d2f917389ced194552addca')
+         'b515835c950ce7950b850459b37136e5')
 
 [ -n "$TDEDIR" ] || TDEDIR=/opt/trinity
+[ -n "$TQTDIR" ] || TQTDIR=${TDEDIR}/tqt3
 
 prepare() {
-  msg "Apply backported patches"
-  cd ${srcdir}/${pkgname#*-}-trinity-${pkgver} || exit 1
-  patch -p1 < ${srcdir}/bp000-fix-tiling-of-maximized-windows.diff
+  cd ${pkgname#*-}-trinity-${pkgver}
+  patch -Np1 -i ${srcdir}/${pkgname}-${pkgver}-gcc16.patch
 }
 
 build() {
@@ -84,6 +78,11 @@ build() {
   cd ${srcdir}/build
 
   msg "Starting cmake..."
+
+  export PKG_CONFIG_PATH=${TQTDIR}/lib/pkgconfig:${PKG_CONFIG_PATH}
+
+  # kill massive amounts of warnings
+  export CXXFLAGS+=' -Wno-deprecated-enum-enum-conversion -Wno-deprecated-declarations'
 
   cmake ${srcdir}/${pkgname#*-}-trinity-${pkgver}/ \
     -GNinja \
@@ -112,6 +111,7 @@ build() {
     -DWITH_TDEHWLIB=ON \
     -DWITH_UPOWER=ON \
     -DBUILD_ALL=ON \
+    -DBUILD_TDM_SYSTEMD_UNIT_FILE=ON \
     -DWITH_GCC_VISIBILITY=ON \
     -DKCHECKPASS_PAM_SERVICE=tde-checkpass \
     -DTDM_PAM_SERVICE=tde \
@@ -129,19 +129,10 @@ package() {
   install -d -m755 ${pkgdir}/usr/share/xsessions
   install -m755 ${srcdir}/trinity.desktop ${pkgdir}/usr/share/xsessions/trinity.desktop
 
-  # update the Xsession file, this resolves problem with kdm dropping back
-  # to the login screen.
-
-  patch -N ${pkgdir}${TDEDIR}/share/config/tdm/Xsession < ${srcdir}/xsession.patch
-
-  ## we will need systemd service files created
-  install -D -m644 "${srcdir}"/tdm.service \
-    "${pkgdir}"/usr/lib/systemd/system/tdm.service
-
   # create the starttrinity link
   # do we need this? wouldn't be better to rename startkde script
   # to starttrinity? (renamed to starttde) Create for compatibility sake.
-  ln -sf $TDEDIR/bin/starttde ${pkgdir}$TDEDIR/bin/starttrinity
+  ln -sf starttde ${pkgdir}$TDEDIR/bin/starttrinity
 
   # install mkpamserv script, so we can auto-generate pam.d configs in post_install()
   install -D -m755 ${srcdir}/${pkgname#*-}-trinity-${pkgver}/mkpamserv ${pkgdir}${TDEDIR}/bin/mkpamserv
@@ -154,8 +145,7 @@ package() {
   mkdir -p ${pkgdir}$TDEDIR/share/icons/gnome/{128x128,64x64,32x32,16x16,48x48,22x22,scalable}
   mkdir -p ${pkgdir}$TDEDIR/share/icons/crystalsvg/{128x128/apps,64x64/apps,32x32/apps,16x16/apps,48x48/apps,22x22/apps,scalable/apps}
 
-  cd ${pkgdir}$TDEDIR/share/icons/gnome/
-
+  cd ${pkgdir}$TDEDIR/share/icons/gnome/ &&
   for i in *; do
     cd $i
     ln -sf ../../crystalsvg/$i/apps/ apps
