@@ -6,7 +6,7 @@ _cat=applications/system/
 _kdemod="${_mod/tde/kde}"
 
 pkgname="tde-${_mod}"
-pkgver=14.1.5
+pkgver=14.1.6
 pkgrel=1
 pkgdesc="TDE Krusader"
 arch=(i686 x86_64 aarch64 armv7h powerpc64le powerpc64 powerpc espresso)
@@ -14,52 +14,41 @@ url="https://scm.trinitydesktop.org/scm/git/${_mod}"
 license=('GPL')
 groups=('tde-extra')
 depends=('tde-tdebase')
-makedepends=('pkgconfig' 'automake')
+makedepends=('tde-cmake-trinity')
 provides=("${_mod}")
 conflicts=("trinity-${_kdemod}" "kdemod3-${_kdemod}")
 replaces=("trinity-${_mod}")
 options=('staticlibs' 'libtool' '!strip' '!debug')
 source=("https://mirror.ppa.trinitydesktop.org/trinity/releases/R${pkgver}/main/${_cat}${_mod}-trinity-${pkgver}.tar.xz")
-md5sums=('d9e00f323110e789cd051c2a026c163e')
+md5sums=('b4569a315ad4500b96575a4d175b87dd')
 install=''
 
 [ -n "$TDEDIR" ] || TDEDIR=/opt/trinity
 [ -n "$TQTDIR" ] || TQTDIR=${TDEDIR}/tqt3
 
 build() {
-  ## Generate config files and update with autoreconf
-  cd ${srcdir}/${pkgname#*-}-trinity-${pkgver}
+  # kill massive amounts of warnings
+  export CXXFLAGS+=' -Wno-deprecated-enum-enum-conversion -Wno-deprecated-declarations'
 
-  msg "Copying system libtool files...."
-  cp /usr/share/aclocal/libtool.m4 ./admin/libtool.m4.in
-  cp /usr/share/libtool/build-aux/ltmain.sh ./admin/ltmain.sh
-  cp -a /usr/share/libtool/build-aux/config.guess ./admin/
-  cp -a /usr/share/libtool/build-aux/config.sub ./admin/
+  msg "Creating out-of-source build directory: ${srcdir}/build"
+  mkdir -p "$srcdir/build"
+  cd "$srcdir/build"
 
-  msg "Running make -f admin/Makefile.common ...."
-  make -f admin/Makefile.common
+  msg "Starting cmake..."
+  cmake ${srcdir}/${_mod}-trinity-${pkgver} \
+    -GNinja \
+    -DCMAKE_VERBOSE_MAKEFILE=ON \
+    -DCMAKE_INSTALL_PREFIX=${TDEDIR} \
+    -DSYSCONF_INSTALL_DIR=${TDEDIR}/etc \
+    -DBUILD_ALL=ON \
+    -DWITH_ALL_OPTIONS=ON
 
-  export PKG_CONFIG_PATH=${TDEDIR}/lib/pkgconfig:${TQTDIR}/lib/pkgconfig:${PKG_CONFIG_PATH}
-
-  ## configure
-  msg "Configuring - ${pkgname}..."
-  CFLAGS="${CFLAGS} -fpermissive" \
-  CXXFLAGS="${CXXFLAGS} -fpermissive" \
-  ./configure \
-    --prefix=${TDEDIR} \
-    --with-tqt-dir=${TQTDIR} \
-    --with-tqt-includes=${TQTDIR}/include \
-    --with-tqt-libraries=${TQTDIR}/lib \
-    --sysconfdir=${TDEDIR}/etc \
-    --localstatedir=/var \
-    --enable-closure
-
-  msg "Building - ${pkgname#*-}..."
-  make $NUMJOBS
+  msg "Building - ${pkgname}..."
+  ninja $NUMJOBS
 }
 
 package() {
-  msg "Packaging - $pkgname-$pkgver"
-  cd ${srcdir}/${pkgname#*-}-trinity-${pkgver}            # use for libtool
-  make -j1 DESTDIR="${pkgdir}" install
+  msg "Packaging - ${pkgname}-${pkgver}"
+  cd "$srcdir/build"
+  DESTDIR="$pkgdir" ninja -j1 install
 }
