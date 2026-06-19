@@ -1,0 +1,227 @@
+From babd52bad38ff9a7561c82a6decc9b6225779dd6 Mon Sep 17 00:00:00 2001
+From: Michele Calgaro <michele.calgaro@yahoo.it>
+Date: Wed, 6 May 2026 17:25:40 +0900
+Subject: [PATCH] Fix FTBFS due to ambiguous overloaded operators when
+ comparing TQString and AtomicString objects.
+
+This resolves issue #109.
+
+Signed-off-by: Michele Calgaro <michele.calgaro@yahoo.it>
+---
+ amarok/src/collectiondb.cpp                   | 10 +++++-----
+ amarok/src/contextbrowser.cpp                 |  6 +++---
+ amarok/src/cuefile.cpp                        |  4 ++--
+ amarok/src/mediabrowser.cpp                   |  2 +-
+ amarok/src/mediadevice/mtp/mtpmediadevice.cpp |  2 +-
+ amarok/src/osd.cpp                            |  4 ++--
+ amarok/src/playlistwindow.cpp                 |  4 ++--
+ amarok/src/tagdialog.cpp                      | 12 ++++++------
+ amarok/src/tracktooltip.cpp                   |  2 +-
+ 9 files changed, 23 insertions(+), 23 deletions(-)
+
+diff --git a/amarok/src/collectiondb.cpp b/amarok/src/collectiondb.cpp
+index 13be9c0e..94f9a23e 100644
+--- a/amarok/src/collectiondb.cpp
++++ b/amarok/src/collectiondb.cpp
+@@ -4533,22 +4533,22 @@ CollectionDB::updateTags( const TQString &url, const MetaBundle &bundle, const b
+         TQString command = "UPDATE tags SET ";
+         if ( values[ 0 ] != bundle.title() )
+             command += "title = '" + escapeString( bundle.title() ) + "', ";
+-        if ( values[ 1 ] != bundle.artist() )
++        if ( values[ 1 ] != bundle.artist().string() )
+         {
+             art = true;
+             command += "artist = " + IDFromExactValue( "artist", bundle.artist() ) + ", ";
+         }
+-        if ( values[ 2 ] != bundle.composer() )
++        if ( values[ 2 ] != bundle.composer().string() )
+         {
+             comp = true;
+             command += "composer = " + IDFromExactValue( "composer", bundle.composer() ) + ", ";
+         }
+-        if ( values[ 3 ] != bundle.album() )
++        if ( values[ 3 ] != bundle.album().string() )
+         {
+             alb = true;
+             command += "album = "  + IDFromExactValue( "album", bundle.album() ) + ", ";
+         }
+-        if ( values[ 4 ] != bundle.genre() )
++        if ( values[ 4 ] != bundle.genre().string() )
+         {
+             gen = true;
+             command += "genre = "  + IDFromExactValue( "genre", bundle.genre() ) + ", ";
+@@ -4560,7 +4560,7 @@ CollectionDB::updateTags( const TQString &url, const MetaBundle &bundle, const b
+         }
+         if ( values[ 6 ] != TQString::number( bundle.track() ) )
+             command += "track = " + TQString::number( bundle.track() ) + ", ";
+-        if ( values[ 7 ] != bundle.comment() )
++        if ( values[ 7 ] != bundle.comment().string() )
+             command += "comment = '" + escapeString( bundle.comment() ) + "', ";
+         if ( values[ 8 ] != TQString::number( bundle.discNumber() ) )
+             command += "discnumber = '" + TQString::number( bundle.discNumber() ) + "', ";
+diff --git a/amarok/src/contextbrowser.cpp b/amarok/src/contextbrowser.cpp
+index b1def4a1..1008bf61 100644
+--- a/amarok/src/contextbrowser.cpp
++++ b/amarok/src/contextbrowser.cpp
+@@ -3077,7 +3077,7 @@ bool CurrentTrackJob::doJob()
+     if( b->m_browseArtists )
+     {
+         artist = b->m_artist;
+-        if( artist == m_currentTrack.artist() )
++        if( artist == m_currentTrack.artist().string() )
+         {
+             b->m_browseArtists = false;
+             b->m_artist = TQString();
+@@ -4364,7 +4364,7 @@ void ContextBrowser::tagsChanged( const MetaBundle &bundle ) //SLOT
+ {
+     const MetaBundle &currentTrack = EngineController::instance()->bundle();
+ 
+-    if( !m_shownAlbums.contains( bundle.album() ) && m_artist != bundle.artist() )
++    if( !m_shownAlbums.contains( bundle.album().string() ) && m_artist != bundle.artist().string() )
+     {
+         if( currentTrack.artist().isEmpty() && currentTrack.album().isEmpty() )
+             return;
+@@ -4385,7 +4385,7 @@ void ContextBrowser::tagsChanged( const TQString &oldArtist, const TQString &old
+         if( currentTrack.artist().isEmpty() && currentTrack.album().isEmpty() )
+             return;
+ 
+-        if( oldArtist != currentTrack.artist() && oldAlbum != currentTrack.album() )
++        if( oldArtist != currentTrack.artist().string() && oldAlbum != currentTrack.album().string() )
+             return;
+     }
+ 
+diff --git a/amarok/src/cuefile.cpp b/amarok/src/cuefile.cpp
+index 4882e264..46875756 100644
+--- a/amarok/src/cuefile.cpp
++++ b/amarok/src/cuefile.cpp
+@@ -233,8 +233,8 @@ void CueFile::engineTrackPositionChanged( long position, bool userSeek )
+             {
+                 MetaBundle bundle = EngineController::instance()->bundle(); // take current one and modify it
+                 if(it.data().getTitle() != bundle.title()
+-                   || it.data().getArtist() != bundle.artist()
+-                   || it.data().getAlbum() != bundle.album()
++                   || it.data().getArtist() != bundle.artist().string()
++                   || it.data().getAlbum() != bundle.album().string()
+                    || it.data().getTrackNumber() != bundle.track())
+                 {
+                     bundle.setTitle(it.data().getTitle());
+diff --git a/amarok/src/mediabrowser.cpp b/amarok/src/mediabrowser.cpp
+index 1c873fda..f9f11ae3 100644
+--- a/amarok/src/mediabrowser.cpp
++++ b/amarok/src/mediabrowser.cpp
+@@ -2797,7 +2797,7 @@ MediaDevice::syncStatsFromDevice( MediaItem *root )
+                 {
+                     // submit to last.fm
+                     if( bundle->length() > 30
+-                            && !bundle->artist().isEmpty() && bundle->artist() != i18n( "Unknown" )
++                            && !bundle->artist().isEmpty() && bundle->artist().string() != i18n( "Unknown" )
+                             && !bundle->title().isEmpty() && bundle->title() != i18n( "Unknown" ) )
+                     {
+                         // don't submit tracks shorter than 30 sec or w/o artist/title
+diff --git a/amarok/src/mediadevice/mtp/mtpmediadevice.cpp b/amarok/src/mediadevice/mtp/mtpmediadevice.cpp
+index c36fba9f..dcc97fb5 100644
+--- a/amarok/src/mediadevice/mtp/mtpmediadevice.cpp
++++ b/amarok/src/mediadevice/mtp/mtpmediadevice.cpp
+@@ -479,7 +479,7 @@ LIBMTP_album_t
+     TQMap<uint32_t,MtpAlbum*>::Iterator it;
+     for( it = m_idToAlbum.begin(); it != m_idToAlbum.end(); ++it )
+     {
+-        if( it.data()->album() == items->first()->bundle()->album() )
++        if( it.data()->album() == items->first()->bundle()->album().string() )
+         {
+             albumid = it.data()->id();
+             break;
+diff --git a/amarok/src/osd.cpp b/amarok/src/osd.cpp
+index fc58fafe..969c14a2 100644
+--- a/amarok/src/osd.cpp
++++ b/amarok/src/osd.cpp
+@@ -888,8 +888,8 @@ Amarok::OSD::forceToggleOSD()
+ void
+ Amarok::OSD::slotCoverChanged( const TQString &artist, const TQString &album )
+ {
+-    if( AmarokConfig::osdCover() && artist == EngineController::instance()->bundle().artist()
+-                                 && album  == EngineController::instance()->bundle().album()  )
++    if( AmarokConfig::osdCover() && artist == EngineController::instance()->bundle().artist().string()
++                                 && album  == EngineController::instance()->bundle().album().string()  )
+     {
+         TQString location = CollectionDB::instance()->albumImage( artist, album, false, 0 );
+ 
+diff --git a/amarok/src/playlistwindow.cpp b/amarok/src/playlistwindow.cpp
+index dab7c902..a538f722 100644
+--- a/amarok/src/playlistwindow.cpp
++++ b/amarok/src/playlistwindow.cpp
+@@ -846,9 +846,9 @@ void PlaylistWindow::savePlaylist() const //SLOT
+ 
+         for( ; item; item = static_cast<PlaylistItem*>( item->itemBelow() ) )
+         {
+-            if( artist != item->artist() )
++            if( artist != item->artist().string() )
+                 useArtist = false;
+-            if( album  != item->album() )
++            if( album  != item->album().string() )
+                 useAlbum = false;
+ 
+             if( !useArtist && !useAlbum )
+diff --git a/amarok/src/tagdialog.cpp b/amarok/src/tagdialog.cpp
+index 109e495f..c5100d33 100644
+--- a/amarok/src/tagdialog.cpp
++++ b/amarok/src/tagdialog.cpp
+@@ -236,7 +236,7 @@ TagDialog::checkModified() //SLOT
+ void
+ TagDialog::loadCover( const TQString &artist, const TQString &album )
+ {
+-    if ( m_bundle.artist() != artist ||  m_bundle.album()!=album )
++    if ( m_bundle.artist().string() != artist ||  m_bundle.album().string()!=album )
+         return;
+ 
+     // draw the album cover on the dialog
+@@ -1252,28 +1252,28 @@ TagDialog::applyToAllTracks()
+         MetaBundle mb = bundleForURL( *it );
+ 
+         int changed = 0;
+-        if( !kComboBox_artist->currentText().isEmpty() && kComboBox_artist->currentText() != mb.artist() ||
++        if( !kComboBox_artist->currentText().isEmpty() && kComboBox_artist->currentText() != mb.artist().string() ||
+                 kComboBox_artist->currentText().isEmpty() && !m_bundle.artist().isEmpty() ) {
+             mb.setArtist( kComboBox_artist->currentText() );
+             changed |= TagDialog::TAGSCHANGED;
+         }
+ 
+-        if( !kComboBox_album->currentText().isEmpty() && kComboBox_album->currentText() != mb.album() ||
++        if( !kComboBox_album->currentText().isEmpty() && kComboBox_album->currentText() != mb.album().string() ||
+                 kComboBox_album->currentText().isEmpty() && !m_bundle.album().isEmpty() ) {
+             mb.setAlbum( kComboBox_album->currentText() );
+             changed |= TagDialog::TAGSCHANGED;
+         }
+-        if( !kComboBox_genre->currentText().isEmpty() && kComboBox_genre->currentText() != mb.genre() ||
++        if( !kComboBox_genre->currentText().isEmpty() && kComboBox_genre->currentText() != mb.genre().string() ||
+                 kComboBox_genre->currentText().isEmpty() && !m_bundle.genre().isEmpty() ) {
+             mb.setGenre( kComboBox_genre->currentText() );
+             changed |= TagDialog::TAGSCHANGED;
+         }
+-        if( !kTextEdit_comment->text().isEmpty() && kTextEdit_comment->text() != mb.comment() ||
++        if( !kTextEdit_comment->text().isEmpty() && kTextEdit_comment->text() != mb.comment().string() ||
+                 kTextEdit_comment->text().isEmpty() && !m_bundle.comment().isEmpty() ) {
+             mb.setComment( kTextEdit_comment->text() );
+             changed |= TagDialog::TAGSCHANGED;
+         }
+-        if( !kComboBox_composer->currentText().isEmpty() && kComboBox_composer->currentText() != mb.composer() ||
++        if( !kComboBox_composer->currentText().isEmpty() && kComboBox_composer->currentText() != mb.composer().string() ||
+              kComboBox_composer->currentText().isEmpty() && !m_bundle.composer().isEmpty() ) {
+             mb.setComposer( kComboBox_composer->currentText() );
+             changed |= TagDialog::TAGSCHANGED;
+diff --git a/amarok/src/tracktooltip.cpp b/amarok/src/tracktooltip.cpp
+index d69a10ef..4ead4f99 100644
+--- a/amarok/src/tracktooltip.cpp
++++ b/amarok/src/tracktooltip.cpp
+@@ -277,7 +277,7 @@ TQPair<TQString, TQRect> TrackToolTip::toolTipText( TQWidget*, const TQPoint& )
+ 
+ void TrackToolTip::slotCoverChanged( const TQString &artist, const TQString &album )
+ {
+-    if( artist == m_tags.artist() && album == m_tags.album() )
++    if( artist == m_tags.artist().string() && album == m_tags.album().string() )
+     {
+         m_cover = CollectionDB::instance()->albumImage( m_tags, true, 150 );
+         if( m_cover == CollectionDB::instance()->notAvailCover() )
+-- 
+2.30.2
+
