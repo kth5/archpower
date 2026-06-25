@@ -4,16 +4,18 @@
 
 _pkg=orc
 pkgname=apache-${_pkg}
-pkgver=2.2.2
-pkgrel=2
+pkgver=2.3.0
+pkgrel=6
 pkgdesc="Columnar storage for Hadoop workloads."
-arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+#arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+arch=(powerpc64)
 url="https://orc.apache.org"
 license=(Apache-2.0)
 depends=(
   abseil-cpp
-  gcc-libs
   glibc
+  libgcc
+  libstdc++
   lz4
   protobuf
   snappy
@@ -24,31 +26,48 @@ makedepends=(cmake git)
 checkdepends=(gtest)
 source=(
   ${pkgname}::git+https://github.com/apache/orc.git#tag=v${pkgver}
-  fix-timezone.patch
-  fix-cmake-modules.patch
+  fix-find-package-mode.patch
 )
-sha256sums=('d463313339da0523239303a0b74e432d9e8b942935093ebad7cab0147503cd76'
-            'd2493cef910f73b01a8ea853470e8c5497e0ef33bb3d17f8eb8ffef7e52f00ac'
-            '19134d5ad86dd76c8b65828dda195f113591c944d8be7298fa980e781595e7d9')
+sha256sums=('512b8f41f9bbdd789ec4d66d5f9331d93df9af90736ee4f77ea4c252d4967d8b'
+            '458ec83da45446442a32dd5bd21b8569a2f20c4cef07fd03ec0044f5604260ea')
 validpgpkeys=(F28C9C925C188C35E345614DEDA00CE834F0FC5C  # Dongjoon Hyun (CODE SIGNING KEY) <dongjoon@apache.org>
               AA94E2A8F0A0B7167305C5232D9F6201DECDFA29) # William Hyun (CODE SIGNING KEY) <william@apache.org>
+
+_reverts_powerpc=(
+  # c++/src/ColumnReader.cc:467:21: error: no matching function for call to ‘min(uint64_t&, long long int)’ [-Wtemplate-body]
+  58d8991662d2c32ad8b26f7f9ee767e729ba19b1
+)
+
 
 prepare(){
   cd ${pkgname}
   sed -i 's/orc STATIC/orc SHARED/' c++/src/CMakeLists.txt
-  # Fix build with protobuf 31 (the google::protobuf::int64 type is not found without this)
-  echo '#include <google/protobuf/stubs/common.h>' >> c++/src/wrap/coded-stream-wrapper.h
-  echo '#include <google/protobuf/stubs/common.h>' >> c++/src/wrap/zero-copy-stream-wrapper.h
-  # Fix for missing /etc/localtime https://github.com/apache/orc/issues/2225
-  patch -p1 -i ../fix-timezone.patch
-  # Fix the cmake modules https://github.com/apache/orc/pull/2240
-  patch -p1 -i ../fix-cmake-modules.patch
+
+  # Our zlib package does not provide files for the config-mode of find_package.
+  # Also when "NAMES" is given, find_package cannot find zlib.
+  patch -p1 < ../fix-find-package-mode.patch
+
+  case "${CARCH}" in
+    powerpc) LDFLAGS="${LDFLAGS/-Wl,--as-needed/}"
+  esac
+
+  case "${CARCH}" in
+    powerpc)
+      for _c in "${_reverts_powerpc[@]}"; do
+        if [[ "${_c}" == *..* ]]; then _l='--reverse'; else _l='--max-count=1'; fi
+        git log --oneline "${_l}" "${_c}"
+        git revert --mainline 1 --no-commit "${_c}"
+      done
+    ;;
+  esac
 }
 
 build(){
-  case "${CARCH}" in
-    powerpc) export CXXFLAGS+=' -latomic' ;;
-  esac
+  # Fix build with protobuf - avoid errors like
+  # /usr/bin/ld: /usr/lib/libabsl_log_internal_check_op.so.2508.0.0: error adding symbols: DSO missing from command line
+  # Apparently protobuf's cmake targets don't specify all dependencies properly.
+  # Solution from https://github.com/protocolbuffers/protobuf/issues/14500#issuecomment-1781292098
+  LDFLAGS+=" -Wl,--copy-dt-needed-entries"
 
   local cmake_options=(
     -B build
@@ -56,12 +75,7 @@ build(){
     -DCMAKE_BUILD_TYPE=None
     -DCMAKE_INSTALL_PREFIX=/usr
     -DSTOP_BUILD_ON_WARNING=OFF
-    -DLZ4_HOME=/usr
-    -DPROTOBUF_HOME=/usr
-    -DSNAPPY_HOME=/usr
-    -DZLIB_HOME=/usr
-    -DZSTD_HOME=/usr
-    -DGTEST_HOME=/usr
+    -DLZ4_HOME=/usr  # needed to use orc's FindLZ4Alt.cmake
     -DORC_PREFER_STATIC_PROTOBUF=OFF
     -DORC_PREFER_STATIC_SNAPPY=OFF
     -DORC_PREFER_STATIC_LZ4=OFF
@@ -73,15 +87,19 @@ build(){
     -Wno-dev
   )
 
+  case "${CARCH}" in
+    powerpc*) export CXXFLAGS+=' -latomic' ;;
+  esac
+
   cmake "${cmake_options[@]}"
   cmake --build build
 }
 
 check(){
-  # One test is failing and cannot be skipped
-  # https://github.com/apache/orc/issues/2239
-  # https://github.com/apache/orc/issues/2238
-  ctest --test-dir build --output-on-failure || true
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+  ctest --test-dir build --output-on-failure
 }
 
 package(){
