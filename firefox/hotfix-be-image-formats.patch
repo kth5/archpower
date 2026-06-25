@@ -1,0 +1,112 @@
+--- firefox-151.0.1/image/decoders/nsBMPDecoder.cpp
++++ firefox-151.0.1/image/decoders/nsBMPDecoder.cpp
+@@ -162,7 +162,8 @@ static void ReadCalRgbEndpoint(const char* aData, uint32_t aEndpointOffset,
+ /// the next pixel.
+ static void SetPixel(uint32_t*& aDecoded, uint8_t aRed, uint8_t aGreen,
+                      uint8_t aBlue, uint8_t aAlpha = 0xFF) {
+-  *aDecoded++ = gfxPackedPixelNoPreMultiply(aAlpha, aRed, aGreen, aBlue);
++  *aDecoded++ = NativeEndian::swapToLittleEndian(
++      gfxPackedPixelNoPreMultiply(aAlpha, aRed, aGreen, aBlue));
+ }
+ 
+ static void SetPixel(uint32_t*& aDecoded, uint8_t idx,
+--- firefox-151.0.1/gfx/ycbcr/YCbCrUtils.cpp
++++ firefox-151.0.1/gfx/ycbcr/YCbCrUtils.cpp
+@@ -5,11 +5,7 @@
+ #include "YCbCrUtils.h"
+ 
+-#include <bit>
+-
+ #include "gfx2DGlue.h"
+ #include "libyuv.h"
+-#include "mozilla/EndianUtils.h"
+-#include "mozilla/gfx/Swizzle.h"
+ #include "ycbcr_to_rgb565.h"
+ #include "yuv_convert.h"
+ 
+@@ -316,16 +316,6 @@ nsresult ConvertYCbCrToRGB(const layers::PlanarYCbCrData& aData,
+     return result;
+   }
+ 
+-  if constexpr (std::endian::native == std::endian::big) {
+-    // libyuv makes endian-correct result, which needs to be swapped to BGRX
+-    if (aDestFormat != SurfaceFormat::R5G6B5_UINT16) {
+-      if (!gfx::SwizzleData(aDestBuffer, aStride, gfx::SurfaceFormat::X8R8G8B8,
+-                            aDestBuffer, aStride, gfx::SurfaceFormat::B8G8R8X8,
+-                            aDestSize)) {
+-        return NS_ERROR_UNEXPECTED;
+-      }
+-    }
+-  }
+   return NS_OK;
+ }
+ 
+@@ -400,15 +390,6 @@ nsresult ConvertYCbCrToRGB32(const layers::PlanarYCbCrData& aData,
+     }
+   }
+ 
+-  if constexpr (std::endian::native == std::endian::big) {
+-    // libyuv makes endian-correct result, which needs to be reversed to BGR* or
+-    // RGB*.
+-    if (!gfx::SwizzleData(aDestBuffer, aStride, gfx::SurfaceFormat::X8R8G8B8,
+-                          aDestBuffer, aStride, gfx::SurfaceFormat::B8G8R8X8,
+-                          aData.mPictureRect.Size())) {
+-      return NS_ERROR_UNEXPECTED;
+-    }
+-  }
+   return NS_OK;
+ }
+ 
+@@ -423,14 +404,6 @@ nsresult ConvertI420AlphaToARGB(const uint8_t* aSrcY, const uint8_t* aSrcU,
+   if (NS_FAILED(result)) {
+     return result;
+   }
+-  if constexpr (std::endian::native == std::endian::big) {
+-    // libyuv makes endian-correct result, which needs to be swapped to BGRA
+-    if (!gfx::SwizzleData(aDstARGB, aDstStrideARGB, gfx::SurfaceFormat::A8R8G8B8,
+-                          aDstARGB, aDstStrideARGB, gfx::SurfaceFormat::B8G8R8A8,
+-                          IntSize(aWidth, aHeight))) {
+-      return NS_ERROR_UNEXPECTED;
+-    }
+-  }
+   return NS_OK;
+ }
+ 
+--- firefox-151.0.1/gfx/ycbcr/yuv_convert.cpp
++++ firefox-151.0.1/gfx/ycbcr/yuv_convert.cpp
+@@ -18,7 +18,9 @@
+ // The alpha is set to 255, allowing the application to use RGBA or RGB32.
+ 
+ #include "yuv_convert.h"
+ 
++#include <bit>
++
+ #include "libyuv.h"
+ #include "mozilla/IntegerRange.h"
+ #include "mozilla/SSE.h"
+@@ -118,6 +120,14 @@ ConvertYCbCrToRGB32(const uint8_t* y_buf,
+   if (yuv_color_space != YUVColorSpace::BT601) {
+     use_deprecated = false;
+   }
++  if constexpr (std::endian::native == std::endian::big) {
++    // The ArchPOWER big-endian rollup keeps OS_RGBA byte-oriented as BGRA.
++    // libyuv writes that byte layout on every architecture, while the legacy
++    // converter writes native-endian packed pixels. Keep one consistent
++    // contract so YCbCrUtils does not need to reverse libyuv's output.
++    use_deprecated = false;
++  }
++
+   if (use_deprecated) {
+     return ConvertYCbCrToRGB32_deprecated(
+         y_buf, u_buf, v_buf, rgb_buf, pic_x, pic_y, pic_width, pic_height,
+--- firefox-151.0.1/modules/libpref/init/StaticPrefList.yaml
++++ firefox-151.0.1/modules/libpref/init/StaticPrefList.yaml
+@@ -8772,7 +8772,7 @@
+ # Whether we record SVG images as blobs or not.
+ - name: image.svg.blob-image
+   type: RelaxedAtomicBool
+-  value: false
++  value: true
+   mirror: always
+ 
+ # Whether to set the incremental attribute in the Priority header for images
