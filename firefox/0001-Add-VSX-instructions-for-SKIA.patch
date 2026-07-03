@@ -1,0 +1,1347 @@
+From a47c991dbbfb709134737a54e8bbe7e0b1bce800 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Fri, 12 Jun 2026 15:23:10 +1000
+Subject: [PATCH 1/3] Add VSX instructions for SKIA
+
+Adapted from work done by Raptor Engineering for chromium's vendored
+SKIA
+
+Co-authored-by: Timothy Pearson <tpearson@raptorengineering.com>
+---
+ gfx/skia/skia/src/base/SkVx.h                 |  58 +++-
+ gfx/skia/skia/src/core/SkBlitRow_D32.cpp      |  98 ++++++
+ gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp   | 268 ++++++++++++++++
+ .../skia/src/opts/SkBitmapProcState_opts.h    | 164 ++++++++++
+ gfx/skia/skia/src/opts/SkBlitRow_opts.h       |  48 +++
+ .../skia/src/opts/SkRasterPipeline_opts.h     | 237 ++++++++++++++
+ gfx/skia/skia/src/opts/SkSwizzler_opts.inc    | 289 ++++++++++++++++++
+ 7 files changed, 1160 insertions(+), 2 deletions(-)
+
+diff --git a/gfx/skia/skia/src/base/SkVx.h b/gfx/skia/skia/src/base/SkVx.h
+index f87ca44d4af0..ed80c91fd38e 100644
+--- a/gfx/skia/skia/src/base/SkVx.h
++++ b/gfx/skia/skia/src/base/SkVx.h
+@@ -52,6 +52,8 @@
+         #include <arm_neon.h>
+     #elif defined(__wasm_simd128__)
+         #include <wasm_simd128.h>
++    #elif defined(SK_CPU_PPC) && defined(__VSX__)
++        #include <altivec.h>
+     #elif SK_CPU_LSX_LEVEL >= SK_CPU_LSX_LEVEL_LASX
+         #include <lasxintrin.h>
+         #include <lsxintrin.h>
+@@ -509,6 +511,14 @@ SINT Vec<N,T> if_then_else(const Vec<N,M<T>>& cond, const Vec<N,T>& t, const Vec
+                                               sk_bit_cast<uint8x16_t>(e)));
+     }
+ #endif
++#if SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__)
++    if constexpr (N*sizeof(T) == 16) {
++        return sk_bit_cast<Vec<N,T>>(
++                vec_sel(sk_bit_cast<__vector unsigned char>(e),
++                        sk_bit_cast<__vector unsigned char>(t),
++                        sk_bit_cast<__vector unsigned char>(cond)));
++    }
++#endif
+ #if SKVX_USE_SIMD && SK_CPU_LSX_LEVEL >= SK_CPU_LSX_LEVEL_LASX
+     if constexpr (N*sizeof(T) == 32) {
+         return sk_bit_cast<Vec<N,T>>(__lasx_xvbitsel_v(sk_bit_cast<__m256i>(e),
+@@ -579,6 +589,11 @@ SINT bool any(const Vec<N,T>& x) {
+                                                           sk_bit_cast<__m128i>(x)));
+         return retv[0] != 0b0000;
+     }
++#endif
++#if SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__)
++    if constexpr (N*sizeof(T) == 16) {
++        return vec_any_ne(sk_bit_cast<__vector unsigned int>(x), vec_splats(0u));
++    }
+ #endif
+     return any(x.lo)
+         || any(x.hi);
+@@ -622,6 +637,11 @@ SINT bool all(const Vec<N,T>& x) {
+                                                           sk_bit_cast<__m128i>(x)));
+         return retv[0] == 0b1111;
+     }
++#endif
++#if SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__)
++    if constexpr (N*sizeof(T) == 16) {
++        return vec_all_ne(sk_bit_cast<__vector unsigned int>(x), vec_splats(0u));
++    }
+ #endif
+     return all(x.lo)
+         && all(x.hi);
+@@ -647,8 +667,22 @@ SIT  T max(const Vec<1,T>& x) { return x.val; }
+ SINT T min(const Vec<N,T>& x) { return std::min(min(x.lo), min(x.hi)); }
+ SINT T max(const Vec<N,T>& x) { return std::max(max(x.lo), max(x.hi)); }
+ 
+-SINT Vec<N,T> min(const Vec<N,T>& x, const Vec<N,T>& y) { return naive_if_then_else(y < x, y, x); }
+-SINT Vec<N,T> max(const Vec<N,T>& x, const Vec<N,T>& y) { return naive_if_then_else(x < y, y, x); }
++SINT Vec<N,T> min(const Vec<N,T>& x, const Vec<N,T>& y) {
++#if SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__)
++    if constexpr (N*sizeof(T) == 16) {
++        return sk_bit_cast<Vec<N,T>>(vec_min(to_vext(x), to_vext(y)));
++    }
++#endif
++    return naive_if_then_else(y < x, y, x);
++}
++SINT Vec<N,T> max(const Vec<N,T>& x, const Vec<N,T>& y) {
++#if SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__)
++    if constexpr (N*sizeof(T) == 16) {
++        return sk_bit_cast<Vec<N,T>>(vec_max(to_vext(x), to_vext(y)));
++    }
++#endif
++    return naive_if_then_else(x < y, y, x);
++}
+ 
+ SINTU Vec<N,T> min(const Vec<N,T>& x, U y) { return min(x, Vec<N,T>(y)); }
+ SINTU Vec<N,T> max(const Vec<N,T>& x, U y) { return max(x, Vec<N,T>(y)); }
+@@ -960,6 +994,26 @@ SIN Vec<N,uint16_t> mulhi(const Vec<N,uint16_t>& x,
+     } else { // N > 8
+         return join(mulhi(x.lo, y.lo), mulhi(x.hi, y.hi));
+     }
++#elif SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__)
++    if constexpr (N == 8) {
++        // u16*u16 -> u32 even/odd products (vmuleuh/vmulouh), then gather the
++        // high 16 bits of each back into sequential lanes. Same idiom as the
++        // VSX scale() in SkSwizzler_opts.
++        __vector unsigned short xs = sk_bit_cast<__vector unsigned short>(x);
++        __vector unsigned short ys = sk_bit_cast<__vector unsigned short>(y);
++        __vector unsigned int even = vec_vmuleuh(xs, ys);
++        __vector unsigned int odd  = vec_vmulouh(xs, ys);
++        const __vector unsigned char hi = {
++            0x02,0x03, 0x12,0x13,  0x06,0x07, 0x16,0x17,
++            0x0A,0x0B, 0x1A,0x1B,  0x0E,0x0F, 0x1E,0x1F
++        };
++        return sk_bit_cast<Vec<8,uint16_t>>(
++            vec_perm((__vector unsigned char)even, (__vector unsigned char)odd, hi));
++    } else if constexpr (N < 8) {
++        return mulhi(join(x,x), join(y,y)).lo;
++    } else { // N > 8
++        return join(mulhi(x.lo, y.lo), mulhi(x.hi, y.hi));
++    }
+ #else
+     return skvx::cast<uint16_t>(mull(x, y) >> 16);
+ #endif
+diff --git a/gfx/skia/skia/src/core/SkBlitRow_D32.cpp b/gfx/skia/skia/src/core/SkBlitRow_D32.cpp
+index bcbf2e66bd46..920d6a9b2366 100644
+--- a/gfx/skia/skia/src/core/SkBlitRow_D32.cpp
++++ b/gfx/skia/skia/src/core/SkBlitRow_D32.cpp
+@@ -517,6 +517,104 @@ static void blit_row_s32_opaque(SkPMColor* dst,
+         }
+     }
+ 
++#elif defined(SK_CPU_PPC) && defined(__VSX__)
++    #include <altivec.h>
++
++    // dst + (((src - dst) * src_scale) >> 8), splayed into 16-bit lanes; the
++    // vec_* transcription of SkPMLerp_SSE2.
++    static inline __vector unsigned char SkPMLerp_VSX(__vector unsigned char src,
++                                                      __vector unsigned char dst,
++                                                      unsigned src_scale) {
++        const __vector unsigned int mask = vec_splats(0x00FF00FFu);
++        const __vector unsigned short eight = vec_splats((unsigned short)8);
++        __vector unsigned short src_rb = (__vector unsigned short)vec_and((__vector unsigned int)src, mask);
++        __vector unsigned short src_ag = vec_sr((__vector unsigned short)src, eight);
++        __vector unsigned short dst_rb = (__vector unsigned short)vec_and((__vector unsigned int)dst, mask);
++        __vector unsigned short dst_ag = vec_sr((__vector unsigned short)dst, eight);
++        __vector unsigned short s = vec_splats((unsigned short)src_scale);
++        __vector unsigned short diff_rb = vec_mul(vec_sub(src_rb, dst_rb), s);
++        __vector unsigned short diff_ag = vec_mul(vec_sub(src_ag, dst_ag), s);
++        diff_rb = vec_sr(diff_rb, eight);
++        __vector unsigned int diff = vec_or((__vector unsigned int)diff_rb,
++                                            vec_andc((__vector unsigned int)diff_ag, mask));
++        return vec_add(dst, (__vector unsigned char)diff);
++    }
++
++    static void blit_row_s32_blend(SkPMColor* dst, const SkPMColor* src, int count, U8CPU alpha) {
++        SkASSERT(alpha <= 255);
++        unsigned src_scale = SkAlpha255To256(alpha);
++        while (count >= 4) {
++            __vector unsigned char s = vec_xl(0, (const unsigned char*)src);
++            __vector unsigned char d = vec_xl(0, (const unsigned char*)dst);
++            vec_xst(SkPMLerp_VSX(s, d, src_scale), 0, (unsigned char*)dst);
++            src += 4; dst += 4; count -= 4;
++        }
++        while (count --> 0) {
++            *dst = SkPMLerp(*src, *dst, src_scale);
++            src++;
++            dst++;
++        }
++    }
++
++    // The vec_* transcription of SkBlendARGB32_SSE2: scale src by aa and dst by
++    // SkAlphaMulInv256(srcA, aa), then add the splayed halves.
++    static inline __vector unsigned char SkBlendARGB32_VSX(__vector unsigned char src,
++                                                           __vector unsigned char dst,
++                                                           unsigned aa) {
++        unsigned alpha = SkAlpha255To256(aa);
++        __vector unsigned short src_scale = vec_splats((unsigned short)alpha);
++        const __vector unsigned int mask = vec_splats(0x00FF00FFu);
++        const __vector unsigned short eight = vec_splats((unsigned short)8);
++
++        // dst_scale = SkAlphaMulInv256(SkGetPackedA32(src), alpha), per 32-bit lane.
++        __vector unsigned int srcA = vec_sr((__vector unsigned int)src, vec_splats(24u));
++        __vector unsigned int ds = (__vector unsigned int)vec_mul((__vector unsigned short)srcA, src_scale);
++        ds = vec_sub(vec_splats((unsigned int)0xFFFF), ds);
++        ds = vec_add(ds, vec_sr(ds, vec_splats(8u)));
++        ds = vec_sr(ds, vec_splats(8u));
++        // Duplicate the low 16-bit word of each 32-bit lane into both halves
++        // (the SSE shufflelo/shufflehi _MM_SHUFFLE(2,2,0,0)).
++        const __vector unsigned char dup = (__vector unsigned char){
++            0,1,0,1, 4,5,4,5, 8,9,8,9, 12,13,12,13
++        };
++        __vector unsigned short dst_scale =
++            (__vector unsigned short)vec_perm((__vector unsigned char)ds,
++                                              (__vector unsigned char)ds, dup);
++
++        __vector unsigned short src_rb = (__vector unsigned short)vec_and((__vector unsigned int)src, mask);
++        __vector unsigned short src_ag = vec_sr((__vector unsigned short)src, eight);
++        __vector unsigned short dst_rb = (__vector unsigned short)vec_and((__vector unsigned int)dst, mask);
++        __vector unsigned short dst_ag = vec_sr((__vector unsigned short)dst, eight);
++
++        src_rb = vec_mul(src_rb, src_scale);
++        src_ag = vec_mul(src_ag, src_scale);
++        dst_rb = vec_mul(dst_rb, dst_scale);
++        dst_ag = vec_mul(dst_ag, dst_scale);
++
++        dst_rb = vec_add(src_rb, dst_rb);
++        dst_ag = vec_add(src_ag, dst_ag);
++
++        dst_rb = vec_sr(dst_rb, eight);
++        __vector unsigned int out = vec_or((__vector unsigned int)dst_rb,
++                                           vec_andc((__vector unsigned int)dst_ag, mask));
++        return (__vector unsigned char)out;
++    }
++
++    static void blit_row_s32a_blend(SkPMColor* dst, const SkPMColor* src, int count, U8CPU alpha) {
++        SkASSERT(alpha <= 255);
++        while (count >= 4) {
++            __vector unsigned char s = vec_xl(0, (const unsigned char*)src);
++            __vector unsigned char d = vec_xl(0, (const unsigned char*)dst);
++            vec_xst(SkBlendARGB32_VSX(s, d, alpha), 0, (unsigned char*)dst);
++            src += 4; dst += 4; count -= 4;
++        }
++        while (count --> 0) {
++            *dst = SkBlendARGB32(*src, *dst, alpha);
++            src++;
++            dst++;
++        }
++    }
++
+ #else
+     static void blit_row_s32_blend(SkPMColor* dst, const SkPMColor* src, int count, U8CPU alpha) {
+         SkASSERT(alpha <= 255);
+diff --git a/gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp b/gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp
+index a7538027b85d..9669431292b6 100644
+--- a/gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp
++++ b/gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp
+@@ -480,6 +480,274 @@ static inline SkPMColor blend_lcd16_opaque(int srcR, int srcG, int srcB,
+         }
+     }
+ 
++#elif defined(SK_CPU_PPC) && defined(__VSX__)
++    #include <altivec.h>
++
++    // Native VSX/AltiVec port of the SSE2 LCD-subpixel blend block below.
++    // Same algorithm — only the intrinsics change. Translations follow the
++    // GCC ppc_wrappers pattern (vec_mergeh/l, vec_packsu, etc.).
++
++    // The following (left) shifts cause the top 5 bits of the mask components to
++    // line up with the corresponding components in an SkPMColor.
++    // Note that the mask's RGB16 order may differ from the SkPMColor order.
++    #define SK_R16x5_R32x5_SHIFT (SK_R32_SHIFT - SK_R16_SHIFT - SK_R16_BITS + 5)
++    #define SK_G16x5_G32x5_SHIFT (SK_G32_SHIFT - SK_G16_SHIFT - SK_G16_BITS + 5)
++    #define SK_B16x5_B32x5_SHIFT (SK_B32_SHIFT - SK_B16_SHIFT - SK_B16_BITS + 5)
++
++    // Each macro must always return __vector unsigned int so the surrounding
++    // vec_and gets matching element types. The pass-through case (SHIFT == 0)
++    // still needs an explicit reinterpret-cast since `mask` is __vector
++    // unsigned char in our function signature.
++    #if SK_R16x5_R32x5_SHIFT == 0
++        #define SkPackedR16x5ToUnmaskedR32x5_VSX(x) ((__vector unsigned int)(x))
++    #elif SK_R16x5_R32x5_SHIFT > 0
++        #define SkPackedR16x5ToUnmaskedR32x5_VSX(x) \
++            vec_sl((__vector unsigned int)(x), vec_splats((unsigned int)SK_R16x5_R32x5_SHIFT))
++    #else
++        #define SkPackedR16x5ToUnmaskedR32x5_VSX(x) \
++            vec_sr((__vector unsigned int)(x), vec_splats((unsigned int)(-SK_R16x5_R32x5_SHIFT)))
++    #endif
++
++    #if SK_G16x5_G32x5_SHIFT == 0
++        #define SkPackedG16x5ToUnmaskedG32x5_VSX(x) ((__vector unsigned int)(x))
++    #elif SK_G16x5_G32x5_SHIFT > 0
++        #define SkPackedG16x5ToUnmaskedG32x5_VSX(x) \
++            vec_sl((__vector unsigned int)(x), vec_splats((unsigned int)SK_G16x5_G32x5_SHIFT))
++    #else
++        #define SkPackedG16x5ToUnmaskedG32x5_VSX(x) \
++            vec_sr((__vector unsigned int)(x), vec_splats((unsigned int)(-SK_G16x5_G32x5_SHIFT)))
++    #endif
++
++    #if SK_B16x5_B32x5_SHIFT == 0
++        #define SkPackedB16x5ToUnmaskedB32x5_VSX(x) ((__vector unsigned int)(x))
++    #elif SK_B16x5_B32x5_SHIFT > 0
++        #define SkPackedB16x5ToUnmaskedB32x5_VSX(x) \
++            vec_sl((__vector unsigned int)(x), vec_splats((unsigned int)SK_B16x5_B32x5_SHIFT))
++    #else
++        #define SkPackedB16x5ToUnmaskedB32x5_VSX(x) \
++            vec_sr((__vector unsigned int)(x), vec_splats((unsigned int)(-SK_B16x5_B32x5_SHIFT)))
++    #endif
++
++    static __vector unsigned char blend_lcd16_vsx(__vector unsigned char& src,
++                                                   __vector unsigned char& dst,
++                                                   __vector unsigned char& mask,
++                                                   __vector unsigned char& srcA) {
++        // Get the R,G,B of each 16bit mask pixel, all aligned to 5-bit positions.
++        __vector unsigned int r = vec_and(SkPackedR16x5ToUnmaskedR32x5_VSX(mask),
++                                          vec_splats((unsigned int)(0x1F << SK_R32_SHIFT)));
++        __vector unsigned int g = vec_and(SkPackedG16x5ToUnmaskedG32x5_VSX(mask),
++                                          vec_splats((unsigned int)(0x1F << SK_G32_SHIFT)));
++        __vector unsigned int b = vec_and(SkPackedB16x5ToUnmaskedB32x5_VSX(mask),
++                                          vec_splats((unsigned int)(0x1F << SK_B32_SHIFT)));
++
++        // a needs to be either the min or the max of the LCD coverages, depending on srcA < dstA.
++        __vector unsigned int rA = vec_sl(r, vec_splats((unsigned int)(SK_A32_SHIFT - SK_R32_SHIFT)));
++        __vector unsigned int gA = vec_sl(g, vec_splats((unsigned int)(SK_A32_SHIFT - SK_G32_SHIFT)));
++        __vector unsigned int bA = vec_sl(b, vec_splats((unsigned int)(SK_A32_SHIFT - SK_B32_SHIFT)));
++        __vector unsigned char aMin = vec_min(vec_min((__vector unsigned char)rA,
++                                                       (__vector unsigned char)gA),
++                                              (__vector unsigned char)bA);
++        __vector unsigned char aMax = vec_max(vec_max((__vector unsigned char)rA,
++                                                       (__vector unsigned char)gA),
++                                              (__vector unsigned char)bA);
++        // srcA has been biased to [0-256]; compare srcA against (dstA+1).
++        __vector unsigned int dstA = vec_and(vec_add((__vector unsigned int)dst,
++                                                     vec_splats((unsigned int)(1 << SK_A32_SHIFT))),
++                                             vec_splats((unsigned int)SK_A32_MASK));
++        __vector __bool int aLT = vec_cmplt((__vector signed int)srcA, (__vector signed int)dstA);
++        // a = (aMin & aLT) | (aMax & ~aLT)
++        __vector unsigned char a = vec_or(vec_and(aMin, (__vector unsigned char)aLT),
++                                          vec_andc(aMax, (__vector unsigned char)aLT));
++
++        // Pack the 4 16-bit mask pixels into 4 32-bit pixels (m0A, m0R, m0G, m0B, ...).
++        mask = vec_or(vec_or(a, (__vector unsigned char)r),
++                      vec_or((__vector unsigned char)g, (__vector unsigned char)b));
++
++        // Interleave into 16-bit words.
++        const __vector unsigned char zeros = vec_splats((unsigned char)0);
++        __vector unsigned short maskLo = (__vector unsigned short)vec_mergeh(mask, zeros);
++        __vector unsigned short maskHi = (__vector unsigned short)vec_mergel(mask, zeros);
++
++        // Upscale 0..31 -> 0..32 by adding (mask >> 4).
++        const __vector unsigned short v4 = vec_splats((unsigned short)4);
++        const __vector unsigned short v8 = vec_splats((unsigned short)8);
++        const __vector unsigned short v5 = vec_splats((unsigned short)5);
++        maskLo = vec_add(maskLo, vec_sr(maskLo, v4));
++        maskHi = vec_add(maskHi, vec_sr(maskHi, v4));
++
++        // Multiply by srcA per 16-bit lane.
++        maskLo = vec_mul(maskLo, (__vector unsigned short)srcA);
++        maskHi = vec_mul(maskHi, (__vector unsigned short)srcA);
++        // Divide by 256 (right-shift 8).
++        maskLo = vec_sr(maskLo, v8);
++        maskHi = vec_sr(maskHi, v8);
++
++        // Unpack dst into 16-bit words.
++        __vector signed short dstLo = (__vector signed short)vec_mergeh(dst, zeros);
++        __vector signed short dstHi = (__vector signed short)vec_mergel(dst, zeros);
++        // mask = (src - dst) * mask
++        __vector signed short srcS = (__vector signed short)src;
++        __vector signed short mLoS = vec_mul((__vector signed short)maskLo, vec_sub(srcS, dstLo));
++        __vector signed short mHiS = vec_mul((__vector signed short)maskHi, vec_sub(srcS, dstHi));
++        // arithmetic shift right by 5
++        mLoS = vec_sra(mLoS, (__vector unsigned short)v5);
++        mHiS = vec_sra(mHiS, (__vector unsigned short)v5);
++        // result = dst + ((src - dst) * mask >> 5)
++        __vector signed short resLo = vec_add(dstLo, mLoS);
++        __vector signed short resHi = vec_add(dstHi, mHiS);
++        // Pack 16-bit signed -> 8-bit unsigned with saturation.
++        return vec_packsu(resLo, resHi);
++    }
++
++    static __vector unsigned char blend_lcd16_opaque_vsx(__vector unsigned char& src,
++                                                          __vector unsigned char& dst,
++                                                          __vector unsigned char& mask) {
++        __vector unsigned int r = vec_and(SkPackedR16x5ToUnmaskedR32x5_VSX(mask),
++                                          vec_splats((unsigned int)(0x1F << SK_R32_SHIFT)));
++        __vector unsigned int g = vec_and(SkPackedG16x5ToUnmaskedG32x5_VSX(mask),
++                                          vec_splats((unsigned int)(0x1F << SK_G32_SHIFT)));
++        __vector unsigned int b = vec_and(SkPackedB16x5ToUnmaskedB32x5_VSX(mask),
++                                          vec_splats((unsigned int)(0x1F << SK_B32_SHIFT)));
++
++        // Opaque src: a = max(r, g, b) shifted to alpha lane.
++        __vector unsigned int rA = vec_sl(r, vec_splats((unsigned int)(SK_A32_SHIFT - SK_R32_SHIFT)));
++        __vector unsigned int gA = vec_sl(g, vec_splats((unsigned int)(SK_A32_SHIFT - SK_G32_SHIFT)));
++        __vector unsigned int bA = vec_sl(b, vec_splats((unsigned int)(SK_A32_SHIFT - SK_B32_SHIFT)));
++        __vector unsigned char a = vec_max(vec_max((__vector unsigned char)rA,
++                                                    (__vector unsigned char)gA),
++                                           (__vector unsigned char)bA);
++
++        mask = vec_or(vec_or(a, (__vector unsigned char)r),
++                      vec_or((__vector unsigned char)g, (__vector unsigned char)b));
++
++        const __vector unsigned char zeros = vec_splats((unsigned char)0);
++        __vector unsigned short maskLo = (__vector unsigned short)vec_mergeh(mask, zeros);
++        __vector unsigned short maskHi = (__vector unsigned short)vec_mergel(mask, zeros);
++
++        const __vector unsigned short v4 = vec_splats((unsigned short)4);
++        const __vector unsigned short v5 = vec_splats((unsigned short)5);
++        maskLo = vec_add(maskLo, vec_sr(maskLo, v4));
++        maskHi = vec_add(maskHi, vec_sr(maskHi, v4));
++
++        __vector signed short dstLo = (__vector signed short)vec_mergeh(dst, zeros);
++        __vector signed short dstHi = (__vector signed short)vec_mergel(dst, zeros);
++        __vector signed short srcS = (__vector signed short)src;
++        __vector signed short mLoS = vec_mul((__vector signed short)maskLo, vec_sub(srcS, dstLo));
++        __vector signed short mHiS = vec_mul((__vector signed short)maskHi, vec_sub(srcS, dstHi));
++        mLoS = vec_sra(mLoS, (__vector unsigned short)v5);
++        mHiS = vec_sra(mHiS, (__vector unsigned short)v5);
++        __vector signed short resLo = vec_add(dstLo, mLoS);
++        __vector signed short resHi = vec_add(dstHi, mHiS);
++        return vec_packsu(resLo, resHi);
++    }
++
++    void blit_row_lcd16(SkPMColor dst[], const uint16_t mask[], SkColor src,
++                        int width, SkPMColor) {
++        if (width <= 0) {
++            return;
++        }
++        int srcA = SkColorGetA(src);
++        int srcR = SkColorGetR(src);
++        int srcG = SkColorGetG(src);
++        int srcB = SkColorGetB(src);
++        srcA = SkAlpha255To256(srcA);
++
++        if (width >= 4) {
++            SkASSERT(SkIsAlign4((uintptr_t) dst));
++            while (!SkIsAlign16((uintptr_t) dst)) {
++                *dst = blend_lcd16(srcA, srcR, srcG, srcB, *dst, *mask);
++                mask++; dst++; width--;
++            }
++
++            // Replicate source across 4 lanes, then unpack low half to interleaved 16-bit.
++            uint32_t srcPM = SkPackARGB32(0xFF, srcR, srcG, srcB);
++            __vector unsigned int src_v32 = vec_splats(srcPM);
++            const __vector unsigned char zeros = vec_splats((unsigned char)0);
++            __vector unsigned char src_v = vec_mergeh((__vector unsigned char)src_v32, zeros);
++            __vector unsigned char srcA_v = (__vector unsigned char)vec_splats((unsigned short)srcA);
++
++            while (width >= 4) {
++                __vector unsigned char dst_v = vec_xl(0, (const unsigned char*)dst);
++                // Load 8 bytes (4x uint16 mask) into low half of vector.
++                uint64_t mlo;
++                memcpy(&mlo, mask, sizeof(mlo));
++                __vector unsigned long long mask_low =
++                    (__vector unsigned long long){mlo, 0};
++                __vector unsigned char mask_v = (__vector unsigned char)mask_low;
++
++                // Check if all mask values are zero (skip blending if so).
++                if (!vec_all_eq((__vector unsigned long long)mask_v,
++                                vec_splats((unsigned long long)0))) {
++                    // Unpack low 8 bytes of mask (4x uint16) into 4x uint32 (with zeros).
++                    // Zero-extend the 4 uint16 masks to 4 uint32 (16-bit-granularity
++                    // merge, matching SSE2's _mm_unpacklo_epi16); a char-granularity
++                    // merge would byte-stretch the RGB565 value and misplace the shifts.
++                    mask_v = (__vector unsigned char)vec_mergeh((__vector unsigned short)mask_v,
++                                                               (__vector unsigned short)zeros);
++                    __vector unsigned char result =
++                        blend_lcd16_vsx(src_v, dst_v, mask_v, srcA_v);
++                    vec_xst(result, 0, (unsigned char*)dst);
++                }
++                dst += 4; mask += 4; width -= 4;
++            }
++        }
++
++        while (width > 0) {
++            *dst = blend_lcd16(srcA, srcR, srcG, srcB, *dst, *mask);
++            mask++; dst++; width--;
++        }
++    }
++
++    void blit_row_lcd16_opaque(SkPMColor dst[], const uint16_t mask[],
++                               SkColor src, int width, SkPMColor opaqueDst) {
++        if (width <= 0) {
++            return;
++        }
++        int srcR = SkColorGetR(src);
++        int srcG = SkColorGetG(src);
++        int srcB = SkColorGetB(src);
++
++        if (width >= 4) {
++            SkASSERT(SkIsAlign4((uintptr_t) dst));
++            while (!SkIsAlign16((uintptr_t) dst)) {
++                *dst = blend_lcd16_opaque(srcR, srcG, srcB, *dst, *mask, opaqueDst);
++                mask++; dst++; width--;
++            }
++
++            uint32_t srcPM = SkPackARGB32(0xFF, srcR, srcG, srcB);
++            __vector unsigned int src_v32 = vec_splats(srcPM);
++            const __vector unsigned char zeros = vec_splats((unsigned char)0);
++            __vector unsigned char src_v = vec_mergeh((__vector unsigned char)src_v32, zeros);
++
++            while (width >= 4) {
++                __vector unsigned char dst_v = vec_xl(0, (const unsigned char*)dst);
++                uint64_t mlo;
++                memcpy(&mlo, mask, sizeof(mlo));
++                __vector unsigned long long mask_low =
++                    (__vector unsigned long long){mlo, 0};
++                __vector unsigned char mask_v = (__vector unsigned char)mask_low;
++
++                if (!vec_all_eq((__vector unsigned long long)mask_v,
++                                vec_splats((unsigned long long)0))) {
++                    // Zero-extend the 4 uint16 masks to 4 uint32 (16-bit-granularity
++                    // merge, matching SSE2's _mm_unpacklo_epi16); a char-granularity
++                    // merge would byte-stretch the RGB565 value and misplace the shifts.
++                    mask_v = (__vector unsigned char)vec_mergeh((__vector unsigned short)mask_v,
++                                                               (__vector unsigned short)zeros);
++                    __vector unsigned char result =
++                        blend_lcd16_opaque_vsx(src_v, dst_v, mask_v);
++                    vec_xst(result, 0, (unsigned char*)dst);
++                }
++                dst += 4; mask += 4; width -= 4;
++            }
++        }
++
++        while (width > 0) {
++            *dst = blend_lcd16_opaque(srcR, srcG, srcB, *dst, *mask, opaqueDst);
++            mask++; dst++; width--;
++        }
++    }
++
+ #elif defined(SK_ARM_HAS_NEON)
+     #include <arm_neon.h>
+ 
+diff --git a/gfx/skia/skia/src/opts/SkBitmapProcState_opts.h b/gfx/skia/skia/src/opts/SkBitmapProcState_opts.h
+index 6d01a2f4458f..87b160ed7a1e 100644
+--- a/gfx/skia/skia/src/opts/SkBitmapProcState_opts.h
++++ b/gfx/skia/skia/src/opts/SkBitmapProcState_opts.h
+@@ -29,6 +29,8 @@
+     #include <lasxintrin.h>
+ #elif SK_CPU_LSX_LEVEL >= SK_CPU_LSX_LEVEL_LSX
+     #include <lsxintrin.h>
++#elif defined(SK_CPU_PPC) && defined(__VSX__)
++    #include <altivec.h>
+ #endif
+ 
+ namespace SK_OPTS_NS {
+@@ -260,6 +262,168 @@ static void decode_packed_coordinates_and_weight(U32 packed, Out* v0, Out* v1, O
+         }
+     }
+ 
++#elif defined(SK_CPU_PPC) && defined(__VSX__)
++
++    // Helper: scalar uint32_t -> 16-byte vector with x in low 32 bits, zero elsewhere.
++    // Equivalent of x86's _mm_cvtsi32_si128.
++    static inline __vector unsigned char vsx_cvt_u32_to_vec(uint32_t x) {
++        __vector unsigned int v = (__vector unsigned int){x, 0, 0, 0};
++        return (__vector unsigned char)v;
++    }
++
++    // Helper: PPC64 VSX equivalent of x86's _mm_maddubs_epi16. Multiplies pairs of
++    // (unsigned byte, signed byte) and adds adjacent pairs to produce 16-bit signed
++    // values, saturating to int16. Implementation transcribes the GCC ppc_wrappers
++    // tmmintrin.h sequence for endianness correctness on LE PPC64.
++    static inline __vector signed short vsx_maddubs_epi16(__vector unsigned char A,
++                                                            __vector signed char B) {
++        __vector signed short __ff = vec_splats((signed short)0x00FF);
++        __vector signed short __C = vec_and(vec_unpackh((__vector signed char)A), __ff);
++        __vector signed short __D = vec_and(vec_unpackl((__vector signed char)A), __ff);
++        __vector signed short __E = vec_unpackh(B);
++        __vector signed short __F = vec_unpackl(B);
++        __C = vec_mul(__C, __E);
++        __D = vec_mul(__D, __F);
++        const __vector unsigned char __odds  = (__vector unsigned char){
++            0,1, 4,5, 8,9, 12,13,  16,17, 20,21, 24,25, 28,29
++        };
++        const __vector unsigned char __evens = (__vector unsigned char){
++            2,3, 6,7, 10,11, 14,15,  18,19, 22,23, 26,27, 30,31
++        };
++        __E = (__vector signed short)vec_perm((__vector unsigned char)__C,
++                                              (__vector unsigned char)__D, __odds);
++        __F = (__vector signed short)vec_perm((__vector unsigned char)__C,
++                                              (__vector unsigned char)__D, __evens);
++        return vec_adds(__E, __F);
++    }
++
++    /*not static*/ inline
++    void S32_alpha_D32_filter_DX(const SkBitmapProcState& s,
++                                 const uint32_t* xy, int count, uint32_t* colors) {
++        SkASSERT(count > 0 && colors != nullptr);
++        SkASSERT(s.fBilerp);
++        SkASSERT(kN32_SkColorType == s.fPixmap.colorType());
++        SkASSERT(s.fAlphaScale <= 256);
++
++        // interpolate_in_x() is the crux of the implementation, interpolating in X
++        // for up to two output pixels (A and B) using vsx_maddubs_epi16().
++        auto interpolate_in_x = [](uint32_t A0, uint32_t A1,
++                                   uint32_t B0, uint32_t B1,
++                                   __vector signed char interlaced_x_weights) {
++            // _mm_unpacklo_epi8(_mm_cvtsi32_si128(A0), _mm_cvtsi32_si128(A1))
++            // = vec_mergeh on uchar, since the input vectors have only the low 32 bits set.
++            __vector unsigned char interlaced_A = vec_mergeh(vsx_cvt_u32_to_vec(A0),
++                                                              vsx_cvt_u32_to_vec(A1));
++            __vector unsigned char interlaced_B = vec_mergeh(vsx_cvt_u32_to_vec(B0),
++                                                              vsx_cvt_u32_to_vec(B1));
++            // _mm_unpacklo_epi64 = vec_mergeh on long long.
++            __vector long long lo64 = vec_mergeh((__vector long long)interlaced_A,
++                                                 (__vector long long)interlaced_B);
++            return vsx_maddubs_epi16((__vector unsigned char)lo64, interlaced_x_weights);
++        };
++
++        // Interpolate {A0..A3} --> output pixel A, and {B0..B3} --> output pixel B.
++        // Returns two pixels, with each color channel in a 16-bit lane of the result.
++        auto interpolate_in_x_and_y = [&](uint32_t A0, uint32_t A1,
++                                          uint32_t A2, uint32_t A3,
++                                          uint32_t B0, uint32_t B1,
++                                          uint32_t B2, uint32_t B3,
++                                          __vector signed char interlaced_x_weights,
++                                          int wy) {
++            __vector signed short top = interpolate_in_x(A0,A1, B0,B1, interlaced_x_weights);
++            __vector signed short bot = interpolate_in_x(A2,A3, B2,B3, interlaced_x_weights);
++
++            // 16*top + (bot-top)*wy, mirroring the SSE2 form (saves one multiply vs. the
++            // straightforward top*(16-wy) + bot*wy).
++            __vector unsigned short v4 = vec_splats((unsigned short)4);
++            __vector signed short wy_v = vec_splats((signed short)wy);
++            __vector signed short px = vec_add(vec_sl(top, v4), vec_mul(vec_sub(bot, top), wy_v));
++
++            // Scale down by total max weight 16x16 = 256.
++            px = (__vector signed short)vec_sr((__vector unsigned short)px, vec_splats((unsigned short)8));
++
++            // Scale by alpha if needed.
++            if (s.fAlphaScale < 256) {
++                __vector signed short scale_v = vec_splats((signed short)s.fAlphaScale);
++                px = (__vector signed short)vec_sr((__vector unsigned short)vec_mul(px, scale_v),
++                                                   vec_splats((unsigned short)8));
++            }
++            return px;
++        };
++
++        // We're in _DX mode here, so we're only varying in X.
++        // That means the first entry of xy is our constant pair of Y coordinates and weight in Y.
++        int y0, y1, wy;
++        decode_packed_coordinates_and_weight(*xy++, &y0, &y1, &wy);
++
++        auto row0 = (const uint32_t*)((const uint8_t*)s.fPixmap.addr() + y0 * s.fPixmap.rowBytes()),
++             row1 = (const uint32_t*)((const uint8_t*)s.fPixmap.addr() + y1 * s.fPixmap.rowBytes());
++
++        while (count >= 4) {
++            // We can really get going, loading 4 X-pairs at a time to produce 4 output pixels.
++            int x0[4],
++                x1[4];
++            __vector unsigned int wx;
++
++            // decode_packed_coordinates_and_weight(), 4x.
++            __vector unsigned int packed = (__vector unsigned int)vec_xl(0, (const unsigned char*)xy);
++            __vector unsigned int x0_v = vec_sr(packed, vec_splats(18u));
++            __vector unsigned int x1_v = vec_and(packed, vec_splats(0x3fffu));
++            vec_xst((__vector unsigned char)x0_v, 0, (unsigned char*)x0);
++            vec_xst((__vector unsigned char)x1_v, 0, (unsigned char*)x1);
++            wx = vec_and(vec_sr(packed, vec_splats(14u)), vec_splats(0xfu));  // [0,15]
++
++            // Splat each x weight 4x (for each color channel) as wr for pixels on the right at x1,
++            // and sixteen minus that as wl for pixels on the left at x0.
++            const __vector unsigned char wr_mask = (__vector unsigned char){
++                0,0,0,0, 4,4,4,4, 8,8,8,8, 12,12,12,12
++            };
++            __vector unsigned char wr = vec_perm((__vector unsigned char)wx,
++                                                  (__vector unsigned char)wx, wr_mask);
++            __vector unsigned char wl = vec_sub(vec_splats((unsigned char)16), wr);
++
++            // Interlace wl and wr for vsx_maddubs_epi16().
++            __vector signed char interlaced_x_weights_AB = (__vector signed char)vec_mergeh(wl, wr);
++            __vector signed char interlaced_x_weights_CD = (__vector signed char)vec_mergel(wl, wr);
++
++            enum { A,B,C,D };
++
++            __vector signed short AB = interpolate_in_x_and_y(
++                    row0[x0[A]], row0[x1[A]], row1[x0[A]], row1[x1[A]],
++                    row0[x0[B]], row0[x1[B]], row1[x0[B]], row1[x1[B]],
++                    interlaced_x_weights_AB, wy);
++            __vector signed short CD = interpolate_in_x_and_y(
++                    row0[x0[C]], row0[x1[C]], row1[x0[C]], row1[x1[C]],
++                    row0[x0[D]], row0[x1[D]], row1[x0[D]], row1[x1[D]],
++                    interlaced_x_weights_CD, wy);
++
++            // Pack 16-bit signed -> 8-bit unsigned with saturation, write 4 pixels.
++            __vector unsigned char packed_out = vec_packsu(AB, CD);
++            vec_xst(packed_out, 0, (unsigned char*)colors);
++            xy     += 4;
++            colors += 4;
++            count  -= 4;
++        }
++
++        while (count --> 0) {
++            // Same flow as the count >= 4 loop, but writing one pixel.
++            int x0, x1, wx;
++            decode_packed_coordinates_and_weight(*xy++, &x0, &x1, &wx);
++
++            __vector unsigned char wr = vec_splats((unsigned char)wx);
++            __vector unsigned char wl = vec_sub(vec_splats((unsigned char)16), wr);
++            __vector signed char interlaced_x_weights = (__vector signed char)vec_mergeh(wl, wr);
++
++            __vector signed short Av = interpolate_in_x_and_y(
++                    row0[x0], row0[x1], row1[x0], row1[x1],
++                    0, 0, 0, 0,
++                    interlaced_x_weights, wy);
++            __vector unsigned char packed_out = vec_packsu(Av,
++                    (__vector signed short)(__vector unsigned char){0});
++            *colors++ = ((__vector unsigned int)packed_out)[0];
++        }
++    }
++
+ #elif SK_CPU_LSX_LEVEL >= SK_CPU_LSX_LEVEL_LASX
+     /*not static*/ inline
+     void S32_alpha_D32_filter_DX(const SkBitmapProcState& s,
+diff --git a/gfx/skia/skia/src/opts/SkBlitRow_opts.h b/gfx/skia/skia/src/opts/SkBlitRow_opts.h
+index d1de5681a72e..d03908a03a32 100644
+--- a/gfx/skia/skia/src/opts/SkBlitRow_opts.h
++++ b/gfx/skia/skia/src/opts/SkBlitRow_opts.h
+@@ -68,6 +68,43 @@
+     }
+ #endif
+ 
++#if defined(SK_CPU_PPC) && defined(__VSX__)
++    #include <altivec.h>
++
++    // Native VSX/AltiVec port of SkPMSrcOver_SSE2.
++    // Same algorithm: src + dst*(256-srcAlpha)/256.
++    static inline __vector unsigned char SkPMSrcOver_VSX(__vector unsigned char src,
++                                                         __vector unsigned char dst) {
++        __vector unsigned int src_u32 = (__vector unsigned int)src;
++        __vector unsigned int dst_u32 = (__vector unsigned int)dst;
++
++        // scale = 256 - (src >> 24)  (per 32-bit lane)
++        __vector unsigned int scale = vec_sub(vec_splats((unsigned int)256),
++                                              vec_sr(src_u32, vec_splats(24u)));
++        // scale_x2 = (scale << 16) | scale  -- splat the scale into both 16-bit halves
++        __vector unsigned int scale_x2 = vec_or(vec_sl(scale, vec_splats(16u)), scale);
++
++        const __vector unsigned int rb_mask = vec_splats(0x00FF00FFu);
++
++        // rb = (dst & 0x00FF00FF) * scale_x2 >> 8   (R and B channels in 16-bit lanes)
++        __vector unsigned short rb = (__vector unsigned short)vec_and(rb_mask, dst_u32);
++        rb = vec_mul(rb, (__vector unsigned short)scale_x2);
++        rb = vec_sr(rb, vec_splats((unsigned short)8));
++
++        // ga = (dst >> 8) * scale_x2  then mask out the rb channels
++        __vector unsigned short ga = vec_sr((__vector unsigned short)dst_u32,
++                                            vec_splats((unsigned short)8));
++        ga = vec_mul(ga, (__vector unsigned short)scale_x2);
++        // andc(ga, rb_mask) = ga & ~rb_mask  -- keep only G and A channels in 16-bit lanes
++        __vector unsigned int ga_u32 = vec_andc((__vector unsigned int)ga, rb_mask);
++
++        // result = src + adds_epu8(rb | ga)
++        __vector unsigned char merged =
++            (__vector unsigned char)vec_or((__vector unsigned int)rb, ga_u32);
++        return vec_adds(src, merged);
++    }
++#endif
++
+ #if SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSE2
+     #include <immintrin.h>
+ 
+@@ -176,6 +213,17 @@ inline void blit_row_s32a_opaque(SkPMColor* dst, const SkPMColor* src, int len,
+     }
+ #endif
+ 
++#if defined(SK_CPU_PPC) && defined(__VSX__)
++    while (len >= 4) {
++        __vector unsigned char vsrc = vec_xl(0, (const unsigned char*)src);
++        __vector unsigned char vdst = vec_xl(0, (const unsigned char*)dst);
++        vec_xst(SkPMSrcOver_VSX(vsrc, vdst), 0, (unsigned char*)dst);
++        src += 4;
++        dst += 4;
++        len -= 4;
++    }
++#endif
++
+ #if SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSE2
+     while (len >= 4) {
+         _mm_storeu_si128((__m128i*)dst, SkPMSrcOver_SSE2(_mm_loadu_si128((const __m128i*)src),
+diff --git a/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h b/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h
+index 695b71434f8c..e2af0b94f392 100644
+--- a/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h
++++ b/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h
+@@ -87,6 +87,8 @@ using NoCtx = const void*;
+     #define SKRP_CPU_SCALAR
+ #elif defined(SK_ARM_HAS_NEON)
+     #define SKRP_CPU_NEON
++#elif defined(SK_CPU_PPC) && defined(__VSX__)
++    #define SKRP_CPU_VSX
+ #elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SKX
+     #define SKRP_CPU_SKX
+ #elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_AVX2
+@@ -109,6 +111,8 @@ using NoCtx = const void*;
+     #include <math.h>
+ #elif defined(SKRP_CPU_NEON)
+     #include <arm_neon.h>
++#elif defined(SKRP_CPU_VSX)
++    #include <altivec.h>
+ #elif defined(SKRP_CPU_LASX)
+     #include <lasxintrin.h>
+     #include <lsxintrin.h>
+@@ -337,6 +341,239 @@ namespace SK_OPTS_NS {
+         vst4q_f32(ptr, (float32x4x4_t{{r,g,b,a}}));
+     }
+ 
++#elif defined(SKRP_CPU_VSX)
++    // Reuse the file-scope Vec<N,T> defined above. It already handles the
++    // GCC-vs-Clang divergence (ext_vector_type on Clang; vector_size via
++    // VecHelper on GCC) and produces the right vector-register-passing ABI
++    // on PPC64. The vec_* intrinsics in <altivec.h> accept either form.
++    template <typename T> using V = Vec<4, T>;
++    using F   = V<float   >;
++    using I32 = V< int32_t>;
++    using U64 = V<uint64_t>;
++    using U32 = V<uint32_t>;
++    using U16 = V<uint16_t>;
++    using U8  = V<uint8_t >;
++
++    // We polyfill a few routines that Clang doesn't build into ext_vector_types.
++    SI F   min(F a, F b)     { return vec_min(a,b); }
++    SI I32 min(I32 a, I32 b) { return vec_min(a,b); }
++    SI U32 min(U32 a, U32 b) { return vec_min(a,b); }
++    SI F   max(F a, F b)     { return vec_max(a,b); }
++    SI I32 max(I32 a, I32 b) { return vec_max(a,b); }
++    SI U32 max(U32 a, U32 b) { return vec_max(a,b); }
++
++    SI F   abs_  (F v)   { return vec_abs(v); }
++    SI I32 abs_  (I32 v) { return vec_abs(v); }
++    SI F   rcp_approx(F v) { return vec_re(v); }
++    SI F   rcp_precise (F v) { F e = rcp_approx(v); return e * (2.0f - v * e); }
++    SI F   rsqrt_approx (F v)   { return vec_rsqrte(v); }
++
++    SI U16 pack(U32 v)       { return __builtin_convertvector(v, U16); }
++    SI U8  pack(U16 v)       { return __builtin_convertvector(v,  U8); }
++
++    SI F if_then_else(I32 c, F t, F e) {
++        return vec_or((__vector float)vec_and((__vector float)c, (__vector float)t), (__vector float)vec_andc((__vector float)e, (__vector float)c));
++    }
++    SI I32 if_then_else(I32 c, I32 t, I32 e) {
++        return (I32)vec_or((__vector unsigned int)vec_and((__vector unsigned int)c, (__vector unsigned int)t), (__vector unsigned int)vec_andc((__vector unsigned int)e, (__vector unsigned int)c));
++    }
++
++    // In both AltiVec and SSE there is no horizontal element compare, unlike ARM.  Fall back to scalar operations here...
++    SI bool any(I32 c) {
++        if (vec_extract((U32)c, 0) != 0) return 1;
++        if (vec_extract((U32)c, 1) != 0) return 1;
++        if (vec_extract((U32)c, 2) != 0) return 1;
++        if (vec_extract((U32)c, 3) != 0) return 1;
++        return 0;
++    }
++    SI bool all(I32 c) {
++        if (vec_extract((U32)c, 0) == 0) return 0;
++        if (vec_extract((U32)c, 1) == 0) return 0;
++        if (vec_extract((U32)c, 2) == 0) return 0;
++        if (vec_extract((U32)c, 3) == 0) return 0;
++        return 1;
++    }
++
++    SI F     mad(F f, F m, F a) { return vec_madd(f,m,a); }
++    SI F    nmad(F f, F m, F a) { return vec_nmsub(f,m,a); }
++    SI F  floor_(F v) { return vec_floor(v); }
++    SI F   ceil_(F v) { return vec_ceil(v); }
++    SI F   sqrt_(F v) { return vec_sqrt(v); }
++    SI I32 iround(F v) { return vec_cts((__vector float)vec_rint(v), 0); }
++    SI U32 round(F v)  { return vec_ctu((__vector float)vec_rint(v), 0); }
++    SI U32 round(F v, F scale) { return (U32)vec_cts((__vector float)vec_rint(v*scale), 0); }
++
++    template <typename T>
++    SI V<T> gather(const T* p, U32 ix) {
++        return V<T>{p[ix[0]], p[ix[1]], p[ix[2]], p[ix[3]]};
++    }
++    template <typename T>
++    SI V<T> gather_unaligned(const T* ptr, U32 ix) {
++        // This tells the compiler ptr might not be aligned appropriately, so
++        // it generates better assembly.
++        typedef T __attribute__ ((aligned (1))) unaligned_ptr;
++        const unaligned_ptr* uptr = static_cast<const unaligned_ptr*>(ptr);
++        return V<T>{uptr[ix[0]], uptr[ix[1]], uptr[ix[2]], uptr[ix[3]]};
++    }
++    template <typename V, typename S>
++    SI void scatter_masked(V src, S* dst, U32 ix, I32 mask) {
++        V before = gather(dst, ix);
++        V after = if_then_else(mask, src, before);
++        dst[ix[0]] = after[0];
++        dst[ix[1]] = after[1];
++        dst[ix[2]] = after[2];
++        dst[ix[3]] = after[3];
++    }
++
++    // Native VSX/AltiVec ports of the load2/store2/load3/load4/store4 helpers.
++    // Each uses vec_xl/vec_xst for unaligned 16-byte loads/stores, vec_mergeh/
++    // vec_mergel for SSE-style epi16/epi32/ps unpack ops, and vec_perm with a
++    // byte-mask for the SSE shufflelo/shufflehi/shuffle/srli_si128 ops. The
++    // PPC64 LE register-to-memory byte order matches x86 LE, so the byte-mask
++    // patterns are identical to the corresponding _mm_setr_epi8 forms.
++
++    SI void load2(const uint16_t* ptr, U16* r, U16* g) {
++        // Load 8 uint16: r0 g0 r1 g1 r2 g2 r3 g3 (in LE memory order).
++        __vector unsigned char v = vec_xl(0, (const unsigned char*)ptr);
++        // Extract every-other 16-bit value via vec_perm (high half of result is unused
++        // but written; sk_unaligned_load below picks up the low 8 bytes).
++        const __vector unsigned char r_mask = (__vector unsigned char){
++            0,1, 4,5, 8,9, 12,13,  0,0,0,0,0,0,0,0
++        };
++        const __vector unsigned char g_mask = (__vector unsigned char){
++            2,3, 6,7, 10,11, 14,15,  0,0,0,0,0,0,0,0
++        };
++        __vector unsigned char R_v = vec_perm(v, v, r_mask);
++        __vector unsigned char G_v = vec_perm(v, v, g_mask);
++        *r = sk_unaligned_load<U16>(&R_v);
++        *g = sk_unaligned_load<U16>(&G_v);
++    }
++
++    SI void store2(uint16_t* ptr, U16 r, U16 g) {
++        // Interleave: rg = r0 g0 r1 g1 r2 g2 r3 g3.
++        // r and g are 8-byte vectors; widen to 16 and vec_mergeh on ushort takes
++        // the low 4 lanes of each.
++        __vector unsigned short rw = widen_cast<__vector unsigned short>(r);
++        __vector unsigned short gw = widen_cast<__vector unsigned short>(g);
++        __vector unsigned short rg = vec_mergeh(rw, gw);
++        vec_xst((__vector unsigned char)rg, 0, (unsigned char*)ptr);
++    }
++
++    SI void load3(const uint16_t* ptr, U16* r, U16* g, U16* b) {
++        // 4 pixels x 3 channels x 2 bytes = 24 bytes. Two 16-byte loads with overlap
++        // avoid reading past the 24-byte source.
++        __vector unsigned char v01 = vec_xl(0, (const unsigned char*)(ptr + 0));
++        __vector unsigned char v23_raw = vec_xl(0, (const unsigned char*)(ptr + 4));
++        const __vector unsigned char zero = vec_splats((unsigned char)0);
++        // v23 = v23_raw >> 4 bytes (drops the overlapping pixel-1 trailing R).
++        const __vector unsigned char shift4 = (__vector unsigned char){
++            4,5,6,7, 8,9,10,11, 12,13,14,15, 16,16,16,16
++        };
++        __vector unsigned char v23 = vec_perm(v23_raw, zero, shift4);
++        // _N holds R,G,B for pixel N in its lower 3 lanes. shift6 advances to the next pixel.
++        const __vector unsigned char shift6 = (__vector unsigned char){
++            6,7,8,9, 10,11,12,13, 14,15, 16,16, 16,16, 16,16
++        };
++        __vector unsigned char _0 = v01;
++        __vector unsigned char _1 = vec_perm(v01, zero, shift6);
++        __vector unsigned char _2 = v23;
++        __vector unsigned char _3 = vec_perm(v23, zero, shift6);
++        // De-interlace to R,G,B per the SSE flow.
++        __vector unsigned short _02 = vec_mergeh((__vector unsigned short)_0,
++                                                  (__vector unsigned short)_2);
++        __vector unsigned short _13 = vec_mergeh((__vector unsigned short)_1,
++                                                  (__vector unsigned short)_3);
++        __vector unsigned short R_v = vec_mergeh(_02, _13);
++        const __vector unsigned char shift8 = (__vector unsigned char){
++            8,9,10,11, 12,13,14,15, 16,16,16,16, 16,16,16,16
++        };
++        __vector unsigned char G_v = vec_perm((__vector unsigned char)R_v, zero, shift8);
++        __vector unsigned short B_v = vec_mergel(_02, _13);
++        *r = sk_unaligned_load<U16>(&R_v);
++        *g = sk_unaligned_load<U16>(&G_v);
++        *b = sk_unaligned_load<U16>(&B_v);
++    }
++
++    SI void load4(const uint16_t* ptr, U16* r, U16* g, U16* b, U16* a) {
++        __vector unsigned short v01 = (__vector unsigned short)
++            vec_xl(0, (const unsigned char*)ptr);            // r0 g0 b0 a0 r1 g1 b1 a1
++        __vector unsigned short v23 = (__vector unsigned short)
++            vec_xl(0, (const unsigned char*)(ptr + 8));      // r2 g2 b2 a2 r3 g3 b3 a3
++        __vector unsigned short _02 = vec_mergeh(v01, v23);  // r0 r2 g0 g2 b0 b2 a0 a2
++        __vector unsigned short _13 = vec_mergel(v01, v23);  // r1 r3 g1 g3 b1 b3 a1 a3
++        __vector unsigned short rg  = vec_mergeh(_02, _13);  // r0 r1 r2 r3 g0 g1 g2 g3
++        __vector unsigned short ba  = vec_mergel(_02, _13);  // b0 b1 b2 b3 a0 a1 a2 a3
++        *r = sk_unaligned_load<U16>((const uint16_t*)&rg + 0);
++        *g = sk_unaligned_load<U16>((const uint16_t*)&rg + 4);
++        *b = sk_unaligned_load<U16>((const uint16_t*)&ba + 0);
++        *a = sk_unaligned_load<U16>((const uint16_t*)&ba + 4);
++    }
++
++    SI void store4(uint16_t* ptr, U16 r, U16 g, U16 b, U16 a) {
++        __vector unsigned short rw = widen_cast<__vector unsigned short>(r);
++        __vector unsigned short gw = widen_cast<__vector unsigned short>(g);
++        __vector unsigned short bw = widen_cast<__vector unsigned short>(b);
++        __vector unsigned short aw = widen_cast<__vector unsigned short>(a);
++        __vector unsigned short rg = vec_mergeh(rw, gw);  // r0 g0 r1 g1 r2 g2 r3 g3
++        __vector unsigned short ba = vec_mergeh(bw, aw);  // b0 a0 b1 a1 b2 a2 b3 a3
++        // Now interleave 32-bit lanes (each rg pair = 1 lane, each ba pair = 1 lane).
++        __vector unsigned int rgba_lo = vec_mergeh((__vector unsigned int)rg,
++                                                    (__vector unsigned int)ba);
++        __vector unsigned int rgba_hi = vec_mergel((__vector unsigned int)rg,
++                                                    (__vector unsigned int)ba);
++        vec_xst((__vector unsigned char)rgba_lo, 0, (unsigned char*)ptr);
++        vec_xst((__vector unsigned char)rgba_hi, 0, (unsigned char*)(ptr + 8));
++    }
++
++    SI void load2(const float* ptr, F* r, F* g) {
++        __vector float _01 = vec_xl(0, ptr);          // r0 g0 r1 g1
++        __vector float _23 = vec_xl(0, ptr + 4);      // r2 g2 r3 g3
++        // r = lanes {_01[0], _01[2], _23[0], _23[2]}; g = {_01[1], _01[3], _23[1], _23[3]}.
++        const __vector unsigned char r_mask = (__vector unsigned char){
++            0,1,2,3, 8,9,10,11, 16,17,18,19, 24,25,26,27
++        };
++        const __vector unsigned char g_mask = (__vector unsigned char){
++            4,5,6,7, 12,13,14,15, 20,21,22,23, 28,29,30,31
++        };
++        *r = (F)vec_perm((__vector unsigned char)_01, (__vector unsigned char)_23, r_mask);
++        *g = (F)vec_perm((__vector unsigned char)_01, (__vector unsigned char)_23, g_mask);
++    }
++
++    SI void store2(float* ptr, F r, F g) {
++        __vector float _01 = vec_mergeh((__vector float)r, (__vector float)g);   // r0 g0 r1 g1
++        __vector float _23 = vec_mergel((__vector float)r, (__vector float)g);   // r2 g2 r3 g3
++        vec_xst((__vector unsigned char)_01, 0, (unsigned char*)ptr);
++        vec_xst((__vector unsigned char)_23, 0, (unsigned char*)(ptr + 4));
++    }
++
++    SI void load4(const float* ptr, F* r, F* g, F* b, F* a) {
++        // 4x4 float matrix transpose: rows -> columns.
++        __vector float row0 = vec_xl(0, ptr +  0);
++        __vector float row1 = vec_xl(0, ptr +  4);
++        __vector float row2 = vec_xl(0, ptr +  8);
++        __vector float row3 = vec_xl(0, ptr + 12);
++        __vector float T0 = vec_mergeh(row0, row2);  // {row0[0], row2[0], row0[1], row2[1]}
++        __vector float T1 = vec_mergeh(row1, row3);
++        __vector float T2 = vec_mergel(row0, row2);
++        __vector float T3 = vec_mergel(row1, row3);
++        *r = (F)vec_mergeh(T0, T1);  // {row0[0], row1[0], row2[0], row3[0]}
++        *g = (F)vec_mergel(T0, T1);
++        *b = (F)vec_mergeh(T2, T3);
++        *a = (F)vec_mergel(T2, T3);
++    }
++
++    SI void store4(float* ptr, F r, F g, F b, F a) {
++        // 4x4 float matrix transpose, then store rows.
++        __vector float T0 = vec_mergeh((__vector float)r, (__vector float)b);
++        __vector float T1 = vec_mergeh((__vector float)g, (__vector float)a);
++        __vector float T2 = vec_mergel((__vector float)r, (__vector float)b);
++        __vector float T3 = vec_mergel((__vector float)g, (__vector float)a);
++        vec_xst((__vector unsigned char)vec_mergeh(T0, T1), 0, (unsigned char*)(ptr +  0));
++        vec_xst((__vector unsigned char)vec_mergel(T0, T1), 0, (unsigned char*)(ptr +  4));
++        vec_xst((__vector unsigned char)vec_mergeh(T2, T3), 0, (unsigned char*)(ptr +  8));
++        vec_xst((__vector unsigned char)vec_mergel(T2, T3), 0, (unsigned char*)(ptr + 12));
++    }
++
+ #elif defined(SKRP_CPU_SKX)
+     template <typename T> using V = Vec<16, T>;
+     using F   = V<float   >;
+diff --git a/gfx/skia/skia/src/opts/SkSwizzler_opts.inc b/gfx/skia/skia/src/opts/SkSwizzler_opts.inc
+index 671db3f05f61..c578238a9e58 100644
+--- a/gfx/skia/skia/src/opts/SkSwizzler_opts.inc
++++ b/gfx/skia/skia/src/opts/SkSwizzler_opts.inc
+@@ -84,6 +84,29 @@ SI float reciprocal_alpha(float a) {
+     auto q = F4{1.0f} / vA;
+     return _mm_and_ps(sk_bit_cast<__m128>(vA != F4{0.0f}), q)[0];
+ }
++#elif defined(SK_CPU_PPC) && defined(__VSX__)
++// -- VSX -- Harden against timing attacks.
++// vec_splats / vec_div / vec_cmpgt / vec_and each map to a single VSX op on
++// both GCC and Clang. vec_cmpgt(vA, 0) is exact for the non-negative-alpha
++// contract (0 <= a) and avoids Clang's static_cast<float>(vector) extension
++// that GCC does not support.
++SK_NO_SANITIZE("float-divide-by-zero")
++SI float reciprocal_alpha_times_255(float a) {
++    SkASSERT(0 <= a && a <= 255);
++    __vector float vA = vec_splats(a);
++    __vector float q = vec_div(vec_splats(255.0f), vA);
++    __vector float vMask = (__vector float)vec_cmpgt(vA, vec_splats(0.0f));
++    return vec_and(vMask, q)[0];
++}
++
++SK_NO_SANITIZE("float-divide-by-zero")
++SI float reciprocal_alpha(float a) {
++    SkASSERT(0 <= a && a <= 1);
++    __vector float vA = vec_splats(a);
++    __vector float q = vec_div(vec_splats(1.0f), vA);
++    __vector float vMask = (__vector float)vec_cmpgt(vA, vec_splats(0.0f));
++    return vec_and(vMask, q)[0];
++}
+ #else
+ // -- Portable -- *Not* hardened against timing attacks
+ SI float reciprocal_alpha_times_255(float a) {
+@@ -1085,6 +1108,208 @@ void rgbA_to_BGRA(uint32_t* dst, const uint32_t* src, int count) {
+     rgbA_to_BGRA_portable(dst, src, count);
+ }
+ 
++#elif defined(SK_CPU_PPC) && defined(__VSX__)
++// -- VSX -- Native Power VSX/AltiVec ports of the SSSE3 swizzlers below.
++// Each _mm_* operation is replaced by the corresponding vec_* sequence per
++// the GCC ppc_wrappers translation pattern (vec_mergeh/l, vec_perm, and the
++// vec_vmuleuh/vmulouh + permute idiom for _mm_mulhi_epu16). The permute
++// masks for byte-shuffles use the same byte-order layout as the SSE
++// _mm_setr_epi8 forms because PPC64 LE register-to-memory byte order is the
++// same as x86 LE.
++
++// Scale: ((x*y) + 128) * 257 >> 16, per 16-bit lane (matches the SSSE3 form).
++static inline __vector unsigned short scale(__vector unsigned short x, __vector unsigned short y) {
++    const __vector unsigned short v128 = vec_splats((unsigned short)128);
++    const __vector unsigned short v257 = vec_splats((unsigned short)257);
++    __vector unsigned short summ = (__vector unsigned short)((__vector unsigned short)(x * y) + v128);
++    // _mm_mulhi_epu16 equivalent: 16x16 -> high 16 bits, via mule+mulo+permute.
++    __vector unsigned int even = vec_vmuleuh(summ, v257);
++    __vector unsigned int odd  = vec_vmulouh(summ, v257);
++    const __vector unsigned char xform = (__vector unsigned char){
++        0x02, 0x03, 0x12, 0x13,  0x06, 0x07, 0x16, 0x17,
++        0x0A, 0x0B, 0x1A, 0x1B,  0x0E, 0x0F, 0x1E, 0x1F
++    };
++    return (__vector unsigned short)vec_perm((__vector unsigned char)even,
++                                             (__vector unsigned char)odd, xform);
++}
++
++static void premul_should_swapRB(bool kSwapRB, uint32_t* dst, const uint32_t* src, int count) {
++    auto premul8 = [=](__vector unsigned char* lo, __vector unsigned char* hi) {
++        const __vector unsigned char zeros = (__vector unsigned char){0};
++        const __vector unsigned char planar = kSwapRB
++            ? (__vector unsigned char){2,6,10,14, 1,5,9,13, 0,4,8,12, 3,7,11,15}
++            : (__vector unsigned char){0,4,8,12, 1,5,9,13, 2,6,10,14, 3,7,11,15};
++
++        // Swizzle each 16-byte chunk into 8-bit planar layout.
++        *lo = vec_perm(*lo, *lo, planar);                        // rrrrgggg bbbbaaaa
++        *hi = vec_perm(*hi, *hi, planar);                        // RRRRGGGG BBBBAAAA
++
++        // Interleave the two halves at 32-bit granularity.
++        __vector unsigned char rg = (__vector unsigned char)
++            vec_mergeh((__vector unsigned int)*lo, (__vector unsigned int)*hi);  // rrrrRRRR ggggGGGG
++        __vector unsigned char ba = (__vector unsigned char)
++            vec_mergel((__vector unsigned int)*lo, (__vector unsigned int)*hi);  // bbbbBBBB aaaaAAAA
++
++        // Unpack to 16-bit planar.
++        __vector unsigned short r = (__vector unsigned short)vec_mergeh(rg, zeros);
++        __vector unsigned short g = (__vector unsigned short)vec_mergel(rg, zeros);
++        __vector unsigned short b = (__vector unsigned short)vec_mergeh(ba, zeros);
++        __vector unsigned short a = (__vector unsigned short)vec_mergel(ba, zeros);
++
++        // Premultiply each colour channel by alpha.
++        r = scale(r, a);
++        g = scale(g, a);
++        b = scale(b, a);
++
++        // Repack into interlaced pixels.
++        const __vector unsigned short v8 = vec_splats((unsigned short)8);
++        __vector unsigned short rg2 = vec_or(r, vec_sl(g, v8));
++        __vector unsigned short ba2 = vec_or(b, vec_sl(a, v8));
++        *lo = (__vector unsigned char)vec_mergeh(rg2, ba2);
++        *hi = (__vector unsigned char)vec_mergel(rg2, ba2);
++    };
++
++    while (count >= 8) {
++        __vector unsigned char lo = vec_xl(0, (const unsigned char*)(src + 0));
++        __vector unsigned char hi = vec_xl(0, (const unsigned char*)(src + 4));
++        premul8(&lo, &hi);
++        vec_xst(lo, 0, (unsigned char*)(dst + 0));
++        vec_xst(hi, 0, (unsigned char*)(dst + 4));
++        src += 8; dst += 8; count -= 8;
++    }
++
++    if (count >= 4) {
++        __vector unsigned char lo = vec_xl(0, (const unsigned char*)src);
++        __vector unsigned char hi = (__vector unsigned char){0};
++        premul8(&lo, &hi);
++        vec_xst(lo, 0, (unsigned char*)dst);
++        src += 4; dst += 4; count -= 4;
++    }
++
++    auto proc = kSwapRB ? RGBA_to_bgrA_portable : RGBA_to_rgbA_portable;
++    proc(dst, src, count);
++}
++
++void RGBA_to_rgbA(uint32_t* dst, const uint32_t* src, int count) {
++    premul_should_swapRB(false, dst, src, count);
++}
++
++void RGBA_to_bgrA(uint32_t* dst, const uint32_t* src, int count) {
++    premul_should_swapRB(true, dst, src, count);
++}
++
++void RGBA_to_BGRA(uint32_t* dst, const uint32_t* src, int count) {
++    const __vector unsigned char swapRB = (__vector unsigned char){
++        2,1,0,3, 6,5,4,7, 10,9,8,11, 14,13,12,15
++    };
++    while (count >= 4) {
++        __vector unsigned char rgba = vec_xl(0, (const unsigned char*)src);
++        __vector unsigned char bgra = vec_perm(rgba, rgba, swapRB);
++        vec_xst(bgra, 0, (unsigned char*)dst);
++        src += 4; dst += 4; count -= 4;
++    }
++    RGBA_to_BGRA_portable(dst, src, count);
++}
++
++void grayA_to_RGBA(uint32_t dst[], const uint8_t* src, int count) {
++    while (count >= 8) {
++        __vector unsigned short ga = (__vector unsigned short)vec_xl(0, src);
++        __vector unsigned short gg = vec_or(
++                vec_and(ga, vec_splats((unsigned short)0x00FF)),
++                vec_sl (ga, vec_splats((unsigned short)8)));
++        __vector unsigned short ggga_lo = vec_mergeh(gg, ga);
++        __vector unsigned short ggga_hi = vec_mergel(gg, ga);
++        vec_xst((__vector unsigned char)ggga_lo, 0, (unsigned char*)(dst + 0));
++        vec_xst((__vector unsigned char)ggga_hi, 0, (unsigned char*)(dst + 4));
++        src += 8 * 2; dst += 8; count -= 8;
++    }
++    grayA_to_RGBA_portable(dst, src, count);
++}
++
++void grayA_to_rgbA(uint32_t dst[], const uint8_t* src, int count) {
++    while (count >= 8) {
++        __vector unsigned short grayA = (__vector unsigned short)vec_xl(0, src);
++        __vector unsigned short g0 = vec_and(grayA, vec_splats((unsigned short)0x00FF));
++        __vector unsigned short a0 = vec_sr   (grayA, vec_splats((unsigned short)8));
++        g0 = scale(g0, a0);
++        const __vector unsigned short v8 = vec_splats((unsigned short)8);
++        __vector unsigned short gg = vec_or(g0, vec_sl(g0, v8));
++        __vector unsigned short ga = vec_or(g0, vec_sl(a0, v8));
++        __vector unsigned short ggga_lo = vec_mergeh(gg, ga);
++        __vector unsigned short ggga_hi = vec_mergel(gg, ga);
++        vec_xst((__vector unsigned char)ggga_lo, 0, (unsigned char*)(dst + 0));
++        vec_xst((__vector unsigned char)ggga_hi, 0, (unsigned char*)(dst + 4));
++        src += 8 * 2; dst += 8; count -= 8;
++    }
++    grayA_to_rgbA_portable(dst, src, count);
++}
++
++enum Format { kRGB1, kBGR1 };
++static void inverted_cmyk_to(Format format, uint32_t* dst, const uint32_t* src, int count) {
++    auto convert8 = [=](__vector unsigned char* lo, __vector unsigned char* hi) {
++        const __vector unsigned char zeros = (__vector unsigned char){0};
++        const __vector unsigned char planar = (kBGR1 == format)
++            ? (__vector unsigned char){2,6,10,14, 1,5,9,13, 0,4,8,12, 3,7,11,15}
++            : (__vector unsigned char){0,4,8,12, 1,5,9,13, 2,6,10,14, 3,7,11,15};
++
++        *lo = vec_perm(*lo, *lo, planar);                        // ccccmmmm yyyykkkk
++        *hi = vec_perm(*hi, *hi, planar);                        // CCCCMMMM YYYYKKKK
++        __vector unsigned char cm = (__vector unsigned char)
++            vec_mergeh((__vector unsigned int)*lo, (__vector unsigned int)*hi);
++        __vector unsigned char yk = (__vector unsigned char)
++            vec_mergel((__vector unsigned int)*lo, (__vector unsigned int)*hi);
++
++        __vector unsigned short c = (__vector unsigned short)vec_mergeh(cm, zeros);
++        __vector unsigned short m = (__vector unsigned short)vec_mergel(cm, zeros);
++        __vector unsigned short y = (__vector unsigned short)vec_mergeh(yk, zeros);
++        __vector unsigned short k = (__vector unsigned short)vec_mergel(yk, zeros);
++
++        __vector unsigned short r = scale(c, k);
++        __vector unsigned short g = scale(m, k);
++        __vector unsigned short b = scale(y, k);
++
++        const __vector unsigned short v8 = vec_splats((unsigned short)8);
++        __vector unsigned short rg = vec_or(r, vec_sl(g, v8));
++        __vector unsigned short ba = vec_or(b, vec_splats((unsigned short)0xFF00));
++        *lo = (__vector unsigned char)vec_mergeh(rg, ba);
++        *hi = (__vector unsigned char)vec_mergel(rg, ba);
++    };
++
++    while (count >= 8) {
++        __vector unsigned char lo = vec_xl(0, (const unsigned char*)(src + 0));
++        __vector unsigned char hi = vec_xl(0, (const unsigned char*)(src + 4));
++        convert8(&lo, &hi);
++        vec_xst(lo, 0, (unsigned char*)(dst + 0));
++        vec_xst(hi, 0, (unsigned char*)(dst + 4));
++        src += 8; dst += 8; count -= 8;
++    }
++    if (count >= 4) {
++        __vector unsigned char lo = vec_xl(0, (const unsigned char*)src);
++        __vector unsigned char hi = (__vector unsigned char){0};
++        convert8(&lo, &hi);
++        vec_xst(lo, 0, (unsigned char*)dst);
++        src += 4; dst += 4; count -= 4;
++    }
++    auto proc = (kBGR1 == format) ? inverted_CMYK_to_BGR1_portable : inverted_CMYK_to_RGB1_portable;
++    proc(dst, src, count);
++}
++
++void inverted_CMYK_to_RGB1(uint32_t dst[], const uint32_t* src, int count) {
++    inverted_cmyk_to(kRGB1, dst, src, count);
++}
++
++void inverted_CMYK_to_BGR1(uint32_t dst[], const uint32_t* src, int count) {
++    inverted_cmyk_to(kBGR1, dst, src, count);
++}
++
++void rgbA_to_RGBA(uint32_t* dst, const uint32_t* src, int count) {
++    rgbA_to_RGBA_portable(dst, src, count);
++}
++
++void rgbA_to_BGRA(uint32_t* dst, const uint32_t* src, int count) {
++    rgbA_to_BGRA_portable(dst, src, count);
++}
++
+ #elif SK_CPU_LSX_LEVEL >= SK_CPU_LSX_LEVEL_LASX
+ // -- LASX ----------------------------------------------------------------------------------------
+ 
+@@ -1736,6 +1961,39 @@ static void gray_to_RGB1_portable(uint32_t dst[], const uint8_t* src, int count)
+         }
+         gray_to_RGB1_portable(dst, src, count);
+     }
++#elif defined(SK_CPU_PPC) && defined(__VSX__)
++    void gray_to_RGB1(uint32_t dst[], const uint8_t* src, int count) {
++        const __vector unsigned char alphas = vec_splats((unsigned char)0xFF);
++        while (count >= 16) {
++            __vector unsigned char grays = vec_xl(0, src);
++
++            // Replicate gray byte: gg = unpack(gray, gray) per 8-bit lane.
++            __vector unsigned char gg_lo = vec_mergeh(grays, grays);
++            __vector unsigned char gg_hi = vec_mergel(grays, grays);
++            __vector unsigned char ga_lo = vec_mergeh(grays, alphas);
++            __vector unsigned char ga_hi = vec_mergel(grays, alphas);
++
++            // Interleave g-pairs and ga-pairs at 16-bit granularity.
++            __vector unsigned short ggga0 = vec_mergeh((__vector unsigned short)gg_lo,
++                                                       (__vector unsigned short)ga_lo);
++            __vector unsigned short ggga1 = vec_mergel((__vector unsigned short)gg_lo,
++                                                       (__vector unsigned short)ga_lo);
++            __vector unsigned short ggga2 = vec_mergeh((__vector unsigned short)gg_hi,
++                                                       (__vector unsigned short)ga_hi);
++            __vector unsigned short ggga3 = vec_mergel((__vector unsigned short)gg_hi,
++                                                       (__vector unsigned short)ga_hi);
++
++            vec_xst((__vector unsigned char)ggga0, 0, (unsigned char*)(dst +  0));
++            vec_xst((__vector unsigned char)ggga1, 0, (unsigned char*)(dst +  4));
++            vec_xst((__vector unsigned char)ggga2, 0, (unsigned char*)(dst +  8));
++            vec_xst((__vector unsigned char)ggga3, 0, (unsigned char*)(dst + 12));
++
++            src += 16;
++            dst += 16;
++            count -= 16;
++        }
++        gray_to_RGB1_portable(dst, src, count);
++    }
+ #elif SK_CPU_LSX_LEVEL >= SK_CPU_LSX_LEVEL_LASX
+     /*not static*/ inline void gray_to_RGB1(uint32_t dst[], const uint8_t* src, int count) {
+         const __m256i alphas = __lasx_xvreplgr2vr_b(0xFF);
+@@ -1920,6 +2178,37 @@ static void RGB_to_BGR1_portable(uint32_t dst[], const uint8_t* src, int count)
+         proc(dst, src, count);
+     }
+ 
++    void RGB_to_RGB1(uint32_t dst[], const uint8_t* src, int count) {
++        insert_alpha_should_swaprb(false, dst, src, count);
++    }
++    void RGB_to_BGR1(uint32_t dst[], const uint8_t* src, int count) {
++        insert_alpha_should_swaprb(true, dst, src, count);
++    }
++#elif defined(SK_CPU_PPC) && defined(__VSX__)
++    static void insert_alpha_should_swaprb(bool kSwapRB,
++                                           uint32_t dst[], const uint8_t* src, int count) {
++        // alphaMask = 0xFF000000 per 32-bit lane -> bytes (in LE memory layout) are
++        // {00,00,00,FF, 00,00,00,FF, ...}.
++        const __vector unsigned char alphaMask = (__vector unsigned char){
++            0,0,0,0xFF, 0,0,0,0xFF, 0,0,0,0xFF, 0,0,0,0xFF
++        };
++        // 'X' (= 0) is irrelevant: the alphaMask OR overwrites those lanes with FF.
++        const __vector unsigned char expand = kSwapRB
++            ? (__vector unsigned char){2,1,0,0, 5,4,3,0, 8,7,6,0, 11,10,9,0}
++            : (__vector unsigned char){0,1,2,0, 3,4,5,0, 6,7,8,0,  9,10,11,0};
++
++        while (count >= 6) {
++            __vector unsigned char rgb = vec_xl(0, src);
++            __vector unsigned char rgba = vec_or(vec_perm(rgb, rgb, expand), alphaMask);
++            vec_xst(rgba, 0, (unsigned char*)dst);
++            src += 4*3;
++            dst += 4;
++            count -= 4;
++        }
++        auto proc = kSwapRB ? RGB_to_BGR1_portable : RGB_to_RGB1_portable;
++        proc(dst, src, count);
++    }
++
+     void RGB_to_RGB1(uint32_t dst[], const uint8_t* src, int count) {
+         insert_alpha_should_swaprb(false, dst, src, count);
+     }
+
+base-commit: a8d530ac13f0ce7e937c047f01f0d36764f5d34e
+-- 
+2.52.0
+
