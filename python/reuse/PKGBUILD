@@ -1,0 +1,104 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: George Rawlinson <george@rawlinson.net.nz>
+# Maintainer: Christian Heusel <gromit@archlinux.org>
+# Contributor: Max Mehl <aur at mehl dot mx>
+
+pkgname=reuse
+pkgver=6.2.0
+pkgrel=2
+pkgdesc='Helper tool for providing and confirming copyright and licensing information'
+arch=(any)
+url='https://reuse.software/'
+license=(
+  Apache-2.0
+  CC-BY-SA-4.0
+  CC0-1.0
+  GPL-3.0-or-later
+)
+depends=(
+  python
+  python-debian
+  python-license-expression
+  python-boolean.py
+  python-jinja
+  python-binaryornot
+  python-attrs
+  python-tomlkit
+  python-click
+)
+makedepends=(
+  git
+  python-build
+  python-installer
+  python-wheel
+  python-poetry-core
+  python-sphinx
+  python-sphinxcontrib-apidoc
+  python-myst-parser
+  python-sphinx-furo
+)
+checkdepends=(python-pytest python-freezegun)
+optdepends=(
+  'git: git repository support'
+  'mercurial: mercurial repository support'
+)
+source=("$pkgname::git+https://github.com/fsfe/reuse-tool#tag=v$pkgver")
+sha512sums=('ac46904579ab918ab97ee9b89229b298ef81dc76c88a175e1ef097a24b1a25c4470b2adbfd8aa83e0bef154fee84eef6cccbe417d0be7c5a7d457d3992c7766e')
+b2sums=('2129ae04524ad1f376e27446ab98877dcf5475aa40ed42a4f60444ac760251816a98eded345c8cfc2cd7e33fc2b1f99c5c20216c1bc1a143b5000250a7cf8e3f')
+
+prepare() {
+  cd "$pkgname"
+
+  # FTBFS
+  sed -e 's/poetry run //g' -i docs/Makefile
+}
+
+build() {
+  cd "$pkgname"
+
+  python -m build --wheel --no-isolation
+
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer --destdir="$(pwd)/tmp" dist/*.whl
+  local site_packages=$(test-env/bin/python -c "import site; print(site.getsitepackages()[0])")
+  export PYTHONPATH="$(pwd)/tmp/$site_packages"
+
+  make -C docs man
+
+  export PATH="$PATH:$(pwd)/tmp/build/reuse/src/reuse/test-env/bin/"
+  mkdir completions
+  _REUSE_COMPLETE=bash_source reuse > completions/bash
+  _REUSE_COMPLETE=fish_source reuse > completions/fish
+  _REUSE_COMPLETE=zsh_source  reuse > completions/zsh
+}
+
+check() {
+  cd "$pkgname"
+
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  export PYTHONPATH="$(pwd)/tmp/$site_packages"
+  # the excluded tests do not work as they expect reuse to be fully installed
+  python -P -m pytest -k 'not test_version and not TestEncodingModule'
+}
+
+package() {
+  cd "$pkgname"
+
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # documentation
+  install -vDm644 -t "$pkgdir/usr/share/doc/$pkgname" ./*.{rst,md}
+  install -vDm644 -t "$pkgdir/usr/share/man/man1" ./docs/_build/man/*.1
+
+  # licenses
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSES/*
+
+  sed -n '/## License/,$ p' README.md > "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+  install -Dm644 completions/bash \
+    "$pkgdir"/usr/share/bash-completion/completions/$pkgname
+  install -Dm644 completions/fish \
+    "$pkgdir"/usr/share/fish/vendor_completions.d/$pkgname.fish
+  install -Dm644 completions/zsh \
+    "$pkgdir"/usr/share/zsh/site-functions/_$pkgname
+}
