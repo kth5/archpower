@@ -10,7 +10,7 @@ _target=powerpc64-unknown-linux-gnu
 pkgname=${_target}-gcc-stage2
 pkgver=16.1.1+r346+g4e03491b401d
 _commit=4e03491b401dce0658543dd90524ddb92063836e
-pkgrel=1
+pkgrel=2
 pkgdesc="The GNU Compiler Collection. Stage 2 for toolchain building (${_target})"
 arch=(x86_64 powerpc64le powerpc espresso)
 license=(
@@ -19,8 +19,8 @@ license=(
 )
 url='http://gcc.gnu.org'
 depends=("${_target}-binutils>=2.41" "${_target}-glibc-headers>=2.38" libmpc zlib)
-makedepends=(git)
-options=(!debug !emptydirs !strip)
+makedepends=(git "${_target}-gcc-stage1>=16.1.1")
+options=(!debug !emptydirs !lto !strip)
 conflicts=("${_target}-gcc-stage1")
 replaces=("${_target}-gcc-stage1")
 provides=("${_target}-gcc-stage1=${pkgver}")
@@ -42,6 +42,9 @@ prepare() {
   [[ ! -d gcc ]] && ln -s gcc-${pkgver/+/-} gcc
   cd gcc
 
+  # on Arch we do not use lib64/
+  sed -i 's@/lib64@/lib@g' gcc/config/rs6000/t-*
+
   # Do not run fixincludes
   sed -i 's@\./fixinc\.sh@-c true@' gcc/Makefile.in
 
@@ -51,7 +54,8 @@ prepare() {
   # configure.ac: When adding -Wno-format, also add -Wno-format-security
   patch -Np0 < "$srcdir/gcc11-Wno-format-security.patch"
 
-  mkdir -p "$srcdir/gcc-build"
+  mkdir -p "$srcdir/gcc-build" "$srcdir/libatomic-build"
+
 }
 
 build() {
@@ -105,11 +109,11 @@ build() {
 }
 
 package() {
-  cd gcc-build
+  cd "$srcdir"/gcc-build
 
   make DESTDIR="$pkgdir" install-gcc install-target-libgcc
 
-  rm -rf "$pkgdir/usr/share"
+  rm -rf "$pkgdir/usr/share" "$pkgdir"/usr/${_target}/lib64
 
   # strip it manually
   strip "$pkgdir/usr/bin/"* 2>/dev/null || true
