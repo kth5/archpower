@@ -8,26 +8,26 @@
 
 _target=powerpc-unknown-linux-gnu
 pkgname=${_target}-glibc
-pkgver=2.43+r5+g856c426a7534
-_commit=856c426a753450b8c6861a5b994a564f4fc16d4b
-pkgrel=1
+pkgver=2.43+r37+gfdf10644d6ee
+_commit=fdf10644d6ee345c7b5277c3fa009c1bedb92d60
+pkgrel=2
 pkgdesc="GNU C Library (${_target})"
 arch=('any')
 url="http://www.gnu.org/software/libc/"
-license=(GPL LGPL)
-depends=("${_target}-linux-api-headers>=6.13")
-makedepends=("${_target}-gcc-stage2>=14.2.1" python git)
+license=(GPL-2.0-or-later LGPL-2.1-or-later)
+depends=("${_target}-linux-api-headers>=7.0")
+makedepends=("${_target}-gcc-stage2>=16.1.1" "${_target}-libatomic>=16.1.1" python git)
 provides=("${_target}-glibc-headers=${pkgver}" "${_target}-eglibc")
 conflicts=("${_target}-glibc-headers" "${_target}-eglibc")
 replaces=("${_target}-glibc-headers")
-options=(!buildflags !strip staticlibs)
+options=(!buildflags !debug !strip staticlibs)
 source=(git+https://sourceware.org/git/glibc.git#commit=${_commit}
         sdt-config.h
         sdt.h
         reenable_DT_HASH.patch)
 validpgpkeys=(7273542B39962DF7B299931416792B4EA25340F8 # Carlos O'Donell
               BC7C7372637EC10C57D7AA6579C43DFBF1CF2187) # Siddhesh Poyarekar
-sha256sums=('190fbfb7154e78c8347527a1955309390a8317c1525a11f4966968503773706b'
+sha256sums=('035c6197fcc46ba839e47dce262d38d3882a24122bff5a63663a46893509890a'
             'cdc234959c6fdb43f000d3bb7d1080b0103f4080f5e67bcfe8ae1aaf477812f0'
             '774061aff612a377714a509918a9e0e0aafce708b87d2d7e06b1bd1f6542fe70'
             'cf9fe494f7ec69752a63d1b0a9ad689aa620888ae9b902b6383a6fbc7c1726a7')
@@ -57,6 +57,7 @@ build() {
   local _configure_flags=(
       --prefix=/usr
       --with-headers=/usr/${_target}/usr/include
+      --with-sysroot=/usr/${_target}
       --enable-add-ons
       --enable-bind-now
       --enable-lock-elision
@@ -89,6 +90,8 @@ build() {
   export OBJCOPY=${_target}-objcopy
   export OBJDUMP=${_target}-objdump
 
+  export LDFLAGS+=" -L/usr/${_target}/lib"
+
   unset LD_LIBRARY_PATH
 
   "$srcdir/glibc/configure" \
@@ -101,10 +104,6 @@ build() {
 
   echo "build-programs=no" >> configparms
   make
-
-  case "${CARCH}" in
-    powerpc64) sed 's@RTLDLIST=.*@RTLDLIST="/usr/lib/ld64.so.2"@g' -i ${pkgdir}/usr/bin/ldd ;;
-  esac
 }
 
 package() {
