@@ -1,4 +1,5 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 # Contributor: Dave Reisner <dreisner@archlinux.org>
 # Contributor: Angel Velasquez <angvp@archlinux.org>
@@ -8,33 +9,47 @@
 
 pkgname=libssh2
 pkgver=1.11.1
-pkgrel=1.1
+pkgrel=5
 pkgdesc="A library implementing the SSH2 protocol as defined by Internet Drafts"
 url="https://www.libssh2.org/"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso riscv64)
-license=('BSD')
-depends=('openssl' 'zlib')
+license=('BSD-3-Clause')
+depends=('glibc' 'openssl' 'zlib')
+makedepends=('git')
 provides=('libssh2.so')
-validpgpkeys=('27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2'   # Daniel Stenberg
-              '914C533DF9B2ADA2204F586D78E11C6B279D5C91')  # Daniel Stenberg (old key)
-source=("https://www.libssh2.org/download/$pkgname-$pkgver.tar.gz"{,.asc})
-b2sums=('a44073d59eeeed57626063067d498f28d64f66febf5cdbd830cf1fa0ffd33e39f4bca57289abef175d4f0413952e1dbc57847aa4fe1d9c0140d8789b7b925528'
-        'SKIP')
+source=(
+  "git+https://github.com/libssh2/libssh2.git?signed#tag=${pkgname}-${pkgver}"
+  $pkgname-1.11.1-CVE-2025-15661.patch
+  $pkgname-1.11.1-CVE-2026-55200.patch
+)
+b2sums=('e09704f04dea54a1583e295002f27de7a40a97fcb05ab12b650735af78be177ddf211ebb2c78098b1b39800ea40b95a63364b50773f54150dff171d0af03177b'
+        'bb012adcced6e85c4e5e987082ccdae893fa10f17862ac49037b1f0232e16ebde3317235bc2ee7d6054678d2c927077c3ab0ce6d35990671d2c3314d4d9ae66f'
+        '743feb7c180288de94649bb1a20b1b2761151c6eaa271d4b6bf145bfceb30684803dfe3c1f6314714381fdce784c5a426c5adc3d58ee49ab1fc0d8f1bc66abfd')
+validpgpkeys=('27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2')   # Daniel Stenberg
+
+prepare() {
+  cd "$pkgname"
+  patch -Np1 -i ../$pkgname-1.11.1-CVE-2025-15661.patch  # CVE-2025-15661
+  git cherry-pick -n 256d04b60d80bf1190e96b0ad1e91b2174d744b1  # CVE-2026-7598
+  git cherry-pick -n 17626857d20b3c9a1addfa45979dadcee1cd84a4  # CVE-2026-55199
+  patch -Np1 -i ../$pkgname-1.11.1-CVE-2026-55200.patch  # CVE-2026-55200
+  # The "_DEV" suffix is only removed from `LIBSSH2_VERSION` for dist tarballs, so we do it here.
+  sed 's/_DEV//' --in-place include/libssh2.h
+  autoreconf -fiv
+}
 
 build() {
-  cd "$pkgname-$pkgver"
-
+  cd "$pkgname"
   ./configure --prefix=/usr --disable-docker-tests
   make
 }
 
 check() {
-  make -C "$pkgname-$pkgver" check
+  make -C "$pkgname" check
 }
 
 package() {
-  cd "$pkgname-$pkgver"
-
+  cd "$pkgname"
   make DESTDIR="$pkgdir" install
-  install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 COPYING -t "$pkgdir"/usr/share/licenses/$pkgname/
 }
