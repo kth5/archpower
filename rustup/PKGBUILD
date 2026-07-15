@@ -4,16 +4,28 @@
 # Contributor: Jonathon Fernyhough <jonathon_at_manjaro_dot_org>
 # Contributor: Jon Gjengset <jon@tsp.io>
 pkgname=rustup
-pkgver=1.27.1
-pkgrel=1.1
+pkgver=1.29.0
+pkgrel=2
 pkgdesc="The Rust toolchain installer"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://github.com/rust-lang/rustup.rs"
 license=('MIT' 'Apache-2.0')
-depends=('curl' 'xz' 'zstd')
+depends=(
+  'glibc'
+  'libgcc'
+  'xz'
+  'zstd'
+)
 makedepends=('cargo')
+makedepends_armv7h=(
+  'clang'
+  'cmake'
+)
 optdepends=('lldb: rust-lldb script'
-            'gdb: rust-gdb script')
+            'gdb: rust-gdb script'
+            'gcc: build executables for most targets' # x86_64-unknown-linux-* but also most Unix-likes
+            'mingw-w64-gcc: {i686,x86_64}-pc-windows-gnu targets'
+            'aarch64-linux-gnu-gcc: aarch64-unknown-linux-* targets')
 provides=('rust' 'cargo' 'rust-nightly' 'cargo-nightly' 'rustfmt' 'rust-src'
           'lib32-rust-libs' 'rust-musl' 'rust-wasm' 'rust-analyzer')
 conflicts=('rust' 'cargo' 'rustfmt')
@@ -21,14 +33,17 @@ replaces=('cargo-tree')
 install='post.install'
 options=("!lto")
 source=("rustup-${pkgver}.tar.gz::https://github.com/rust-lang/rustup.rs/archive/${pkgver}.tar.gz"
-        "rustup-profile.sh")
-sha512sums=('e0494678b7117464665c2aa88165e13baf2dcfb2a33c57dc78f669533111f773724d227ee05967de427845f8633e56fdf8159c7a5b96638413710beacb115075'
-            '18d5b4ab9a032cb43fd0b59fb553a878068981534e549935c5ff4a12dc2f74849ce36367eb59e670d674a19a7d4bc0056d0694d7f87ede187416c2ffcbb20355')
+        "rustup-profile.sh"
+        "rustup-profile.fish")
+sha512sums=('50f013e98bd4d83a97d8aedcfc08d603dea51ef30fa9bd9048bbbec4ee884304f15b47bc9da94f6077838fc1ba384744cb6600418cb370765739e20635bffd63'
+            '18d5b4ab9a032cb43fd0b59fb553a878068981534e549935c5ff4a12dc2f74849ce36367eb59e670d674a19a7d4bc0056d0694d7f87ede187416c2ffcbb20355'
+            '01477110cc630b2fbd60b45e53d5fddea1b96d56c7dd318c9dcd0fcb3401778df0f2ffaeda09ed57c3d09723e7e7b9080028ccde7ebd7774c7098e6fc7900669')
 _binlinks=('cargo' 'rustc' 'rustdoc' 'rust-gdb' 'rust-lldb' 'rustfmt' 'cargo-fmt' 'cargo-clippy' 'clippy-driver' 'cargo-miri')
 
 build() {
   cd "$pkgname-${pkgver}"
-  cargo build --release --features no-self-update --bin rustup-init
+  export ZSTD_SYS_USE_PKG_CONFIG=1
+  cargo build --release --no-default-features --features reqwest-rustls-tls --features no-self-update --bin rustup-init
 }
 
 package() {
@@ -43,6 +58,7 @@ package() {
   ln -s /usr/bin/rustup "${pkgdir}/usr/lib/$pkgname/bin/rust-analyzer"
 
   install -Dm644 "$srcdir/$pkgname-profile.sh" "$pkgdir/etc/profile.d/$pkgname.sh"
+  install -Dm644 "$srcdir/$pkgname-profile.fish" "$pkgdir/usr/share/fish/vendor_conf.d/$pkgname.fish"
 
   # Generate completion files.
   mkdir -p "$pkgdir/usr/share/bash-completion/completions"
