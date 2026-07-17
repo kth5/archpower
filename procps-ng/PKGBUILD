@@ -7,24 +7,49 @@
 
 pkgname=procps-ng
 pkgver=4.0.6
-pkgrel=1
+pkgrel=3
 pkgdesc='Utilities for monitoring your system and its processes'
 url='https://gitlab.com/procps-ng/procps'
 license=(GPL LGPL)
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 depends=(glibc ncurses libncursesw.so systemd-libs)
 makedepends=(gettext git po4a systemd)
+checkdepends=(dejagnu)
 conflicts=(procps sysvinit-tools)
 provides=(procps sysvinit-tools libproc2.so)
 replaces=(procps sysvinit-tools)
 options=('!emptydirs')
 validpgpkeys=('5D2FB320B825D93904D205193938F96BDF50FEA5') # Craig Small <csmall@debian.org>
-source=("git+https://gitlab.com/procps-ng/procps.git#tag=v${pkgver}?signed")
+source=("git+https://gitlab.com/procps-ng/procps.git?signed#tag=v${pkgver}")
 sha256sums=('160aa30e2a133f44e7cc6e90c16cc018360a786f043aef84614ce595062fc894')
 b2sums=('fe36c3c3c38882e09c47f7865015c5f8fc82e7432cb427ca21ad3712a112025daeba395b118ba81245727443407fb6666cf4ffea1f2ce1f605a8c5bbe8508db2')
 
+_backports=(
+  # watch: Don't remove 2 lines with -t option
+  'd089943ab4e1ce1f5e3d44847416a89ceab75147'
+  # watch: Handle resizing better
+  '389ded19680a7a792c943d5552dd8803851778be'
+  # watch: Restore LINES and COLUMNS env
+  '0f77d5b06f7ce2b743a0c4ef3fd61c3b4bd6101a'
+)
+
+_reverts=(
+)
+
 prepare() {
   cd procps
+
+  local _c _l
+  for _c in "${_backports[@]}"; do
+    if [[ "${_c}" == *..* ]]; then _l='--reverse'; else _l='--max-count=1'; fi
+    git log --oneline "${_l}" "${_c}"
+    git cherry-pick --mainline 1 --no-commit "${_c}"
+  done
+  for _c in "${_reverts[@]}"; do
+    if [[ "${_c}" == *..* ]]; then _l='--reverse'; else _l='--max-count=1'; fi
+    git log --oneline "${_l}" "${_c}"
+    git revert --mainline 1 --no-commit "${_c}"
+  done
 
   ./autogen.sh
 }
@@ -45,6 +70,16 @@ build() {
     --disable-kill
 
   make
+}
+
+check() {
+  case "${CARCH}" in
+    powerpc) return 0 ;;
+  esac
+
+  cd procps
+
+  make check
 }
 
 package() {
