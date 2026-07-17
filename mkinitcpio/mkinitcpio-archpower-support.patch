@@ -1,22 +1,48 @@
 diff -ruN mkinitcpio-40.orig/functions mkinitcpio-40/functions
 --- mkinitcpio-40.orig/functions	2026-01-15 12:52:02.597263028 +0100
 +++ mkinitcpio-40/functions	2026-01-15 12:52:16.749954348 +0100
-@@ -161,6 +161,14 @@
+@@ -156 +156 @@ kver_x86() {
+-    offset="$(od -An -j0x20E -dN2 "$1")" || return
++    offset="$(od --endian=little -An -j0x20E -dN2 "$1")" || return
+@@ -161,6 +161,24 @@
      printf '%s' "$kver"
  }
  
 +kver_powerpc() {
-+    local kver
++    local kver image
 +
 +    read -r kver _ < \
 +      <(strings "$1" | grep '^Linux version [0-9]' | awk '{print $3}' | head -n1)
++
++    # A PowerPC zImage stores the compressed kernel in an ELF section.
++    if [[ -z "$kver" ]]; then
++        image="$(mktemp)" || return
++        if objcopy --dump-section .kernel:vmlinux.strip="$image" "$1" 2>/dev/null; then
++            read -r _ _ kver _ < \
++              <(decompress_cat "$image" | grep -m1 -aoE 'Linux version .(\.[-_[:alnum:]+]+)+')
++        fi
++        rm -f -- "$image"
++    fi
 +    printf '%s' "$kver"
 +}
 +
  detect_compression() {
      # Detect standard compressed files. Not Linux-kernel specific.
  
-@@ -456,11 +464,17 @@
+@@ -290,8 +308,9 @@ _zboot_cat() {
+     # Read a pair of u32s from 0x08 (right after the "zimg" magic
+     # identifier) for the starting-offset and size of the compressed
+     # data.
++    # EFI zboot header fields are always little-endian.
+-    start="$(od -An -j "$((offset+0x08))" -t u4 -N4 "$file" | tr -dc '[:alnum:]')"
+-    size="$(od -An -j "$((offset+0x0c))" -t u4 -N4 "$file" | tr -dc '[:alnum:]')"
++    start="$(od --endian=little -An -j "$((offset+0x08))" -t u4 -N4 "$file" | tr -dc '[:alnum:]')"
++    size="$(od --endian=little -An -j "$((offset+0x0c))" -t u4 -N4 "$file" | tr -dc '[:alnum:]')"
+-
++    # Reject malformed offsets before using them below.
+     [[ "$start" =~ ^[0-9]+$ ]] || return 1
+     [[ "$size" =~ ^[0-9]+$ ]] || return 1
+@@ -456,11 +474,17 @@
  
      local arch
      arch="$(uname -m)"
@@ -38,7 +64,7 @@ diff -ruN mkinitcpio-40.orig/functions mkinitcpio-40/functions
  
      [[ "$kver" =~ $re ]] || return 1
  
-@@ -1177,7 +1191,7 @@
+@@ -1177,7 +1201,7 @@
          ln -s "../run"  "$root/var/run"
  
          case "$arch" in
@@ -95,6 +121,25 @@ diff -ruN mkinitcpio-40.orig/install/kms mkinitcpio-40/install/kms
      fi
  }
  
+diff -ruN mkinitcpio-40.orig/libalpm/scripts/mkinitcpio mkinitcpio-40/libalpm/scripts/mkinitcpio
+--- mkinitcpio-40.orig/libalpm/scripts/mkinitcpio	2025-11-04 15:21:40.000000000 -0600
++++ mkinitcpio-40/libalpm/scripts/mkinitcpio	2026-07-17 13:01:32.394117633 -0500
+@@ -112,0 +113,3 @@
++    # Device trees are installed alongside the kernel and initramfs images.
++    unsorted_filelist+=("/boot/dtbs-${pkgbase}")
++
+@@ -126 +129 @@ install_kernel() {
+-    local kernel preset="/etc/mkinitcpio.d/${pkgbase}.preset"
++    local dtbs kernel kver preset="/etc/mkinitcpio.d/${pkgbase}.preset"
+@@ -140,0 +144,8 @@ install_kernel() {
++
++        kver="${line#usr/lib/modules/}"
++        kver="${kver%/vmlinuz}"
++        dtbs="/usr/share/dtbs/${kver}"
++        if [[ -d "$dtbs" ]]; then
++            install -d -- "/boot/dtbs-${pkgbase}"
++            cp -a -- "${dtbs}/." "/boot/dtbs-${pkgbase}/"
++        fi
 diff -ruN mkinitcpio-40.orig/meson.build mkinitcpio-40/meson.build
 --- mkinitcpio-40.orig/meson.build	2025-11-04 22:34:36.424376700 +0100
 +++ mkinitcpio-40/meson.build	2026-01-15 12:54:13.101482771 +0100
