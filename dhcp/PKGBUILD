@@ -9,22 +9,22 @@ pkgname=('dhcp' 'dhclient')
 _realver=4.4.3-P1
 pkgver=${_realver/-/.}
 pkgrel=4
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
-license=('custom:isc-dhcp')
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+license=('MPL-2.0')
 url='https://www.isc.org/dhcp/'
 makedepends=('bash' 'iproute2' 'openldap')
 options=('!lto')
 validpgpkeys=('7E1C91AC8030A5A59D1EFAB9750F3C87723E4012') # Internet Systems Consortium, Inc. (Signing key, 2021-2022) <codesign@isc.org>
 source=("https://downloads.isc.org/isc/${pkgbase}/${_realver}/${pkgbase}-${_realver}.tar.gz"{,.asc}
         '0001-99-replace-hostname-with-uname-n.patch'
-        'dhcp-sysusers.conf'
-        'dhcp-tmpfiles.conf'
+        'dhcp.sysusers'
+        'dhcp.tmpfiles'
         'dhcpd4.service'
         'dhcpd6.service'
         'dhclient@.service')
 sha256sums=('0ac416bb55997ca8632174fd10737fd61cdb8dba2752160a335775bc21dc73c7'
             'SKIP'
-            '559ed9ce6318f1a3700f8b879552bd22844c7c5b96622202dbf3164cd99c444e'
+            '948007b19ba51006fa83fde790c3f32de93195e59723f0dfc6f1696c76dcc636'
             '62335e1043e40ea96a7447db499eafcb9b5a262356c5d9951a43ca4bc981fecc'
             'abcd30e9e8428e34d22ab4d3074ef4bd84c2b11f5868597111b47d6f56d204da'
             '03fce30efab819b2d928085b0bab962a33ce56fc376acae98ad9b30aa278c9c8'
@@ -36,18 +36,14 @@ prepare() {
 
   patch -Np1 < ../0001-99-replace-hostname-with-uname-n.patch
 
-  sed "s@^bindconfig = @bindconfig = --build=${CHOST} @g" -i bind/Makefile.in
+  autoreconf -fvi
 }
 
 build() {
   cd "${srcdir}/${pkgbase}-${_realver}"
 
-  case "${CARCH}" in
-    powerpc|riscv64) export CFLAGS+=' -latomic' ;;
-  esac
-
+  CFLAGS+=' -std=gnu17'
   ./configure \
-      --build=${CHOST} \
       --prefix=/usr \
       --sbindir=/usr/bin \
       --sysconfdir=/etc \
@@ -72,8 +68,8 @@ package_dhcp(){
 
   make DESTDIR="${pkgdir}" install
 
-  install -D -m644 "${srcdir}/dhcp-sysusers.conf" "${pkgdir}/usr/lib/sysusers.d/dhcp.conf"
-  install -D -m644 "${srcdir}/dhcp-tmpfiles.conf" "${pkgdir}/usr/lib/tmpfiles.d/dhcp.conf"
+  install -D -m644 "${srcdir}/dhcp.sysusers" "${pkgdir}/usr/lib/sysusers.d/dhcp.conf"
+  install -D -m644 "${srcdir}/dhcp.tmpfiles" "${pkgdir}/usr/lib/tmpfiles.d/dhcp.conf"
   install -D -m644 "${srcdir}/dhcpd4.service" "${pkgdir}/usr/lib/systemd/system/dhcpd4.service"
   install -D -m644 "${srcdir}/dhcpd6.service" "${pkgdir}/usr/lib/systemd/system/dhcpd6.service"
 
