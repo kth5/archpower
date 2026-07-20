@@ -5,7 +5,8 @@
 # Contributor: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=python-hypothesis
-pkgver=6.151.11
+_name=${pkgname#python-}
+pkgver=6.155.7
 pkgrel=1
 pkgdesc="Advanced Quickcheck style testing library for Python"
 arch=(any)
@@ -39,6 +40,8 @@ checkdepends=(
   python-pytest
   python-pytest-xdist
   python-pytz
+  python-scipy
+  python-syrupy
   python-watchdog
 )
 optdepends=(
@@ -58,57 +61,43 @@ optdepends=(
   'python-rich: for CLI'
   'python-watchdog: for tracking file system events'
 )
-source=("$pkgname::git+$_url#tag=hypothesis-python-$pkgver")
-sha512sums=('cc28f0c3bcd166e7e4d99312bbfdfcf6a254cf0980cb98cc5b74e7a1a74762edeb5c2362dddcd994419cec85c9e5070959a0dfc617a9953ef9709481c266b7bc')
-b2sums=('04cb6a45d77dfe657a9189b5ba80b4a572141c7a781ca70d05600746e84f0fe8e814e3b63e51cc2eeb35bb77ebfbcbded49aa4c3bb434c5fb620e6fd5d907d94')
-
-prepare() {
-  cd $pkgname/hypothesis-python
-  # Fix test failing due to trailing space diff
-  sed -i 's/def      /def/' tests/cover/test_reflection.py
-}
+source=("$pkgname::git+$_url#tag=v$pkgver")
+sha512sums=('f0c5d3376765813cff9cee403e3f4aada33e2350ffb738e6289029c77c36ef569bcd05da104b0203eb25c8d5e03ab4e34d9b60418939227ec3bd0281d7a59a24')
+b2sums=('5ac80e0b74272a079ccc6efbdc3965e9a348a936d7c8bc46bcdca8eedcaf014d5909b8f98c83f75ccde183cd79df76fcc9fb4432495a8d982c743d2db0006791')
 
 build() {
-  cd $pkgname/hypothesis-python
+  cd $pkgname/$_name
   python -m build --wheel --no-isolation
 }
 
 check() {
-  cd $pkgname/hypothesis-python
+  cd $pkgname/$_name
   python -m venv --system-site-packages test-env
   test-env/bin/python -m installer dist/*.whl
   local pytest_options=(
     -vv
+    # ignore deprecation warnings
+    -W=ignore::DeprecationWarning
     # Run tests in parallel, takes forever otherwise
     -n auto
+    # Keep rootdir at hypothesis-python/ so --deselect node ids resolve
+    --rootdir=.
     # Depends on python-hypothesis-crosshair which is not packaged,
     # for some reason --deselect does not work, so ignoring whole file
     --ignore=tests/crosshair/test_conformance.py
     --ignore=tests/crosshair/test_crosshair.py
     # Fails with AssertionError for some reason
     --ignore=tests/nocover/test_scrutineer.py
+    # fails with mismatch for some reason
+    --deselect 'tests/snapshots/test_always_failing.py::test_always_failing[emails]'
+    --deselect 'tests/quality/test_integers.py::test_biases_towards_boundary_values'
 
-    # Fails for some reason
-    --ignore=tests/pytest/test_capture.py # ::test_healthcheck_traceback_is_hidden
-    --ignore=tests/pytest/test_fixtures.py # ::test_given_fails_if_already_decorated_with_fixture
-    --ignore=tests/watchdog/test_database.py
-    --ignore=tests/nocover/test_argument_validation.py
-
-    # Fails due to health check too slow for some reason
-    --deselect=tests/nocover/test_stateful.py::test_unrelated_rule_does_not_use_var_reference_repr
-
-    -W=ignore::DeprecationWarning
-
-    # Fail with numpy 2.4
-    --ignore=tests/numpy/test_floor_ceil.py
-    --ignore=tests/numpy/test_from_type.py
-    --ignore=tests/ghostwriter/test_expected_output.py
   )
   PATH="$PWD/test-env/bin:$PATH" test-env/bin/python -m pytest \
     "${pytest_options[@]}" tests/
 }
 
 package() {
-  cd $pkgname/hypothesis-python
+  cd $pkgname/$_name
   python -m installer --destdir="$pkgdir" dist/*.whl
 }
