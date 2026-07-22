@@ -1,0 +1,62 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+# Contributor: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Ionut Biru <ibiru@archlinux.org>
+# Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
+
+pkgname=python-pyopenssl
+pkgver=26.3.0
+pkgrel=1
+pkgdesc='Python wrapper around the OpenSSL library'
+arch=(any)
+url='https://pyopenssl.org/'
+license=(Apache-2.0)
+depends=(python python-cryptography)
+makedepends=(
+  git
+  python-build
+  python-installer
+  python-setuptools
+  python-wheel
+)
+checkdepends=(
+  python-pytest
+  python-pytest-rerunfailures
+  python-pretend
+)
+source=("$pkgname::git+https://github.com/pyca/pyopenssl#tag=$pkgver")
+sha512sums=('6dcfb980caa97a022cf539391ff08dc922b9a98da7c59f82ce2a6d28aefc2a686e496193920bf4bbdb0da56f5dd5bcbc6ce9ba0f3596b175094508975312a81d')
+b2sums=('c7f086395a20b5a01d5bd5505e4fd40f77bb354f580bdea2a6b64061307344478d4f84bc10b34611efc970c7978fb2e63638bad032ae7214abf96a1dcef903ed')
+
+build() {
+  cd "$pkgname"
+
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "$pkgname"
+
+  # temporary install
+  python -m installer --destdir="$(pwd)/tmp" dist/*.whl
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  export PYTHONPATH="$(pwd)/tmp/$site_packages"
+
+  local pytest_options=(
+    -vv
+    # TODO: Fix deselected tests failing due to throwing the wrong exception.
+    --deselect tests/test_ssl.py::TestConnectionSendall::test_closed
+    --deselect tests/test_ssl.py::TestConnection::test_shutdown_closed
+    # https://github.com/pyca/pyopenssl/issues/1455
+    --deselect tests/test_ssl.py::TestOCSP::test_client_receives_servers_data 
+  )
+
+  pytest "${pytest_options[@]}"
+}
+
+package() {
+  cd "$pkgname"
+
+  python -m installer --destdir="$pkgdir" dist/*.whl
+}
+# vim: ts=2 sw=2 et:
