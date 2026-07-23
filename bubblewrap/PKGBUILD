@@ -8,7 +8,7 @@ pkgname=(
   bubblewrap
   bubblewrap-suid
 )
-pkgver=0.11.1
+pkgver=0.11.2
 pkgrel=1
 pkgdesc='Unprivileged sandboxing tool'
 url='https://github.com/containers/bubblewrap'
@@ -27,9 +27,10 @@ makedepends=(
   meson
 )
 source=("git+$url?signed#tag=v$pkgver")
-b2sums=('88e135290be818d465ee4893817d5d5a01136f990715068b09832f11e37920334369af5e4dc736b846b5ce7f45763bea4f6b45d98a4e11c1ae4b482859866e90')
+b2sums=('7166c1483c8c8d6b2fed4220f023b51bc0de2ccc2c61a3435e1adc0d1ded316de027721a6c71e14c957e65f81bf0195634b39db834071055aaff4484ad2d0ecc')
 validpgpkeys=(
   DA98F25C0871C49A59EAFF2C4DE8FF2A63C7CC90 # Simon McVittie <smcv@collabora.com>
+  252C6FEA78A69D3BC0AD458A616C5BDC0C29AB04 # Alexander Larsson <alexl@redhat.com>
 )
 
 prepare() {
@@ -37,13 +38,21 @@ prepare() {
 }
 
 build() {
-  arch-meson $pkgbase build -D selinux=disabled
+  local meson_options=(
+    -D selinux=disabled
+  )
+
+  arch-meson $pkgbase build "${meson_options[@]}"
+  arch-meson $pkgbase build-suid "${meson_options[@]}" -D support_setuid=true
+
   meson compile -C build
+  meson compile -C build-suid
 }
 
 check() {
   # Broken in our containers
   meson test -C build --print-errorlogs || :
+  meson test -C build-suid --print-errorlogs || :
 }
 
 package_bubblewrap() {
@@ -55,7 +64,7 @@ package_bubblewrap-suid() {
   provides=("bubblewrap=$pkgver-$pkgrel")
   conflicts=(bubblewrap)
 
-  meson install -C build --destdir "$pkgdir"
+  meson install -C build-suid --destdir "$pkgdir"
   chmod u+s "$pkgdir/usr/bin/bwrap"
 }
 
