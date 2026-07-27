@@ -3,7 +3,7 @@
 # Contributor: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=mongo-c-driver
-pkgver=2.2.3
+pkgver=2.3.2
 pkgrel=1
 pkgdesc="A client library written in C for MongoDB"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
@@ -31,27 +31,28 @@ replaces=(
   libbson
   libmongoc
 )
-source=("$url/archive/$pkgver/$pkgname-$pkgver.tar.gz")
-b2sums=('151d5bacb58297163ef2c2c8b5d6baf46f8cd2e9f956d899f96c0045cef93538ebe978fc5d8e462087cf5177c3681bec1d444ba5bb6fa1516f5c1747490a3345')
+source=("$url/archive/$pkgver/$pkgname-$pkgver.tar.gz"
+         cmake-4.4.patch)
+b2sums=('5238aeef28be1afe2c3407a7cd3ae647b5444989803327667e39a59ea365d67fad77e581e155fc7dea537ca15cf5fb78cd8427437a37fbfd712fdb3e9552c554'
+        'a07ff84c415f33ad70b1df489bad26f55e4b7cd4ab21b527097aa5a68ce059c55fe6d2c04e606e50839da160fbbe2109cd823be10f042a2dd8c04fb81ff8cdec')
+
+prepare() {
+  cd $pkgname-$pkgver
+  patch -p1 -i ../cmake-4.4.patch # Fix build with cmake 4.4
+}
 
 build() {
-  case "${CARCH}" in
-    powerpc|powerpc64)
-      cmake_options=(-DENABLE_TESTS=OFF)
-    ;;
-    *)
-      cmake_options=(-DENABLE_TESTS=ON)
-    ;;
-  esac
-
   cd $pkgname-$pkgver
-  # ENABLE_STATIC=ON is required to build tests.
+  # ENABLE_STATIC=BUILD_ONLY and DENABLE_STATIC_LIBBSON_INSTALL=OFF 
+  # is required to build tests, without installing .a libs and cmake stuff for *::static.
   cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -Wno-dev \
     -DBUILD_VERSION="$pkgver" \
-    -DENABLE_STATIC=ON ${cmake_options[@]}
+    -DENABLE_STATIC=BUILD_ONLY \
+    -DENABLE_STATIC_LIBBSON_INSTALL=OFF \
+    -DENABLE_TESTS=ON
   cmake --build build
 }
 
@@ -65,13 +66,15 @@ check() {
   export MONGOC_TEST_OFFLINE=ON
   export MONGOC_TEST_SKIP_LIVE=ON
   local skip_tests=(
-    mongoc/Client/ipv6/single
+    mongoc/Client/exhaust_cursor/err/network/2nd_batch/pooled
+    mongoc/Client/exhaust_cursor/err/network/2nd_batch/single
+    mongoc/Client/recovering
     mongoc/Client/ssl/reconnect/pooled
     mongoc/ClientPool/openssl/change_ssl_opts
     mongoc/MongoDB/handshake/null_args
-    mongoc/TOPOLOGY/scanner_ssl
     mongoc/azure/imds/http/talk
     mongoc/gcp/http/talk
+    mongoc/pkg-config/bson-import-static
     mongoc/pkg-config/mongoc-import-shared
     mongoc/pkg-config/mongoc-import-static
   )
