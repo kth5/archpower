@@ -1,34 +1,9 @@
-From 8a5f1624fe027a0621c3aef9752cb560a8f5dee1 Mon Sep 17 00:00:00 2001
-From: Giulio Benetti <giulio.benetti@benettiengineering.com>
-Date: Mon, 30 Mar 2026 17:06:14 +0200
-Subject: [PATCH v2] Bug 2027768 - Fix build failure due to missing gcm stubs
- if on big endian
-
-Building gcm on Big Endian architectures lead to linking failure due to
-missing gcm stubs. This is because those stubs are guarded by
-DHAVE_PLATFORM_GHASH that at the moment is defined for every architecture
-that provides acceleration. But at the moment we can also build without
-acceleration but DHAVE_PLATFORM_GHASH is defined in any case.
-So let's add to coreconf/Linux.mk a runtime test to find out which
-endianness toolchain is by setting the new introduced LITTLE_ENDIAN
-variable. And later on, in lib/freebl/Makefile let's guard
-DHAVE_PLATFORM_GHASH definition depending on LITTLE_ENDIAN VARIABLE.
-
-Signed-off-by: Giulio Benetti <giulio.benetti@benettiengineering.com>
----
-V1->V2:
-* added endianness checking in Makefile and define DHAVE_PLATFORM_GHASH
-  accordingly in lib/freebl/Makefile
----
- coreconf/Linux.mk   |  8 ++++++++
- lib/freebl/Makefile | 28 ++++++++++++++++++++++------
- 2 files changed, 30 insertions(+), 6 deletions(-)
-
 diff --git a/coreconf/Linux.mk b/coreconf/Linux.mk
-index dcb432415f..cf1f62378d 100644
 --- a/coreconf/Linux.mk
 +++ b/coreconf/Linux.mk
-@@ -188,6 +188,14 @@ endif
+@@ -186,10 +186,18 @@
+ FREEBL_LOWHASH = 1
+ endif
  endif
  endif
  
@@ -43,11 +18,12 @@ index dcb432415f..cf1f62378d 100644
  USE_SYSTEM_ZLIB = 1
  ZLIB_LIBS = -lz
  
-diff --git a/lib/freebl/Makefile b/lib/freebl/Makefile
-index 4ee9d61f50..39ef28ec8c 100644
---- a/lib/freebl/Makefile
-+++ b/lib/freebl/Makefile
-@@ -112,7 +112,10 @@ endif
+ # The -rpath '$$ORIGIN' linker option instructs this library to search for its
+ # dependencies in the same directory where it resides.
+diff '--color=auto' -Naur a/lib/freebl/Makefile b/lib/freebl/Makefile
+--- a/lib/freebl/Makefile   2026-07-19 11:30:59.568272858 +0300
++++ b/lib/freebl/Makefile   2026-07-19 12:20:56.138305051 +0300
+@@ -112,7 +112,10 @@
  # NSS_X64 means the target is a 64-bits 64 CPU architecture
  # NSS_X86_OR_X64 means the target is either x86 or x64
  ifeq (,$(filter-out i386 x386 x86 x86_64,$(CPU_ARCH)))
@@ -59,7 +35,7 @@ index 4ee9d61f50..39ef28ec8c 100644
          EXTRA_SRCS += ghash-x86.c aes-x86.c
  $(OBJDIR)/ghash-x86.o: CFLAGS += -mpclmul -maes
  $(OBJDIR)/aes-x86.o: CFLAGS += -mpclmul -maes
-@@ -138,7 +141,10 @@ endif
+@@ -138,7 +141,10 @@
  endif
  ifeq ($(CPU_ARCH),aarch64)
      ifdef CC_IS_CLANG
@@ -71,7 +47,7 @@ index 4ee9d61f50..39ef28ec8c 100644
          EXTRA_SRCS += aes-armv8.c ghash-aarch64.c sha1-armv8.c sha256-armv8.c
      else ifeq (1,$(CC_IS_GCC))
          # GCC versions older than 4.9 don't support ARM AES. The check
-@@ -146,18 +152,26 @@ ifeq ($(CPU_ARCH),aarch64)
+@@ -146,11 +152,17 @@
          # and then rejects any major versions prior to 5. Note that
          # there has been no GCC 4.10, as it was renamed to GCC 5.
          ifneq (,$(filter 4.9,$(word 1,$(GCC_VERSION)).$(word 2,$(GCC_VERSION))))
@@ -91,6 +67,7 @@ index 4ee9d61f50..39ef28ec8c 100644
              EXTRA_SRCS += aes-armv8.c ghash-aarch64.c sha1-armv8.c sha256-armv8.c
          endif
      endif
+@@ -183,7 +195,9 @@
  endif
  ifeq ($(CPU_ARCH),arm)
  ifndef NSS_DISABLE_ARM32_NEON
@@ -101,7 +78,7 @@ index 4ee9d61f50..39ef28ec8c 100644
      EXTRA_SRCS += ghash-arm32-neon.c
  endif
      ifdef CC_IS_CLANG
-@@ -290,7 +304,9 @@ ifeq ($(CPU_ARCH),arm)
+@@ -316,7 +330,9 @@
      MPI_SRCS += mpi_arm.c
  endif
  ifeq ($(CPU_ARCH),ppc)
@@ -112,6 +89,3 @@ index 4ee9d61f50..39ef28ec8c 100644
      EXTRA_SRCS += ghash-ppc.c
  ifdef USE_64
      DEFINES += -DNSS_NO_INIT_SUPPORT
--- 
-2.47.3
-
