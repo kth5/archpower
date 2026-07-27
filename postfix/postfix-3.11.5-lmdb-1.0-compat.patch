@@ -1,0 +1,46 @@
+--
+Edmund Lodewijks <edm...@proteamail.com>
+TZ: UTC+2 / GMT+2
+diff --git a/src/util/slmdb.c b/src/util/slmdb.c
+index 3f795631..79b5d5b5 100644
+--- a/src/util/slmdb.c
++++ b/src/util/slmdb.c
+@@ -391,12 +391,35 @@ static int slmdb_prepare(SLMDB *slmdb)
+      * aborts commits a transaction, it must set slmdb->txn to null to avoid
+      * a use-after-free error in slmdb_close().
+      * 
+-     * - With O_TRUNC we make a "drop" request before updating the database.
+-     * 
++     * - With O_TRUNC we empty the database before updating it. We cannot use
++     * mdb_drop() for this: as of LMDB 1.0 (ITS#8174) mdb_drop() on the default
++     * database marks its transaction dropped/dirty, so the transaction can no
++     * longer be reused for the bulk-mode mdb_put() calls that follow, and
++     * committing all updates as one atomic transaction is exactly what we need.
++     * Instead we empty the database with an in-transaction cursor delete-all,
++     * which leaves the transaction usable and preserves the single-commit
++     * atomicity model.
++     *
+      * - With a bulk-mode transaction we commit when the database is closed.
+      */
+     if (slmdb->open_flags & O_TRUNC) {
+-	if ((status = mdb_drop(slmdb->txn, slmdb->dbi, 0)) != 0) {
++	MDB_cursor *cursor;
++	MDB_val cursor_key;
++	MDB_val cursor_val;
++
++	if ((status = mdb_cursor_open(slmdb->txn, slmdb->dbi, &cursor)) != 0) {
++	    mdb_txn_abort(slmdb->txn);
++	    slmdb->txn = 0;
++	    return (status);
++	}
++	while ((status = mdb_cursor_get(cursor, &cursor_key, &cursor_val,
++					MDB_NEXT)) == 0)
++	    if ((status = mdb_cursor_del(cursor, 0)) != 0)
++		break;
++	mdb_cursor_close(cursor);
++	if (status == MDB_NOTFOUND)		/* emptied to end-of-db */
++	    status = 0;
++	if (status != 0) {
+ 	    mdb_txn_abort(slmdb->txn);
+ 	    slmdb->txn = 0;
+ 	    return (status);
