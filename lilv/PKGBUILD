@@ -6,10 +6,10 @@
 
 pkgbase=lilv
 pkgname=(
-  lilv{,-docs}
+  lilv{,-{docs,tools}}
   python-lilv
 )
-pkgver=0.26.4
+pkgver=0.28.0
 pkgrel=1
 pkgdesc="A C library interface to the LV2 plug-in standard"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
@@ -35,9 +35,9 @@ makedepends=(
 source=(
   https://download.drobilla.net/$pkgname-$pkgver.tar.xz{,.sig}
 )
-sha512sums=('634b3f5e7a1763f9ea84dc8e41991e7dfa631457fc3c7beb8c7f627f1447da9e2d27f8389423de6ca508aaf00ef74c3b671166f194cd889952b267f7f0491cb6'
+sha512sums=('754c9996670235766b84e416bbcb5352a7376e86f7fa373f9428125552294a5d6b032a363ea51fbbf81b88c8f2e47b3566a07bf0992e6e6ebd1bbf31651d9024'
             'SKIP')
-b2sums=('242e185a5e43f661505d1dd447db4394dc78ece0cce3f2ffc756544c2a7071bc01045b45c13e8aec5b2f6bca7033159f16ece1ed93e1ffee016c88453816b03d'
+b2sums=('8b45946b492ac6dd00efa0bd487a03e109e1ad9d6452a924bbf51b09cf67713dc91937d4ac441dd6884769bf192ae8d55cd0296485a73df9a4a1e145250beba2'
         'SKIP')
 validpgpkeys=('907D226E7E13FA337F014A083672782A9BF368F3') # David Robillard <d@drobilla.net>
 
@@ -70,24 +70,44 @@ package_lilv() {
     zix
   )
   optdepends=(
-    'libsndfile: for lv2apply'
     'lilv-docs: for documentation'
+    'lilv-tools: for CLI tools'
     'python-lilv: for Python bindings'
   )
   provides=(liblilv-0.so)
 
   meson install -C build --destdir "$pkgdir"
+
+  # install bash completion to correct directory and remove /etc: https://gitlab.com/lv2/lilv/-/work_items/15
+  install -vDm 644 "$pkgdir/etc/bash_completion.d/$pkgname" -t "$pkgdir/usr/share/bash-completion/completions/"
+  rm -frv "$pkgdir/etc"
+
   (
     cd "$pkgdir"
+
+    _pick $pkgname-tools usr/bin/
+    _pick $pkgname-tools usr/share/man/man1/
+    _pick $pkgname-tools usr/share/bash-completion/
+
     _pick $pkgname-docs usr/share/doc
+
     _pick python-$pkgbase usr/lib/python*
   )
 
   install -vDm 644 $pkgbase-$pkgver/LICENSES/* -t "$pkgdir/usr/share/licenses/$pkgname/"
   install -vDm 644 $pkgname-$pkgver/{NEWS,README.md} -t "$pkgdir/usr/share/doc/$pkgname/"
-  # install bash completion to correct directory and remove /etc
-  install -vDm 644 "$pkgdir/etc/bash_completion.d/$pkgname" -t "$pkgdir/usr/share/bash-completion/completions/"
-  rm -frv "$pkgdir/etc"
+}
+
+package_lilv-tools() {
+  pkgdesc+=" - CLI tools"
+  depends=(
+    glibc
+    libsndfile libsndfile.so
+    lilv liblilv-0.so
+  )
+
+  mv -v $pkgname/* "$pkgdir"
+  install -vDm 644 $pkgbase-$pkgver/LICENSES/* -t "$pkgdir/usr/share/licenses/$pkgname/"
 }
 
 package_lilv-docs() {
