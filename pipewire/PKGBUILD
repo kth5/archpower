@@ -24,7 +24,10 @@ pkgname=(
   pipewire-session-manager
   pulse-native-provider
 )
-pkgver=1.6.2
+case "${CARCH}" in
+  x86_64) pkgname+=(pipewire-onnx) ;;
+esac
+pkgver=1.6.8
 pkgrel=1
 epoch=1
 pkgdesc="Low-latency audio/video router and processor"
@@ -75,6 +78,7 @@ makedepends=(
   valgrind
   webrtc-audio-processing-1
 )
+makedepends_x86_64=(onnxruntime)
 checkdepends=(
   desktop-file-utils
   openal
@@ -82,13 +86,10 @@ checkdepends=(
 source=(
   "git+https://gitlab.freedesktop.org/pipewire/pipewire.git#tag=$pkgver"
 )
-b2sums=('27c3f29c85791a7c524256c6e52dbd086f346ecc9d33b5f075f82cdfdef4f31e04af5f937c3d95c501a5f94d6e26160585bec4bb96808c8dc766396d99763aaa')
+b2sums=('f4425c8fa9ab33918e52bb0c1272079dd510e1c08b1d228802ad60e7080629f1e82ec30f19dd9e344cd6476803773d79f50957ddfeecfc01d657550a712fd6ba')
 
 prepare() {
   cd pipewire
-
-  # Fix build
-  git cherry-pick -n fb47e739d9f605772b5098421a809537c108d30c
 }
 
 build() {
@@ -104,8 +105,12 @@ build() {
     -D session-managers=[]
     -D snap=disabled
     -D udevrulesdir=/usr/lib/udev/rules.d
-    -D onnxruntime=disabled
   )
+
+  case "${CARCH}" in
+    x86_64) ;;
+    *) meson_options+=(-D onnxruntime=disabled) ;;
+  esac
 
   arch-meson pipewire build "${meson_options[@]}"
   meson compile -C build
@@ -161,6 +166,9 @@ package_pipewire() {
     'realtime-privileges: realtime privileges with rt module'
     'rtkit: realtime privileges with rtkit module'
   )
+  optdepends_x86_64=(
+    'pipewire-onnx: ONNX filter support'
+  )
   install=pipewire.install
 
   meson install -C build --destdir "$pkgdir"
@@ -185,6 +193,12 @@ package_pipewire() {
     _pick docs usr/share/doc
 
     _pick libcamera usr/lib/$_spaname/libcamera
+
+    case "${CARCH}" in
+      x86_64)
+        _pick onnx usr/lib/$_spaname/filter-graph/libspa-filter-graph-plugin-onnx.so
+      ;;
+    esac
 
     _pick audio usr/bin/pipewire-{aes67,avb}
     _pick audio usr/bin/pw-{cat,loopback,mididump,midi2play,midi2record,sysex}
@@ -449,6 +463,20 @@ package_pipewire-jack() {
 
   # directories for overrides
   mkdir -p "$pkgdir/etc/pipewire/jack.conf.d"
+
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 pipewire/COPYING
+}
+
+package_pipewire-onnx() {
+  pkgdesc+=" - ONNX filter support"
+  depends=(
+    "pipewire-audio=$epoch:$pkgver-$pkgrel"
+    "pipewire=$epoch:$pkgver-$pkgrel"
+    glibc
+    onnxruntime
+  )
+
+  mv onnx/* "$pkgdir"
 
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 pipewire/COPYING
 }
