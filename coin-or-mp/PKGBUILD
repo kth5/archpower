@@ -6,46 +6,38 @@
 
 pkgname=coin-or-mp
 pkgver=1.8.4
-pkgrel=6.1
+pkgrel=7
 pkgdesc='C-API library that supports most of the functionality of CLP (Coin LP), CBC (Coin Branch-and-Cut), and CGL (Cut Generation Library) projects'
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://projects.coin-or.org/CoinMP'
-license=(EPL)
+license=(CPL-1.0)
 groups=(coin-or)
 depends=(coin-or-cbc
-         coin-or-cgl
-         coin-or-clp
-         coin-or-coinutils
-         gcc-libs
-         glibc)
-source=(https://www.coin-or.org/download/source/CoinMP/CoinMP-$pkgver.tgz)
-sha256sums=('3459fb0ccbdd39342744684338984ac4cc153fb0434f4cae8cf74bd67490a38d')
+         glibc
+         libgcc
+         libstdc++)
+makedepends=(git)
+source=(git+https://github.com/coin-or/CoinMP#tag=releases/$pkgver)
+sha256sums=('ca675f20c3008618ba8d6827191a0d64f9f08995b613adfd8aa2a40f47d3d2e2')
 
 build() {
-  cd CoinMP-$pkgver/CoinMP
+  cd CoinMP
   export CXXFLAGS+=" -Wp,-U_GLIBCXX_ASSERTIONS"
-  ./configure --prefix=/usr --build=${CHOST} \
-              --with-osi-lib="$(pkg-config --libs osi)" \
-              --with-osi-incdir="/usr/include/coin/" \
-              --with-clp-lib="$(pkg-config --libs clp)" \
-              --with-clp-incdir="/usr/include/coin/" \
-              --with-cgl-lib="$(pkg-config --libs cgl)" \
-              --with-cgl-incdir="/usr/include/coin/" \
-              --with-cbc-lib="$(pkg-config --libs cbc)" \
-              --with-cbc-incdir="/usr/include/coin/" \
-              --with-coinutils-lib="$(pkg-config --libs coinutils)" \
-              --with-coinutils-incdir="/usr/include/coin/"
-  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool # Fix overlinking
+  ./configure \
+    --prefix=/usr \
+    --with-cbc-lib="-lCbcSolver -lCbc" \
+    --with-cbc-incdir="/usr/include/coin/" \
+    --build=${CHOST}
   make
 }
 
 check() {
-  cd CoinMP-$pkgver/CoinMP
+  cd CoinMP
   make test
 }
 
 package() {
-  cd CoinMP-$pkgver/CoinMP
+  cd CoinMP
 
   make DESTDIR="$pkgdir" install
   rm -r "$pkgdir"/build
