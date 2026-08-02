@@ -7,11 +7,12 @@ pkgname=(
   webkit2gtk-4.1
   webkit2gtk-4.1-docs
 )
-pkgver=2.50.4
-pkgrel=1
+pkgver=2.52.5
+pkgrel=2
 pkgdesc="Web content engine for GTK"
 url="https://webkitgtk.org"
-arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+#arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+arch=(powerpc espresso)
 license=(
   # :sort ui /\v^\s*['"]?/
   'AFL-2.0 OR GPL-2.0-or-later'
@@ -48,7 +49,6 @@ depends=(
   expat
   fontconfig
   freetype2
-  gcc-libs
   gdk-pixbuf2
   glib2
   glibc
@@ -60,11 +60,13 @@ depends=(
   harfbuzz-icu
   hyphen
   icu
+  libatomic
   lcms2
   libavif
   libdrm
   libegl
   libepoxy
+  libgcc
   libgcrypt
   libgl
   libgles
@@ -75,6 +77,7 @@ depends=(
   libseccomp
   libsecret
   libsoup3
+  libstdc++
   libsystemd
   libtasn1
   libwebp
@@ -111,19 +114,19 @@ makedepends=(
 makedepends_powerpc=(
   distcc
 )
-makedepends_powerpc64le=(
-  gcc14
-)
 source=(
   $url/releases/webkitgtk-$pkgver.tar.xz{,.asc}
   reduce-memory-overheads.patch
+  2.50.4-prefer-pthread.patch
 )
-sha256sums=('d3bfa473845acfab72635bada5e0d134fda6792c5b95c5c5cd141b46125bd8e4'
+sha256sums=('8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b'
             'SKIP'
-            '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864')
-b2sums=('e3bcf35b5783d17c9a01b8eaf72592c82f60a8d31732309ebe89dd8a6303fe694b333e273c4472cebd85be1fd9b86400e72558d01ffaa076e5f550eb413fac71'
+            '13df7f0b0a61866e767f280bbe77667126ae7de4ad4f463c682040da6366a864'
+            'db2cf9b094f7e2136a5d5c6f434aab0d031771268882487975fc8283f6093c09')
+b2sums=('092da7eff173c45e24444ec266d4f0cd730f967d09bfecd395be54e401a2e7c6c7124ff5d0818f7ab02993993e8434ae25e220a1c06b071c1b674b9dfe956a51'
         'SKIP'
-        'cc16462ce22df999b47ef477d4272ef3df2fbbfe5cdc585f3ce47e56cde65a1d7dd1105e6e7bbff41695f79b6394bc3e403e53a669bb7f456c733ed216372c9b')
+        'cc16462ce22df999b47ef477d4272ef3df2fbbfe5cdc585f3ce47e56cde65a1d7dd1105e6e7bbff41695f79b6394bc3e403e53a669bb7f456c733ed216372c9b'
+        '01dd68e7d2281c1812fb48c08f22a6dac939687825b384bed04927e8d02895d422d64e4f21a339b160f8bfa1009573639f935535029ec891158a05544200dc05')
 validpgpkeys=(
   # https://www.webkitgtk.org/verifying.html
   5AA3BC334FD7E3369E7C77B291C559DBE4C9123B # Adrián Pérez de Castro <aperez@igalia.com>
@@ -131,13 +134,14 @@ validpgpkeys=(
 )
 
 case "${CARCH}" in
-  powerpc) options+=(!debug !lto) ;;
+  powerpc64le|powerpc) options+=(!debug !lto) ;;
 esac
 
 prepare() {
   cd webkitgtk-$pkgver
 
   patch -Np1 -i ${srcdir}/reduce-memory-overheads.patch
+  patch -Np1 -i ${srcdir}/2.50.4-prefer-pthread.patch
 }
 
 build() {
@@ -159,12 +163,8 @@ build() {
 
   case "${CARCH}" in
     powerpc64le)
-      cmake_options+=(
-        -DCMAKE_C_COMPILER=gcc-14
-        -DCMAKE_CXX_COMPILER=g++-14
-      )
-      export CFLAGS+=' -mminimal-toc'
-      export CXXFLAGS+=' -mminimal-toc'
+      export CXXFLAGS+=' -DSKCMS_HAS_MUSTTAIL=0 -mminimal-toc'
+      export CFLAGS+=' -DSKCMS_HAS_MUSTTAIL=0 -mminimal-toc'
       export LDFLAGS+=' -Wl,--no-keep-memory'
     ;;
     powerpc64)
