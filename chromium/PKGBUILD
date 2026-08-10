@@ -6,7 +6,7 @@
 # Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
 
 pkgname=chromium
-pkgver=150.0.7871.128
+pkgver=151.0.7922.108
 pkgrel=1
 _launcher_ver=8
 _manual_clone=0
@@ -58,6 +58,7 @@ makedepends=(
   'compiler-rt'
   'git'
   'gn'
+  'go'
   'gperf'
   'java-runtime-headless'
   'lld'
@@ -86,38 +87,38 @@ source=(https://commondatastorage.googleapis.com/chromium-browser-official/chrom
         chromium-149-unbundle-minizip-undo-unicode.patch
         chromium-149-use-of-undeclared-identifier-ERROR.patch
         chromium-149-build-with-wasm-rollup.patch
-        chromium-150-fix-ar-unbundle.patch
-        chromium-150-fix-sysroot-path-error.patch
         chromium-150-revert-avx-flag-change.patch
+        chromium-151-dont-depends-on-histograms.xml-if-it-is-not-git-checkout.patch
         compiler-rt-adjust-paths.patch
         increase-fortify-level.patch
         enable-widevine-arm64.patch
         use-oauth2-client-switches-as-default.patch
         glibc-2.42-baud-rate-fix.patch
-        chromium-ppc64le-patches-r1.tar.gz
+        chromium-ppc64le-patches-r2.tar.gz
         swiftshader-ppc-xcoff-baseclasses.patch
-        git+https://gn.googlesource.com/gn#commit=27a549cc1f83b223cf07e152f3e36681d5dd68fd)
-sha256sums=('b8eca4b15c7232e27237f9db99e607e19fa0c26830ff4d68ceba6b66209ff663'
+        chromium-151-dawn-cipd-add-ppc64le.patch
+        git+https://gn.googlesource.com/gn#commit=1d86777e7f2562a86ecea77d1809ac4f82bb5bfe)
+sha256sums=('3f13338d12db5c6e17464b3be28eca2a07d64c7c58634268fa76924e3c5243aa'
             '213e50f48b67feb4441078d50b0fd431df34323be15be97c55302d3fdac4483a'
             '11a96ffa21448ec4c63dd5c8d6795a1998d8e5cd5a689d91aea4d2bdd13fb06e'
             '4fc040a0656a0a524dd8ad090cd129fc5b6cb21adcc66be82080165789e8c13e'
             'c382830318c5b37826ecf44f3ba9def6be8affdad1bce819ecb83f3222ff4b3a'
             'b9e6339221efe03540ffb360c161d93604a1fc93a5a1c53e5e9849066f987d05'
-            '5ade4cdba7afebfcc09fa969f15bf27404579beac5b7bafb59a0214d407e4ad2'
+            'e25cf8fb60f5958127053c515b8decc2b45acceebf9a57654066d093df11f8e9'
             'c22338d13f12772cdbcb5cfc1ace94438b9f9c72353cdb165a3ff3ef3d677c78'
             '951514535be65f0e2f84e82305d96292be1da353c1427ba1048ea24be70003c4'
             'c4df27d25d298ac95d85e6f06b558b73bb67de5110a19a0228cb7f8519291ea5'
-            'f056d12571823d06c2a938158734fb4c7eeccb5c6f68228634d0c73d75feaa78'
-            '5c42260b11b87dd01c4ef11598033e9687bdf384af2e45adab2fd00964e977e8'
             '5f6ccb7b945c8a13c690493723bad816b36f2f25792d47e677b56f8200907e60'
+            '552ddcef0cf139927f54c9c728c68b0e385600107e5166449b29de75e5dfcd7f'
             'ec8e49b7114e2fa2d359155c9ef722ff1ba5fe2c518fa48e30863d71d3b82863'
             'd634d2ce1fc63da7ac41f432b1e84c59b7cceabf19d510848a7cff40c8025342'
             '33d1650e183a86cc2d0e9b0fcc08a5da76c7354d25a419921e9d2dc02b8b3854'
             '9343afa1a4308a7cfb3317229f5aff7778688debcc03c4a74a85908aa1d0cc3a'
             '1c1898f263eaacbc069a8e1a3e732852350350d1dad4cb1a6bba430e3b796cd0'
-            'a4aa7a5da8ba75b8429cc30ce27f1600b78e294e2a81d8fe0e6f658f54ed499f'
+            '3276d4bf11881a4bff4c01898ad9bfb629900a4c83de50751424ad14e2912a88'
             '389faf07f2fc7f0180998c78417ca23b7c8fa37d3ddd2f5ab569334834c3a955'
-            '47ce95f3a9303c01ce401cde3c0d32abcaa9cb3de007d3e852a6e2b26fe8128e')
+            'bb2dcfbdd0246b1a8be0c02db3915ad00a791eb835346eee8bee2f4774dd0aff'
+            'SKIP')  # pinned via #commit= — git verifies
 
 if (( _manual_clone )); then
   source[0]=fetch-chromium-release
@@ -174,8 +175,9 @@ prepare() {
     ./fetch-chromium-release $pkgver
   fi
 
-  # Build a fresh gn — chromium 150 uses gn dotfile/tool attributes newer
-  # than what's in Arch POWER's `gn` package (0.2324). Small repo, ~1 min.
+  # Build a fresh gn — chromium 151 uses gn dotfile/tool attributes newer
+  # than what's in Arch POWER's `gn` package (0.2324). We pin to the exact
+  # commit chromium 151's DEPS references. Small repo, ~1 min build.
   # This step + the local override in build() can be dropped once the
   # `gn` package is refreshed.
   msg2 "Building gn..."
@@ -255,17 +257,12 @@ EOF
 
   patch -Np1 -i ../chromium-149-use-of-undeclared-identifier-ERROR.patch
 
-  # Fix issue about missing AR file
-  # Credit: https://github.com/ungoogled-software/ungoogled-chromium/pull/3837
-  patch -Np1 -i ../chromium-150-fix-ar-unbundle.patch
-
-  # Fix issue about missing sysroot path
-  # Credit: https://github.com/ungoogled-software/ungoogled-chromium/pull/3837#issuecomment-4836756738
-  patch -Np1 -i ../chromium-150-fix-sysroot-path-error.patch
-
   # Fix issue about missing AVX functions
   # Credit: https://github.com/ungoogled-software/ungoogled-chromium/pull/3837
   patch -Np1 -i ../chromium-150-revert-avx-flag-change.patch
+
+  # Credit: https://github.com/ungoogled-software/ungoogled-chromium/pull/3883
+  patch -Np1 -i ../chromium-151-dont-depends-on-histograms.xml-if-it-is-not-git-checkout.patch
 
   # swiftshader bundles a stripped LLVM 10.0. Its PPC target compiles
   # PPCXCOFFObjectWriter.cpp and PPCMCAsmInfo.cpp, which subclass
@@ -274,12 +271,15 @@ EOF
   # Linux ppc64le uses ELF, but the vtables still need to resolve.
   if [[ $CARCH == powerpc64le ]]; then
     patch -Np1 -i ../swiftshader-ppc-xcoff-baseclasses.patch
+
+    # Teach dawn's cipd_deps helper about ppc64le so tint's generate_sources
+    # action can locate our go symlink (see linker of go binary above).
+    patch -Np1 -i ../chromium-151-dawn-cipd-add-ppc64le.patch
   fi
 
-  # ppc64le patches (Raptor Engineering / Debian chromium-team, series-ordered).
-  # Applied on a Chromium version four security releases newer than Debian's
-  # baseline; expect the vast majority to apply cleanly since they touch
-  # arch-specific files upstream rarely modifies in point releases.
+  # ppc64le patches (Debian chromium-team, series-ordered). Refreshed from
+  # https://salsa.debian.org/chromium-team/chromium debian/patches/ppc64le,
+  # tracking the same upstream Chromium release as this PKGBUILD.
   if [[ $CARCH == powerpc64le ]]; then
     local _p
     while IFS= read -r _p; do
@@ -290,16 +290,22 @@ EOF
     done < "$srcdir/ppc64le-patches/debian-series"
   fi
 
-  # Link to system tools required by the build
+  # Link to system tools required by the build. Go lives under a CIPD-arch
+  # directory that dawn's cipd_deps.get_cipd_platform() looks up at build
+  # time — pick the matching name per arch.
+  local _cipd_arch=linux-amd64
+  [[ $CARCH == powerpc64le ]] && _cipd_arch=linux-ppc64le
+
   mkdir -p third_party/node/linux/node-linux-x64/bin \
-           third_party/rust-toolchain/bin \
            third_party/jdk/current/bin \
-           third_party/rust-toolchain/bin
+           third_party/rust-toolchain/bin \
+           "third_party/dawn/tools/golang/$_cipd_arch/bin"
 
   ln -s /usr/bin/node third_party/node/linux/node-linux-x64/bin/
   ln -s /usr/bin/java third_party/jdk/current/bin/
   if (( !_manual_clone )); then
     ln -s /usr/bin/rustc third_party/rust-toolchain/bin/
+    ln -s /usr/bin/go "third_party/dawn/tools/golang/$_cipd_arch/bin/"
   fi
 
   # remove x86_64 binary and use our own
@@ -340,6 +346,11 @@ EOF
 }
 
 build() {
+  # Pin LAUNCHER_VERSION to pkgver-pkgrel. Without this, the launcher's Makefile
+  # falls through to `git describe` which walks up into any parent git repo
+  # (e.g. our own working tree) and picks whatever tag it finds there.
+  sed -i "s@\$(shell git describe 2>/dev/null || echo v8)@$pkgver-$pkgrel@" \
+    chromium-launcher-$_launcher_ver/Makefile
   make -C chromium-launcher-$_launcher_ver
 
   cd chromium-$pkgver
@@ -444,19 +455,8 @@ build() {
     CXXFLAGS="${CXXFLAGS/-march=*([^ ]) }"
   fi
 
-  if [[ $CARCH == powerpc64le ]]; then
-    # Same rationale as aarch64/riscv64: the ppc64le patch set (esp. libvpx,
-    # skia, pffft) uses per-TU -mcpu selection; a global -mcpu/-mtune overrides
-    # those and breaks the build. Baseline is forced to POWER8 by
-    # 0001-Force-baseline-POWER8-AltiVec-VSX-CPU-features-when-.patch.
-    CFLAGS="${CFLAGS//-mcpu=*([^ ]) }"
-    CFLAGS="${CFLAGS//-mtune=*([^ ]) }"
-    CXXFLAGS="${CXXFLAGS//-mcpu=*([^ ]) }"
-    CXXFLAGS="${CXXFLAGS//-mtune=*([^ ]) }"
-  fi
-
-  # Arch's packaged gn (0.2324) doesn't support several dotfile/tool
-  # attributes chromium 150 uses (expand_directory_allowlist,
+  # Arch POWER's packaged gn (0.2324) doesn't support several dotfile/tool
+  # attributes chromium 151 uses (expand_directory_allowlist,
   # expand_directory(), inputs= on rust_* tools, c_additional_outputs).
   # We built a fresh gn in prepare() — use it. Drop this when Arch POWER's
   # gn package is refreshed.
