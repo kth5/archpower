@@ -6,8 +6,9 @@ pkgbase=glycin
 pkgname=(
   glycin
   glycin-gtk4
+  glycin-docs
 )
-pkgver=2.1.1
+pkgver=2.1.5
 pkgrel=2
 pkgdesc="Sandboxed and extendable image decoding"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
@@ -27,9 +28,10 @@ depends=(
 )
 makedepends=(
   clang
+  gi-docgen
   git
-  gtk4
   gobject-introspection
+  gtk4
   libheif
   meson
   rust
@@ -46,7 +48,7 @@ source=(
   "git+https://gitlab.gnome.org/sophie-h/test-images.git"
   "ignore-seccomp.patch"
 )
-b2sums=('4028b02e02e6e2e19ce76e543461552abcf68da1fd3e3459a31222a52ddd9ace95e3426d24879aae13245b3a2bd20606e3d2b8fa11045f35ad2639d32ff5db33'
+b2sums=('d3e6740c617fbf33339ec0118e0d6cb9a2bf6ab782d46d9de8f77ffb8b0f4d2132dc09b4decab13c94db341e4aa25ad6a3f47184918f6df732e097944905f848'
         'SKIP'
         '2fb414d45ad54ddb7c1cabf42c57958c17cb2281465158fab143f46211c972efd2c26e7534b7e8b8be33e7a805c74278a4dfbdf1aad09ae1895e74dcc15a131a')
 
@@ -59,6 +61,12 @@ export CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
 prepare() {
   cd glycin
 
+  # Fix dds loading (shared-mime-info 2.5)
+  git cherry-pick -n 476720131410e80436e65b9e24fcab52467e1b0f
+
+  # Fix xpm loading
+  git cherry-pick -n 590c6d215afb3ed055909d5f208d2db200386409
+
   git submodule init
   git submodule set-url tests/test-images "$srcdir/test-images"
   git -c protocol.file.allow=always -c protocol.allow=never submodule update
@@ -67,11 +75,16 @@ prepare() {
 
   # Match cargo_home in meson.build
   CARGO_HOME="$srcdir/build/cargo-home" \
-    cargo fetch --locked --target "$(rustc --print host-tuple)"
+    cargo fetch --locked --target host-tuple
 }
 
 build() {
   local meson_options=(
+    -D capi_docs=true
+    -D test_tokio=false
+
+    # heic (image/heif) encoding test hangs
+    -D test_skip_ext=heic
   )
 
   arch-meson glycin build "${meson_options[@]}"
@@ -82,6 +95,7 @@ check() {
   case "${CARCH}" in
     powerpc*) return 0 ;;
   esac
+
   meson test -C build --print-errorlogs
 }
 
@@ -104,12 +118,15 @@ package_glycin() {
   meson install -C build --destdir "$pkgdir" --no-rebuild
 
   cd "$pkgdir"
+
   _pick gtk4 usr/include/glycin-gtk4-*
   _pick gtk4 usr/lib/girepository-1.0/GlyGtk4-*
   _pick gtk4 usr/lib/libglycin-gtk4-*
   _pick gtk4 usr/lib/pkgconfig/glycin-gtk4-*
   _pick gtk4 usr/share/gir-1.0/GlyGtk4-*
   _pick gtk4 usr/share/vala/vapi/glycin-gtk4-*
+
+  _pick docs usr/share/doc
 }
 
 package_glycin-gtk4() {
@@ -129,4 +146,11 @@ package_glycin-gtk4() {
   mv gtk4/* "$pkgdir"
 }
 
+
+package_glycin-docs() {
+  pkgdesc+=" - documentation"
+  depends=()
+
+  mv docs/* "$pkgdir"
+}
 # vim:set sw=2 sts=-1 et:
