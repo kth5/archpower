@@ -1,11 +1,13 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Antonio Rojas <arojas@archlinux.org>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 
 pkgbase=pyside6
 pkgname=(pyside6
          pyside6-tools
-         shiboken6)
-pkgver=6.11.0
+         shiboken6
+         shiboken6-generator)
+pkgver=6.11.1
 pkgrel=4
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://www.qt.io'
@@ -13,14 +15,15 @@ license=(GPL-3.0-only
          LGPL-3.0-only
          LicenseRef-Qt-Commercial
          Qt-GPL-exception-1.0)
-makedepends=(clang21
+makedepends=(clang
              cmake
              git
-             llvm21
+             llvm
              ninja
              python-numpy
              python-setuptools
              qt6-3d
+             qt6-canvaspainter
              qt6-charts
              qt6-connectivity
              qt6-datavis3d
@@ -42,23 +45,16 @@ makedepends=(clang21
              qt6-tools
              qt6-webchannel
              qt6-websockets)
-makedepends_x86_64=(
-             qt6-webengine
-             qt6-webview)
-source=(git+https://code.qt.io/pyside/pyside-setup#tag=v$pkgver
-        fix-header-install-dir.patch)
-sha256sums=('be9ab37fcb968156880ab8c6790ad80ab75fbbdd3519fe693ae9cda3f385f8f2'
-            '3bc87409ea3dc41847f1d5d7612fd97931b67f1b40510b465543a8ef5c9764ff')
+makedpends_x86_64=(qt6-webengine qt6-webview)
+source=(git+https://code.qt.io/pyside/pyside-setup#tag=v$pkgver)
+sha256sums=('4f8c8416ceceaca24d7b75d0007d5c1979c5b40827743b7b734a4674be9a1b70')
 
 prepare() {
   cd pyside-setup
-  git revert -n c9d602ab4afa5c9834c4674a742dc9bab7f4b326 05e328476f2d6ef8a0f3f44aca1e5b1cdb7499fc # Revert broken cmake files
-  patch -p1 -i ../fix-header-install-dir.patch # Revert broken header install dir
+  git cherry-pick -n d252378a3980c99e23340e6b722631182814d8bb 71c4d1750463c99ab9cbff7e1d7162210506f225 # Fix header install dir
 }
 
 build() {
-  export CLANG_INSTALL_DIR=/usr/lib/llvm21
-  export LLVM_INSTALL_DIR=/usr/lib/llvm21
   cmake -B build -S pyside-setup -G Ninja \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=None \
@@ -72,40 +68,55 @@ build() {
 }
 
 package_shiboken6() {
-  pkgdesc='Generates bindings for C++ libraries using CPython source code'
-  depends=(clang
-           clang21
-           gcc-libs
-           glibc
-           libxml2
-           libxslt
-           llvm
-           llvm21
-           python
-           qt6-base)
-  optdepends=('python: Python bindings')
+  pkgdesc='Python/C++ bindings helper module'
+  depends=(glibc
+           libgcc
+           libstdc++
+           python)
 
   DESTDIR="$pkgdir" cmake --install build/sources/shiboken6
-  DESTDIR="$pkgdir" cmake --install build/sources/shiboken6_generator
 
 # Install egg-info
   export PATH="/usr/lib/qt6/bin:$PATH"
   cd pyside-setup
   python setup.py egg_info --build-type=shiboken6
+  _pythonpath=`python -c "from sysconfig import get_path; print(get_path('platlib'))"`
+  cp -r shiboken6.egg-info "$pkgdir"/$_pythonpath
+}
+
+package_shiboken6-generator() {
+  pkgdesc='Python/C++ bindings generator'
+  depends=(clang
+           glibc
+           libgcc
+           libstdc++
+           libxml2
+           libxslt
+           llvm
+           python
+           qt6-base)
+
+  DESTDIR="$pkgdir" cmake --install build/sources/shiboken6_generator
+           
+# Install egg-info
+  export PATH="/usr/lib/qt6/bin:$PATH"
+  cd pyside-setup
   python setup.py egg_info --build-type=shiboken6-generator
   _pythonpath=`python -c "from sysconfig import get_path; print(get_path('platlib'))"`
-  cp -r shiboken6*.egg-info "$pkgdir"/$_pythonpath
+  cp -r shiboken6_generator.egg-info "$pkgdir"/$_pythonpath
 }
 
 package_pyside6() {
   pkgdesc='Enables the use of Qt6 APIs in Python applications'
-  depends=(gcc-libs
-           glibc
+  depends=(glibc
+           libgcc
+           libstdc++
            python
            qt6-base
            qt6-declarative
            shiboken6)
   optdepends=('qt6-3d: Qt3D bindings'
+              'qt6-canvaspainter: QtCanvasPainter bindings'
               'qt6-charts: QtCharts bindings'
               'qt6-connectivity: QtBluetooth and QtNfc bindings'
               'qt6-datavis3d: QtDataVisualization bindings'
@@ -127,7 +138,7 @@ package_pyside6() {
               'qt6-webchannel: QtWebChannel bindings'
               'qt6-webengine: QtWebEngine bindings'
               'qt6-websockets: QtWebSockets bindings')
-  optdepends_x86_64=('qt6-webview: QtWebView bindings')
+  optdpends_x86_64=('qt6-webview: QtWebView bindings')
   provides=(qt6-python-bindings)
 
   DESTDIR="$pkgdir" cmake --install build/sources/pyside6
