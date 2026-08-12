@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=libkexiv2
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='A library to manipulate pictures metadata'
 url='https://www.kde.org/'
@@ -17,7 +17,7 @@ depends=(glibc
          qt6-base)
 makedepends=(extra-cmake-modules)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('fdd8b2ca473339281676bccd1be1d6bf7df2f7644822c52a5cb73af8535a854e'
+sha256sums=('dd5ddbf107dd9a51454ae83b0537ca80ce31e65da649c0a8db745e356d0d0064'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
