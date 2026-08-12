@@ -3,7 +3,7 @@
 # Contributor: Jan de Groot <jgc@archlinux.org>
 
 pkgname=fontconfig
-pkgver=2.18.2
+pkgver=2.18.3
 pkgrel=1
 epoch=2
 pkgdesc="Library for configuring and customizing font access"
@@ -35,7 +35,7 @@ source=(
   40-fontconfig-config.script
   fontconfig.hook
 )
-b2sums=('0bddd8361e37acd810e03406da3c210c58694956d860f809d1c5b0177d87cf3f376de95113e8b4f0beb855ba7e7e8e5b9072f2d2ec4ab441d2d8fd40f50aa4dc'
+b2sums=('7635f6d32ed8ffb5ad4a8614c5cd87949935c3743635af9749faf93dc82aab57c7e09b46132edf8939a5ce5d38ef7ee12be457aa474d74e61af04fb96fb87f1a'
         'b06b3f2b8c0c38139a9247c26a641e6dc01d50b530478dd14133175a603f60b0af901af16c9fcf1ce73d23786ea14bfdbacd39f1dcfd88f6382965ad22be1411'
         '7fb63e76ab126bc0a7decfd74c53429ad1ce6d13de2f14037259616d8d4150b8fa4601c7f02b75918ccd5995d424816dc9d01a5fe7e39dc3dd1fcc83dfdb0fe8'
         'dfbf47c069c88da7687511356cef5bb94b7190e558a6f08390d6976fa7065ba7137ccb0a5ca1defdef655091afe74eb8a3d33fb9f3e0633409aa79f753ad276d')
