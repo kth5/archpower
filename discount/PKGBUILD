@@ -5,7 +5,7 @@
 # Contributor: Patrick McCarty <pnorcks at gmail dot com>
 
 pkgname=discount
-pkgver=3.0.1.2
+pkgver=3.0.1.3
 _pkgver=3.0.0d
 pkgrel=1
 pkgdesc='A Markdown implementation written in C'
