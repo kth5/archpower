@@ -8,15 +8,16 @@
 # Contributor: Gustavo Alvarez <sl1pkn07@gmail.com>
 
 pkgname=mlt
-pkgver=7.36.1
-pkgrel=4
+pkgver=7.40.0
+pkgrel=3
 pkgdesc='An open source multimedia framework'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://www.mltframework.org'
 license=(LGPL-2.1-only)
-depends=(gcc-libs
-         glibc
-         libebur128)
+depends=(glibc
+         libebur128
+         libgcc
+         libstdc++)
 optdepends=('ffmpeg: ffmpeg plugin'
             'fftw: plus plugin'
             'fontconfig: gdk plugin'
@@ -47,6 +48,9 @@ optdepends=('ffmpeg: ffmpeg plugin'
             'sox: SOX (Audio Swiss Army Knife) plugin'
             'vid.stab: video stabilize plugin'
             'zlib: glaxnimate plugin')
+optdepends_x86_64=(
+            'rnnoise: rnnoise plugin'
+)
 makedepends=(cmake
              eigen
              ffmpeg
@@ -71,25 +75,43 @@ makedepends=(cmake
              sdl_image
              swig
              vid.stab)
+makedepends_x86_64=(
+             rnnoise
+)
 source=(git+https://github.com/mltframework/mlt#tag=v$pkgver
-        git+https://gitlab.com/mattbas/glaxnimate.git)
-sha256sums=('96c89f203e0e2061f29fa21ab6c5c449cd5ed9b37c29d50779bd2975ef339937'
-            'SKIP')
+        git+https://invent.kde.org/graphics/glaxnimate.git
+        git+https://github.com/mbasaglia/thorvg.git
+        ffmpeg-9.patch)
+sha256sums=('99f6370263714259200af2cdc381205610247767ca6eb0ef5d1d2ebba2901a4f'
+            'SKIP'
+            'SKIP'
+            'b1b1710b9978dd502fcc0ba06db7ede63a737df06508f82d42c9f67a6d82f6cd')
 
 prepare() {
   cd $pkgname
   git submodule init
   git submodule set-url src/modules/glaxnimate/glaxnimate "$srcdir"/glaxnimate
   git -c protocol.file.allow=always submodule update
+
+  patch -p1 < ../ffmpeg-9.patch # Fix build with FFmpeg 9
+
+  cd src/modules/glaxnimate/glaxnimate
+  git submodule init
+  git submodule set-url external/thorvg/thorvg "$srcdir"/thorvg
+  git -c protocol.file.allow=always submodule update external/thorvg/thorvg
 }
 
 build() {
+  case "${CARCH}" in
+    powerpc*) cmake_options=(-DMOD_RNNOISE=OFF) ;;
+  esac
+
   cmake -B build -S $pkgname \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DMOD_OPENCV=ON \
     -DMOD_GLAXNIMATE_QT6=ON \
     -DMOD_QT6=ON \
-    -DSWIG_PYTHON=ON
+    -DSWIG_PYTHON=ON ${cmake_options[@]}
   cmake --build build
 }
 
