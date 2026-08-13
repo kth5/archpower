@@ -9,7 +9,7 @@ pkgname=(
   glib2-devel
   glib2-docs
 )
-pkgver=2.88.2
+pkgver=2.88.3
 pkgrel=1
 pkgdesc="Low level core library"
 url="https://gitlab.gnome.org/GNOME/glib"
@@ -49,14 +49,18 @@ source=(
   0001-glib-compile-schemas-Remove-noisy-deprecation-warnin.patch
   0002-gdesktopappinfo-Add-more-known-terminals.patch
   gio-querymodules.hook
+  gio-remove-module-cache.hook
   glib-compile-schemas.hook
+  glib-remove-compiled-schemas.hook
 )
-b2sums=('3f945f1751d2723efaef159b7510688abe9f870c9f027ce9c585244b88a0198edd1d8cbe09fd552517d2ac5cff7e1307a00c81210a84783815abadc8038f17fa'
+b2sums=('9239e87c1133864340fda4ba99c53cd1684f421f7fb9a90299b6a25f582db3f70e7aab6988a7943934ece0d48246bc61c764cd08ef98f6bec3d4383a3f1bf679'
         'SKIP'
         '4ddbd31f5f466fce99d82890292ff922555a9ab379d22202aeea5127f58798668f871dea0485cc0f458069276ad512412285ede6c8f3e36bea899358f49e931a'
         'f749220228e18f49c38a03d9b42ebbd2c8723c0f668eedf966339176ad946a82e0f0c605e6cb8f4a0d0ccc1777fc12dece36f4e9015c24879d48889a9e944c91'
         '14c9211c0557f6d8d9a914f1b18b7e0e23f79f4abde117cb03ab119b95bf9fa9d7a712aa0a29beb266468aeb352caa3a9e4540503cfc9fe0bbaf764371832a96'
-        'acc2f474139e535f4bdd70ac22a9150f786b3395e679b14d0d3fbb9361d511bb1b5069d95b2a7ac9c0f3d901b03a0c037eb273446ba00764191b30a777bd2bc9')
+        'f2e5c26c6bc8f00cab04e73352a72b2d8c6cad5a611fb672a21e7357ee8fcc9f6d35242febf0b73c024eaa397c953df88cb18756fb6fae9ee5c295f642f8da73'
+        'acc2f474139e535f4bdd70ac22a9150f786b3395e679b14d0d3fbb9361d511bb1b5069d95b2a7ac9c0f3d901b03a0c037eb273446ba00764191b30a777bd2bc9'
+        'cdfc55274ea4476a547553fd68eda64b2ac235fc037e6847fbaf117999c1976d7932e7787f76f7af9f0937328dba04a36e68f364dc87a9d5a7aabec10301329d')
 validpgpkeys=(
   53EF3DC3B63E2899271BD26322E8091EEA11BBB7 # Emmanuele Bassi <ebassi@gnome.org>
   923B7025EE03C1C59F42684CF0942E894B2EAFA0 # Philip Withnall <pwithnall@gnome.org>
@@ -79,6 +83,17 @@ prepare() {
 }
 
 build() {
+  case "${CARCH}" in
+    powerpc*)
+      # low threadcount like on x86/arm won't make this noticable
+      # but LTO+ninja easily becomes a process bomb
+      export NINJAFLAGS+="${MAKEFLAGS} -l $(( $(nproc) / 2 ))"
+      export CFLAGS=${CFLAGS/-flto=[0-9a-z]+ /-flto=jobserver }
+      export CXXFLAGS=${CXXFLAGS/-flto=[0-9a-z]+ /-flto=jobserver }
+      export LDFLAGS=${LDFLAGS/-flto=[0-9a-z]+ /-flto=jobserver }
+    ;;
+  esac
+
   local meson_options=(
     --default-library both
     -D documentation=true
@@ -129,7 +144,6 @@ package_glib2() {
     'gvfs: most gio functionality'
   )
   options+=(staticlibs)
-  install=glib2.install
 
   meson install -C build --destdir "$pkgdir"
 
