@@ -4,62 +4,69 @@
 # Contributor: jackoneill <cantabile.desu@gmail.com>
 
 pkgname=vapoursynth
-pkgver=73
+pkgver=77
 pkgrel=2
 pkgdesc='A video processing framework with the future in mind'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url=http://www.vapoursynth.com/
 license=(
-  LGPL2.1
-  custom:OFL
+  LGPL-2.1-only
+  OFL-1.1
 )
 depends=(
+  glibc
+  libgcc
+  libstdc++
   libzimg.so
   python
 )
 makedepends=(
   cython
   git
-  python-sphinx
+  meson-python
+  python-build
+  python-installer
 )
-_tag=76762f6a07d5169c21903972f67827fc108020ba
 source=(
-  git+https://github.com/vapoursynth/vapoursynth.git#tag=${_tag}
+  git+https://github.com/vapoursynth/vapoursynth.git#tag=R${pkgver}
   vapoursynth.xml
 )
-b2sums=('4fb5b185c5b8192fbe7df974837409afb4b8748db4d439689852e79a195561d5ab4714bee879dee2a3be21e52c8c3455418ac327f307d069794a6a0b6b05399e'
+b2sums=('ae5d05679969783d4fd400c6fce88646ca935b176699595050a1beb2adbc10aaf1c8e5a7dba771f0e81205d8e60f6de3e0e63346745adcfb076589ee253d193e'
         'feae23a22f8589177f30c36bdf21bab93d55a786194d3e0e958537016630d075b82178f60ac840f30ae316a8f87d3fb01f371211f62d1fee9850ee5063561747')
-
-pkgver() {
-  cd vapoursynth
-  git describe --tags | sed 's/^R//'
-}
 
 prepare() {
   cd vapoursynth
-  ./autogen.sh
+  git cherry-pick -n d398f465154ef141d447af78b2e65a025de28522 # Prevent statically linking libstdc++
 }
 
 build() {
-  case "${CARCH}" in
-    powerpc) CXXFLAGS+=' -latomic' ;;
-  esac
-
   cd vapoursynth
-  ./configure \
-    --prefix=/usr \
-    --disable-static
-  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-  make
+  python -m build --wheel --no-isolation
 }
 
 package() {
-  cd vapoursynth
+  python -m installer --destdir="$pkgdir" vapoursynth/dist/*.whl
 
-  make DESTDIR="${pkgdir}" install
+  local _sitepkgs
+  _sitepkgs="$(python -c 'import site; print(site.getsitepackages()[0])')"
+  ln -sr "${pkgdir}${_sitepkgs}/vapoursynth/libvapoursynth.so.4" "${pkgdir}/usr/lib/libvapoursynth.so.4"
+  ln -sr "${pkgdir}/usr/lib/libvapoursynth.so.4" "${pkgdir}/usr/lib/libvapoursynth.so"
+  ln -sr "${pkgdir}${_sitepkgs}/vapoursynth/libvsscript.so" "${pkgdir}/usr/lib/libvapoursynth-script.so.0"
+  ln -sr "${pkgdir}/usr/lib/libvapoursynth-script.so.0" "${pkgdir}/usr/lib/libvapoursynth-script.so"
 
-  install -Dm 644 src/core/ter-116n.ofl.txt -t "${pkgdir}"/usr/share/licenses/vapoursynth/
-  install -Dm 644 ../vapoursynth.xml -t "${pkgdir}"/usr/share/mime/packages/
+  install -d -m755 "${pkgdir}/usr"/{include,lib/pkgconfig}
+  ln -sr "${pkgdir}${_sitepkgs}/vapoursynth/include" "${pkgdir}/usr/include/vapoursynth"
+  ln -sr "${pkgdir}${_sitepkgs}/vapoursynth/pkgconfig/vapoursynth.pc" "${pkgdir}/usr/lib/pkgconfig/vapoursynth.pc"
+
+  install -d -m755 "${pkgdir}${_sitepkgs}/vapoursynth/plugins"
+  install -Dm 644 vapoursynth/src/core/ter-116n.ofl.txt -t "${pkgdir}/usr/share/licenses/vapoursynth"
+  install -Dm 644 vapoursynth.xml -t "${pkgdir}/usr/share/mime/packages"
+
+  local _libvsscript="${_sitepkgs}/vapoursynth/libvsscript.so"
+  printf "export VSSCRIPT_PATH='%s'\n" "${_libvsscript}" \
+    | install -Dm 644 /dev/stdin "${pkgdir}/etc/profile.d/vapoursynth.sh"
+  printf "set --export --global VSSCRIPT_PATH '%s'\n" "${_libvsscript}" \
+    | install -Dm 644 /dev/stdin "${pkgdir}/usr/share/fish/vendor_conf.d/vapoursynth.fish"
 }
 
-# vim: ts=2 sw=2 et:
+# vim: ts=2 sw=2 et
