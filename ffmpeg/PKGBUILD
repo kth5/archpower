@@ -1,4 +1,3 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Maxime Gauduin <alucryd@archlinux.org>
 # Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 # Contributor: Ionut Biru <ibiru@archlinux.org>
@@ -6,8 +5,8 @@
 # Contributor: Paul Mattal <paul@archlinux.org>
 
 pkgname=ffmpeg
-pkgver=8.1
-pkgrel=3.2
+pkgver=9.0.1
+pkgrel=1
 epoch=2
 pkgdesc='Complete solution to record, convert and stream audio and video'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
@@ -24,7 +23,6 @@ depends=(
   fribidi
   glib2
   glibc
-  glslang
   gmp
   gnutls
   gsm
@@ -39,6 +37,7 @@ depends=(
   libdrm
   libdvdnav
   libdvdread
+  libgcc
   libgl
   libiec61883
   libjxl
@@ -69,6 +68,7 @@ depends=(
   rubberband
   sdl2
   snappy
+  sndio
   speex
   srt
   svt-av1
@@ -98,6 +98,7 @@ makedepends=(
   ladspa
   mesa
   opencl-headers
+  spirv-headers
   vulkan-headers
 )
 makedepends_x86_64=(
@@ -110,6 +111,7 @@ optdepends=(
 )
 optdepends_x86_64=(
   'intel-media-sdk: Intel QuickSync support (legacy)'
+  'ladspa: LADSPA filters'
   'nvidia-utils: Nvidia NVDEC/NVENC support'
   'onevpl-intel-gpu: Intel QuickSync support'
 )
@@ -122,13 +124,12 @@ provides=(
   libswresample.so
   libswscale.so
 )
-_tag=a65b3bfe9dacc3b20597ef199d0afdd8bc8128e2
 source=(
-  git+https://git.ffmpeg.org/ffmpeg.git?signed#tag=${_tag}
+  git+https://git.ffmpeg.org/ffmpeg.git?signed#tag=n${pkgver}
   0001-Add-av_stream_get_first_dts-for-Chromium.patch
   powerpc-disable-ppc4xx.patch
 )
-b2sums=('8e5818da4965fdd2dc7de521a2f20013a05bd4e9d6fc3eecb6ed261f91c3e4ed4b64687654bee190b0e3b702dc8184f86bfe1941a58cd0b002843c81f70fa904'
+b2sums=('e22f57e76d587eecfdfe3ba0fbfaa37c6c95b43d4fc60da9d4feb11a2c87dcaf7ac891fbaa649289bec4ef40378743d61c77128b7127e8dc42d95f95a60aee69'
         'e5f7b79f7731be9ee5a7280a9221fb531ac5a2d9820fc5870b68b0eabea667dfbe8f39f41c1e1763a4c84982896afaa54c81ff57847d203b70afafd726689e5d'
         '90cb6bf3c96c4acc3e82190539be8e7fb5db5322190b7a04deb764e0d76f87c1398bf3a79b364126eba65988c20c5474cd04e239dc2a98fd815781dc75fec6f7')
 validpgpkeys=(DD1EC9E8DE085C629B3E1846B18E8928B3948D64) # Michael Niedermayer <michael@niedermayer.cc>
@@ -139,23 +140,21 @@ prepare() {
   # https://crbug.com/1251779
   git apply -3 ../0001-Add-av_stream_get_first_dts-for-Chromium.patch
 
-  patch -Np1 -i ${srcdir}/powerpc-disable-ppc4xx.patch
-}
-
-pkgver() {
-  cd ffmpeg
-  git describe --tags | sed 's/^n//'
+  git apply -3 ../powerpc-disable-ppc4xx.patch
 }
 
 build() {
-  export PKG_CONFIG_PATH='/usr/lib/mbedtls2/pkgconfig'
-  cd ffmpeg
-
   case "${CARCH}" in
+    powerpc64le) _configure_flags=(
+               --enable-power8
+               --enable-vsx
+               --enable-altivec
+            )
+    ;;
     powerpc|powerpc64) _configure_flags=(
                #--disable-asm
                #--disable-altivec # altivec support on 32/64be is broken
-               --disable-power8  # buildbot may be a power9
+               --disable-power8  # buildbot may be a power8/9
                --disable-vsx     # later SIMD, disable them forcefully
             )
     ;;
@@ -168,6 +167,8 @@ build() {
     ;;
   esac
 
+  export PKG_CONFIG_PATH='/usr/lib/mbedtls2/pkgconfig'
+  cd ffmpeg
   ./configure \
     --prefix=/usr \
     --disable-debug \
@@ -182,6 +183,7 @@ build() {
     --enable-gnutls \
     --enable-gpl \
     --enable-ladspa \
+    --enable-lcms2 \
     --enable-libaom \
     --enable-libass \
     --enable-libbluray \
@@ -192,7 +194,6 @@ build() {
     --enable-libdvdread \
     --enable-libfreetype \
     --enable-libfribidi \
-    --enable-libglslang \
     --enable-libgsm \
     --enable-libharfbuzz \
     --enable-libiec61883 \
@@ -235,7 +236,8 @@ build() {
     --enable-shared \
     --enable-vapoursynth \
     --enable-version3 \
-    --enable-vulkan ${_configure_flags[@]}
+    --enable-vulkan ${_configure_flags[@]} \
+    --disable-decoder=magicyuv # pixelsmash
   make
   make tools/qt-faststart
   make doc/ff{mpeg,play}.1
@@ -249,7 +251,7 @@ package() {
     libdav1d.so
     libfreetype.so
     libharfbuzz.so
-    libjxl.so
+#   libjxl.so
     libopenmpt.so
     libplacebo.so
     librav1e.so
@@ -263,7 +265,7 @@ package() {
     libvorbis.so
     libvpx.so
     libx264.so
-    libx265.so
+#   libx265.so
     libxvidcore.so
     libzimg.so
     libzmq.so
