@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kturtle
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='Educational Programming Environment'
 url='https://apps.kde.org/kturtle/'
@@ -29,7 +29,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-education)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('42e306962f4795dba8932e00c5dfc70dc7892b6779ad97e1ac950816c44c0233'
+sha256sums=('d5736efad2344a6936ee18367e0cd2c1b0f98cbb6ed89106144a0a7d5047ecf7'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
