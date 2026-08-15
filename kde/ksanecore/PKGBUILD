@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=ksanecore
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='Library providing logic to interface scanners'
 url='https://www.kde.org/'
@@ -18,7 +18,7 @@ depends=(glibc
          sane)
 makedepends=(extra-cmake-modules)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('8f84a08f984055ced7a1a2051b9a2044d15c0a9523121a56aca66bfe5ab269d9'
+sha256sums=('e5c96840ba21e7afa6e0635b21cc117552898b14628d9555f2a600c77884747d'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
