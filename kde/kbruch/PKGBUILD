@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kbruch
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='Exercise Fractions'
 url='https://apps.kde.org/kbruch/'
@@ -26,7 +26,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-education)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('af81430b703edc70091a507f911ce66377bc720eed3e88e781a4ce8b9d1db343'
+sha256sums=('3eae3f9a99ead74cd509f87d7c9e9c6cd91977ec8b6ee68cf0c80371d6b5e273'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
