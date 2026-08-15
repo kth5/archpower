@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=libkcddb
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='KDE CDDB library'
 url='https://www.kde.org/'
@@ -27,7 +27,7 @@ makedepends=(extra-cmake-modules
              kdoctools)
 conflicts=('libkcddb5<24')
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('d3b8d83bf5482cc5ed2d5830960940fb0397fe7fcfbbacf85c8c2b68f752a38b'
+sha256sums=('c5af21abfc86438c576c84846f95d895c10e9be9d5f40bac5df45000b993c38d'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
