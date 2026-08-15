@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=libkomparediff2
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='Library to compare files and strings'
 url='https://www.kde.org/'
@@ -22,7 +22,7 @@ depends=(glibc
          qt6-base)
 makedepends=(extra-cmake-modules)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('31fed1758f80e560852ad15bc24d6e9778c1a5983ea2fb7ee0081795a0175010'
+sha256sums=('dd77529a93ac3f9aefe571961e8f7ab14c416f3164a524c6588284bcc1ac817b'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
