@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kanagram
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='Letter Order Game'
 url='https://apps.kde.org/kanagram/'
@@ -31,7 +31,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-education)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('73a1d5056fd00f137bac234cb618d24a8f3e4bda31d03fec0089bb93de069ab9'
+sha256sums=('ef08ea3ed240c2a163e2b2abf1a19fcfbda079c8f000f9dd1e14fab44851fd0d'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
