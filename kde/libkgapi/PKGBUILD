@@ -3,7 +3,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=libkgapi
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='A KDE-based library for accessing various Google services via their public API'
 url='https://www.kde.org/'
@@ -18,7 +18,7 @@ depends=(glibc
 makedepends=(extra-cmake-modules
              qt6-tools)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('ff52aabaa388e9a57be2510ccedb0c514ef5e35c02c0cc256217a1e4d876ebf1'
+sha256sums=('ad43a76a774cd21c9ed899fbea4959042d66747296e1e521ec2b313713b12bee'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
