@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=blinken
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='Memory Enhancement Game'
 url='https://apps.kde.org/blinken/'
@@ -27,7 +27,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-education)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('fe6182b27fa31e5b2cc257644f1ce40cbbaf500de161ab3498fe3ab18e05fffb'
+sha256sums=('453fc075cc01aeac980ecdf3064874a69c357d46c60457bc42fb979a9567a0ba'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
