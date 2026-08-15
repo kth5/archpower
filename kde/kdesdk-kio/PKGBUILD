@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kdesdk-kio
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='KDE SDK KIO-Slaves'
 url='https://www.kde.org/'
@@ -23,7 +23,7 @@ replaces=(kdesdk-kioslaves)
 groups=(kde-applications
         kde-sdk)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('21802432767a46208544bf37a00811ce33463cf3a9378ca8ece0b88eaac67994'
+sha256sums=('e73cff30b504240ce0257326aa376ad7473cbc25f195bb92f383c78dd8ca8268'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
