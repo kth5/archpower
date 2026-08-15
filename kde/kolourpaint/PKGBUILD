@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kolourpaint
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='Paint Program'
 url='https://apps.kde.org/kolourpaint/'
@@ -28,7 +28,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-graphics)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('9b65c636e30e0a376352c66bb70de74fae2b732c9d24531fcc17be863f27126b'
+sha256sums=('fece103c529290212cc7a66e9f22e894eb034d04579332a17d7f6c0e8eda6069'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
