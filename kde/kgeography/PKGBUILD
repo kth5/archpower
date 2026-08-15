@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kgeography
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='Geography Trainer'
 url='https://apps.kde.org/kgeography/'
@@ -27,7 +27,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-education)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('3bd27fe577ece70dc63c942c5635c035c00d7743236c259e4abc92e3c29a8e8c'
+sha256sums=('610044230df482718ed9476c66905a5200e40d78d6484e88bb1d61ef7a4d6ae2'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
