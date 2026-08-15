@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kamera
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='KDE integration for gphoto2 cameras'
 url='https://apps.kde.org/kamera/'
@@ -26,7 +26,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-graphics)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('73166f0bd638a40b041715e11aca1fac606dfbc654a413efca8f864c06f04eaf'
+sha256sums=('6b695382b8bf27deea190c48b29c63ffeae416f84da014de105cc8f86b7a7ae6'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
