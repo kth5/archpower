@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=libksane
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='An image scanning library'
 url='https://www.kde.org/'
@@ -21,7 +21,7 @@ depends=(glibc
          qt6-base)
 makedepends=(extra-cmake-modules)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('9266e5e33384da1cd7dc8a7fe236ff938e9f075bea9a20560884efcb7fb1c63b'
+sha256sums=('ca86e492328262cc6d89c1b131139edeb6b4e1eeb15b84fba8a172fe09a25f70'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
