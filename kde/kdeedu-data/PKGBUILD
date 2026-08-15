@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kdeedu-data
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='Common data for KDE Edu applications'
 url='https://kde.org/'
@@ -15,7 +15,7 @@ depends=(hicolor-icon-theme)
 makedepends=(extra-cmake-modules
              qt6-base)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('be7e26a14ec91053f407709ab48edffe9c437d374bebf0cadc10d9fd31b29722'
+sha256sums=('e7b7f90aa23ee5b2b5943003a376f96fa75591716cb7d99a22b5ef08020fa519'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
