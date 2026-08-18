@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kget
-pkgver=26.04.2
+pkgver=26.04.3
 pkgrel=1
 pkgdesc='Download Manager'
 url='https://apps.kde.org/kget/'
@@ -46,7 +46,7 @@ groups=(kde-applications
         kde-network)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
 
-sha256sums=('e4643214ddc3c43eada345eeb33418963c9f880903a0410db2320423521be669'
+sha256sums=('590dcb9f40f9f5bb12a67c1b1c690dc29d183c952da2d76aa93f89d8b89c41d8'
             'SKIP')
 
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
