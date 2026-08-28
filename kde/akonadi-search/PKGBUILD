@@ -3,7 +3,7 @@
 # Contributor: Gustavo Alvarez <sl1pkn07@gmail.com>
 
 pkgname=akonadi-search
-pkgver=26.04.3
+pkgver=26.08.0
 pkgrel=1
 pkgdesc='Libraries and daemons to implement searching in Akonadi'
 url='https://kontact.kde.org'
@@ -30,7 +30,7 @@ depends=(akonadi
 makedepends=(corrosion
              extra-cmake-modules)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('86b8a2381f641e96a9de61ca10605effb0be735f1342f4c2205eaf60bf47cc0e'
+sha256sums=('22cad63d16449f2496374edf866a38bd62187006d0835e3cd1df0e6333e4d61a'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
