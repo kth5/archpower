@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kgpg
-pkgver=26.04.3
+pkgver=26.08.0
 pkgrel=1
 pkgdesc='A GnuPG frontend'
 url='https://apps.kde.org/kgpg/'
@@ -36,7 +36,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-utilities)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('ef53918510a4b9d32a5ea524c84cb66212d3f70067bf7217ef4355b081eb9b04'
+sha256sums=('6aa94e872dc629b226a2f618021c2b9e5387023d88bccf36df69a4bcad409bd0'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
