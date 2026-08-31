@@ -1,10 +1,12 @@
-From a47c991dbbfb709134737a54e8bbe7e0b1bce800 Mon Sep 17 00:00:00 2001
+From 8a9291045a810106102d82ea57b138659c616ca9 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
 Date: Fri, 12 Jun 2026 15:23:10 +1000
-Subject: [PATCH 1/3] Add VSX instructions for SKIA
+Subject: [PATCH 1/8] Add PPC64LE VSX instructions for SKIA
 
 Adapted from work done by Raptor Engineering for chromium's vendored
-SKIA
+SKIA. Gated to little-endian: the SSE-derived swizzle and permute
+helpers assume the ppc64le vector-register byte order, so big-endian
+falls back to the portable paths.
 
 Co-authored-by: Timothy Pearson <tpearson@raptorengineering.com>
 ---
@@ -18,23 +20,23 @@ Co-authored-by: Timothy Pearson <tpearson@raptorengineering.com>
  7 files changed, 1160 insertions(+), 2 deletions(-)
 
 diff --git a/gfx/skia/skia/src/base/SkVx.h b/gfx/skia/skia/src/base/SkVx.h
-index f87ca44d4af0..ed80c91fd38e 100644
+index 7dc4d8e24d29..801136ad3ec7 100644
 --- a/gfx/skia/skia/src/base/SkVx.h
 +++ b/gfx/skia/skia/src/base/SkVx.h
-@@ -52,6 +52,8 @@
+@@ -50,6 +50,8 @@
          #include <arm_neon.h>
      #elif defined(__wasm_simd128__)
          #include <wasm_simd128.h>
-+    #elif defined(SK_CPU_PPC) && defined(__VSX__)
++    #elif defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +        #include <altivec.h>
      #elif SK_CPU_LSX_LEVEL >= SK_CPU_LSX_LEVEL_LASX
          #include <lasxintrin.h>
          #include <lsxintrin.h>
-@@ -509,6 +511,14 @@ SINT Vec<N,T> if_then_else(const Vec<N,M<T>>& cond, const Vec<N,T>& t, const Vec
+@@ -507,6 +509,14 @@ SINT Vec<N,T> if_then_else(const Vec<N,M<T>>& cond, const Vec<N,T>& t, const Vec
                                                sk_bit_cast<uint8x16_t>(e)));
      }
  #endif
-+#if SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__)
++#if SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +    if constexpr (N*sizeof(T) == 16) {
 +        return sk_bit_cast<Vec<N,T>>(
 +                vec_sel(sk_bit_cast<__vector unsigned char>(e),
@@ -45,38 +47,38 @@ index f87ca44d4af0..ed80c91fd38e 100644
  #if SKVX_USE_SIMD && SK_CPU_LSX_LEVEL >= SK_CPU_LSX_LEVEL_LASX
      if constexpr (N*sizeof(T) == 32) {
          return sk_bit_cast<Vec<N,T>>(__lasx_xvbitsel_v(sk_bit_cast<__m256i>(e),
-@@ -579,6 +589,11 @@ SINT bool any(const Vec<N,T>& x) {
+@@ -577,6 +587,11 @@ SINT bool any(const Vec<N,T>& x) {
                                                            sk_bit_cast<__m128i>(x)));
          return retv[0] != 0b0000;
      }
 +#endif
-+#if SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__)
++#if SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +    if constexpr (N*sizeof(T) == 16) {
 +        return vec_any_ne(sk_bit_cast<__vector unsigned int>(x), vec_splats(0u));
 +    }
  #endif
      return any(x.lo)
          || any(x.hi);
-@@ -622,6 +637,11 @@ SINT bool all(const Vec<N,T>& x) {
+@@ -620,6 +635,11 @@ SINT bool all(const Vec<N,T>& x) {
                                                            sk_bit_cast<__m128i>(x)));
          return retv[0] == 0b1111;
      }
 +#endif
-+#if SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__)
++#if SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +    if constexpr (N*sizeof(T) == 16) {
 +        return vec_all_ne(sk_bit_cast<__vector unsigned int>(x), vec_splats(0u));
 +    }
  #endif
      return all(x.lo)
          && all(x.hi);
-@@ -647,8 +667,22 @@ SIT  T max(const Vec<1,T>& x) { return x.val; }
+@@ -645,8 +665,22 @@ SIT  T max(const Vec<1,T>& x) { return x.val; }
  SINT T min(const Vec<N,T>& x) { return std::min(min(x.lo), min(x.hi)); }
  SINT T max(const Vec<N,T>& x) { return std::max(max(x.lo), max(x.hi)); }
  
 -SINT Vec<N,T> min(const Vec<N,T>& x, const Vec<N,T>& y) { return naive_if_then_else(y < x, y, x); }
 -SINT Vec<N,T> max(const Vec<N,T>& x, const Vec<N,T>& y) { return naive_if_then_else(x < y, y, x); }
 +SINT Vec<N,T> min(const Vec<N,T>& x, const Vec<N,T>& y) {
-+#if SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__)
++#if SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +    if constexpr (N*sizeof(T) == 16) {
 +        return sk_bit_cast<Vec<N,T>>(vec_min(to_vext(x), to_vext(y)));
 +    }
@@ -84,7 +86,7 @@ index f87ca44d4af0..ed80c91fd38e 100644
 +    return naive_if_then_else(y < x, y, x);
 +}
 +SINT Vec<N,T> max(const Vec<N,T>& x, const Vec<N,T>& y) {
-+#if SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__)
++#if SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +    if constexpr (N*sizeof(T) == 16) {
 +        return sk_bit_cast<Vec<N,T>>(vec_max(to_vext(x), to_vext(y)));
 +    }
@@ -94,11 +96,11 @@ index f87ca44d4af0..ed80c91fd38e 100644
  
  SINTU Vec<N,T> min(const Vec<N,T>& x, U y) { return min(x, Vec<N,T>(y)); }
  SINTU Vec<N,T> max(const Vec<N,T>& x, U y) { return max(x, Vec<N,T>(y)); }
-@@ -960,6 +994,26 @@ SIN Vec<N,uint16_t> mulhi(const Vec<N,uint16_t>& x,
+@@ -958,6 +992,26 @@ SIN Vec<N,uint16_t> mulhi(const Vec<N,uint16_t>& x,
      } else { // N > 8
          return join(mulhi(x.lo, y.lo), mulhi(x.hi, y.hi));
      }
-+#elif SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__)
++#elif SKVX_USE_SIMD && defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +    if constexpr (N == 8) {
 +        // u16*u16 -> u32 even/odd products (vmuleuh/vmulouh), then gather the
 +        // high 16 bits of each back into sequential lanes. Same idiom as the
@@ -122,14 +124,14 @@ index f87ca44d4af0..ed80c91fd38e 100644
      return skvx::cast<uint16_t>(mull(x, y) >> 16);
  #endif
 diff --git a/gfx/skia/skia/src/core/SkBlitRow_D32.cpp b/gfx/skia/skia/src/core/SkBlitRow_D32.cpp
-index bcbf2e66bd46..920d6a9b2366 100644
+index 27f0b4d229c0..3a4939aaae10 100644
 --- a/gfx/skia/skia/src/core/SkBlitRow_D32.cpp
 +++ b/gfx/skia/skia/src/core/SkBlitRow_D32.cpp
 @@ -517,6 +517,104 @@ static void blit_row_s32_opaque(SkPMColor* dst,
          }
      }
  
-+#elif defined(SK_CPU_PPC) && defined(__VSX__)
++#elif defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +    #include <altivec.h>
 +
 +    // dst + (((src - dst) * src_scale) >> 8), splayed into 16-bit lanes; the
@@ -231,14 +233,14 @@ index bcbf2e66bd46..920d6a9b2366 100644
      static void blit_row_s32_blend(SkPMColor* dst, const SkPMColor* src, int count, U8CPU alpha) {
          SkASSERT(alpha <= 255);
 diff --git a/gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp b/gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp
-index a7538027b85d..9669431292b6 100644
+index bfc8a6c218fa..a30038af03f8 100644
 --- a/gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp
 +++ b/gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp
 @@ -480,6 +480,274 @@ static inline SkPMColor blend_lcd16_opaque(int srcR, int srcG, int srcB,
          }
      }
  
-+#elif defined(SK_CPU_PPC) && defined(__VSX__)
++#elif defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +    #include <altivec.h>
 +
 +    // Native VSX/AltiVec port of the SSE2 LCD-subpixel blend block below.
@@ -510,14 +512,14 @@ index a7538027b85d..9669431292b6 100644
      #include <arm_neon.h>
  
 diff --git a/gfx/skia/skia/src/opts/SkBitmapProcState_opts.h b/gfx/skia/skia/src/opts/SkBitmapProcState_opts.h
-index 6d01a2f4458f..87b160ed7a1e 100644
+index 407563eae493..392d59c1c403 100644
 --- a/gfx/skia/skia/src/opts/SkBitmapProcState_opts.h
 +++ b/gfx/skia/skia/src/opts/SkBitmapProcState_opts.h
 @@ -29,6 +29,8 @@
      #include <lasxintrin.h>
  #elif SK_CPU_LSX_LEVEL >= SK_CPU_LSX_LEVEL_LSX
      #include <lsxintrin.h>
-+#elif defined(SK_CPU_PPC) && defined(__VSX__)
++#elif defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +    #include <altivec.h>
  #endif
  
@@ -526,7 +528,7 @@ index 6d01a2f4458f..87b160ed7a1e 100644
          }
      }
  
-+#elif defined(SK_CPU_PPC) && defined(__VSX__)
++#elif defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +
 +    // Helper: scalar uint32_t -> 16-byte vector with x in low 32 bits, zero elsewhere.
 +    // Equivalent of x86's _mm_cvtsi32_si128.
@@ -692,14 +694,14 @@ index 6d01a2f4458f..87b160ed7a1e 100644
      /*not static*/ inline
      void S32_alpha_D32_filter_DX(const SkBitmapProcState& s,
 diff --git a/gfx/skia/skia/src/opts/SkBlitRow_opts.h b/gfx/skia/skia/src/opts/SkBlitRow_opts.h
-index d1de5681a72e..d03908a03a32 100644
+index 54de40498aeb..9090549ed25c 100644
 --- a/gfx/skia/skia/src/opts/SkBlitRow_opts.h
 +++ b/gfx/skia/skia/src/opts/SkBlitRow_opts.h
 @@ -68,6 +68,43 @@
      }
  #endif
  
-+#if defined(SK_CPU_PPC) && defined(__VSX__)
++#if defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +    #include <altivec.h>
 +
 +    // Native VSX/AltiVec port of SkPMSrcOver_SSE2.
@@ -736,14 +738,14 @@ index d1de5681a72e..d03908a03a32 100644
 +    }
 +#endif
 +
- #if SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSE2
+ #if SK_CPU_X64_LEVEL >= SK_CPU_X64_LEVEL_SSE2
      #include <immintrin.h>
  
 @@ -176,6 +213,17 @@ inline void blit_row_s32a_opaque(SkPMColor* dst, const SkPMColor* src, int len,
      }
  #endif
  
-+#if defined(SK_CPU_PPC) && defined(__VSX__)
++#if defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +    while (len >= 4) {
 +        __vector unsigned char vsrc = vec_xl(0, (const unsigned char*)src);
 +        __vector unsigned char vdst = vec_xl(0, (const unsigned char*)dst);
@@ -754,22 +756,22 @@ index d1de5681a72e..d03908a03a32 100644
 +    }
 +#endif
 +
- #if SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSE2
+ #if SK_CPU_X64_LEVEL >= SK_CPU_X64_LEVEL_SSE2
      while (len >= 4) {
          _mm_storeu_si128((__m128i*)dst, SkPMSrcOver_SSE2(_mm_loadu_si128((const __m128i*)src),
 diff --git a/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h b/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h
-index 695b71434f8c..e2af0b94f392 100644
+index 9a0edd9594d7..601c0b5e579c 100644
 --- a/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h
 +++ b/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h
 @@ -87,6 +87,8 @@ using NoCtx = const void*;
      #define SKRP_CPU_SCALAR
  #elif defined(SK_ARM_HAS_NEON)
      #define SKRP_CPU_NEON
-+#elif defined(SK_CPU_PPC) && defined(__VSX__)
++#elif defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +    #define SKRP_CPU_VSX
- #elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SKX
-     #define SKRP_CPU_SKX
- #elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_AVX2
+ #elif SK_CPU_X64_LEVEL >= SK_CPU_X64_LEVEL_ML4
+     #define SKRP_CPU_ML4
+ #elif SK_CPU_X64_LEVEL >= SK_CPU_X64_LEVEL_AVX2
 @@ -109,6 +111,8 @@ using NoCtx = const void*;
      #include <math.h>
  #elif defined(SKRP_CPU_NEON)
@@ -1016,18 +1018,18 @@ index 695b71434f8c..e2af0b94f392 100644
 +        vec_xst((__vector unsigned char)vec_mergel(T2, T3), 0, (unsigned char*)(ptr + 12));
 +    }
 +
- #elif defined(SKRP_CPU_SKX)
+ #elif defined(SKRP_CPU_ML4)
      template <typename T> using V = Vec<16, T>;
      using F   = V<float   >;
 diff --git a/gfx/skia/skia/src/opts/SkSwizzler_opts.inc b/gfx/skia/skia/src/opts/SkSwizzler_opts.inc
-index 671db3f05f61..c578238a9e58 100644
+index e5c506b55e0c..dca01914fbb8 100644
 --- a/gfx/skia/skia/src/opts/SkSwizzler_opts.inc
 +++ b/gfx/skia/skia/src/opts/SkSwizzler_opts.inc
 @@ -84,6 +84,29 @@ SI float reciprocal_alpha(float a) {
      auto q = F4{1.0f} / vA;
      return _mm_and_ps(sk_bit_cast<__m128>(vA != F4{0.0f}), q)[0];
  }
-+#elif defined(SK_CPU_PPC) && defined(__VSX__)
++#elif defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +// -- VSX -- Harden against timing attacks.
 +// vec_splats / vec_div / vec_cmpgt / vec_and each map to a single VSX op on
 +// both GCC and Clang. vec_cmpgt(vA, 0) is exact for the non-negative-alpha
@@ -1057,7 +1059,7 @@ index 671db3f05f61..c578238a9e58 100644
      rgbA_to_BGRA_portable(dst, src, count);
  }
  
-+#elif defined(SK_CPU_PPC) && defined(__VSX__)
++#elif defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +// -- VSX -- Native Power VSX/AltiVec ports of the SSSE3 swizzlers below.
 +// Each _mm_* operation is replaced by the corresponding vec_* sequence per
 +// the GCC ppc_wrappers translation pattern (vec_mergeh/l, vec_perm, and the
@@ -1266,7 +1268,7 @@ index 671db3f05f61..c578238a9e58 100644
          }
          gray_to_RGB1_portable(dst, src, count);
      }
-+#elif defined(SK_CPU_PPC) && defined(__VSX__)
++#elif defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +    void gray_to_RGB1(uint32_t dst[], const uint8_t* src, int count) {
 +        const __vector unsigned char alphas = vec_splats((unsigned char)0xFF);
 +        while (count >= 16) {
@@ -1312,7 +1314,7 @@ index 671db3f05f61..c578238a9e58 100644
 +    void RGB_to_BGR1(uint32_t dst[], const uint8_t* src, int count) {
 +        insert_alpha_should_swaprb(true, dst, src, count);
 +    }
-+#elif defined(SK_CPU_PPC) && defined(__VSX__)
++#elif defined(SK_CPU_PPC) && defined(__VSX__) && defined(SK_CPU_LENDIAN)
 +    static void insert_alpha_should_swaprb(bool kSwapRB,
 +                                           uint32_t dst[], const uint8_t* src, int count) {
 +        // alphaMask = 0xFF000000 per 32-bit lane -> bytes (in LE memory layout) are
@@ -1340,8 +1342,3 @@ index 671db3f05f61..c578238a9e58 100644
      void RGB_to_RGB1(uint32_t dst[], const uint8_t* src, int count) {
          insert_alpha_should_swaprb(false, dst, src, count);
      }
-
-base-commit: a8d530ac13f0ce7e937c047f01f0d36764f5d34e
--- 
-2.52.0
-

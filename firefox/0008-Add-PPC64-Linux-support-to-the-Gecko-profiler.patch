@@ -1,0 +1,304 @@
+From 5dd8c5ab90f4a93bf579784666933bdafc4c6c9c Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Wed, 22 Jul 2026 21:17:32 +1000
+Subject: [PATCH 8/8] Add PPC64 Linux support to the Gecko profiler
+
+Define GP_PLAT_ppc64_linux so the profiler uses the real Linux sampler
+instead of platform-noop.cpp, and capture PC/SP/FP/LR from the signal
+ucontext (NIA, r1, r31, LR). A new UNWINDING_REGS_HAVE_LR register-set
+variant forwards LR to JS::ProfilingFrameIterator, whose PPC64 support
+already landed with the wasm profiling work.
+
+Native stack walking uses a dedicated backchain walker: the PPC64 ELF
+ABIs require every function that allocates a stack frame to store the
+caller's stack pointer at *(sp) and its return address at
+caller_sp + 16, at every optimization level, so the native call stack
+can be recovered without unwind tables or LUL support. The walk is
+bounds- and alignment-checked against the sampled thread's stack and
+stops at JIT frames, which are covered by the JS frame merging instead.
+The walker needs no initialization, so it also serves the fast-init
+path used for backtrace samples.
+
+shared-libraries-linux.cc is enabled for symbolication, and the
+sysfs-based CPU-frequency counter compiles on the no-LUL branch.
+---
+ .../core/platform-linux-android.cpp           |  7 ++
+ mozglue/baseprofiler/core/platform.cpp        |  6 ++
+ mozglue/baseprofiler/moz.build                |  3 +-
+ .../public/ProfilerPlatformMacros.h           |  7 ++
+ .../profiler/core/platform-linux-android.cpp  |  7 ++
+ tools/profiler/core/platform.cpp              | 70 ++++++++++++++++++-
+ tools/profiler/moz.build                      |  6 ++
+ 7 files changed, 103 insertions(+), 3 deletions(-)
+
+diff --git a/mozglue/baseprofiler/core/platform-linux-android.cpp b/mozglue/baseprofiler/core/platform-linux-android.cpp
+index bff7f2f59e1c..7890ba2be0a1 100644
+--- a/mozglue/baseprofiler/core/platform-linux-android.cpp
++++ b/mozglue/baseprofiler/core/platform-linux-android.cpp
+@@ -120,6 +120,13 @@ static void PopulateRegsFromContext(Registers& aRegs, ucontext_t* aContext) {
+   aRegs.mPC = reinterpret_cast<Address>(mcontext.pc);
+   aRegs.mSP = reinterpret_cast<Address>(mcontext.gregs[29]);
+   aRegs.mFP = reinterpret_cast<Address>(mcontext.gregs[30]);
++#elif defined(GP_PLAT_ppc64_linux)
++  // gp_regs[32] is the NIA (next instruction address); the ABI has no
++  // dedicated frame pointer, but the JITs use r31.
++  aRegs.mPC = reinterpret_cast<Address>(mcontext.gp_regs[32]);
++  aRegs.mSP = reinterpret_cast<Address>(mcontext.gp_regs[1]);
++  aRegs.mFP = reinterpret_cast<Address>(mcontext.gp_regs[31]);
++  aRegs.mLR = reinterpret_cast<Address>(mcontext.gp_regs[36]);
+ 
+ #else
+ #  error "bad platform"
+diff --git a/mozglue/baseprofiler/core/platform.cpp b/mozglue/baseprofiler/core/platform.cpp
+index 48e123feaf00..ae57bf9ac37f 100644
+--- a/mozglue/baseprofiler/core/platform.cpp
++++ b/mozglue/baseprofiler/core/platform.cpp
+@@ -1139,6 +1139,9 @@ static const char* const kMainThreadName = "GeckoMain";
+     defined(GP_PLAT_arm64_freebsd) || defined(GP_ARCH_arm64) ||         \
+     defined(__aarch64__)
+ #  define UNWINDING_REGS_HAVE_LR_R11
++#elif defined(GP_PLAT_ppc64_linux) || defined(GP_ARCH_ppc64) || \
++    defined(__powerpc64__)
++#  define UNWINDING_REGS_HAVE_LR
+ #endif
+ 
+ // The registers used for stack unwinding and a few other sampling purposes.
+@@ -1167,6 +1170,8 @@ class Registers {
+ #elif defined(UNWINDING_REGS_HAVE_LR_R11)
+   Address mLR{nullptr};   // ARM link register, or temp for return address.
+   Address mR11{nullptr};  // Temp for frame pointer.
++#elif defined(UNWINDING_REGS_HAVE_LR)
++  Address mLR{nullptr};  // PPC64 link register.
+ #endif
+ 
+ #if defined(GP_OS_linux) || defined(GP_OS_android) || defined(GP_OS_freebsd)
+@@ -1487,6 +1492,7 @@ static void DoPeriodicSample(PSLockRef aLock,
+ #undef UNWINDING_REGS_HAVE_R10_R12
+ #undef UNWINDING_REGS_HAVE_LR_R7
+ #undef UNWINDING_REGS_HAVE_LR_R11
++#undef UNWINDING_REGS_HAVE_LR
+ 
+ // END sampling/unwinding code
+ ////////////////////////////////////////////////////////////////////////
+diff --git a/mozglue/baseprofiler/moz.build b/mozglue/baseprofiler/moz.build
+index bdad42c5bb68..0b9a956dac90 100644
+--- a/mozglue/baseprofiler/moz.build
++++ b/mozglue/baseprofiler/moz.build
+@@ -35,7 +35,8 @@ if not CONFIG["JS_STANDALONE"]:
+         )
+         or (
+             CONFIG["OS_TARGET"] == "Linux"
+-            and CONFIG["TARGET_CPU"] in ("aarch64", "arm", "x86", "x86_64", "mips64")
++            and CONFIG["TARGET_CPU"]
++            in ("aarch64", "arm", "x86", "x86_64", "mips64", "ppc64")
+         )
+         or (
+             CONFIG["OS_TARGET"] == "FreeBSD"
+diff --git a/mozglue/baseprofiler/public/ProfilerPlatformMacros.h b/mozglue/baseprofiler/public/ProfilerPlatformMacros.h
+index 6d5d7e91ef78..1648df9a3c08 100644
+--- a/mozglue/baseprofiler/public/ProfilerPlatformMacros.h
++++ b/mozglue/baseprofiler/public/ProfilerPlatformMacros.h
+@@ -22,6 +22,7 @@
+ #undef GP_PLAT_amd64_linux
+ #undef GP_PLAT_arm_linux
+ #undef GP_PLAT_mips64_linux
++#undef GP_PLAT_ppc64_linux
+ #undef GP_PLAT_amd64_darwin
+ #undef GP_PLAT_arm64_darwin
+ #undef GP_PLAT_x86_windows
+@@ -36,6 +37,7 @@
+ #undef GP_ARCH_arm
+ #undef GP_ARCH_arm64
+ #undef GP_ARCH_mips64
++#undef GP_ARCH_ppc64
+ #undef GP_ARCH_unknown
+ 
+ #undef GP_OS_android
+@@ -93,6 +95,11 @@
+ #  define GP_ARCH_mips64 1
+ #  define GP_OS_linux 1
+ 
++#elif defined(__linux__) && defined(__powerpc64__)
++#  define GP_PLAT_ppc64_linux 1
++#  define GP_ARCH_ppc64 1
++#  define GP_OS_linux 1
++
+ #elif defined(__APPLE__) && defined(__aarch64__)
+ #  define GP_PLAT_arm64_darwin 1
+ #  define GP_ARCH_arm64 1
+diff --git a/tools/profiler/core/platform-linux-android.cpp b/tools/profiler/core/platform-linux-android.cpp
+index b0da2610e4a0..07525f311d53 100644
+--- a/tools/profiler/core/platform-linux-android.cpp
++++ b/tools/profiler/core/platform-linux-android.cpp
+@@ -112,6 +112,13 @@ static void PopulateRegsFromContext(Registers& aRegs, ucontext_t* aContext) {
+   aRegs.mPC = reinterpret_cast<Address>(mcontext.pc);
+   aRegs.mSP = reinterpret_cast<Address>(mcontext.gregs[29]);
+   aRegs.mFP = reinterpret_cast<Address>(mcontext.gregs[30]);
++#elif defined(GP_PLAT_ppc64_linux)
++  // gp_regs[32] is the NIA (next instruction address); the ABI has no
++  // dedicated frame pointer, but the JITs use r31.
++  aRegs.mPC = reinterpret_cast<Address>(mcontext.gp_regs[32]);
++  aRegs.mSP = reinterpret_cast<Address>(mcontext.gp_regs[1]);
++  aRegs.mFP = reinterpret_cast<Address>(mcontext.gp_regs[31]);
++  aRegs.mLR = reinterpret_cast<Address>(mcontext.gp_regs[36]);
+ 
+ #else
+ #  error "bad platform"
+diff --git a/tools/profiler/core/platform.cpp b/tools/profiler/core/platform.cpp
+index 54288fed2452..bdcfbfe1be17 100644
+--- a/tools/profiler/core/platform.cpp
++++ b/tools/profiler/core/platform.cpp
+@@ -243,11 +243,20 @@ BOOL WINAPI GetThreadInformation(
+ #  endif
+ #endif
+ 
++// PPC64 Linux has no LUL support, but the ELF ABIs mandate a stack backchain
++// that is maintained at every optimization level, so a dedicated backchain
++// walker provides native stacks.
++#if defined(GP_PLAT_ppc64_linux)
++#  define HAVE_NATIVE_UNWIND
++#  define USE_PPC64_BACKCHAIN_STACK_WALK
++#endif
++
+ // We can only stackwalk without expensive initialization on platforms which
+ // support FramePointerStackWalk or MozStackWalk. LUL Stackwalking requires
+ // initializing LUL, and EHABIStackWalk requires initializing EHABI, both of
+ // which can be expensive.
+-#if defined(USE_FRAME_POINTER_STACK_WALK) || defined(USE_MOZ_STACK_WALK)
++#if defined(USE_FRAME_POINTER_STACK_WALK) || defined(USE_MOZ_STACK_WALK) || \
++    defined(USE_PPC64_BACKCHAIN_STACK_WALK)
+ #  define HAVE_FASTINIT_NATIVE_UNWIND
+ #endif
+ 
+@@ -2120,6 +2129,9 @@ static const char* const kMainThreadName = "GeckoMain";
+     defined(GP_PLAT_arm64_freebsd) || defined(GP_ARCH_arm64) ||         \
+     defined(__aarch64__)
+ #  define UNWINDING_REGS_HAVE_LR_R11
++#elif defined(GP_PLAT_ppc64_linux) || defined(GP_ARCH_ppc64) || \
++    defined(__powerpc64__)
++#  define UNWINDING_REGS_HAVE_LR
+ #endif
+ 
+ // The registers used for stack unwinding and a few other sampling purposes.
+@@ -2148,6 +2160,8 @@ class Registers {
+ #elif defined(UNWINDING_REGS_HAVE_LR_R11)
+   Address mLR{nullptr};   // ARM link register, or temp for return address.
+   Address mR11{nullptr};  // Temp for frame pointer.
++#elif defined(UNWINDING_REGS_HAVE_LR)
++  Address mLR{nullptr};  // PPC64 link register.
+ #endif
+ 
+ #if defined(GP_OS_linux) || defined(GP_OS_android) || defined(GP_OS_freebsd)
+@@ -2295,6 +2309,8 @@ static uint32_t ExtractJsFrames(
+ #elif defined(UNWINDING_REGS_HAVE_LR_R11)
+       registerState.lr = aRegs.mLR;
+       registerState.tempFP = aRegs.mR11;
++#elif defined(UNWINDING_REGS_HAVE_LR)
++      registerState.lr = aRegs.mLR;
+ #endif
+ 
+       // Non-periodic sampling passes Nothing() as the buffer write position to
+@@ -2560,7 +2576,8 @@ static void MergeStacks(
+   }
+ }
+ 
+-#if defined(USE_FRAME_POINTER_STACK_WALK) || defined(USE_MOZ_STACK_WALK)
++#if defined(USE_FRAME_POINTER_STACK_WALK) || defined(USE_MOZ_STACK_WALK) || \
++    defined(USE_PPC64_BACKCHAIN_STACK_WALK)
+ static void StackWalkCallback(uint32_t aFrameNumber, void* aPC, void* aSP,
+                               void* aClosure) {
+   NativeStack* nativeStack = static_cast<NativeStack*>(aClosure);
+@@ -2649,6 +2666,48 @@ static void DoFramePointerBacktrace(
+ }
+ #endif
+ 
++#if defined(USE_PPC64_BACKCHAIN_STACK_WALK)
++static void DoPPC64BackchainBacktrace(
++    const ThreadRegistration::UnlockedReaderAndAtomicRWOnThread& aThreadData,
++    const Registers& aRegs, NativeStack& aNativeStack,
++    StackWalkControl* aStackWalkControlIfSupported) {
++  // WARNING: this function runs within the profiler's "critical section".
++  // WARNING: this function might be called while the profiler is inactive, and
++  //          cannot rely on ActivePS.
++
++  // The PPC64 ELF ABIs require every function that allocates a stack frame to
++  // store the caller's stack pointer at *(sp) (the backchain) and its return
++  // address at caller_sp + 16, at every optimization level. Walking the
++  // backchain therefore recovers the native call stack without unwind tables.
++  // JIT frames do not maintain the chain and fail the validation checks below;
++  // JS stacks for such samples come from the JS frame merging instead.
++  StackWalkCallback(/* frameNum */ 0, aRegs.mPC, aRegs.mSP, &aNativeStack);
++
++  const uintptr_t stackEnd = uintptr_t(aThreadData.StackTop());
++  uintptr_t sp = uintptr_t(aRegs.mSP);
++  if (!sp || (sp & 15) || sp + 32 > stackEnd) {
++    return;
++  }
++  // Skip the interrupted function's possibly incomplete frame; its PC was
++  // recorded above.
++  uintptr_t frame = *reinterpret_cast<uintptr_t*>(sp);
++  while (aNativeStack.mCount < MAX_NATIVE_FRAMES) {
++    if (!frame || (frame & 15) || frame <= sp || frame + 32 > stackEnd) {
++      break;
++    }
++    uintptr_t ra = *reinterpret_cast<uintptr_t*>(frame + 16);
++    uintptr_t next = *reinterpret_cast<uintptr_t*>(frame);
++    if (!ra) {
++      break;
++    }
++    StackWalkCallback(aNativeStack.mCount, reinterpret_cast<void*>(ra),
++                      reinterpret_cast<void*>(frame), &aNativeStack);
++    sp = frame;
++    frame = next;
++  }
++}
++#endif
++
+ #if defined(USE_MOZ_STACK_WALK)
+ static void DoMozStackWalkBacktrace(
+     const ThreadRegistration::UnlockedReaderAndAtomicRWOnThread& aThreadData,
+@@ -2965,6 +3024,9 @@ static void DoNativeBacktrace(
+ #  elif defined(USE_MOZ_STACK_WALK)
+   DoMozStackWalkBacktrace(aThreadData, aRegs, aNativeStack,
+                           aStackWalkControlIfSupported);
++#  elif defined(USE_PPC64_BACKCHAIN_STACK_WALK)
++  DoPPC64BackchainBacktrace(aThreadData, aRegs, aNativeStack,
++                            aStackWalkControlIfSupported);
+ #  else
+ #    error "Invalid configuration"
+ #  endif
+@@ -3152,6 +3214,7 @@ static inline void DoPeriodicSample(
+ #undef UNWINDING_REGS_HAVE_R10_R12
+ #undef UNWINDING_REGS_HAVE_LR_R7
+ #undef UNWINDING_REGS_HAVE_LR_R11
++#undef UNWINDING_REGS_HAVE_LR
+ 
+ // END sampling/unwinding code
+ ////////////////////////////////////////////////////////////////////////
+@@ -8336,6 +8399,9 @@ static void profiler_suspend_and_sample_thread(
+ #  elif defined(USE_MOZ_STACK_WALK)
+       DoMozStackWalkBacktrace(aThreadData, aRegs, nativeStack,
+                               stackWalkControlIfSupported);
++#  elif defined(USE_PPC64_BACKCHAIN_STACK_WALK)
++      DoPPC64BackchainBacktrace(aThreadData, aRegs, nativeStack,
++                                stackWalkControlIfSupported);
+ #  else
+ #    error "Invalid configuration"
+ #  endif
+diff --git a/tools/profiler/moz.build b/tools/profiler/moz.build
+index 7364bf5e22e5..1883371d11c5 100644
+--- a/tools/profiler/moz.build
++++ b/tools/profiler/moz.build
+@@ -179,6 +179,12 @@ else:
+     UNIFIED_SOURCES += [
+         "gecko/nsProfiler.cpp",
+     ]
++    # ppc64 has a working sampler (see ProfilerPlatformMacros.h) but no LUL
++    # support yet, so it does not take the full Linux branch above.
++    if CONFIG["OS_TARGET"] == "Linux" and CONFIG["TARGET_CPU"] == "ppc64":
++        UNIFIED_SOURCES += [
++            "core/ProfilerCPUFreq-linux-android.cpp",
++        ]
+ 
+ LOCAL_INCLUDES += [
+     "/caps",

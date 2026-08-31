@@ -1,14 +1,17 @@
-From b0c5b4968444b9d340b6330c6044d42dd6fcb01e Mon Sep 17 00:00:00 2001
+From d908c45059e9efcda121eb794a546fb01a519bd6 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
 Date: Fri, 12 Jun 2026 15:30:13 +1000
-Subject: [PATCH] Add VSX instructions for libwebp
+Subject: [PATCH 2/8] Add PPC64LE VSX instructions for libwebp
+
+Gated to little-endian: the VSX kernels assume the ppc64le vector-register
+byte order, so big-endian falls back to the portable C paths.
 
 Assisted-by: Lance Albertson <lance@osuosl.org>
 Assisted-by: Thushan Fernando <thushan@thushanfernando.com>
 ---
  media/libwebp/src/dsp/alpha_processing.c     |   6 +
  media/libwebp/src/dsp/alpha_processing_vsx.c | 246 +++++++
- media/libwebp/src/dsp/cpu.h                  |  14 +-
+ media/libwebp/src/dsp/cpu.h                  |  18 +-
  media/libwebp/src/dsp/dec.c                  |   6 +
  media/libwebp/src/dsp/dec_vsx.c              | 737 +++++++++++++++++++
  media/libwebp/src/dsp/filters.c              |   6 +
@@ -24,7 +27,7 @@ Assisted-by: Thushan Fernando <thushan@thushanfernando.com>
  media/libwebp/src/dsp/yuv.h                  |  21 +
  media/libwebp/src/dsp/yuv_vsx.c              | 206 ++++++
  media/libwebp/src/moz/cpu.cpp                |   4 +
- 18 files changed, 2255 insertions(+), 1 deletion(-)
+ 18 files changed, 2259 insertions(+), 1 deletion(-)
  create mode 100644 media/libwebp/src/dsp/alpha_processing_vsx.c
  create mode 100644 media/libwebp/src/dsp/dec_vsx.c
  create mode 100644 media/libwebp/src/dsp/filters_vsx.c
@@ -310,17 +313,21 @@ index 000000000000..2aad1cd8b648
 +
 +#endif  // WEBP_USE_VSX
 diff --git a/media/libwebp/src/dsp/cpu.h b/media/libwebp/src/dsp/cpu.h
-index 780ac8d4e40e..532f0637cbdf 100644
+index 780ac8d4e40e..05357aff804d 100644
 --- a/media/libwebp/src/dsp/cpu.h
 +++ b/media/libwebp/src/dsp/cpu.h
-@@ -154,6 +154,17 @@
+@@ -154,6 +154,21 @@
  #define WEBP_USE_MSA
  #endif
  
 +//------------------------------------------------------------------------------
 +// PPC64 / Power VSX (ISA 2.07 / POWER8 baseline).
++//
++// Little-endian only: the VSX kernels assume the ppc64le vector-register byte
++// order, so big-endian falls back to the portable C paths.
 +
-+#if defined(__powerpc64__) && defined(__VSX__)
++#if defined(__powerpc64__) && defined(__VSX__) && \
++    defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
 +#define WEBP_USE_VSX
 +#endif
 +
@@ -331,7 +338,7 @@ index 780ac8d4e40e..532f0637cbdf 100644
  //------------------------------------------------------------------------------
  
  #ifndef WEBP_DSP_OMIT_C_CODE
-@@ -308,7 +319,8 @@ typedef enum {
+@@ -308,7 +323,8 @@ typedef enum {
    kNEON,
    kMIPS32,
    kMIPSdspR2,
@@ -2522,6 +2529,3 @@ index c6633170c923..82986d2f631e 100644
  #endif
      default:
        return 0;
--- 
-2.52.0
-

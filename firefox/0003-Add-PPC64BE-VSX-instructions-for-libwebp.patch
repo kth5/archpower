@@ -1,0 +1,1818 @@
+From caa5be9340b0f9afa9beb55cfd747f8c43fceff7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Sun, 5 Jul 2026 10:54:17 +1000
+Subject: [PATCH 3/8] Add PPC64BE VSX instructions for libwebp
+
+Assisted-by: Lance Albertson <lance@osuosl.org>
+Assisted-by: Thushan Fernando <thushan@thushanfernando.com>
+Assisted-by: James Zern <jzern@google.com>
+---
+ media/libwebp/src/dsp/alpha_processing_vsx.c |  58 ++-
+ media/libwebp/src/dsp/cpu.h                  |  10 +-
+ media/libwebp/src/dsp/dec_vsx.c              | 397 ++++++++++++-------
+ media/libwebp/src/dsp/filters_vsx.c          |  42 +-
+ media/libwebp/src/dsp/lossless_vsx.c         |  93 +++--
+ media/libwebp/src/dsp/moz.build              |   2 +-
+ media/libwebp/src/dsp/rescaler_vsx.c         |  23 +-
+ media/libwebp/src/dsp/upsampling_vsx.c       | 149 +++----
+ media/libwebp/src/dsp/yuv.h                  |  16 +
+ media/libwebp/src/dsp/yuv_vsx.c              | 258 ++++++++++--
+ 10 files changed, 735 insertions(+), 313 deletions(-)
+
+diff --git a/media/libwebp/src/dsp/alpha_processing_vsx.c b/media/libwebp/src/dsp/alpha_processing_vsx.c
+index 2aad1cd8b648..7e6c7cc8a05c 100644
+--- a/media/libwebp/src/dsp/alpha_processing_vsx.c
++++ b/media/libwebp/src/dsp/alpha_processing_vsx.c
+@@ -1,4 +1,4 @@
+-// Copyright 2014 Google Inc. All Rights Reserved.
++// Copyright 2026 Google Inc. All Rights Reserved.
+ //
+ // Use of this source code is governed by a BSD-style license
+ // that can be found in the COPYING file in the root of the source
+@@ -7,7 +7,9 @@
+ // be found in the AUTHORS file in the root of the source tree.
+ // -----------------------------------------------------------------------------
+ //
+-// VSX (PowerPC) version of alpha processing functions.
++// VSX (PowerPC64) version of alpha processing functions.
++//
++// Authors: Trung Lê (8@tle.id.au)
+ 
+ #include "src/dsp/dsp.h"
+ 
+@@ -25,9 +27,22 @@ typedef __vector signed short i16x8;
+ typedef __vector unsigned int u32x4;
+ typedef __vector signed int i32x4;
+ 
++// Widening merge that keeps the little-endian lane order on both endiannesses by
++// swapping operands on big-endian (see dec_vsx.c).
++#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++#define WMERGEH(a, b) vec_mergeh((b), (a))
++#define WMERGEL(a, b) vec_mergel((b), (a))
++#else
++#define WMERGEH(a, b) vec_mergeh((a), (b))
++#define WMERGEL(a, b) vec_mergel((a), (b))
++#endif
++
+ //------------------------------------------------------------------------------
+ // Alpha dispatch / extraction.
+ 
++// Writes the alpha byte into a fixed pixel byte position, which differs by
++// endianness; kept little-endian only and left to the scalar reference on BE.
++#if (__BYTE_ORDER__ != __ORDER_BIG_ENDIAN__)
+ static int DispatchAlpha_VSX(const uint8_t* WEBP_RESTRICT alpha,
+                              int alpha_stride, int width, int height,
+                              uint8_t* WEBP_RESTRICT dst, int dst_stride) {
+@@ -73,6 +88,7 @@ static int DispatchAlpha_VSX(const uint8_t* WEBP_RESTRICT alpha,
+   }
+   return (alpha_and != 0xff);
+ }
++#endif  // !__ORDER_BIG_ENDIAN__
+ 
+ static void DispatchAlphaToGreen_VSX(const uint8_t* WEBP_RESTRICT alpha,
+                                      int alpha_stride, int width, int height,
+@@ -81,17 +97,19 @@ static void DispatchAlphaToGreen_VSX(const uint8_t* WEBP_RESTRICT alpha,
+   int i, j;
+   const u8x16 zero = vec_splats((unsigned char)0);
+   const u16x8 z16 = vec_splats((unsigned short)0);
++  const u32x4 sh8 = vec_splats((unsigned int)8);
+   const int limit = width & ~15;
+   for (j = 0; j < height; ++j) {
+     for (i = 0; i < limit; i += 16) {
+       const u8x16 a0 = vec_xl(0, (unsigned char*)&alpha[i]);
+-      // Place each alpha byte into the green slot (<< 8) of a 32-bit lane.
+-      const u16x8 a1_lo = (u16x8)vec_mergeh(zero, a0);  // note the 'zero' first
+-      const u16x8 a1_hi = (u16x8)vec_mergel(zero, a0);
+-      const u32x4 g0 = (u32x4)vec_mergeh(a1_lo, z16);
+-      const u32x4 g1 = (u32x4)vec_mergel(a1_lo, z16);
+-      const u32x4 g2 = (u32x4)vec_mergeh(a1_hi, z16);
+-      const u32x4 g3 = (u32x4)vec_mergel(a1_hi, z16);
++      // Build the 32-bit value (alpha << 8) per lane, then store: zero-extend
++      // to the low lane (endian-neutral value) and shift into the green slot.
++      const u16x8 a1_lo = (u16x8)WMERGEH(a0, zero);
++      const u16x8 a1_hi = (u16x8)WMERGEL(a0, zero);
++      const u32x4 g0 = vec_sl((u32x4)WMERGEH(a1_lo, z16), sh8);
++      const u32x4 g1 = vec_sl((u32x4)WMERGEL(a1_lo, z16), sh8);
++      const u32x4 g2 = vec_sl((u32x4)WMERGEH(a1_hi, z16), sh8);
++      const u32x4 g3 = vec_sl((u32x4)WMERGEL(a1_hi, z16), sh8);
+       vec_xst(g0, 0, &dst[i + 0]);
+       vec_xst(g1, 0, &dst[i + 4]);
+       vec_xst(g2, 0, &dst[i + 8]);
+@@ -109,14 +127,23 @@ static int ExtractAlpha_VSX(const uint8_t* WEBP_RESTRICT argb, int argb_stride,
+   uint32_t alpha_and = 0xff;
+   int i, j, k;
+   const u32x4 a_mask = vec_splats((uint32_t)0xff);  // keeps the low byte
++  // The extracted byte lives at pixel byte offset 0, i.e. the value's low byte
++  // on LE but its high byte on BE; shift it down first so the mask picks it.
++#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++  const u32x4 a_shift = vec_splats((unsigned int)24);
++#else
++  const u32x4 a_shift = vec_splats((unsigned int)0);
++#endif
+   u8x16 all_and = vec_splats((unsigned char)0xff);
+   const int limit = width & ~7;
+ 
+   for (j = 0; j < height; ++j) {
+     const uint32_t* src = (const uint32_t*)argb;
+     for (i = 0; i < limit; i += 8) {
+-      const u32x4 a0 = vec_and(vec_xl(0, (uint32_t*)(src + 0)), a_mask);
+-      const u32x4 a1 = vec_and(vec_xl(0, (uint32_t*)(src + 4)), a_mask);
++      const u32x4 a0 =
++          vec_and(vec_sr(vec_xl(0, (uint32_t*)(src + 0)), a_shift), a_mask);
++      const u32x4 a1 =
++          vec_and(vec_sr(vec_xl(0, (uint32_t*)(src + 4)), a_shift), a_mask);
+       const i16x8 c0 = vec_packs((i32x4)a0, (i32x4)a1);
+       const u8x16 d0 = vec_packsu(c0, c0);  // 8 alpha bytes in the low half
+       memcpy(&alpha[i], &d0, 8);
+@@ -164,6 +191,10 @@ static void ExtractGreen_VSX(const uint32_t* WEBP_RESTRICT argb,
+ //------------------------------------------------------------------------------
+ // Premultiply.
+ 
++// The premultiply kernel spreads the alpha byte across the r/g/b channels via
++// fixed byte-position permute controls; kept little-endian only, with the
++// scalar reference used on big-endian.
++#if (__BYTE_ORDER__ != __ORDER_BIG_ENDIAN__)
+ #define MULTIPLIER(a) ((a) * 32897U)
+ #define PREMULTIPLY(x, m) (((x) * (m)) >> 23)
+ 
+@@ -226,14 +257,19 @@ static void ApplyAlphaMultiply_VSX(uint8_t* rgba, int alpha_first, int w, int h,
+ 
+ #undef MULTIPLIER
+ #undef PREMULTIPLY
++#endif  // !__ORDER_BIG_ENDIAN__
+ 
+ //------------------------------------------------------------------------------
+ 
+ extern void WebPInitAlphaProcessingVSX(void);
+ 
+ WEBP_TSAN_IGNORE_FUNCTION void WebPInitAlphaProcessingVSX(void) {
++  // ApplyAlphaMultiply and DispatchAlpha depend on little-endian pixel byte
++  // order; leave them on the scalar reference for big-endian.
++#if (__BYTE_ORDER__ != __ORDER_BIG_ENDIAN__)
+   WebPApplyAlphaMultiply = ApplyAlphaMultiply_VSX;
+   WebPDispatchAlpha = DispatchAlpha_VSX;
++#endif
+   WebPDispatchAlphaToGreen = DispatchAlphaToGreen_VSX;
+   WebPExtractAlpha = ExtractAlpha_VSX;
+   WebPExtractGreen = ExtractGreen_VSX;
+diff --git a/media/libwebp/src/dsp/cpu.h b/media/libwebp/src/dsp/cpu.h
+index 05357aff804d..9889d054042e 100644
+--- a/media/libwebp/src/dsp/cpu.h
++++ b/media/libwebp/src/dsp/cpu.h
+@@ -155,13 +155,11 @@
+ #endif
+ 
+ //------------------------------------------------------------------------------
+-// PPC64 / Power VSX (ISA 2.07 / POWER8 baseline).
+-//
+-// Little-endian only: the VSX kernels assume the ppc64le vector-register byte
+-// order, so big-endian falls back to the portable C paths.
++// PPC64 / Power VSX (ISA 2.07 / POWER8 baseline). Works on both endians: the
++// VSX kernels keep the little-endian vector lane order on big-endian via the
++// WMERGEH/WMERGEL widening-merge wrappers.
+ 
+-#if defined(__powerpc64__) && defined(__VSX__) && \
+-    defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
++#if defined(__powerpc64__) && defined(__VSX__)
+ #define WEBP_USE_VSX
+ #endif
+ 
+diff --git a/media/libwebp/src/dsp/dec_vsx.c b/media/libwebp/src/dsp/dec_vsx.c
+index e0c1cbc3b71b..0b22340786fa 100644
+--- a/media/libwebp/src/dsp/dec_vsx.c
++++ b/media/libwebp/src/dsp/dec_vsx.c
+@@ -1,4 +1,4 @@
+-// Copyright 2011 Google Inc. All Rights Reserved.
++// Copyright 2026 Google Inc. All Rights Reserved.
+ //
+ // Use of this source code is governed by a BSD-style license
+ // that can be found in the COPYING file in the root of the source
+@@ -7,7 +7,9 @@
+ // be found in the AUTHORS file in the root of the source tree.
+ // -----------------------------------------------------------------------------
+ //
+-// VSX (PowerPC) version of decoding functions.
++// VSX (PowerPC64) version of decoding functions.
++//
++// Authors: Trung Lê (8@tle.id.au)
+ 
+ #include "src/dsp/dsp.h"
+ 
+@@ -16,14 +18,27 @@
+ #include <altivec.h>
+ #include <string.h>
+ 
+-typedef __vector signed short     i16x8;
+-typedef __vector unsigned short   u16x8;
+-typedef __vector signed int       i32x4;
+-typedef __vector unsigned int     u32x4;
+-typedef __vector unsigned char    u8x16;
+-typedef __vector signed char      i8x16;
++typedef __vector signed short i16x8;
++typedef __vector unsigned short u16x8;
++typedef __vector signed int i32x4;
++typedef __vector unsigned int u32x4;
++typedef __vector unsigned char u8x16;
++typedef __vector signed char i8x16;
+ typedef __vector signed long long i64x2;
+ 
++// PPC64 runs in both endiannesses. GCC's vec_merge*/vec_perm/vec_mule are
++// element-array-consistent across endianness, but a *widening* merge that
++// reinterprets adjacent narrow lanes as a wider type lands them in the opposite
++// half on big-endian. WMERGEH/WMERGEL keep the little-endian lane order on both
++// by swapping the operands on big-endian.
++#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++#define WMERGEH(a, b) vec_mergeh((b), (a))
++#define WMERGEL(a, b) vec_mergel((b), (a))
++#else
++#define WMERGEH(a, b) vec_mergeh((a), (b))
++#define WMERGEL(a, b) vec_mergel((a), (b))
++#endif
++
+ // Signed multiply-high of packed 16-bit lanes (POWER8 has no vmulhsh).
+ static WEBP_INLINE i16x8 MulHi16_S(i16x8 a, i16x8 b) {
+   const u32x4 sh = vec_splats((unsigned int)16);
+@@ -61,7 +76,7 @@ static WEBP_INLINE i16x8 Load4Coeffs(const int16_t* WEBP_RESTRICT p) {
+ static WEBP_INLINE i16x8 LoadDst(const uint8_t* WEBP_RESTRICT p, int n) {
+   unsigned char tmp[16] = {0};
+   memcpy(tmp, p, n);
+-  return (i16x8)vec_mergeh(vec_xl(0, tmp), vec_splats((unsigned char)0));
++  return (i16x8)WMERGEH(vec_xl(0, tmp), vec_splats((unsigned char)0));
+ }
+ 
+ static void Transform_VSX(const int16_t* WEBP_RESTRICT in,
+@@ -94,10 +109,10 @@ static void Transform_VSX(const int16_t* WEBP_RESTRICT in,
+     const i16x8 dc = vec_add(T0, vec_splats((short)4));
+     const i16x8 a = vec_add(dc, T2);
+     const i16x8 b = vec_sub(dc, T2);
+-    const i16x8 c = vec_add(vec_sub(T1, T3),
+-                            vec_sub(MulHi16_S(T1, k2), MulHi16_S(T3, k1)));
+-    const i16x8 d = vec_add(vec_add(T1, T3),
+-                            vec_add(MulHi16_S(T1, k1), MulHi16_S(T3, k2)));
++    const i16x8 c =
++        vec_add(vec_sub(T1, T3), vec_sub(MulHi16_S(T1, k2), MulHi16_S(T3, k1)));
++    const i16x8 d =
++        vec_add(vec_add(T1, T3), vec_add(MulHi16_S(T1, k1), MulHi16_S(T3, k2)));
+     const i16x8 s0 = vec_sra(vec_add(a, d), three);
+     const i16x8 s1 = vec_sra(vec_add(b, c), three);
+     const i16x8 s2 = vec_sra(vec_sub(b, c), three);
+@@ -115,25 +130,29 @@ static void Transform_VSX(const int16_t* WEBP_RESTRICT in,
+     const u8x16 r2 = vec_packsu(vec_add(d2, T2), vec_add(d2, T2));
+     const u8x16 r3 = vec_packsu(vec_add(d3, T3), vec_add(d3, T3));
+     unsigned char b0[16], b1[16], b2[16], b3[16];
+-    memcpy(b0, &r0, 16); memcpy(b1, &r1, 16);
+-    memcpy(b2, &r2, 16); memcpy(b3, &r3, 16);
+-    memcpy(dst + 0 * BPS, b0, n); memcpy(dst + 1 * BPS, b1, n);
+-    memcpy(dst + 2 * BPS, b2, n); memcpy(dst + 3 * BPS, b3, n);
++    memcpy(b0, &r0, 16);
++    memcpy(b1, &r1, 16);
++    memcpy(b2, &r2, 16);
++    memcpy(b3, &r3, 16);
++    memcpy(dst + 0 * BPS, b0, n);
++    memcpy(dst + 1 * BPS, b1, n);
++    memcpy(dst + 2 * BPS, b2, n);
++    memcpy(dst + 3 * BPS, b3, n);
+   }
+ }
+ 
+ //------------------------------------------------------------------------------
+ // Simple in-loop edge filtering.
+ 
+-#define ABSU(p, q) vec_or(vec_subs((u8x16)(q), (u8x16)(p)), \
+-                          vec_subs((u8x16)(p), (u8x16)(q)))
++#define ABSU(p, q) \
++  vec_or(vec_subs((u8x16)(q), (u8x16)(p)), vec_subs((u8x16)(p), (u8x16)(q)))
+ 
+ // Per-byte signed arithmetic >>3, packed with saturation.
+ static WEBP_INLINE i8x16 SignedShift3(i8x16 x) {
+   const u8x16 z = vec_splats((unsigned char)0);
+   const u16x8 sh = vec_splats((unsigned short)(3 + 8));
+-  const i16x8 lo = vec_sra((i16x8)vec_mergeh(z, (u8x16)x), sh);
+-  const i16x8 hi = vec_sra((i16x8)vec_mergel(z, (u8x16)x), sh);
++  const i16x8 lo = vec_sra((i16x8)WMERGEH(z, (u8x16)x), sh);
++  const i16x8 hi = vec_sra((i16x8)WMERGEL(z, (u8x16)x), sh);
+   return (i8x16)vec_packs(lo, hi);
+ }
+ 
+@@ -157,8 +176,7 @@ static WEBP_INLINE void DoFilter2_VSX(u8x16* WEBP_RESTRICT p1,
+ 
+   const i8x16 d0 = vec_subs(Q0, P0);
+   const i8x16 s1 = vec_adds(vec_subs(p1s, q1s), d0);
+-  i8x16 a = vec_adds(d0, vec_adds(d0, s1));
+-  a = vec_and(a, (i8x16)mask);
++  const i8x16 a = vec_and(vec_adds(d0, vec_adds(d0, s1)), (i8x16)mask);
+   const i8x16 v3 = SignedShift3(vec_adds(a, vec_splats((signed char)3)));
+   const i8x16 v4 = SignedShift3(vec_adds(a, vec_splats((signed char)4)));
+   Q0 = vec_subs(Q0, v4);
+@@ -187,19 +205,26 @@ static void SimpleVFilter16i_VSX(uint8_t* p, int stride, int thresh) {
+ 
+ // Transpose four columns out of / into 16 rows for horizontal-edge filtering.
+ static WEBP_INLINE void Load8x4(const uint8_t* WEBP_RESTRICT b, int s,
+-                                u8x16* WEBP_RESTRICT p, u8x16* WEBP_RESTRICT q) {
++                                u8x16* WEBP_RESTRICT p,
++                                u8x16* WEBP_RESTRICT q) {
+   uint32_t a0[4], a1[4];
+-  memcpy(&a0[0], b + 0 * s, 4); memcpy(&a0[1], b + 4 * s, 4);
+-  memcpy(&a0[2], b + 2 * s, 4); memcpy(&a0[3], b + 6 * s, 4);
+-  memcpy(&a1[0], b + 1 * s, 4); memcpy(&a1[1], b + 5 * s, 4);
+-  memcpy(&a1[2], b + 3 * s, 4); memcpy(&a1[3], b + 7 * s, 4);
+-  const u8x16 A0 = vec_xl(0, (unsigned char*)a0);
+-  const u8x16 A1 = vec_xl(0, (unsigned char*)a1);
+-  const u8x16 B0 = vec_mergeh(A0, A1), B1 = vec_mergel(A0, A1);
+-  const u16x8 C0 = vec_mergeh((u16x8)B0, (u16x8)B1);
+-  const u16x8 C1 = vec_mergel((u16x8)B0, (u16x8)B1);
+-  *p = (u8x16)vec_mergeh((u32x4)C0, (u32x4)C1);
+-  *q = (u8x16)vec_mergel((u32x4)C0, (u32x4)C1);
++  memcpy(&a0[0], b + 0 * s, 4);
++  memcpy(&a0[1], b + 4 * s, 4);
++  memcpy(&a0[2], b + 2 * s, 4);
++  memcpy(&a0[3], b + 6 * s, 4);
++  memcpy(&a1[0], b + 1 * s, 4);
++  memcpy(&a1[1], b + 5 * s, 4);
++  memcpy(&a1[2], b + 3 * s, 4);
++  memcpy(&a1[3], b + 7 * s, 4);
++  {
++    const u8x16 A0 = vec_xl(0, (unsigned char*)a0);
++    const u8x16 A1 = vec_xl(0, (unsigned char*)a1);
++    const u8x16 B0 = vec_mergeh(A0, A1), B1 = vec_mergel(A0, A1);
++    const u16x8 C0 = vec_mergeh((u16x8)B0, (u16x8)B1);
++    const u16x8 C1 = vec_mergel((u16x8)B0, (u16x8)B1);
++    *p = (u8x16)vec_mergeh((u32x4)C0, (u32x4)C1);
++    *q = (u8x16)vec_mergel((u32x4)C0, (u32x4)C1);
++  }
+ }
+ 
+ static WEBP_INLINE void Load16x4(const uint8_t* WEBP_RESTRICT r0,
+@@ -207,11 +232,13 @@ static WEBP_INLINE void Load16x4(const uint8_t* WEBP_RESTRICT r0,
+                                  u8x16* p1, u8x16* p0, u8x16* q0, u8x16* q1) {
+   Load8x4(r0, s, p1, q0);
+   Load8x4(r8, s, p0, q1);
+-  const u8x16 t1 = *p1, t2 = *q0;
+-  *p1 = (u8x16)vec_mergeh((i64x2)t1, (i64x2)*p0);
+-  *p0 = (u8x16)vec_mergel((i64x2)t1, (i64x2)*p0);
+-  *q0 = (u8x16)vec_mergeh((i64x2)t2, (i64x2)*q1);
+-  *q1 = (u8x16)vec_mergel((i64x2)t2, (i64x2)*q1);
++  {
++    const u8x16 t1 = *p1, t2 = *q0;
++    *p1 = (u8x16)vec_mergeh((i64x2)t1, (i64x2)*p0);
++    *p0 = (u8x16)vec_mergel((i64x2)t1, (i64x2)*p0);
++    *q0 = (u8x16)vec_mergeh((i64x2)t2, (i64x2)*q1);
++    *q1 = (u8x16)vec_mergel((i64x2)t2, (i64x2)*q1);
++  }
+ }
+ 
+ static WEBP_INLINE void Store4x4(u8x16 x, uint8_t* WEBP_RESTRICT dst, int s) {
+@@ -226,16 +253,17 @@ static WEBP_INLINE void Store16x4(u8x16 p1, u8x16 p0, u8x16 q0, u8x16 q1,
+                                   uint8_t* WEBP_RESTRICT r8, int s) {
+   u8x16 t = p0;
+   u8x16 p0s = vec_mergeh(p1, t), p1s = vec_mergel(p1, t);
+-  t = q0;
+-  u8x16 q0s = vec_mergeh(t, q1), q1s = vec_mergel(t, q1);
++  u8x16 q0s = vec_mergeh(q0, q1), q1s = vec_mergel(q0, q1);
+   t = p0s;
+   p0s = (u8x16)vec_mergeh((u16x8)t, (u16x8)q0s);
+   q0s = (u8x16)vec_mergel((u16x8)t, (u16x8)q0s);
+   t = p1s;
+   p1s = (u8x16)vec_mergeh((u16x8)t, (u16x8)q1s);
+   q1s = (u8x16)vec_mergel((u16x8)t, (u16x8)q1s);
+-  Store4x4(p0s, r0, s); Store4x4(q0s, r0 + 4 * s, s);
+-  Store4x4(p1s, r8, s); Store4x4(q1s, r8 + 4 * s, s);
++  Store4x4(p0s, r0, s);
++  Store4x4(q0s, r0 + 4 * s, s);
++  Store4x4(p1s, r8, s);
++  Store4x4(q1s, r8 + 4 * s, s);
+ }
+ 
+ static void SimpleHFilter16_VSX(uint8_t* p, int stride, int thresh) {
+@@ -257,9 +285,8 @@ static void SimpleHFilter16i_VSX(uint8_t* p, int stride, int thresh) {
+ //------------------------------------------------------------------------------
+ // Complex in-loop edge filtering (vertical/luma).
+ 
+-static const u8x16 kSignBit = {
+-    0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+-    0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80};
++static const u8x16 kSignBit = {0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
++                               0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80};
+ #define FLIPB(x) ((x) = (i8x16)vec_xor((u8x16)(x), kSignBit))
+ 
+ static WEBP_INLINE u8x16 GetNotHEV(u8x16 p1, u8x16 p0, u8x16 q0, u8x16 q1,
+@@ -280,7 +307,8 @@ static WEBP_INLINE void DoSimpleFilterS(i8x16* p0, i8x16* q0, i8x16 f) {
+   *p0 = vec_adds(*p0, SignedShift3(vec_adds(f, vec_splats((signed char)3))));
+ }
+ 
+-static WEBP_INLINE void Update2Pixels(i8x16* pi, i8x16* qi, i16x8 lo, i16x8 hi) {
++static WEBP_INLINE void Update2Pixels(i8x16* pi, i8x16* qi, i16x8 lo,
++                                      i16x8 hi) {
+   const u16x8 s7 = vec_splats((unsigned short)7);
+   const i8x16 d = (i8x16)vec_packs(vec_sra(lo, s7), vec_sra(hi, s7));
+   *pi = vec_adds(*pi, d);
+@@ -299,38 +327,53 @@ static WEBP_INLINE u8x16 ComplexMask(u8x16 p3, u8x16 p2, u8x16 p1, u8x16 p0,
+   m = vec_max(m, ABSU(q1, q0));
+   m = vec_max(m, ABSU(q3, q2));
+   m = vec_max(m, ABSU(q2, q1));
+-  const u8x16 tm = (u8x16)vec_cmpeq(
+-      vec_subs(m, vec_splats((unsigned char)ithresh)),
+-      vec_splats((unsigned char)0));
+-  const u8x16 t2 = vec_and(ABSU(p1, q1), vec_splats((unsigned char)0xFE));
+-  const u8x16 t3 = (u8x16)vec_sr((u16x8)t2, vec_splats((unsigned short)1));
+-  const u8x16 t6 = vec_adds(vec_adds(ABSU(p0, q0), ABSU(p0, q0)), t3);
+-  const u8x16 fm = (u8x16)vec_cmpeq(
+-      vec_subs(t6, vec_splats((unsigned char)thresh)),
+-      vec_splats((unsigned char)0));
+-  return vec_and(tm, fm);
++  {
++    const u8x16 tm =
++        (u8x16)vec_cmpeq(vec_subs(m, vec_splats((unsigned char)ithresh)),
++                         vec_splats((unsigned char)0));
++    const u8x16 t2 = vec_and(ABSU(p1, q1), vec_splats((unsigned char)0xFE));
++    const u8x16 t3 = (u8x16)vec_sr((u16x8)t2, vec_splats((unsigned short)1));
++    const u8x16 t6 = vec_adds(vec_adds(ABSU(p0, q0), ABSU(p0, q0)), t3);
++    const u8x16 fm =
++        (u8x16)vec_cmpeq(vec_subs(t6, vec_splats((unsigned char)thresh)),
++                         vec_splats((unsigned char)0));
++    return vec_and(tm, fm);
++  }
+ }
+ 
+ static WEBP_INLINE void DoFilter4(u8x16* p1u, u8x16* p0u, u8x16* q0u,
+                                   u8x16* q1u, u8x16 mask, int hev_thresh) {
+   const u8x16 zero = vec_splats((unsigned char)0);
+   const u8x16 not_hev = GetNotHEV(*p1u, *p0u, *q0u, *q1u, hev_thresh);
+-  i8x16 p1 = (i8x16)vec_xor(*p1u, kSignBit), p0 = (i8x16)vec_xor(*p0u, kSignBit);
+-  i8x16 q0 = (i8x16)vec_xor(*q0u, kSignBit), q1 = (i8x16)vec_xor(*q1u, kSignBit);
++  i8x16 p1 = (i8x16)vec_xor(*p1u, kSignBit),
++        p0 = (i8x16)vec_xor(*p0u, kSignBit);
++  i8x16 q0 = (i8x16)vec_xor(*q0u, kSignBit),
++        q1 = (i8x16)vec_xor(*q1u, kSignBit);
+   i8x16 t1 = vec_andc(vec_subs(p1, q1), (i8x16)not_hev);
+   const i8x16 t2 = vec_subs(q0, p0);
+-  t1 = vec_adds(t1, t2); t1 = vec_adds(t1, t2); t1 = vec_adds(t1, t2);
++  t1 = vec_adds(t1, t2);
++  t1 = vec_adds(t1, t2);
++  t1 = vec_adds(t1, t2);
+   t1 = vec_and(t1, (i8x16)mask);
+-  const i8x16 a3 = SignedShift3(vec_adds(t1, vec_splats((signed char)4)));
+-  p0 = vec_adds(p0, SignedShift3(vec_adds(t1, vec_splats((signed char)3))));
+-  q0 = vec_subs(q0, a3);
+-  FLIPB(p0); FLIPB(q0);
+-  const i8x16 t = vec_add(a3, (i8x16)kSignBit);
+-  i8x16 t3 = vec_sub((i8x16)vec_avg((u8x16)t, zero), vec_splats((signed char)64));
+-  t3 = vec_and((i8x16)not_hev, t3);
+-  q1 = vec_subs(q1, t3); p1 = vec_adds(p1, t3);
+-  FLIPB(p1); FLIPB(q1);
+-  *p1u = (u8x16)p1; *p0u = (u8x16)p0; *q0u = (u8x16)q0; *q1u = (u8x16)q1;
++  {
++    const i8x16 a3 = SignedShift3(vec_adds(t1, vec_splats((signed char)4)));
++    const i8x16 t = vec_add(a3, (i8x16)kSignBit);
++    i8x16 t3 =
++        vec_sub((i8x16)vec_avg((u8x16)t, zero), vec_splats((signed char)64));
++    t3 = vec_and((i8x16)not_hev, t3);
++    p0 = vec_adds(p0, SignedShift3(vec_adds(t1, vec_splats((signed char)3))));
++    q0 = vec_subs(q0, a3);
++    FLIPB(p0);
++    FLIPB(q0);
++    q1 = vec_subs(q1, t3);
++    p1 = vec_adds(p1, t3);
++    FLIPB(p1);
++    FLIPB(q1);
++  }
++  *p1u = (u8x16)p1;
++  *p0u = (u8x16)p0;
++  *q0u = (u8x16)q0;
++  *q1u = (u8x16)q1;
+ }
+ 
+ static WEBP_INLINE void DoFilter6(u8x16* p2u, u8x16* p1u, u8x16* p0u,
+@@ -338,9 +381,12 @@ static WEBP_INLINE void DoFilter6(u8x16* p2u, u8x16* p1u, u8x16* p0u,
+                                   u8x16 mask, int hev_thresh) {
+   const u8x16 zero = vec_splats((unsigned char)0);
+   const u8x16 not_hev = GetNotHEV(*p1u, *p0u, *q0u, *q1u, hev_thresh);
+-  i8x16 p2 = (i8x16)vec_xor(*p2u, kSignBit), p1 = (i8x16)vec_xor(*p1u, kSignBit);
+-  i8x16 p0 = (i8x16)vec_xor(*p0u, kSignBit), q0 = (i8x16)vec_xor(*q0u, kSignBit);
+-  i8x16 q1 = (i8x16)vec_xor(*q1u, kSignBit), q2 = (i8x16)vec_xor(*q2u, kSignBit);
++  i8x16 p2 = (i8x16)vec_xor(*p2u, kSignBit),
++        p1 = (i8x16)vec_xor(*p1u, kSignBit);
++  i8x16 p0 = (i8x16)vec_xor(*p0u, kSignBit),
++        q0 = (i8x16)vec_xor(*q0u, kSignBit);
++  i8x16 q1 = (i8x16)vec_xor(*q1u, kSignBit),
++        q2 = (i8x16)vec_xor(*q2u, kSignBit);
+   const i8x16 a = GetBaseDelta(p1, p0, q0, q1);
+   {  // hev pixels: simple filter
+     const i8x16 f = vec_and(a, (i8x16)vec_andc(mask, not_hev));
+@@ -349,8 +395,8 @@ static WEBP_INLINE void DoFilter6(u8x16* p2u, u8x16* p1u, u8x16* p0u,
+   {  // non-hev pixels: strong filter
+     const i8x16 f = vec_and(a, vec_and((i8x16)not_hev, (i8x16)mask));
+     const i16x8 k9 = vec_splats((short)0x0900), k63 = vec_splats((short)63);
+-    const i16x8 f9lo = MulHi16_S((i16x8)vec_mergeh(zero, (u8x16)f), k9);
+-    const i16x8 f9hi = MulHi16_S((i16x8)vec_mergel(zero, (u8x16)f), k9);
++    const i16x8 f9lo = MulHi16_S((i16x8)WMERGEH(zero, (u8x16)f), k9);
++    const i16x8 f9hi = MulHi16_S((i16x8)WMERGEL(zero, (u8x16)f), k9);
+     const i16x8 a2lo = vec_add(f9lo, k63), a2hi = vec_add(f9hi, k63);
+     const i16x8 a1lo = vec_add(a2lo, f9lo), a1hi = vec_add(a2hi, f9hi);
+     const i16x8 a0lo = vec_add(a1lo, f9lo), a0hi = vec_add(a1hi, f9hi);
+@@ -358,8 +404,12 @@ static WEBP_INLINE void DoFilter6(u8x16* p2u, u8x16* p1u, u8x16* p0u,
+     Update2Pixels(&p1, &q1, a1lo, a1hi);
+     Update2Pixels(&p0, &q0, a0lo, a0hi);
+   }
+-  *p2u = (u8x16)p2; *p1u = (u8x16)p1; *p0u = (u8x16)p0;
+-  *q0u = (u8x16)q0; *q1u = (u8x16)q1; *q2u = (u8x16)q2;
++  *p2u = (u8x16)p2;
++  *p1u = (u8x16)p1;
++  *p0u = (u8x16)p0;
++  *q0u = (u8x16)q0;
++  *q1u = (u8x16)q1;
++  *q2u = (u8x16)q2;
+ }
+ 
+ static void VFilter16_VSX(uint8_t* p, int s, int thresh, int ithresh,
+@@ -370,8 +420,12 @@ static void VFilter16_VSX(uint8_t* p, int s, int thresh, int ithresh,
+   u8x16 q2 = vec_xl(0, p + 2 * s), q3 = vec_xl(0, p + 3 * s);
+   const u8x16 m = ComplexMask(p3, p2, p1, p0, q0, q1, q2, q3, thresh, ithresh);
+   DoFilter6(&p2, &p1, &p0, &q0, &q1, &q2, m, hev_thresh);
+-  vec_xst(p2, 0, p - 3 * s); vec_xst(p1, 0, p - 2 * s); vec_xst(p0, 0, p - s);
+-  vec_xst(q0, 0, p); vec_xst(q1, 0, p + s); vec_xst(q2, 0, p + 2 * s);
++  vec_xst(p2, 0, p - 3 * s);
++  vec_xst(p1, 0, p - 2 * s);
++  vec_xst(p0, 0, p - s);
++  vec_xst(q0, 0, p);
++  vec_xst(q1, 0, p + s);
++  vec_xst(q2, 0, p + 2 * s);
+ }
+ 
+ static void VFilter16i_VSX(uint8_t* p, int s, int thresh, int ithresh,
+@@ -379,14 +433,19 @@ static void VFilter16i_VSX(uint8_t* p, int s, int thresh, int ithresh,
+   int k;
+   for (k = 3; k > 0; --k) {
+     p += 4 * s;
+-    u8x16 p3 = vec_xl(0, p - 4 * s), p2 = vec_xl(0, p - 3 * s);
+-    u8x16 p1 = vec_xl(0, p - 2 * s), p0 = vec_xl(0, p - s);
+-    u8x16 q0 = vec_xl(0, p), q1 = vec_xl(0, p + s);
+-    u8x16 q2 = vec_xl(0, p + 2 * s), q3 = vec_xl(0, p + 3 * s);
+-    const u8x16 m = ComplexMask(p3, p2, p1, p0, q0, q1, q2, q3, thresh, ithresh);
+-    DoFilter4(&p1, &p0, &q0, &q1, m, hev_thresh);
+-    vec_xst(p1, 0, p - 2 * s); vec_xst(p0, 0, p - s);
+-    vec_xst(q0, 0, p); vec_xst(q1, 0, p + s);
++    {
++      u8x16 p3 = vec_xl(0, p - 4 * s), p2 = vec_xl(0, p - 3 * s);
++      u8x16 p1 = vec_xl(0, p - 2 * s), p0 = vec_xl(0, p - s);
++      u8x16 q0 = vec_xl(0, p), q1 = vec_xl(0, p + s);
++      u8x16 q2 = vec_xl(0, p + 2 * s), q3 = vec_xl(0, p + 3 * s);
++      const u8x16 m =
++          ComplexMask(p3, p2, p1, p0, q0, q1, q2, q3, thresh, ithresh);
++      DoFilter4(&p1, &p0, &q0, &q1, m, hev_thresh);
++      vec_xst(p1, 0, p - 2 * s);
++      vec_xst(p0, 0, p - s);
++      vec_xst(q0, 0, p);
++      vec_xst(q1, 0, p + s);
++    }
+   }
+ }
+ 
+@@ -398,10 +457,13 @@ static void HFilter16_VSX(uint8_t* p, int s, int thresh, int ithresh,
+   u8x16 p3, p2, p1, p0, q0, q1, q2, q3;
+   Load16x4(b, b + 8 * s, s, &p3, &p2, &p1, &p0);
+   Load16x4(p, p + 8 * s, s, &q0, &q1, &q2, &q3);
+-  const u8x16 m = ComplexMask(p3, p2, p1, p0, q0, q1, q2, q3, thresh, ithresh);
+-  DoFilter6(&p2, &p1, &p0, &q0, &q1, &q2, m, hev_thresh);
+-  Store16x4(p3, p2, p1, p0, b, b + 8 * s, s);
+-  Store16x4(q0, q1, q2, q3, p, p + 8 * s, s);
++  {
++    const u8x16 m =
++        ComplexMask(p3, p2, p1, p0, q0, q1, q2, q3, thresh, ithresh);
++    DoFilter6(&p2, &p1, &p0, &q0, &q1, &q2, m, hev_thresh);
++    Store16x4(p3, p2, p1, p0, b, b + 8 * s, s);
++    Store16x4(q0, q1, q2, q3, p, p + 8 * s, s);
++  }
+ }
+ 
+ static void HFilter16i_VSX(uint8_t* p, int s, int thresh, int ithresh,
+@@ -409,13 +471,17 @@ static void HFilter16i_VSX(uint8_t* p, int s, int thresh, int ithresh,
+   int k;
+   for (k = 3; k > 0; --k) {
+     p += 4;
+-    u8x16 p3, p2, p1, p0, q0, q1, q2, q3;
+-    Load16x4(p - 4, p - 4 + 8 * s, s, &p3, &p2, &p1, &p0);
+-    Load16x4(p, p + 8 * s, s, &q0, &q1, &q2, &q3);
+-    const u8x16 m =
+-        ComplexMask(p3, p2, p1, p0, q0, q1, q2, q3, thresh, ithresh);
+-    DoFilter4(&p1, &p0, &q0, &q1, m, hev_thresh);
+-    Store16x4(p1, p0, q0, q1, p - 2, p - 2 + 8 * s, s);
++    {
++      u8x16 p3, p2, p1, p0, q0, q1, q2, q3;
++      Load16x4(p - 4, p - 4 + 8 * s, s, &p3, &p2, &p1, &p0);
++      Load16x4(p, p + 8 * s, s, &q0, &q1, &q2, &q3);
++      {
++        const u8x16 m =
++            ComplexMask(p3, p2, p1, p0, q0, q1, q2, q3, thresh, ithresh);
++        DoFilter4(&p1, &p0, &q0, &q1, m, hev_thresh);
++        Store16x4(p1, p0, q0, q1, p - 2, p - 2 + 8 * s, s);
++      }
++    }
+   }
+ }
+ 
+@@ -447,22 +513,31 @@ static void VFilter8_VSX(uint8_t* WEBP_RESTRICT u, uint8_t* WEBP_RESTRICT v,
+   u8x16 q2 = LoadUV(u + 2 * s, v + 2 * s), q3 = LoadUV(u + 3 * s, v + 3 * s);
+   const u8x16 m = ComplexMask(p3, p2, p1, p0, q0, q1, q2, q3, thresh, ithresh);
+   DoFilter6(&p2, &p1, &p0, &q0, &q1, &q2, m, hev_thresh);
+-  StoreUV(p2, u - 3 * s, v - 3 * s); StoreUV(p1, u - 2 * s, v - 2 * s);
+-  StoreUV(p0, u - s, v - s); StoreUV(q0, u, v);
+-  StoreUV(q1, u + s, v + s); StoreUV(q2, u + 2 * s, v + 2 * s);
++  StoreUV(p2, u - 3 * s, v - 3 * s);
++  StoreUV(p1, u - 2 * s, v - 2 * s);
++  StoreUV(p0, u - s, v - s);
++  StoreUV(q0, u, v);
++  StoreUV(q1, u + s, v + s);
++  StoreUV(q2, u + 2 * s, v + 2 * s);
+ }
+ 
+ static void VFilter8i_VSX(uint8_t* WEBP_RESTRICT u, uint8_t* WEBP_RESTRICT v,
+                           int s, int thresh, int ithresh, int hev_thresh) {
+-  u += 4 * s; v += 4 * s;
+-  u8x16 p3 = LoadUV(u - 4 * s, v - 4 * s), p2 = LoadUV(u - 3 * s, v - 3 * s);
+-  u8x16 p1 = LoadUV(u - 2 * s, v - 2 * s), p0 = LoadUV(u - s, v - s);
+-  u8x16 q0 = LoadUV(u, v), q1 = LoadUV(u + s, v + s);
+-  u8x16 q2 = LoadUV(u + 2 * s, v + 2 * s), q3 = LoadUV(u + 3 * s, v + 3 * s);
+-  const u8x16 m = ComplexMask(p3, p2, p1, p0, q0, q1, q2, q3, thresh, ithresh);
+-  DoFilter4(&p1, &p0, &q0, &q1, m, hev_thresh);
+-  StoreUV(p1, u - 2 * s, v - 2 * s); StoreUV(p0, u - s, v - s);
+-  StoreUV(q0, u, v); StoreUV(q1, u + s, v + s);
++  u += 4 * s;
++  v += 4 * s;
++  {
++    u8x16 p3 = LoadUV(u - 4 * s, v - 4 * s), p2 = LoadUV(u - 3 * s, v - 3 * s);
++    u8x16 p1 = LoadUV(u - 2 * s, v - 2 * s), p0 = LoadUV(u - s, v - s);
++    u8x16 q0 = LoadUV(u, v), q1 = LoadUV(u + s, v + s);
++    u8x16 q2 = LoadUV(u + 2 * s, v + 2 * s), q3 = LoadUV(u + 3 * s, v + 3 * s);
++    const u8x16 m =
++        ComplexMask(p3, p2, p1, p0, q0, q1, q2, q3, thresh, ithresh);
++    DoFilter4(&p1, &p0, &q0, &q1, m, hev_thresh);
++    StoreUV(p1, u - 2 * s, v - 2 * s);
++    StoreUV(p0, u - s, v - s);
++    StoreUV(q0, u, v);
++    StoreUV(q1, u + s, v + s);
++  }
+ }
+ 
+ static void HFilter8_VSX(uint8_t* WEBP_RESTRICT u, uint8_t* WEBP_RESTRICT v,
+@@ -470,21 +545,30 @@ static void HFilter8_VSX(uint8_t* WEBP_RESTRICT u, uint8_t* WEBP_RESTRICT v,
+   u8x16 p3, p2, p1, p0, q0, q1, q2, q3;
+   Load16x4(u - 4, v - 4, s, &p3, &p2, &p1, &p0);
+   Load16x4(u, v, s, &q0, &q1, &q2, &q3);
+-  const u8x16 m = ComplexMask(p3, p2, p1, p0, q0, q1, q2, q3, thresh, ithresh);
+-  DoFilter6(&p2, &p1, &p0, &q0, &q1, &q2, m, hev_thresh);
+-  Store16x4(p3, p2, p1, p0, u - 4, v - 4, s);
+-  Store16x4(q0, q1, q2, q3, u, v, s);
++  {
++    const u8x16 m =
++        ComplexMask(p3, p2, p1, p0, q0, q1, q2, q3, thresh, ithresh);
++    DoFilter6(&p2, &p1, &p0, &q0, &q1, &q2, m, hev_thresh);
++    Store16x4(p3, p2, p1, p0, u - 4, v - 4, s);
++    Store16x4(q0, q1, q2, q3, u, v, s);
++  }
+ }
+ 
+ static void HFilter8i_VSX(uint8_t* WEBP_RESTRICT u, uint8_t* WEBP_RESTRICT v,
+                           int s, int thresh, int ithresh, int hev_thresh) {
+-  u += 4; v += 4;
+-  u8x16 p3, p2, p1, p0, q0, q1, q2, q3;
+-  Load16x4(u - 4, v - 4, s, &p3, &p2, &p1, &p0);
+-  Load16x4(u, v, s, &q0, &q1, &q2, &q3);
+-  const u8x16 m = ComplexMask(p3, p2, p1, p0, q0, q1, q2, q3, thresh, ithresh);
+-  DoFilter4(&p1, &p0, &q0, &q1, m, hev_thresh);
+-  Store16x4(p1, p0, q0, q1, u - 2, v - 2, s);
++  u += 4;
++  v += 4;
++  {
++    u8x16 p3, p2, p1, p0, q0, q1, q2, q3;
++    Load16x4(u - 4, v - 4, s, &p3, &p2, &p1, &p0);
++    Load16x4(u, v, s, &q0, &q1, &q2, &q3);
++    {
++      const u8x16 m =
++          ComplexMask(p3, p2, p1, p0, q0, q1, q2, q3, thresh, ithresh);
++      DoFilter4(&p1, &p0, &q0, &q1, m, hev_thresh);
++      Store16x4(p1, p0, q0, q1, u - 2, v - 2, s);
++    }
++  }
+ }
+ 
+ //------------------------------------------------------------------------------
+@@ -511,7 +595,8 @@ static void VE16_VSX(uint8_t* dst) {
+ }
+ static void HE16_VSX(uint8_t* dst) {
+   int j;
+-  for (j = 0; j < 16; ++j) vec_xst(vec_splats(dst[-1 + j * BPS]), 0, dst + j * BPS);
++  for (j = 0; j < 16; ++j)
++    vec_xst(vec_splats(dst[-1 + j * BPS]), 0, dst + j * BPS);
+ }
+ static void DC16_VSX(uint8_t* dst) {
+   int s = 16, j;
+@@ -532,12 +617,13 @@ static void DC16NoTopLeft_VSX(uint8_t* dst) { Put16(0x80, dst); }
+ static void TM16_VSX(uint8_t* dst) {
+   const u8x16 zero = vec_splats((unsigned char)0);
+   const u8x16 t = vec_xl(0, dst - BPS);
+-  const i16x8 tl = (i16x8)vec_mergeh(t, zero), th = (i16x8)vec_mergel(t, zero);
++  const i16x8 tl = (i16x8)WMERGEH(t, zero), th = (i16x8)WMERGEL(t, zero);
+   const int c = dst[-BPS - 1];
+   int y;
+   for (y = 0; y < 16; ++y) {
+     const i16x8 b = vec_splats((short)(dst[-1 + y * BPS] - c));
+-    vec_xst((u8x16)vec_packsu(vec_add(b, tl), vec_add(b, th)), 0, dst + y * BPS);
++    vec_xst((u8x16)vec_packsu(vec_add(b, tl), vec_add(b, th)), 0,
++            dst + y * BPS);
+   }
+ }
+ 
+@@ -566,7 +652,7 @@ static void DC8uvNoTopLeft_VSX(uint8_t* dst) { Put8x8uv(0x80, dst); }
+ static void TM8uv_VSX(uint8_t* dst) {
+   const u8x16 zero = vec_splats((unsigned char)0);
+   const u8x16 t = vec_xl(0, dst - BPS);
+-  const i16x8 tl = (i16x8)vec_mergeh(t, zero);
++  const i16x8 tl = (i16x8)WMERGEH(t, zero);
+   const int c = dst[-BPS - 1];
+   int y;
+   for (y = 0; y < 8; ++y) {
+@@ -579,13 +665,26 @@ static void TM8uv_VSX(uint8_t* dst) {
+ }
+ 
+ //------------------------------------------------------------------------------
+-// 4x4 luma intra prediction. Whole-vector byte shifts window the edge samples:
+-//   srli_si128(x,n) == vec_sld(zero, x, 16 - n)
+-//   slli_si128(x,n) == vec_sld(x, zero, n)
+-
++// 4x4 luma intra prediction. Whole-vector byte shifts window the edge samples
++// in little-endian byte order (element 0 == lowest address), emulating the SSE
++// _mm_srli_si128 / _mm_slli_si128 the reference is written against:
++//   srli_si128(x,n): out[i] = x[i+n], top n zeroed
++//   slli_si128(x,n): out[i] = x[i-n], bottom n zeroed
++// vec_sld shifts in register-element order, which is reversed between the two
++// endiannesses, so the operand pairing flips on big-endian. INS16 likewise
++// byte-swaps the inserted 16-bit value so its low byte lands at the lower
++// address on both, and the Get/Set/StoreWord helpers pack bytes little-endian.
++#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++#define SRLI(x, n) vec_sld((x), zero, (n))
++#define SLLI(x, n) vec_sld(zero, (x), 16 - (n))
++#define INS16(v, val, i) \
++  ((u8x16)vec_insert((short)__builtin_bswap16((unsigned short)(val)), \
++                     (i16x8)(v), (i)))
++#else
+ #define SRLI(x, n) vec_sld(zero, (x), 16 - (n))
+ #define SLLI(x, n) vec_sld((x), zero, (n))
+ #define INS16(v, val, i) ((u8x16)vec_insert((short)(val), (i16x8)(v), (i)))
++#endif
+ #define AVG3C(a, b, c) ((uint8_t)(((a) + 2 * (b) + (c) + 2) >> 2))
+ 
+ static WEBP_INLINE u8x16 Load64(const uint8_t* WEBP_RESTRICT p) {
+@@ -593,24 +692,32 @@ static WEBP_INLINE u8x16 Load64(const uint8_t* WEBP_RESTRICT p) {
+   memcpy(b, p, 8);
+   return vec_xl(0, b);
+ }
++// The four windowed edge bytes are packed little-endian (byte 0 in the low
++// bits) so the predictors read/write them the same way on both endiannesses.
+ static WEBP_INLINE uint32_t GetWord(u8x16 v) {
+   unsigned char b[16];
+-  uint32_t r;
+   memcpy(b, &v, 16);
+-  memcpy(&r, b, 4);
+-  return r;
++  return (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) |
++         ((uint32_t)b[3] << 24);
+ }
+ static WEBP_INLINE u8x16 SetWord(uint32_t v) {
+   unsigned char b[16] = {0};
+-  memcpy(b, &v, 4);
++  b[0] = (unsigned char)(v);
++  b[1] = (unsigned char)(v >> 8);
++  b[2] = (unsigned char)(v >> 16);
++  b[3] = (unsigned char)(v >> 24);
+   return vec_xl(0, b);
+ }
+ static WEBP_INLINE void StoreWord(uint32_t v, uint8_t* dst) {
+-  memcpy(dst, &v, 4);
++  dst[0] = (unsigned char)(v);
++  dst[1] = (unsigned char)(v >> 8);
++  dst[2] = (unsigned char)(v >> 16);
++  dst[3] = (unsigned char)(v >> 24);
+ }
+ 
+ static void VE4_VSX(uint8_t* dst) {
+-  const u8x16 zero = vec_splats((unsigned char)0), one = vec_splats((unsigned char)1);
++  const u8x16 zero = vec_splats((unsigned char)0),
++              one = vec_splats((unsigned char)1);
+   const u8x16 A = Load64(dst - BPS - 1), B = SRLI(A, 1), C = SRLI(A, 2);
+   const u8x16 a = vec_avg(A, C), lsb = vec_and(vec_xor(A, C), one);
+   const u8x16 avg = vec_avg(vec_subs(a, lsb), B);
+@@ -619,7 +726,8 @@ static void VE4_VSX(uint8_t* dst) {
+   for (i = 0; i < 4; ++i) StoreWord(v, dst + i * BPS);
+ }
+ static void LD4_VSX(uint8_t* dst) {
+-  const u8x16 zero = vec_splats((unsigned char)0), one = vec_splats((unsigned char)1);
++  const u8x16 zero = vec_splats((unsigned char)0),
++              one = vec_splats((unsigned char)1);
+   const u8x16 A = Load64(dst - BPS), B = SRLI(A, 1), C = SRLI(A, 2);
+   const u8x16 CH = INS16(C, dst[-BPS + 7], 3);
+   const u8x16 a1 = vec_avg(A, CH), lsb = vec_and(vec_xor(A, CH), one);
+@@ -630,7 +738,8 @@ static void LD4_VSX(uint8_t* dst) {
+   StoreWord(GetWord(SRLI(r, 3)), dst + 3 * BPS);
+ }
+ static void VR4_VSX(uint8_t* dst) {
+-  const u8x16 zero = vec_splats((unsigned char)0), one = vec_splats((unsigned char)1);
++  const u8x16 zero = vec_splats((unsigned char)0),
++              one = vec_splats((unsigned char)1);
+   const int I = dst[-1 + 0 * BPS], J = dst[-1 + 1 * BPS], K = dst[-1 + 2 * BPS];
+   const int X = dst[-1 - BPS];
+   const u8x16 XA = Load64(dst - BPS - 1), A0 = SRLI(XA, 1);
+@@ -646,7 +755,8 @@ static void VR4_VSX(uint8_t* dst) {
+   dst[0 + 3 * BPS] = AVG3C(K, J, I);
+ }
+ static void VL4_VSX(uint8_t* dst) {
+-  const u8x16 zero = vec_splats((unsigned char)0), one = vec_splats((unsigned char)1);
++  const u8x16 zero = vec_splats((unsigned char)0),
++              one = vec_splats((unsigned char)1);
+   const u8x16 A = Load64(dst - BPS), B = SRLI(A, 1), C = SRLI(A, 2);
+   const u8x16 a1 = vec_avg(A, B), a2 = vec_avg(C, B), a3 = vec_avg(a1, a2);
+   const u8x16 lsb1 = vec_and(vec_xor(a1, a2), one);
+@@ -661,12 +771,13 @@ static void VL4_VSX(uint8_t* dst) {
+   dst[3 + 3 * BPS] = (extra >> 8) & 0xff;
+ }
+ static void RD4_VSX(uint8_t* dst) {
+-  const u8x16 zero = vec_splats((unsigned char)0), one = vec_splats((unsigned char)1);
++  const u8x16 zero = vec_splats((unsigned char)0),
++              one = vec_splats((unsigned char)1);
+   const uint32_t I = dst[-1 + 0 * BPS], J = dst[-1 + 1 * BPS];
+   const uint32_t K = dst[-1 + 2 * BPS], L = dst[-1 + 3 * BPS];
+   const u8x16 XA = Load64(dst - BPS - 1);
+-  const u8x16 all = vec_or(SetWord((uint32_t)(L | (K << 8) | (J << 16) | (I << 24))),
+-                           SLLI(XA, 4));
++  const u8x16 all = vec_or(
++      SetWord((uint32_t)(L | (K << 8) | (J << 16) | (I << 24))), SLLI(XA, 4));
+   const u8x16 k1 = SRLI(all, 1), j2 = SRLI(all, 2);
+   const u8x16 a1 = vec_avg(j2, all), lsb = vec_and(vec_xor(j2, all), one);
+   const u8x16 r = vec_avg(vec_subs(a1, lsb), k1);
+@@ -678,7 +789,7 @@ static void RD4_VSX(uint8_t* dst) {
+ static void TM4_VSX(uint8_t* dst) {
+   const u8x16 zero = vec_splats((unsigned char)0);
+   const u8x16 t = Load64(dst - BPS);
+-  const i16x8 tb = (i16x8)vec_mergeh(t, zero);
++  const i16x8 tb = (i16x8)WMERGEH(t, zero);
+   const int c = dst[-BPS - 1];
+   int y;
+   for (y = 0; y < 4; ++y) {
+diff --git a/media/libwebp/src/dsp/filters_vsx.c b/media/libwebp/src/dsp/filters_vsx.c
+index 6c875eb8893f..71826b53bafd 100644
+--- a/media/libwebp/src/dsp/filters_vsx.c
++++ b/media/libwebp/src/dsp/filters_vsx.c
+@@ -1,4 +1,4 @@
+-// Copyright 2015 Google Inc. All Rights Reserved.
++// Copyright 2026 Google Inc. All Rights Reserved.
+ //
+ // Use of this source code is governed by a BSD-style license
+ // that can be found in the COPYING file in the root of the source
+@@ -7,7 +7,9 @@
+ // be found in the AUTHORS file in the root of the source tree.
+ // -----------------------------------------------------------------------------
+ //
+-// VSX (PowerPC) version of filtering functions.
++// VSX (PowerPC64) version of the alpha (un)filters.
++//
++// Authors: Trung Lê (8@tle.id.au)
+ 
+ #include "src/dsp/dsp.h"
+ 
+@@ -26,17 +28,27 @@ typedef __vector signed short i16x8;
+ typedef __vector unsigned long long u64x2;
+ 
+ // Byte-wise shifts of the whole 128-bit register, matching the little-endian
+-// semantics of _mm_slli_si128 / _mm_srli_si128. 'n' must be a literal.
++// semantics of _mm_slli_si128 / _mm_srli_si128. 'n' must be a literal. vec_sld
++// shifts in register-element order, reversed between endiannesses, so the
++// operand pairing flips on big-endian. WMERGEH keeps the little-endian lane
++// order of a widening merge on both.
++#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++#define SLLI(x, n) vec_sld(zero, (x), 16 - (n))
++#define SRLI(x, n) vec_sld((x), zero, (n))
++#define WMERGEH(a, b) vec_mergeh((b), (a))
++#else
+ #define SLLI(x, n) vec_sld((x), zero, (n))
+ #define SRLI(x, n) vec_sld(zero, (x), 16 - (n))
++#define WMERGEH(a, b) vec_mergeh((a), (b))
++#endif
+ 
+ // Loads 8 bytes from 'p' into the low half of a vector (high half undefined).
+ static WEBP_INLINE u8x16 Load8(const uint8_t* p) {
+   uint64_t v;
+   memcpy(&v, p, 8);
+-  // Cast to unsigned long long so clang picks the right vec_splats overload:
+-  // uint64_t is unsigned long under LP64, which is ambiguous between the
+-  // unsigned long long and unsigned __int128 overloads.
++  // uint64_t is 'unsigned long' under LP64, which is ambiguous between the
++  // 'unsigned long long' and 'unsigned __int128' vec_splats() overloads on
++  // clang; cast to an exact-match type.
+   return (u8x16)vec_splats((unsigned long long)v);
+ }
+ 
+@@ -62,7 +74,13 @@ static void HorizontalUnfilter_VSX(const uint8_t* prev, const uint8_t* in,
+     const u8x16 A6 = SLLI(A5, 4);
+     const u8x16 A7 = vec_add(A5, A6);
+     memcpy(out + i, &A7, 8);
+-    last = (u8x16)vec_sr((u64x2)A7, sh56);  // broadcast out[i + 7] to byte 0
++    // Broadcast out[i + 7] (byte 7) to byte 0. It is the u64's most-significant
++    // byte on LE and least-significant on BE, so the shift direction flips.
++#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++    last = (u8x16)vec_sl((u64x2)A7, sh56);
++#else
++    last = (u8x16)vec_sr((u64x2)A7, sh56);
++#endif
+   }
+   for (; i < width; ++i) out[i] = (uint8_t)(in[i] + out[i - 1]);
+ }
+@@ -107,8 +125,8 @@ static void GradientPredictInverse_VSX(const uint8_t* in, const uint8_t* top,
+     for (i = 0; i < max_pos; i += 8) {
+       const u8x16 t0 = Load8(top + i);
+       const u8x16 t1 = Load8(top + i - 1);
+-      const u16x8 B = (u16x8)vec_mergeh(t0, zero);
+-      const u16x8 C = (u16x8)vec_mergeh(t1, zero);
++      const u16x8 B = (u16x8)WMERGEH(t0, zero);
++      const u16x8 C = (u16x8)WMERGEH(t1, zero);
+       const u8x16 D = Load8(in + i);  // base input
+       const u16x8 E = vec_sub(B, C);  // unclipped gradient basis b - c
+       u8x16 out = zero;               // accumulator for output
+@@ -121,9 +139,9 @@ static void GradientPredictInverse_VSX(const uint8_t* in, const uint8_t* top,
+         A = vec_and(tmp5, mask_hi);  // keep new sample
+         out = vec_or(out, A);        // accumulate output
+         if (--k == 0) break;
+-        A = SLLI(A, 1);                  // rotate left sample
+-        mask_hi = SLLI(mask_hi, 1);      // rotate mask
+-        A = (u8x16)vec_mergeh(A, zero);  // convert 8b -> 16b
++        A = SLLI(A, 1);              // rotate left sample
++        mask_hi = SLLI(mask_hi, 1);  // rotate mask
++        A = (u8x16)WMERGEH(A, zero);  // convert 8b -> 16b
+       }
+       A = SRLI(A, 7);  // prepare left sample for next iteration
+       memcpy(row + i, &out, 8);
+diff --git a/media/libwebp/src/dsp/lossless_vsx.c b/media/libwebp/src/dsp/lossless_vsx.c
+index 89da30c9589c..3739067547d0 100644
+--- a/media/libwebp/src/dsp/lossless_vsx.c
++++ b/media/libwebp/src/dsp/lossless_vsx.c
+@@ -1,4 +1,4 @@
+-// Copyright 2014 Google Inc. All Rights Reserved.
++// Copyright 2026 Google Inc. All Rights Reserved.
+ //
+ // Use of this source code is governed by a BSD-style license
+ // that can be found in the COPYING file in the root of the source
+@@ -7,7 +7,9 @@
+ // be found in the AUTHORS file in the root of the source tree.
+ // -----------------------------------------------------------------------------
+ //
+-// VSX (PowerPC) version of lossless functions.
++// VSX (PowerPC64) version of the lossless decoding functions.
++//
++// Authors: Trung Lê (8@tle.id.au)
+ 
+ #include "src/dsp/dsp.h"
+ 
+@@ -43,9 +45,16 @@ static WEBP_INLINE i16x8 MulHiS16(i16x8 a, i16x8 b) {
+ static void AddGreenToBlueAndRed_VSX(const uint32_t* src, int num_pixels,
+                                      uint32_t* dst) {
+   const u8x16 zero = vec_splats((unsigned char)0);
+-  // Replicate the green byte (offset 1 of each pixel) into the blue/red slots.
++  // Replicate the green byte of each pixel into the blue/red slots. Green sits
++  // at byte offset 1 on LE (B,G,R,A) but 2 on BE (A,R,G,B); the blue/red slots
++  // flip likewise.
++#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++  const u8x16 kSpreadGreen = {16, 2, 16, 2,  16, 6,  16, 6,
++                              16, 10, 16, 10, 16, 14, 16, 14};
++#else
+   const u8x16 kSpreadGreen = {1, 16, 1, 16, 5,  16, 5,  16,
+                               9, 16, 9, 16, 13, 16, 13, 16};
++#endif
+   int i;
+   for (i = 0; i + 4 <= num_pixels; i += 4) {
+     const u8x16 in = (u8x16)vec_xl(0, (uint32_t*)&src[i]);
+@@ -60,6 +69,13 @@ static void AddGreenToBlueAndRed_VSX(const uint32_t* src, int num_pixels,
+ static void TransformColorInverse_VSX(const VP8LMultipliers* const m,
+                                       const uint32_t* src, int num_pixels,
+                                       uint32_t* dst) {
++#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++  // This routine is a direct port of the SSE2 kernel and works in terms of
++  // little-endian pixel byte order (masks, per-lane shifts and the packed
++  // multiplier pairs all assume it). Rather than maintain a mirrored
++  // big-endian variant, defer to the scalar reference there.
++  VP8LTransformColorInverse_C(m, src, num_pixels, dst);
++#else
+ // sign-extended multiplying constants, pre-shifted by 5 (see lossless_sse2.c).
+ #define CST(X) (((int16_t)((m->X) << 8)) >> 5)
+   const i16x8 mults_rb =
+@@ -93,6 +109,7 @@ static void TransformColorInverse_VSX(const VP8LMultipliers* const m,
+   if (i != num_pixels) {
+     VP8LTransformColorInverse_C(m, src + i, num_pixels - i, dst + i);
+   }
++#endif  // __ORDER_BIG_ENDIAN__
+ }
+ 
+ //------------------------------------------------------------------------------
+@@ -100,8 +117,13 @@ static void TransformColorInverse_VSX(const VP8LMultipliers* const m,
+ 
+ static void ConvertBGRAToRGBA_VSX(const uint32_t* WEBP_RESTRICT src,
+                                   int num_pixels, uint8_t* WEBP_RESTRICT dst) {
+-  // Swap the blue (offset 0) and red (offset 2) bytes of each pixel.
++  // BGRA -> RGBA. ARGB pixels are stored little-endian in memory (B,G,R,A) on
++  // LE but big-endian (A,R,G,B) on BE, so the byte gather differs by endian.
++#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++  const u8x16 kSwapBR = {1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12};
++#else
+   const u8x16 kSwapBR = {2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15};
++#endif
+   int i;
+   for (i = 0; i + 4 <= num_pixels; i += 4) {
+     const u8x16 in = (u8x16)vec_xl(0, (uint32_t*)&src[i]);
+@@ -114,8 +136,13 @@ static void ConvertBGRAToRGBA_VSX(const uint32_t* WEBP_RESTRICT src,
+ 
+ static void ConvertBGRAToRGB_VSX(const uint32_t* WEBP_RESTRICT src,
+                                  int num_pixels, uint8_t* WEBP_RESTRICT dst) {
+-  // BGRA -> RGB: gather R,G,B (offsets 2,1,0) of each pixel, drop alpha.
++  // BGRA -> RGB: gather R,G,B of each pixel, drop alpha (byte offsets differ by
++  // endian; ARGB pixels are B,G,R,A in memory on LE, A,R,G,B on BE).
++#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++  const u8x16 kToRGB = {1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15, 0, 0, 0, 0};
++#else
+   const u8x16 kToRGB = {2, 1, 0, 6, 5, 4, 10, 9, 8, 14, 13, 12, 0, 0, 0, 0};
++#endif
+   int i;
+   for (i = 0; i + 4 <= num_pixels; i += 4) {
+     const u8x16 in = (u8x16)vec_xl(0, (uint32_t*)&src[i]);
+@@ -129,8 +156,13 @@ static void ConvertBGRAToRGB_VSX(const uint32_t* WEBP_RESTRICT src,
+ 
+ static void ConvertBGRAToBGR_VSX(const uint32_t* WEBP_RESTRICT src,
+                                  int num_pixels, uint8_t* WEBP_RESTRICT dst) {
+-  // BGRA -> BGR: gather B,G,R (offsets 0,1,2) of each pixel, drop alpha.
++  // BGRA -> BGR: gather B,G,R of each pixel, drop alpha (byte offsets differ by
++  // endian; ARGB pixels are B,G,R,A in memory on LE, A,R,G,B on BE).
++#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++  const u8x16 kToBGR = {3, 2, 1, 7, 6, 5, 11, 10, 9, 15, 14, 13, 0, 0, 0, 0};
++#else
+   const u8x16 kToBGR = {0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, 0, 0, 0, 0};
++#endif
+   int i;
+   for (i = 0; i + 4 <= num_pixels; i += 4) {
+     const u8x16 in = (u8x16)vec_xl(0, (uint32_t*)&src[i]);
+@@ -145,10 +177,22 @@ static void ConvertBGRAToBGR_VSX(const uint32_t* WEBP_RESTRICT src,
+ //------------------------------------------------------------------------------
+ // Predictor transform.
+ 
++static const u8x16 kZero = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+ // Byte-wise shifts of the whole register (little-endian _mm_s{l,r}li_si128).
++// vec_sld shifts in register-element order, reversed between endiannesses, so
++// the operand pairing flips on big-endian. WMERGEH/WMERGEL likewise keep the
++// little-endian lane order of a *widening* merge on both.
++#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++#define SLLI(x, n) vec_sld(kZero, (x), 16 - (n))
++#define SRLI(x, n) vec_sld((x), kZero, (n))
++#define WMERGEH(a, b) vec_mergeh((b), (a))
++#define WMERGEL(a, b) vec_mergel((b), (a))
++#else
+ #define SLLI(x, n) vec_sld((x), kZero, (n))
+ #define SRLI(x, n) vec_sld(kZero, (x), 16 - (n))
+-static const u8x16 kZero = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
++#define WMERGEH(a, b) vec_mergeh((a), (b))
++#define WMERGEL(a, b) vec_mergel((a), (b))
++#endif
+ 
+ // Per-byte floor average (a + b) >> 1, matching the C Average2().
+ static WEBP_INLINE u8x16 Average2_u8(u8x16 a, u8x16 b) {
+@@ -164,7 +208,7 @@ static WEBP_INLINE u32x4 Lane0(uint32_t v) {
+ 
+ // Single-pixel helpers operating on the low 32-bit lane only.
+ static WEBP_INLINE u16x8 Unpack16(uint32_t a) {
+-  return (u16x8)vec_mergeh((u8x16)Lane0(a), kZero);
++  return (u16x8)WMERGEH((u8x16)Lane0(a), kZero);
+ }
+ 
+ static WEBP_INLINE uint32_t Average2_VSX(uint32_t a0, uint32_t a1) {
+@@ -184,22 +228,6 @@ static WEBP_INLINE uint32_t Average3_VSX(uint32_t a0, uint32_t a1,
+   return vec_extract((u32x4)vec_packsu((i16x8)avg2, (i16x8)avg2), 0);
+ }
+ 
+-static WEBP_INLINE uint32_t Average4_VSX(uint32_t a0, uint32_t a1, uint32_t a2,
+-                                         uint32_t a3) {
+-  const u16x8 one = vec_splats((unsigned short)1);
+-  const u16x8 avg1 = Average2_16(a0, a1);
+-  const u16x8 avg2 = Average2_16(a2, a3);
+-  const u16x8 avg3 = vec_sr(vec_add(avg1, avg2), one);
+-  return vec_extract((u32x4)vec_packsu((i16x8)avg3, (i16x8)avg3), 0);
+-}
+-
+-static WEBP_INLINE uint32_t ClampedAddSubtractFull_VSX(uint32_t c0, uint32_t c1,
+-                                                       uint32_t c2) {
+-  const i16x8 v =
+-      vec_sub((i16x8)vec_add(Unpack16(c0), Unpack16(c1)), (i16x8)Unpack16(c2));
+-  return vec_extract((u32x4)vec_packsu(v, v), 0);
+-}
+-
+ static WEBP_INLINE uint32_t ClampedAddSubtractHalf_VSX(uint32_t c0, uint32_t c1,
+                                                        uint32_t c2) {
+   const u16x8 one = vec_splats((unsigned short)1);
+@@ -215,17 +243,6 @@ static WEBP_INLINE uint32_t ClampedAddSubtractHalf_VSX(uint32_t c0, uint32_t c1,
+   return vec_extract((u32x4)vec_packsu(A4, A4), 0);
+ }
+ 
+-static WEBP_INLINE uint32_t Select_VSX(uint32_t a, uint32_t b, uint32_t c) {
+-  const u8x16 A = (u8x16)Lane0(a);
+-  const u8x16 B = (u8x16)Lane0(b);
+-  const u8x16 C = (u8x16)Lane0(c);
+-  const u32x4 sa = vec_sum4s(vec_or(vec_subs(A, C), vec_subs(C, A)),
+-                             vec_splats((unsigned int)0));
+-  const u32x4 sb = vec_sum4s(vec_or(vec_subs(B, C), vec_subs(C, B)),
+-                             vec_splats((unsigned int)0));
+-  return vec_extract((u32x4)vec_cmpgt(sb, sa), 0) ? b : a;
+-}
+-
+ static uint32_t Predictor5_VSX(const uint32_t* const left,
+                                const uint32_t* const top) {
+   return Average3_VSX(*left, top[0], top[1]);
+@@ -379,7 +396,7 @@ static void PredictorAdd11_VSX(const uint32_t* in, const uint32_t* upper,
+     const i16x8 all = vec_add((i16x8)L, (DIFF));          \
+     const u8x16 res = vec_add(src, vec_packsu(all, all)); \
+     out[i + out_idx++] = vec_extract((u32x4)res, 0);      \
+-    L = (u16x8)vec_mergeh(res, kZero);                    \
++    L = (u16x8)WMERGEH(res, kZero);                       \
+   } while (0)
+ 
+ static void PredictorAdd12_VSX(const uint32_t* in, const uint32_t* upper,
+@@ -393,9 +410,9 @@ static void PredictorAdd12_VSX(const uint32_t* in, const uint32_t* upper,
+     const u8x16 TL = (u8x16)vec_xl(0, (uint32_t*)&upper[i - 1]);
+     // 16-bit gradient basis T - TL for the four pixels (low and high halves).
+     i16x8 diff_lo =
+-        vec_sub((i16x8)vec_mergeh(T, kZero), (i16x8)vec_mergeh(TL, kZero));
++        vec_sub((i16x8)WMERGEH(T, kZero), (i16x8)WMERGEH(TL, kZero));
+     i16x8 diff_hi =
+-        vec_sub((i16x8)vec_mergel(T, kZero), (i16x8)vec_mergel(TL, kZero));
++        vec_sub((i16x8)WMERGEL(T, kZero), (i16x8)WMERGEL(TL, kZero));
+     DO_PRED12(diff_lo);
+     diff_lo = (i16x8)SRLI((u8x16)diff_lo, 8);
+     src = SRLI(src, 4);
+diff --git a/media/libwebp/src/dsp/moz.build b/media/libwebp/src/dsp/moz.build
+index d9452e2b6665..6e7435c78356 100644
+--- a/media/libwebp/src/dsp/moz.build
++++ b/media/libwebp/src/dsp/moz.build
+@@ -130,7 +130,7 @@ elif CONFIG['TARGET_CPU'] == 'ppc64':
+     DEFINES['WEBP_HAVE_VSX'] = 1;
+     for f in SOURCES:
+       if f.endswith('vsx.c'):
+-        SOURCES[f].flags += ['-mvsx']
++        SOURCES[f].flags += ['-mcpu=power8', '-mvsx']
+ 
+ if CONFIG['CC_TYPE'] in ('clang', 'clang-cl'):
+     CFLAGS += ['-Wno-unreachable-code']
+diff --git a/media/libwebp/src/dsp/rescaler_vsx.c b/media/libwebp/src/dsp/rescaler_vsx.c
+index 002f232d647a..ecb19c510202 100644
+--- a/media/libwebp/src/dsp/rescaler_vsx.c
++++ b/media/libwebp/src/dsp/rescaler_vsx.c
+@@ -1,4 +1,4 @@
+-// Copyright 2015 Google Inc. All Rights Reserved.
++// Copyright 2026 Google Inc. All Rights Reserved.
+ //
+ // Use of this source code is governed by a BSD-style license
+ // that can be found in the COPYING file in the root of the source
+@@ -7,7 +7,9 @@
+ // be found in the AUTHORS file in the root of the source tree.
+ // -----------------------------------------------------------------------------
+ //
+-// VSX (PowerPC) version of rescaling functions.
++// VSX (PowerPC64) version of rescaling functions.
++//
++// Authors: Trung Lê (8@tle.id.au)
+ 
+ #include "src/dsp/dsp.h"
+ 
+@@ -35,6 +37,17 @@ typedef __vector unsigned long long u64x2;
+ #error "MULT_FIX/WEBP_RESCALER_RFIX need some more work"
+ #endif
+ 
++// After a >>32 of the 32x32->64 products, the meaningful low 32 bits of each
++// 64-bit lane sit in the even u32 element on little-endian but the odd element
++// on big-endian; recombine the even/odd lane results accordingly.
++static WEBP_INLINE u32x4 PackLo32_VSX(u64x2 e, u64x2 o) {
++#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++  return vec_mergeo((u32x4)e, (u32x4)o);
++#else
++  return vec_mergee((u32x4)e, (u32x4)o);
++#endif
++}
++
+ // Returns (x * scale + ROUNDER) >> 32 for each of the four 32-bit lanes.
+ static WEBP_INLINE u32x4 MultFix_VSX(u32x4 x, uint32_t scale) {
+   const u64x2 rounder = vec_splats((unsigned long long)ROUNDER);
+@@ -46,7 +59,7 @@ static WEBP_INLINE u32x4 MultFix_VSX(u32x4 x, uint32_t scale) {
+   u64x2 o = vec_add(vec_mulo(x, s), rounder);
+   e = vec_sr(e, shift);
+   o = vec_sr(o, shift);
+-  return vec_mergee((u32x4)e, (u32x4)o);
++  return PackLo32_VSX(e, o);
+ }
+ 
+ // Returns (x * scale) >> 32 for each lane (no rounding).
+@@ -55,7 +68,7 @@ static WEBP_INLINE u32x4 MultFixFloor_VSX(u32x4 x, uint32_t scale) {
+   const u32x4 s = vec_splats(scale);
+   u64x2 e = vec_sr(vec_mule(x, s), shift);
+   u64x2 o = vec_sr(vec_mulo(x, s), shift);
+-  return vec_mergee((u32x4)e, (u32x4)o);
++  return PackLo32_VSX(e, o);
+ }
+ 
+ // Returns (A * frow + B * irow + ROUNDER) >> 32 for each lane.
+@@ -72,7 +85,7 @@ static WEBP_INLINE u32x4 Interpolate_VSX(const rescaler_t* WEBP_RESTRICT frow,
+   u64x2 o = vec_add(vec_mulo(f, va), vec_mulo(ir, vb));
+   e = vec_sr(vec_add(e, rounder), shift);
+   o = vec_sr(vec_add(o, rounder), shift);
+-  return vec_mergee((u32x4)e, (u32x4)o);
++  return PackLo32_VSX(e, o);
+ }
+ 
+ // Saturated pack of two 32-bit lane vectors (8 values) into 8 bytes at dst.
+diff --git a/media/libwebp/src/dsp/upsampling_vsx.c b/media/libwebp/src/dsp/upsampling_vsx.c
+index a7191972fc6e..853115d264ed 100644
+--- a/media/libwebp/src/dsp/upsampling_vsx.c
++++ b/media/libwebp/src/dsp/upsampling_vsx.c
+@@ -1,4 +1,4 @@
+-// Copyright 2011 Google Inc. All Rights Reserved.
++// Copyright 2026 Google Inc. All Rights Reserved.
+ //
+ // Use of this source code is governed by a BSD-style license
+ // that can be found in the COPYING file in the root of the source
+@@ -7,7 +7,9 @@
+ // be found in the AUTHORS file in the root of the source tree.
+ // -----------------------------------------------------------------------------
+ //
+-// VSX (PowerPC) version of YUV to RGB upsampling functions.
++// VSX (PowerPC64) version of YUV to RGB upsampling functions.
++//
++// Authors: Trung Lê (8@tle.id.au)
+ 
+ #include "src/dsp/dsp.h"
+ 
+@@ -28,7 +30,7 @@ typedef __vector unsigned short u16x8;
+ // Upsample 16 chroma pairs from rows r1/r2 (17 readable bytes each) into 32
+ // "top" bytes at out[0..31] and 32 "bottom" bytes at out[64..95], matching the
+ // fancy-upsampler diagonal weights (a + 3b + 3c + d) / 8 etc.
+-#define GET_M(ij, in) \
++#define GET_M(ij, in)       \
+   vec_sub(vec_avg(k, (in)), \
+           vec_and(vec_or(vec_and((ij), st), vec_xor(k, (in))), one))
+ 
+@@ -56,71 +58,77 @@ static void Upsample32Pixels(const uint8_t* WEBP_RESTRICT r1,
+   vec_xst(vec_mergel(tc, td), 0, out + 80);
+ }
+ 
+-#define UPSAMPLE_FUNC(FUNC_NAME, FUNC, FUNC32)                                 \
+-static void FUNC_NAME(const uint8_t* WEBP_RESTRICT top_y,                      \
+-                      const uint8_t* WEBP_RESTRICT bottom_y,                   \
+-                      const uint8_t* WEBP_RESTRICT top_u,                      \
+-                      const uint8_t* WEBP_RESTRICT top_v,                      \
+-                      const uint8_t* WEBP_RESTRICT cur_u,                      \
+-                      const uint8_t* WEBP_RESTRICT cur_v,                      \
+-                      uint8_t* WEBP_RESTRICT top_dst,                          \
+-                      uint8_t* WEBP_RESTRICT bottom_dst, int len) {            \
+-  int uv_pos, pos;                                                            \
+-  uint8_t uv_buf[14 * 32 + 15] = {0};                                         \
+-  uint8_t* const r_u = (uint8_t*)(((uintptr_t)(uv_buf + 15)) & ~(uintptr_t)15);\
+-  uint8_t* const r_v = r_u + 32;                                              \
+-  assert(top_y != NULL);                                                      \
+-  {                                                                           \
+-    const int u_diag = ((top_u[0] + cur_u[0]) >> 1) + 1;                      \
+-    const int v_diag = ((top_v[0] + cur_v[0]) >> 1) + 1;                      \
+-    FUNC(top_y[0], (top_u[0] + u_diag) >> 1, (top_v[0] + v_diag) >> 1,        \
+-         top_dst);                                                           \
+-    if (bottom_y != NULL) {                                                   \
+-      FUNC(bottom_y[0], (cur_u[0] + u_diag) >> 1, (cur_v[0] + v_diag) >> 1,   \
+-           bottom_dst);                                                      \
+-    }                                                                         \
+-  }                                                                           \
+-  for (pos = 1, uv_pos = 0; pos + 32 + 1 <= len; pos += 32, uv_pos += 16) {   \
+-    Upsample32Pixels(top_u + uv_pos, cur_u + uv_pos, r_u);                    \
+-    Upsample32Pixels(top_v + uv_pos, cur_v + uv_pos, r_v);                    \
+-    FUNC32(top_y + pos, r_u, r_v, top_dst + pos * 4);                         \
+-    if (bottom_y != NULL) {                                                   \
+-      FUNC32(bottom_y + pos, r_u + 64, r_v + 64, bottom_dst + pos * 4);       \
+-    }                                                                         \
+-  }                                                                           \
+-  if (len > 1) {                                                              \
+-    const int left_over = ((len + 1) >> 1) - (pos >> 1);                      \
+-    uint8_t* const tmp_top_dst = r_u + 4 * 32;                                \
+-    uint8_t* const tmp_bottom_dst = tmp_top_dst + 4 * 32;                     \
+-    uint8_t* const tmp_top = tmp_bottom_dst + 4 * 32;                         \
+-    uint8_t* const tmp_bottom = (bottom_y == NULL) ? NULL : tmp_top + 32;     \
+-    uint8_t r1[17], r2[17];                                                   \
+-    assert(left_over > 0);                                                    \
+-    memcpy(r1, top_u + uv_pos, left_over);                                    \
+-    memcpy(r2, cur_u + uv_pos, left_over);                                    \
+-    memset(r1 + left_over, r1[left_over - 1], 17 - left_over);                \
+-    memset(r2 + left_over, r2[left_over - 1], 17 - left_over);                \
+-    Upsample32Pixels(r1, r2, r_u);                                            \
+-    memcpy(r1, top_v + uv_pos, left_over);                                    \
+-    memcpy(r2, cur_v + uv_pos, left_over);                                    \
+-    memset(r1 + left_over, r1[left_over - 1], 17 - left_over);                \
+-    memset(r2 + left_over, r2[left_over - 1], 17 - left_over);                \
+-    Upsample32Pixels(r1, r2, r_v);                                            \
+-    memcpy(tmp_top, top_y + pos, len - pos);                                  \
+-    if (bottom_y != NULL) memcpy(tmp_bottom, bottom_y + pos, len - pos);      \
+-    FUNC32(tmp_top, r_u, r_v, tmp_top_dst);                                   \
+-    if (bottom_y != NULL) FUNC32(tmp_bottom, r_u + 64, r_v + 64,             \
+-                                 tmp_bottom_dst);                            \
+-    memcpy(top_dst + pos * 4, tmp_top_dst, (len - pos) * 4);                  \
+-    if (bottom_y != NULL) {                                                   \
+-      memcpy(bottom_dst + pos * 4, tmp_bottom_dst, (len - pos) * 4);          \
+-    }                                                                         \
+-  }                                                                           \
+-}
+-
+-UPSAMPLE_FUNC(UpsampleRgbaLinePair_VSX, VP8YuvToRgba, VP8YuvToRgba32_VSX)
+-UPSAMPLE_FUNC(UpsampleBgraLinePair_VSX, VP8YuvToBgra, VP8YuvToBgra32_VSX)
+-UPSAMPLE_FUNC(UpsampleArgbLinePair_VSX, VP8YuvToArgb, VP8YuvToArgb32_VSX)
++#define UPSAMPLE_FUNC(FUNC_NAME, FUNC, FUNC32, XSTEP)                          \
++  static void FUNC_NAME(                                                       \
++      const uint8_t* WEBP_RESTRICT top_y,                                      \
++      const uint8_t* WEBP_RESTRICT bottom_y,                                   \
++      const uint8_t* WEBP_RESTRICT top_u, const uint8_t* WEBP_RESTRICT top_v,  \
++      const uint8_t* WEBP_RESTRICT cur_u, const uint8_t* WEBP_RESTRICT cur_v,  \
++      uint8_t* WEBP_RESTRICT top_dst, uint8_t* WEBP_RESTRICT bottom_dst,       \
++      int len) {                                                               \
++    int uv_pos, pos;                                                           \
++    uint8_t uv_buf[14 * 32 + 15] = {0};                                        \
++    uint8_t* const r_u =                                                       \
++        (uint8_t*)(((uintptr_t)(uv_buf + 15)) & ~(uintptr_t)15);               \
++    uint8_t* const r_v = r_u + 32;                                             \
++    assert(top_y != NULL);                                                     \
++    {                                                                          \
++      const int u_diag = ((top_u[0] + cur_u[0]) >> 1) + 1;                     \
++      const int v_diag = ((top_v[0] + cur_v[0]) >> 1) + 1;                     \
++      FUNC(top_y[0], (top_u[0] + u_diag) >> 1, (top_v[0] + v_diag) >> 1,       \
++           top_dst);                                                           \
++      if (bottom_y != NULL) {                                                  \
++        FUNC(bottom_y[0], (cur_u[0] + u_diag) >> 1, (cur_v[0] + v_diag) >> 1,  \
++             bottom_dst);                                                      \
++      }                                                                        \
++    }                                                                          \
++    for (pos = 1, uv_pos = 0; pos + 32 + 1 <= len; pos += 32, uv_pos += 16) {  \
++      Upsample32Pixels(top_u + uv_pos, cur_u + uv_pos, r_u);                   \
++      Upsample32Pixels(top_v + uv_pos, cur_v + uv_pos, r_v);                   \
++      FUNC32(top_y + pos, r_u, r_v, top_dst + pos * XSTEP);                    \
++      if (bottom_y != NULL) {                                                  \
++        FUNC32(bottom_y + pos, r_u + 64, r_v + 64, bottom_dst + pos * XSTEP);  \
++      }                                                                        \
++    }                                                                          \
++    if (len > 1) {                                                             \
++      const int left_over = ((len + 1) >> 1) - (pos >> 1);                     \
++      uint8_t* const tmp_top_dst = r_u + 4 * 32;                               \
++      uint8_t* const tmp_bottom_dst = tmp_top_dst + 4 * 32;                    \
++      uint8_t* const tmp_top = tmp_bottom_dst + 4 * 32;                        \
++      uint8_t* const tmp_bottom = (bottom_y == NULL) ? NULL : tmp_top + 32;    \
++      uint8_t r1[17], r2[17];                                                  \
++      assert(left_over > 0);                                                   \
++      memcpy(r1, top_u + uv_pos, left_over);                                   \
++      memcpy(r2, cur_u + uv_pos, left_over);                                   \
++      memset(r1 + left_over, r1[left_over - 1], 17 - left_over);               \
++      memset(r2 + left_over, r2[left_over - 1], 17 - left_over);               \
++      Upsample32Pixels(r1, r2, r_u);                                           \
++      memcpy(r1, top_v + uv_pos, left_over);                                   \
++      memcpy(r2, cur_v + uv_pos, left_over);                                   \
++      memset(r1 + left_over, r1[left_over - 1], 17 - left_over);               \
++      memset(r2 + left_over, r2[left_over - 1], 17 - left_over);               \
++      Upsample32Pixels(r1, r2, r_v);                                           \
++      memcpy(tmp_top, top_y + pos, len - pos);                                 \
++      if (bottom_y != NULL) memcpy(tmp_bottom, bottom_y + pos, len - pos);     \
++      FUNC32(tmp_top, r_u, r_v, tmp_top_dst);                                  \
++      if (bottom_y != NULL)                                                    \
++        FUNC32(tmp_bottom, r_u + 64, r_v + 64, tmp_bottom_dst);                \
++      memcpy(top_dst + pos * XSTEP, tmp_top_dst, (len - pos) * XSTEP);         \
++      if (bottom_y != NULL) {                                                  \
++        memcpy(bottom_dst + pos * XSTEP, tmp_bottom_dst, (len - pos) * XSTEP); \
++      }                                                                        \
++    }                                                                          \
++  }
++
++UPSAMPLE_FUNC(UpsampleRgbaLinePair_VSX, VP8YuvToRgba, VP8YuvToRgba32_VSX, 4)
++UPSAMPLE_FUNC(UpsampleBgraLinePair_VSX, VP8YuvToBgra, VP8YuvToBgra32_VSX, 4)
++UPSAMPLE_FUNC(UpsampleArgbLinePair_VSX, VP8YuvToArgb, VP8YuvToArgb32_VSX, 4)
++UPSAMPLE_FUNC(UpsampleRgbLinePair_VSX, VP8YuvToRgb, VP8YuvToRgb32_VSX, 3)
++UPSAMPLE_FUNC(UpsampleBgrLinePair_VSX, VP8YuvToBgr, VP8YuvToBgr32_VSX, 3)
++UPSAMPLE_FUNC(UpsampleRgba4444LinePair_VSX, VP8YuvToRgba4444,
++              VP8YuvToRgba444432_VSX, 2)
++UPSAMPLE_FUNC(UpsampleRgb565LinePair_VSX, VP8YuvToRgb565, VP8YuvToRgb56532_VSX,
++              2)
+ 
+ extern WebPUpsampleLinePairFunc WebPUpsamplers[/* MODE_LAST */];
+ 
+@@ -131,6 +139,11 @@ WEBP_TSAN_IGNORE_FUNCTION void WebPInitUpsamplersVSX(void) {
+   WebPUpsamplers[MODE_BGRA] = UpsampleBgraLinePair_VSX;
+   WebPUpsamplers[MODE_rgbA] = UpsampleRgbaLinePair_VSX;
+   WebPUpsamplers[MODE_bgrA] = UpsampleBgraLinePair_VSX;
++  WebPUpsamplers[MODE_RGB] = UpsampleRgbLinePair_VSX;
++  WebPUpsamplers[MODE_BGR] = UpsampleBgrLinePair_VSX;
++  WebPUpsamplers[MODE_RGB_565] = UpsampleRgb565LinePair_VSX;
++  WebPUpsamplers[MODE_RGBA_4444] = UpsampleRgba4444LinePair_VSX;
++  WebPUpsamplers[MODE_rgbA_4444] = UpsampleRgba4444LinePair_VSX;
+ #if !defined(WEBP_REDUCE_CSP)
+   WebPUpsamplers[MODE_ARGB] = UpsampleArgbLinePair_VSX;
+   WebPUpsamplers[MODE_Argb] = UpsampleArgbLinePair_VSX;
+diff --git a/media/libwebp/src/dsp/yuv.h b/media/libwebp/src/dsp/yuv.h
+index 979891d3232d..813025799861 100644
+--- a/media/libwebp/src/dsp/yuv.h
++++ b/media/libwebp/src/dsp/yuv.h
+@@ -200,6 +200,22 @@ void VP8YuvToArgb32_VSX(const uint8_t* WEBP_RESTRICT y,
+                         const uint8_t* WEBP_RESTRICT u,
+                         const uint8_t* WEBP_RESTRICT v,
+                         uint8_t* WEBP_RESTRICT dst);
++void VP8YuvToRgb32_VSX(const uint8_t* WEBP_RESTRICT y,
++                       const uint8_t* WEBP_RESTRICT u,
++                       const uint8_t* WEBP_RESTRICT v,
++                       uint8_t* WEBP_RESTRICT dst);
++void VP8YuvToBgr32_VSX(const uint8_t* WEBP_RESTRICT y,
++                       const uint8_t* WEBP_RESTRICT u,
++                       const uint8_t* WEBP_RESTRICT v,
++                       uint8_t* WEBP_RESTRICT dst);
++void VP8YuvToRgba444432_VSX(const uint8_t* WEBP_RESTRICT y,
++                            const uint8_t* WEBP_RESTRICT u,
++                            const uint8_t* WEBP_RESTRICT v,
++                            uint8_t* WEBP_RESTRICT dst);
++void VP8YuvToRgb56532_VSX(const uint8_t* WEBP_RESTRICT y,
++                          const uint8_t* WEBP_RESTRICT u,
++                          const uint8_t* WEBP_RESTRICT v,
++                          uint8_t* WEBP_RESTRICT dst);
+ 
+ #endif    // WEBP_USE_VSX
+ 
+diff --git a/media/libwebp/src/dsp/yuv_vsx.c b/media/libwebp/src/dsp/yuv_vsx.c
+index 1fdc5c80ba16..f139c6314d16 100644
+--- a/media/libwebp/src/dsp/yuv_vsx.c
++++ b/media/libwebp/src/dsp/yuv_vsx.c
+@@ -1,4 +1,4 @@
+-// Copyright 2014 Google Inc. All Rights Reserved.
++// Copyright 2026 Google Inc. All Rights Reserved.
+ //
+ // Use of this source code is governed by a BSD-style license
+ // that can be found in the COPYING file in the root of the source
+@@ -7,7 +7,9 @@
+ // be found in the AUTHORS file in the root of the source tree.
+ // -----------------------------------------------------------------------------
+ //
+-// VSX (PowerPC) version of YUV->RGB conversion functions.
++// VSX (PowerPC64) version of YUV->RGB conversion functions.
++//
++// Authors: Trung Lê (8@tle.id.au)
+ 
+ #include "src/dsp/dsp.h"
+ 
+@@ -18,10 +20,23 @@
+ 
+ #include "src/dsp/yuv.h"
+ 
+-typedef __vector unsigned char  u8x16;
++typedef __vector unsigned char u8x16;
+ typedef __vector unsigned short u16x8;
+-typedef __vector signed   short i16x8;
+-typedef __vector unsigned int   u32x4;
++typedef __vector signed short i16x8;
++typedef __vector unsigned int u32x4;
++
++// PPC64 runs in both endiannesses. GCC's vec_merge*/vec_perm/vec_mule are
++// element-array-consistent across endianness, but a *widening* merge that
++// reinterprets adjacent narrow lanes as a wider type lands them in the opposite
++// half on big-endian. WMERGEH/WMERGEL keep the little-endian lane order on both
++// by swapping the operands on big-endian.
++#if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++#define WMERGEH(a, b) vec_mergeh((b), (a))
++#define WMERGEL(a, b) vec_mergel((b), (a))
++#else
++#define WMERGEH(a, b) vec_mergeh((a), (b))
++#define WMERGEL(a, b) vec_mergel((a), (b))
++#endif
+ 
+ // POWER8 has no "multiply-high unsigned halfword", so emulate _mm_mulhi_epu16
+ // via even/odd 16x16->32 products, >>16, then interleave back.
+@@ -42,10 +57,10 @@ static WEBP_INLINE void ConvertYUV444ToRGB(u16x8 Y0, u16x8 U0, u16x8 V0,
+   const u16x8 k14234 = vec_splats((unsigned short)14234);
+   const u16x8 k33050 = vec_splats((unsigned short)33050);
+   const u16x8 k17685 = vec_splats((unsigned short)17685);
+-  const u16x8 k6419  = vec_splats((unsigned short)6419);
++  const u16x8 k6419 = vec_splats((unsigned short)6419);
+   const u16x8 k13320 = vec_splats((unsigned short)13320);
+-  const u16x8 k8708  = vec_splats((unsigned short)8708);
+-  const u16x8 six    = vec_splats((unsigned short)6);
++  const u16x8 k8708 = vec_splats((unsigned short)8708);
++  const u16x8 six = vec_splats((unsigned short)6);
+ 
+   const u16x8 Y1 = MulHi16(Y0, k19077);
+   const u16x8 R2 = vec_add(vec_sub(Y1, k14234), MulHi16(V0, k26149));
+@@ -66,7 +81,7 @@ static WEBP_INLINE u16x8 LoadHi16(const uint8_t* WEBP_RESTRICT src) {
+   const u8x16 zero = vec_splats((unsigned char)0);
+   unsigned char tmp[16] = {0};
+   memcpy(tmp, src, 8);
+-  return (u16x8)vec_mergeh(zero, vec_xl(0, tmp));
++  return (u16x8)WMERGEH(zero, vec_xl(0, tmp));
+ }
+ 
+ // Load 4 U/V bytes, shift into the high byte, and replicate each sample.
+@@ -74,8 +89,10 @@ static WEBP_INLINE u16x8 LoadUVHi8(const uint8_t* WEBP_RESTRICT src) {
+   const u8x16 zero = vec_splats((unsigned char)0);
+   unsigned char tmp[16] = {0};
+   memcpy(tmp, src, 4);
+-  const u16x8 t = (u16x8)vec_mergeh(zero, vec_xl(0, tmp));
+-  return vec_mergeh(t, t);
++  {
++    const u16x8 t = (u16x8)WMERGEH(zero, vec_xl(0, tmp));
++    return vec_mergeh(t, t);
++  }
+ }
+ 
+ static WEBP_INLINE void YUV420ToRGB(const uint8_t* WEBP_RESTRICT y,
+@@ -99,20 +116,41 @@ static WEBP_INLINE void PackAndStore4(i16x8 c0, i16x8 c1, i16x8 c2, i16x8 c3,
+ 
+ static const i16x8 kAlpha = {255, 255, 255, 255, 255, 255, 255, 255};
+ 
++// Pack three 8-lane channels into 24 interleaved bytes (c0 c1 c2 per pixel).
++static const u8x16 kPack3Lo = {0,  8, 16, 1,  9, 17, 2,  10,
++                               18, 3, 11, 19, 4, 12, 20, 5};
++static const u8x16 kPack3Hi = {13, 21, 6, 14, 22, 7, 15, 23,
++                               0,  0,  0, 0,  0,  0, 0,  0};
++static WEBP_INLINE void PackAndStore3(i16x8 c0, i16x8 c1, i16x8 c2,
++                                      uint8_t* WEBP_RESTRICT dst) {
++  const u8x16 c01 = vec_packsu(c0, c1);  // [c0_0..7 | c1_0..7]
++  const u8x16 c22 = vec_packsu(c2, c2);  // [c2_0..7 | ...]
++  const u8x16 lo = vec_perm(c01, c22, kPack3Lo);
++  const u8x16 hi = vec_perm(c01, c22, kPack3Hi);
++  vec_xst(lo, 0, dst);
++  memcpy(dst + 16, &hi, 8);
++}
++
+ static void YuvToRgbaRow_VSX(const uint8_t* WEBP_RESTRICT y,
+                              const uint8_t* WEBP_RESTRICT u,
+                              const uint8_t* WEBP_RESTRICT v,
+                              uint8_t* WEBP_RESTRICT dst, int len) {
+   int n;
+   for (n = 0; n + 8 <= len; n += 8, dst += 32) {
+-    i16x8 R, G; u16x8 B;
++    i16x8 R, G;
++    u16x8 B;
+     YUV420ToRGB(y, u, v, &R, &G, &B);
+     PackAndStore4(R, G, (i16x8)B, kAlpha, dst);
+-    y += 8; u += 4; v += 4;
++    y += 8;
++    u += 4;
++    v += 4;
+   }
+   for (; n < len; ++n) {
+     VP8YuvToRgba(y[0], u[0], v[0], dst);
+-    dst += 4; y += 1; u += (n & 1); v += (n & 1);
++    dst += 4;
++    y += 1;
++    u += (n & 1);
++    v += (n & 1);
+   }
+ }
+ 
+@@ -122,14 +160,20 @@ static void YuvToBgraRow_VSX(const uint8_t* WEBP_RESTRICT y,
+                              uint8_t* WEBP_RESTRICT dst, int len) {
+   int n;
+   for (n = 0; n + 8 <= len; n += 8, dst += 32) {
+-    i16x8 R, G; u16x8 B;
++    i16x8 R, G;
++    u16x8 B;
+     YUV420ToRGB(y, u, v, &R, &G, &B);
+     PackAndStore4((i16x8)B, G, R, kAlpha, dst);
+-    y += 8; u += 4; v += 4;
++    y += 8;
++    u += 4;
++    v += 4;
+   }
+   for (; n < len; ++n) {
+     VP8YuvToBgra(y[0], u[0], v[0], dst);
+-    dst += 4; y += 1; u += (n & 1); v += (n & 1);
++    dst += 4;
++    y += 1;
++    u += (n & 1);
++    v += (n & 1);
+   }
+ }
+ 
+@@ -139,14 +183,20 @@ static void YuvToArgbRow_VSX(const uint8_t* WEBP_RESTRICT y,
+                              uint8_t* WEBP_RESTRICT dst, int len) {
+   int n;
+   for (n = 0; n + 8 <= len; n += 8, dst += 32) {
+-    i16x8 R, G; u16x8 B;
++    i16x8 R, G;
++    u16x8 B;
+     YUV420ToRGB(y, u, v, &R, &G, &B);
+     PackAndStore4(kAlpha, R, G, (i16x8)B, dst);
+-    y += 8; u += 4; v += 4;
++    y += 8;
++    u += 4;
++    v += 4;
+   }
+   for (; n < len; ++n) {
+     VP8YuvToArgb(y[0], u[0], v[0], dst);
+-    dst += 4; y += 1; u += (n & 1); v += (n & 1);
++    dst += 4;
++    y += 1;
++    u += (n & 1);
++    v += (n & 1);
+   }
+ }
+ 
+@@ -158,9 +208,10 @@ void VP8YuvToRgba32_VSX(const uint8_t* WEBP_RESTRICT y,
+                         uint8_t* WEBP_RESTRICT dst) {
+   int n;
+   for (n = 0; n < 32; n += 8, dst += 32) {
+-    i16x8 R, G; u16x8 B;
+-    ConvertYUV444ToRGB(LoadHi16(y + n), LoadHi16(u + n), LoadHi16(v + n),
+-                       &R, &G, &B);
++    i16x8 R, G;
++    u16x8 B;
++    ConvertYUV444ToRGB(LoadHi16(y + n), LoadHi16(u + n), LoadHi16(v + n), &R,
++                       &G, &B);
+     PackAndStore4(R, G, (i16x8)B, kAlpha, dst);
+   }
+ }
+@@ -171,9 +222,10 @@ void VP8YuvToBgra32_VSX(const uint8_t* WEBP_RESTRICT y,
+                         uint8_t* WEBP_RESTRICT dst) {
+   int n;
+   for (n = 0; n < 32; n += 8, dst += 32) {
+-    i16x8 R, G; u16x8 B;
+-    ConvertYUV444ToRGB(LoadHi16(y + n), LoadHi16(u + n), LoadHi16(v + n),
+-                       &R, &G, &B);
++    i16x8 R, G;
++    u16x8 B;
++    ConvertYUV444ToRGB(LoadHi16(y + n), LoadHi16(u + n), LoadHi16(v + n), &R,
++                       &G, &B);
+     PackAndStore4((i16x8)B, G, R, kAlpha, dst);
+   }
+ }
+@@ -184,17 +236,165 @@ void VP8YuvToArgb32_VSX(const uint8_t* WEBP_RESTRICT y,
+                         uint8_t* WEBP_RESTRICT dst) {
+   int n;
+   for (n = 0; n < 32; n += 8, dst += 32) {
+-    i16x8 R, G; u16x8 B;
+-    ConvertYUV444ToRGB(LoadHi16(y + n), LoadHi16(u + n), LoadHi16(v + n),
+-                       &R, &G, &B);
++    i16x8 R, G;
++    u16x8 B;
++    ConvertYUV444ToRGB(LoadHi16(y + n), LoadHi16(u + n), LoadHi16(v + n), &R,
++                       &G, &B);
+     PackAndStore4(kAlpha, R, G, (i16x8)B, dst);
+   }
+ }
+ 
++// Pack R/G/B/A into 16-bit rgba4444 (8 pixels -> 16 bytes).
++static WEBP_INLINE void PackAndStore4444(i16x8 R, i16x8 G, u16x8 B, i16x8 A,
++                                         uint8_t* WEBP_RESTRICT dst) {
++  const u8x16 mask = vec_splats((unsigned char)0xf0);
++  const u16x8 four = vec_splats((unsigned short)4);
++#if (WEBP_SWAP_16BIT_CSP == 0)
++  const u8x16 rg0 = vec_packsu(R, G);
++  const u8x16 ba0 = vec_packsu((i16x8)B, A);
++#else
++  const u8x16 rg0 = vec_packsu((i16x8)B, A);
++  const u8x16 ba0 = vec_packsu(R, G);
++#endif
++  const u8x16 rb1 = vec_mergeh(rg0, ba0);
++  const u8x16 ga1 = vec_mergel(rg0, ba0);
++  const u8x16 rb2 = vec_and(rb1, mask);
++  const u8x16 ga2 = (u8x16)vec_sr((u16x8)vec_and(ga1, mask), four);
++  vec_xst(vec_or(rb2, ga2), 0, dst);
++}
++
++// Pack R/G/B into 16-bit rgb565 (8 pixels -> 16 bytes).
++static WEBP_INLINE void PackAndStore565(i16x8 R, i16x8 G, u16x8 B,
++                                        uint8_t* WEBP_RESTRICT dst) {
++  const u16x8 three = vec_splats((unsigned short)3);
++  const u16x8 five = vec_splats((unsigned short)5);
++  const u8x16 r0 = vec_packsu(R, R);
++  const u8x16 g0 = vec_packsu(G, G);
++  const u8x16 b0 = vec_packsu((i16x8)B, (i16x8)B);
++  const u8x16 r1 = vec_and(r0, vec_splats((unsigned char)0xf8));
++  const u8x16 b1 =
++      vec_and((u8x16)vec_sr((u16x8)b0, three), vec_splats((unsigned char)0x1f));
++  const u8x16 g1 =
++      (u8x16)vec_sr((u16x8)vec_and(g0, vec_splats((unsigned char)0xe0)), five);
++  const u8x16 g2 =
++      (u8x16)vec_sl((u16x8)vec_and(g0, vec_splats((unsigned char)0x1c)), three);
++  const u8x16 rg = vec_or(r1, g1);
++  const u8x16 gb = vec_or(g2, b1);
++#if (WEBP_SWAP_16BIT_CSP == 0)
++  vec_xst(vec_mergeh(rg, gb), 0, dst);
++#else
++  vec_xst(vec_mergeh(gb, rg), 0, dst);
++#endif
++}
++
++void VP8YuvToRgba444432_VSX(const uint8_t* WEBP_RESTRICT y,
++                            const uint8_t* WEBP_RESTRICT u,
++                            const uint8_t* WEBP_RESTRICT v,
++                            uint8_t* WEBP_RESTRICT dst) {
++  int n;
++  for (n = 0; n < 32; n += 8, dst += 16) {
++    i16x8 R, G;
++    u16x8 B;
++    ConvertYUV444ToRGB(LoadHi16(y + n), LoadHi16(u + n), LoadHi16(v + n), &R,
++                       &G, &B);
++    PackAndStore4444(R, G, B, kAlpha, dst);
++  }
++}
++
++void VP8YuvToRgb56532_VSX(const uint8_t* WEBP_RESTRICT y,
++                          const uint8_t* WEBP_RESTRICT u,
++                          const uint8_t* WEBP_RESTRICT v,
++                          uint8_t* WEBP_RESTRICT dst) {
++  int n;
++  for (n = 0; n < 32; n += 8, dst += 16) {
++    i16x8 R, G;
++    u16x8 B;
++    ConvertYUV444ToRGB(LoadHi16(y + n), LoadHi16(u + n), LoadHi16(v + n), &R,
++                       &G, &B);
++    PackAndStore565(R, G, B, dst);
++  }
++}
++
++void VP8YuvToRgb32_VSX(const uint8_t* WEBP_RESTRICT y,
++                       const uint8_t* WEBP_RESTRICT u,
++                       const uint8_t* WEBP_RESTRICT v,
++                       uint8_t* WEBP_RESTRICT dst) {
++  int n;
++  for (n = 0; n < 32; n += 8, dst += 24) {
++    i16x8 R, G;
++    u16x8 B;
++    ConvertYUV444ToRGB(LoadHi16(y + n), LoadHi16(u + n), LoadHi16(v + n), &R,
++                       &G, &B);
++    PackAndStore3(R, G, (i16x8)B, dst);
++  }
++}
++
++void VP8YuvToBgr32_VSX(const uint8_t* WEBP_RESTRICT y,
++                       const uint8_t* WEBP_RESTRICT u,
++                       const uint8_t* WEBP_RESTRICT v,
++                       uint8_t* WEBP_RESTRICT dst) {
++  int n;
++  for (n = 0; n < 32; n += 8, dst += 24) {
++    i16x8 R, G;
++    u16x8 B;
++    ConvertYUV444ToRGB(LoadHi16(y + n), LoadHi16(u + n), LoadHi16(v + n), &R,
++                       &G, &B);
++    PackAndStore3((i16x8)B, G, R, dst);
++  }
++}
++
++static void YuvToRgbRow_VSX(const uint8_t* WEBP_RESTRICT y,
++                            const uint8_t* WEBP_RESTRICT u,
++                            const uint8_t* WEBP_RESTRICT v,
++                            uint8_t* WEBP_RESTRICT dst, int len) {
++  int n;
++  for (n = 0; n + 8 <= len; n += 8, dst += 24) {
++    i16x8 R, G;
++    u16x8 B;
++    YUV420ToRGB(y, u, v, &R, &G, &B);
++    PackAndStore3(R, G, (i16x8)B, dst);
++    y += 8;
++    u += 4;
++    v += 4;
++  }
++  for (; n < len; ++n) {
++    VP8YuvToRgb(y[0], u[0], v[0], dst);
++    dst += 3;
++    y += 1;
++    u += (n & 1);
++    v += (n & 1);
++  }
++}
++
++static void YuvToBgrRow_VSX(const uint8_t* WEBP_RESTRICT y,
++                            const uint8_t* WEBP_RESTRICT u,
++                            const uint8_t* WEBP_RESTRICT v,
++                            uint8_t* WEBP_RESTRICT dst, int len) {
++  int n;
++  for (n = 0; n + 8 <= len; n += 8, dst += 24) {
++    i16x8 R, G;
++    u16x8 B;
++    YUV420ToRGB(y, u, v, &R, &G, &B);
++    PackAndStore3((i16x8)B, G, R, dst);
++    y += 8;
++    u += 4;
++    v += 4;
++  }
++  for (; n < len; ++n) {
++    VP8YuvToBgr(y[0], u[0], v[0], dst);
++    dst += 3;
++    y += 1;
++    u += (n & 1);
++    v += (n & 1);
++  }
++}
++
+ extern void WebPInitSamplersVSX(void);
+ 
+ WEBP_TSAN_IGNORE_FUNCTION void WebPInitSamplersVSX(void) {
++  WebPSamplers[MODE_RGB] = YuvToRgbRow_VSX;
+   WebPSamplers[MODE_RGBA] = YuvToRgbaRow_VSX;
++  WebPSamplers[MODE_BGR] = YuvToBgrRow_VSX;
+   WebPSamplers[MODE_BGRA] = YuvToBgraRow_VSX;
+   WebPSamplers[MODE_ARGB] = YuvToArgbRow_VSX;
+ }
