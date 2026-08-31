@@ -7,7 +7,7 @@ pkgbase=kcachegrind
 pkgname=(kcachegrind
          kcachegrind-common
          qcachegrind)
-pkgver=26.04.3
+pkgver=26.08.0
 pkgrel=1
 pkgdesc='Visualization of Performance Profiling Data'
 url='https://apps.kde.org/kcachegrind/'
@@ -19,7 +19,7 @@ makedepends=(extra-cmake-modules
              kxmlgui
              qt6-tools)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('5a071482af4c999081eca0da798c457db33cfc791c133859e8c9877cebd22577'
+sha256sums=('760296956f12ced6bb51a6db2be813be425ee60bc204bd36a9c42a273e5ca0df'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
