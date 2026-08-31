@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=rocs
-pkgver=26.04.3
+pkgver=26.08.0
 pkgrel=1
 pkgdesc='Graph Theory IDE'
 url='https://apps.kde.org/rocs/'
@@ -36,7 +36,7 @@ makedepends=(boost
 groups=(kde-applications
         kde-education)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('603b78382fee164dd20ea2b0319ec68ce70556c720a8c0900acddb3158a91dde'
+sha256sums=('ac923f21e423c063f6b5fa77d8a21647c83f4da97c59110777420cc7069b12b3'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
