@@ -1,0 +1,62 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Daniel M. Capella <polyzen@archlinux.org>
+# Contributor: ObserverOfTime <chronobserver@disroot.org>
+
+pkgname=tree-sitter-markdown
+pkgver=0.5.3
+pkgrel=2
+pkgdesc='Markdown grammar for tree-sitter'
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url=https://github.com/tree-sitter-grammars/tree-sitter-markdown
+license=(MIT)
+groups=(tree-sitter-grammars)
+depends=(
+  glibc
+)
+makedepends=(
+  cmake
+  git
+  tree-sitter-cli
+)
+optdepends=('tree-sitter: core library')
+provides=(
+  "lib$pkgname.so"
+  "lib$pkgname-inline.so"
+)
+source=("git+$url.git#commit=v$pkgver")
+b2sums=('1252abe04242f577f3279c8b9b7fd9153961fbb1edc4accea0227f82699a216239c3bce80a7ad4cf696e33e09493780c57bdafd4d4db1ca0356adc31d81bf421')
+
+prepare() {
+  cd $pkgname/tree-sitter-markdown
+  tree-sitter generate src/grammar.json
+
+  cd ../tree-sitter-markdown-inline
+  tree-sitter generate src/grammar.json
+}
+
+build() {
+  local cmake_options=(
+    -B build
+    -S "$pkgname"
+    -W no-dev
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_PREFIX=/usr
+  )
+
+  cmake "${cmake_options[@]}"
+  cmake --build build
+}
+
+package() {
+  install -d "$pkgdir"/usr/lib/tree_sitter
+  ln -s /usr/lib/lib$pkgname.so \
+    "$pkgdir"/usr/lib/tree_sitter/${pkgname#tree-sitter-}.so
+  ln -s /usr/lib/lib$pkgname-inline.so \
+    "$pkgdir"/usr/lib/tree_sitter/${pkgname#tree-sitter-}_inline.so
+
+  DESTDIR="$pkgdir" cmake --install build
+
+  cd $pkgname
+  install -Dm644 -t "$pkgdir"/usr/share/doc/$pkgname README.md
+  install -Dm644 -t "$pkgdir"/usr/share/licenses/$pkgname LICENSE
+}
