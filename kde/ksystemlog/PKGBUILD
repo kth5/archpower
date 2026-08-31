@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=ksystemlog
-pkgver=26.04.3
+pkgver=26.08.0
 pkgrel=1
 pkgdesc='System log viewer tool'
 url='https://apps.kde.org/ksystemlog/'
@@ -33,7 +33,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-system)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('a93b84c398be0f85ee5b4d54214f306f86f21c168f93791c7a809f6108d28c82'
+sha256sums=('4caf2653ea15cab7219c8d1f5bd205783c5f185b92f5abcc6d3e803fc8d3a82e'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
