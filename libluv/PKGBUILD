@@ -1,0 +1,94 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Sven-Hendrik Haase <svenstaro@archlinux.org>
+# Contributor: Jurica Bradarić <jbradaric@gmail.com>
+# Contributor: jprjr <john@jrjrtech.com>
+pkgname=('lua-luv' 'lua51-luv' 'lua52-luv' 'lua53-luv' 'lua54-luv')
+case "${CARCH}" in
+  powerpc|powerpc64le|x86_64)
+    pkgname+=('libluv')
+  ;;
+esac
+pkgbase=libluv
+pkgver=1.52.1
+_pkgver=1.52.1-0
+pkgrel=1
+pkgdesc='Bare libuv bindings for lua'
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url='https://github.com/luvit/luv'
+license=('Apache-2.0')
+depends=('libuv')
+makedepends=('cmake' 'libuv' 'ninja' 'lua>=5.5.0' 'lua<5.6.0' 'lua51' 'lua52' 'lua53' 'lua54')
+makedepends_powerpc=('luajit')
+makedepends_powerpc64le=('luajit')
+makedepends_x86_64=('luajit')
+source=("https://github.com/luvit/luv/releases/download/${_pkgver}/luv-${_pkgver}.tar.gz")
+sha256sums=('3e6eb820a3aee034f85f9cce9bd77b5d42f34d128a1ccec877adf28c913577c7')
+
+build() {
+  # build per-lua versions
+  for ver in 5.1 5.2 5.3 5.4 5.5; do
+    incdir="/usr/include/lua${ver}"
+    if [ "$ver" = "5.5" ] ; then
+      incdir="/usr/include"
+    fi
+    cmake -GNinja \
+      -Bbuild-lua${ver//./} \
+      -DLUA=/usr/bin/lua${ver} \
+      -DLUA_INCDIR=${incdir} \
+      -DLUADIR=/usr/share/lua/${ver} \
+      -DLIBDIR=/usr/lib/lua/${ver} \
+      -DWITH_SHARED_LIBUV=ON \
+      -DLUA_BUILD_TYPE=System \
+      -DCMAKE_INSTALL_PREFIX=/usr \
+      "luv-${_pkgver}"
+    ninja -C "build-lua${ver//./}"
+  done
+
+  # build shared library version
+  cmake -GNinja \
+    -Bbuild \
+    -DWITH_SHARED_LIBUV=ON \
+    -DLUA_BUILD_TYPE=System \
+    -DBUILD_MODULE=OFF \
+    -DBUILD_SHARED_LIBS=ON \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    "luv-${_pkgver}"
+  ninja -C "build"
+}
+
+package_libluv() {
+  depends+=('luajit')
+  DESTDIR="${pkgdir}" ninja -C "build" install
+}
+
+package_lua-luv() {
+  pkgdesc+=' - Lua module'
+  depends+=('lua')
+  DESTDIR="${pkgdir}" ninja -C "build-lua55" install
+}
+
+package_lua51-luv() {
+  pkgdesc+=' - Lua 5.1 module'
+  depends+=('lua51')
+  DESTDIR="${pkgdir}" ninja -C "build-lua51" install
+}
+
+package_lua52-luv() {
+  pkgdesc+=' - Lua 5.2 module'
+  depends+=('lua52')
+  DESTDIR="${pkgdir}" ninja -C "build-lua52" install
+}
+
+package_lua53-luv() {
+  pkgdesc+=' - Lua 5.3 module'
+  depends+=('lua53')
+  DESTDIR="${pkgdir}" ninja -C "build-lua53" install
+}
+
+package_lua54-luv() {
+  pkgdesc+=' - Lua 5.4 module'
+  depends+=('lua54')
+  DESTDIR="${pkgdir}" ninja -C "build-lua54" install
+}
+
+# vim:set ts=2 sw=2 et:
