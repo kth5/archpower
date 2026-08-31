@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kapptemplate
-pkgver=26.04.3
+pkgver=26.08.0
 pkgrel=1
 pkgdesc='KDE Template Generator'
 url='https://apps.kde.org/kapptemplate/'
@@ -28,7 +28,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-sdk)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('e917a5e37e8c7b9283af30fcd017433a0966d9d4236e4021f817acd2723a5426'
+sha256sums=('5dafeb5ef7e3b437403b36f6f2d90357e6994d6c83f541bf90af682d091ec01c'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
