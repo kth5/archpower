@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kruler
-pkgver=26.04.3
+pkgver=26.08.0
 pkgrel=1
 pkgdesc='Screen Ruler'
 url='https://apps.kde.org/kruler/'
@@ -28,7 +28,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-graphics)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('634b154d05db526a4d05025e7358b01929b7c5938602477f6880b19c6ba79a13'
+sha256sums=('92cbcd18795a177c2613a0316b5c29b713bbc89c6473a1d8f7ea56f6ceaa915f'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
