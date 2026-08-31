@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=analitza
-pkgver=26.04.3
+pkgver=26.08.0
 pkgrel=1
 pkgdesc='A library to add mathematical features to your program'
 url='https://www.kde.org/'
@@ -23,7 +23,7 @@ makedepends=(eigen
 conflicts=(analitza5)
 replaces=(analitza5)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('615b7c244a5baee0be5214c53b8ce37d0a54e69a6fd6b8438c30d7fda45b0746'
+sha256sums=('78e29638b71d9789405773cb6d8613bdef0f989abb6f6f3eef7662ebaad01d7f'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
