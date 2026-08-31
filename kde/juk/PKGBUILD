@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=juk
-pkgver=26.04.3
+pkgver=26.08.0
 pkgrel=1
 pkgdesc='A jukebox, tagger and music collection manager'
 url='https://apps.kde.org/juk/'
@@ -39,7 +39,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-multimedia)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('93963ec7511d854477f54bccfa6cc584cc6935b977a498851cfab66946e8b813'
+sha256sums=('1fd5d4516c898b1324c1e5e4259abd099e23e5aae4c32417b26a094401b516a3'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
