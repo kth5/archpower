@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=step
-pkgver=26.04.3
+pkgver=26.08.0
 pkgrel=1
 pkgdesc='Interactive Physical Simulator'
 url='https://apps.kde.org/step/'
@@ -38,7 +38,7 @@ makedepends=(eigen
 groups=(kde-applications
         kde-education)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('37abc38d7f1931842d2b910ee28f8788b40d8a021a926c4a1b9b7f0aedd05fa4'
+sha256sums=('d89061b66d52574cd2ad254be3bfe5924ef8ae8c6dc1a380766f9e1f79ace516'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
