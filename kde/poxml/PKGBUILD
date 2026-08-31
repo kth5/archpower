@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=poxml
-pkgver=26.04.3
+pkgver=26.08.0
 pkgrel=1
 pkgdesc='Translates DocBook XML files using gettext po files'
 url='https://www.kde.org/'
@@ -20,7 +20,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-sdk)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('c3b3c9719d50e4dde81f67e75ce236ef15b9e81187208f3b3844707cce76c448'
+sha256sums=('bc94b06c8bd2e84489c09bb92dd9ad94bbf4e5d83f5707c0625cd5ab81a8371f'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
