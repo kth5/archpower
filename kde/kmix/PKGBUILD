@@ -4,7 +4,7 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 pkgname=kmix
-pkgver=26.04.3
+pkgver=26.08.0
 pkgrel=1
 pkgdesc='KDE volume control program'
 url='https://apps.kde.org/kmix/'
@@ -36,7 +36,7 @@ makedepends=(extra-cmake-modules
 groups=(kde-applications
         kde-multimedia)
 source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig})
-sha256sums=('6bcd3c7d9a093fa93c9d6cfaf1a13b691d73de91b9bceaf7de2f00dc4d5eb3ad'
+sha256sums=('2e7d66ea06e91df099cdc0e979595229018ca3d08f1c04e80eab8b6bcb4920f3'
             'SKIP')
 validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
               F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
