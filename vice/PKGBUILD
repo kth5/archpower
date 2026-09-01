@@ -5,13 +5,14 @@
 pkgbase=vice
 pkgname=(vice vice-sdl2)
 pkgver=3.10
-pkgrel=2
+pkgrel=3
 pkgdesc='Versatile Commodore Emulator'
 arch=(powerpc64le powerpc64 powerpc espresso)
 license=(GPL-2.0-only)
 url='https://vice-emu.sourceforge.io/'
-depends=(alsa-lib glew libevdev libpng libpulse)
-makedepends=(automake-1.16 dos2unix giflib glib2-devel gtk3 libjpeg-turbo libpcap libxaw python sdl2 sdl2_image xa xorg-bdftopcf xorg-mkfontscale)
+depends=(alsa-lib giflib libpng libpulse libusb)
+makedepends=(dos2unix glew glib2-devel gtk3 libevdev libjpeg-turbo libpcap libxaw python sdl2 sdl2_image xa xdg-utils xorg-bdftopcf xorg-mkfontscale
+             automake-1.16)
 source=("https://downloads.sourceforge.net/project/vice-emu/releases/$pkgbase-$pkgver.tar.gz"
         disable-fc-cache.patch)
 b2sums=('d41bfe4ed5213f4fff345f195de60e95d87b9c5901e89ff31d221841e51358a55e1f7fecae5afae0e71439d5a8da7411e632bc42b582e5b17b72dba07ae2cadd'
@@ -22,6 +23,7 @@ prepare() {
   rm -rf src/lib/{liblame,libx264,libffmpeg}
   patch -p1 -i ../disable-fc-cache.patch
   sed -i 's/lib64/lib/g' configure.ac
+  sed -i 's/xdg-icon-resource install/xdg-icon-resource install --mode user/' data/common/Makefile.am
   autoreconf -fi
   cp -rv ../$pkgbase-$pkgver ../$pkgbase-sdl2
 }
@@ -35,6 +37,7 @@ build() {
     --disable-sdl2ui \
     --enable-gtk3ui \
     --enable-x64 \
+    --enable-desktop-files \
     --with-gif \
     --libdir=/usr/lib \
     --prefix=/usr
@@ -54,15 +57,17 @@ build() {
 
 package_vice() {
   pkgdesc='Versatile Commodore Emulator (GTK3)'
-  depends+=(giflib gtk3)
+  depends+=(glew gtk3 libevdev)
   provides=(vice)
   conflicts=(vice-sdl2)
   make -C $pkgbase-$pkgver DESTDIR="$pkgdir" realdocdir=/usr/share/doc/vice install
+  find "$pkgdir"/usr/share/icons -type d -exec chmod 755 {} +
+  find "$pkgdir"/usr/share/icons -type f -exec chmod 644 {} +
 }
 
 package_vice-sdl2() {
   pkgdesc='Versatile Commodore Emulator (SDL2)'
-  depends+=(giflib sdl2 sdl2_image)
+  depends+=(sdl2 sdl2_image)
   provides=(vice)
   conflicts=(vice)
   make -C $pkgbase-sdl2 DESTDIR="$pkgdir" realdocdir=/usr/share/doc/vice install
