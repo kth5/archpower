@@ -3,20 +3,23 @@
 # Maintainer: Jakub Klinkovský <lahwaacz at archlinux dot org>
 
 pkgname=adios2
-pkgver=2.11.0
-pkgrel=7
+pkgver=2.12.1
+pkgrel=6
 pkgdesc="The Adaptable Input/Output System version 2"
-arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+#arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+arch=(powerpc espresso)
 url="https://adios2.readthedocs.io/en/latest/"
 license=(Apache-2.0)
 depends=(
   blosc2
   bzip2 libbz2.so
+  curl libcurl.so
   glibc
   hdf5
   libfabric
   libgcc
   libgfortran
+  libgomp
   libpng libpng16.so
   libsodium libsodium.so
   libstdc++
@@ -27,11 +30,11 @@ depends=(
   pugixml
   python
   sqlite libsqlite3.so
-  sz
   yaml-cpp libyaml-cpp.so
   zeromq libzmq.so
   zfp
   zlib libz.so
+  zstd libzstd.so
 )
 depends_x86_64=(
   openucx libucp.so libucs.so
@@ -40,11 +43,12 @@ makedepends=(
   cmake
   gcc-fortran
   gtest
+  nanobind
   ninja
   nlohmann-json
-  pybind11
   python-mpi4py
   python-numpy
+  sz
 )
 makedepends_x86_64=(
   cuda
@@ -58,8 +62,17 @@ optdepends_x86_64=(
 )
 source=(
   https://github.com/ornladios/ADIOS2/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz
+  InlineWriter.patch
 )
-b2sums=('d79d833ee42a6097b15341729892dde119b9e157ec5f3078a2a842f412ceca064b619fb5b7b4f95bf8134298e50251acd88f9981426b10c00070b33ad4abc8d5')
+b2sums=('4b62124d733fdadcbbf6a6e4209b202ea3f71af620e62f7cc3ad06ecc7ff1d3732406cd789e9c6a7838ba5bf08ca38622a83438a1d79665016c6fd344bdb9a1d'
+        '184f413ac2921fb5eb5be7f8e0bd1c2fb6ba20106964facb84f6e88a702cd892ccdcc73b34f4948993cb89b9d09560841c58f885e8619ae9aff62d103ac9da81')
+
+prepare() {
+  cd ${pkgname^^}-${pkgver}
+  # Workaround for a bug in ParaViewFidesEngine plugin that was introduced in https://github.com/ornladios/ADIOS2/pull/4922
+  # See https://github.com/ornladios/ADIOS2/pull/5111
+  patch -p1 < ../InlineWriter.patch
+}
 
 build() {
   # In general, we want to list all real archs (sm_XX) and the latest virtual arch (compute_XX) for future PTX compatibility.
@@ -73,13 +86,13 @@ build() {
     -W no-dev
     -DCMAKE_BUILD_TYPE=None
     -DCMAKE_INSTALL_PREFIX=/usr
-    # CUB requires at least C++17 https://github.com/ornladios/ADIOS2/issues/4620
-    -DCMAKE_CXX_STANDARD=17
     -DADIOS2_USE_EXTERNAL_DEPENDENCIES=ON
+    -DADIOS2_USE_EXTERNAL_PERFSTUBS=OFF
+    -DADIOS2_USE_EXTERNAL_NANOBIND=ON
     #-DADIOS2_HAVE_HDF5_VOL needs hdf5-openmpi
     -DADIOS2_HAVE_HDF5_VOL=OFF
     -DADIOS2_BUILD_EXAMPLES=OFF
-    -DADIOS2_USE_Derived_Variables=ON
+    -DADIOS2_USE_Derived_Variable=ON
   )
 
   case "${CARCH}" in
@@ -90,9 +103,11 @@ build() {
         #FIXME: RefactorMDR.cpp:444:29: error: invalid initialization of reference of type ‘const adios2::Dims&’ {
         -DADIOS2_USE_MGARD=OFF
         -DDILL_NATIVE_ONLY=OFF
+        -DADIOS2_USE_HDF5=OFF
+        -DADIOS2_USE_HDF5=OFF
       )
     ;;
-    powerpc64|riscv64)
+    powerpc64)
       cmake_options+=(
         -DDILL_NATIVE_ONLY=OFF
       )
