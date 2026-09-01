@@ -1,0 +1,133 @@
+From 321af18ecb7f19c3b24c6cd22192e357d937422a Mon Sep 17 00:00:00 2001
+From: Juniper Tyree <juniper.tyree@helsinki.fi>
+Date: Fri, 21 Nov 2025 10:39:52 +0200
+Subject: [PATCH] Introduce SZ3::unordered_map for wasm32 compatibility
+
+---
+ .../SZ3/decomposition/SZBioMDDecomposition.hpp    |  3 ++-
+ include/SZ3/encoder/HuffmanEncoder.hpp            | 11 ++---------
+ include/SZ3/encoder/HuffmanEncoderV2.hpp          | 10 +++++-----
+ include/SZ3/utils/Collections.hpp                 | 15 +++++++++++++++
+ 4 files changed, 24 insertions(+), 15 deletions(-)
+ create mode 100644 include/SZ3/utils/Collections.hpp
+
+diff --git a/include/SZ3/decomposition/SZBioMDDecomposition.hpp b/include/SZ3/decomposition/SZBioMDDecomposition.hpp
+index 418dd5e1..0499dd7c 100644
+--- a/include/SZ3/decomposition/SZBioMDDecomposition.hpp
++++ b/include/SZ3/decomposition/SZBioMDDecomposition.hpp
+@@ -9,6 +9,7 @@
+ #include <list>
+ 
+ #include "SZ3/utils/Config.hpp"
++#include "SZ3/utils/Collections.hpp"
+ 
+ namespace SZ3 {
+ 
+@@ -106,7 +107,7 @@ class SZBioMDDecomposition : public concepts::DecompositionInterface<T, int, N>
+                 }
+             }
+         }
+-        ska::unordered_map<int, size_t> frequency;
++        unordered_map<int, size_t> frequency;
+         for (size_t i = 0; i < sites.size(); i++) {
+             frequency[sites[i]]++;
+         }
+diff --git a/include/SZ3/encoder/HuffmanEncoder.hpp b/include/SZ3/encoder/HuffmanEncoder.hpp
+index 00d5ca18..69645a0b 100644
+--- a/include/SZ3/encoder/HuffmanEncoder.hpp
++++ b/include/SZ3/encoder/HuffmanEncoder.hpp
+@@ -8,9 +8,7 @@
+ #include "SZ3/utils/ByteUtil.hpp"
+ #include "SZ3/utils/MemoryUtil.hpp"
+ #include "SZ3/utils/Timer.hpp"
+-#if INTPTR_MAX == INT64_MAX  // 64bit system
+-#include "SZ3/utils/ska_hash/unordered_map.hpp"
+-#endif  // INTPTR_MAX == INT64_MAX
++#include "SZ3/utils/Collections.hpp"
+ #include <cassert>
+ #include <cstdio>
+ #include <cstdlib>
+@@ -18,7 +16,6 @@
+ #include <iostream>
+ #include <map>
+ #include <set>
+-#include <unordered_map>
+ #include <unordered_set>
+ 
+ namespace SZ3 {
+@@ -520,11 +517,7 @@ class HuffmanEncoder : public concepts::EncoderInterface<T> {
+         T max = s[0];
+         offset = s[0];  // offset is min
+ 
+-#if (SZ3_USE_SKA_HASH) && (INTPTR_MAX == INT64_MAX)  // use ska for 64bit system
+-        ska::unordered_map<T, size_t> frequency;
+-#else   // most likely 32bit system
+-        std::unordered_map<T, size_t> frequency;
+-#endif  // INTPTR_MAX == INT64_MAX
++        unordered_map<T, size_t> frequency;
+ 
+         for (size_t i = 0; i < length; i++) {
+             frequency[s[i]] += 1;
+diff --git a/include/SZ3/encoder/HuffmanEncoderV2.hpp b/include/SZ3/encoder/HuffmanEncoderV2.hpp
+index f2821ecb..fc041c3d 100644
+--- a/include/SZ3/encoder/HuffmanEncoderV2.hpp
++++ b/include/SZ3/encoder/HuffmanEncoderV2.hpp
+@@ -12,7 +12,7 @@
+ #include "SZ3/utils/ByteUtil.hpp"
+ #include "SZ3/utils/MemoryUtil.hpp"
+ #include "SZ3/utils/Timer.hpp"
+-#include "SZ3/utils/ska_hash/unordered_map.hpp"
++#include "SZ3/utils/Collections.hpp"
+ 
+ namespace SZ3 {
+ template <class T>
+@@ -91,8 +91,8 @@ class HuffmanEncoderV2 : public concepts::EncoderInterface<T> {
+ 
+         std::vector<uchar> veclen;
+         std::vector<int> veccode;
+-        ska::unordered_map<size_t, uchar> mplen;
+-        ska::unordered_map<size_t, int> mpcode;
++        unordered_map<size_t, uchar> mplen;
++        unordered_map<size_t, int> mpcode;
+         //            std::unordered_map<size_t,uchar> mplen;
+         //            std::unordered_map<size_t,int> mpcode;
+         //            std::map<size_t,uchar> mplen;
+@@ -128,7 +128,7 @@ class HuffmanEncoderV2 : public concepts::EncoderInterface<T> {
+         T maxval;
+         std::vector<Node> ht;
+         std::vector<size_t> vecfreq;
+-        ska::unordered_map<T, size_t> mpfreq;
++        unordered_map<T, size_t> mpfreq;
+         //            std::unordered_map<T,size_t> mpfreq;
+         //            std::map<T,size_t> mpfreq;
+ 
+@@ -278,7 +278,7 @@ class HuffmanEncoderV2 : public concepts::EncoderInterface<T> {
+             //                tree.mplen.reserve(num_bin);
+             //                tree.mpcode.reserve(num_bin);
+ 
+-            //                ska::unordered_map<T,size_t> freq;
++            //                unordered_map<T,size_t> freq;
+             //                std::unordered_map<T,size_t> freq;
+             std::map<T, size_t> freq;
+             //                freq.reserve(num_bin);
+diff --git a/include/SZ3/utils/Collections.hpp b/include/SZ3/utils/Collections.hpp
+new file mode 100644
+index 00000000..42d561ac
+--- /dev/null
++++ b/include/SZ3/utils/Collections.hpp
+@@ -0,0 +1,15 @@
++#if INTPTR_MAX == INT64_MAX  // use ska for 64bit system
++#include "SZ3/utils/ska_hash/unordered_map.hpp"
++#else   // most likely 32bit system
++#include <unordered_map>
++#endif  // INTPTR_MAX == INT64_MAX
++
++namespace SZ3 {
++
++#if (SZ3_USE_SKA_HASH) && (INTPTR_MAX == INT64_MAX)  // use ska for 64bit system
++    using ska::unordered_map;
++#else   // most likely 32bit system
++    using std::unordered_map;
++#endif  // INTPTR_MAX == INT64_MAX
++
++}
