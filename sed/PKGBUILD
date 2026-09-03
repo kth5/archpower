@@ -5,45 +5,79 @@
 
 pkgname=sed
 pkgver=4.10
-pkgrel=1
+pkgrel=2
 pkgdesc='GNU stream editor'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://www.gnu.org/software/sed/'
 license=('GPL-3.0-or-later')
-depends=('glibc' 'acl')
-makedepends=('gettext')
-source=("https://ftp.gnu.org/pub/gnu/sed/$pkgname-$pkgver.tar.xz"{,.sig})
-validpgpkeys=('155D3FC500C834486D1EEA677FD9FCCB000BEEEE') #Jim Meyering <jim@meyering.net>
-sha256sums=('b8e72182b2ec96a3574e2998c47b7aaa64cc20ce000d8e9ac313cc07cecf28c7'
-            'SKIP')
+depends=('glibc' 'acl' 'attr')
+makedepends=('git' 'wget' 'gettext')
+checkdepends=('glibc-locales')
+validpgpkeys=('155D3FC500C834486D1EEA677FD9FCCB000BEEEE') # Jim Meyering <meyering@meta.com>
+source=("git+https://git.savannah.gnu.org/git/sed.git#tag=v${pkgver}?signed"
+        "git+https://git.savannah.gnu.org/git/gnulib.git"
+        "https://ftp.gnu.org/gnu/sed/sed-${pkgver}.tar.gz"{,.sig}
+        sed-4.10-fix-panic-printf-format.patch)
+sha256sums=('d28f7150773847031de56a7de4ba5fa17273097845f3a449be23bd65f283324b'
+            'SKIP'
+            '4d179ffaf92ec4dcec541f7c032be1c3b9a1856f4970adb95a505221702f5277'
+            'SKIP'
+            'ac3c39fa4439910f406a233fe98cf720700b3be12995030219ed67c31e0df23f')
+
+# uselessly ressource intensive with only marginal gain
+# requires >4GB RAM to complete so impossible on 32bit
+case "${CARCH}" in
+  powerpc*) options=(!lto) ;;
+esac
 
 prepare() {
-  cd $pkgname-$pkgver
-  # apply patch from the source array (should be a pacman feature)
-  local src
-  for src in "${source[@]}"; do
-    src="${src%%::*}"
-    src="${src##*/}"
-    [[ $src = *.patch ]] || continue
-    echo "Applying patch $src..."
-    patch -Np1 < "../$src"
-  done
+  cd "${pkgname}"
+
+  git submodule init
+  git config submodule.gnulib.url "${srcdir}/gnulib"
+  git -c protocol.file.allow=always submodule update
+
+  patch -Np1 -i ${srcdir}/sed-4.10-fix-panic-printf-format.patch
+
+  # Don't pull unstable translations from web
+  ./bootstrap --skip-po
 }
 
 build() {
-  cd $pkgname-$pkgver
+  case "${CARCH}" in
+    powerpc)
+      CFLAGS=${CFLAGS/-Werror=format-security/}
+      CFLAGS=${CFLAGS/-Wformat/}
+    ;;
+  esac 
+
+  cd "${pkgname}"
   ./configure --prefix=/usr
   make
+
+  # Generate sed mo files from dist tarball
+  # See: https://archlinux.org/todo/unstable-gnu-translations/
+  cd "${srcdir}/${pkgname}-${pkgver}/po"
+  for po in *.po; do
+    msgfmt "${po}" -o "${po%.po}.mo"
+  done
 }
 
 check() {
-  cd $pkgname-$pkgver
+  cd "${pkgname}"
   make check
 }
 
 package() {
-  cd $pkgname-$pkgver
-  make DESTDIR="$pkgdir" install
+  cd "${pkgname}"
+  make DESTDIR="${pkgdir}" install
+
+  # Install sed mo files from dist tarball
+  # See: https://archlinux.org/todo/unstable-gnu-translations/
+  cd "${srcdir}/${pkgname}-${pkgver}/po"
+  for mo in *.mo; do
+    install -Dm 644 "${mo}" "${pkgdir}/usr/share/locale/${mo%.mo}/LC_MESSAGES/${pkgname}.mo"
+  done
 }
 
 # vim:set ts=2 sw=2 et:
