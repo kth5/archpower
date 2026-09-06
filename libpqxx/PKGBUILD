@@ -3,33 +3,57 @@
 # Contributor: Giovanni Scafora <giovanni@archlinux.org>
 
 pkgname=libpqxx
-pkgver=7.10.2
+pkgver=8.0.2
 pkgrel=1
 pkgdesc='C++ client API for PostgreSQL'
 url='http://pqxx.org/development/libpqxx/'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-license=('custom')
-depends=('postgresql-libs>=9.1')
-makedepends=('python')
+license=(BSD-3-Clause)
+depends=(
+  glibc
+  libstdc++.so
+  libgcc_s.so
+  'postgresql-libs>=9.1'
+)
+makedepends=(
+  git
+  python
+  cmake
+  ninja
+)
 provides=("libpqxx-${pkgver%.*}.so")
-source=(https://github.com/jtv/libpqxx/archive/${pkgver}/${pkgname}-${pkgver}.tar.gz)
-sha256sums=('9e109ffe12daa7b689da41dac05509f41b803f8405e38b1687b54e09df19000f')
-b2sums=('93d521d4f1d5ed1e37d427041ae2b016899edf6dbc65968979ab8d16fd0a9701edb4af725b6b4f0f80f86dbb462ca52bd1bd7b2ccaee90a7abb3396e60807612')
+source=("$pkgname::git+https://github.com/jtv/libpqxx#tag=$pkgver")
+sha512sums=('20a64ca454cfadcdbe06d35800c5718ec707924e982a13b837287ececf891a2e9ecc8a5917bdf55514d6364cc0133fd64bfb2bd4c26e52a05a1d8adce9eb5af5')
+b2sums=('f29a053498c5320200097d6d2afb6dc7ad001ab5eb57d8eed9a81684768f419daed485b8e848260b769a83a8f8cbe5578533f37da85a77f7f15ab7fdb5e5bc54')
 
 build() {
-  cd ${pkgname}-${pkgver}
-  ./configure \
-    --prefix=/usr \
-    --enable-shared \
-    --disable-doc
-  make
+  local cmake_options=(
+    -B build
+    -S "$pkgname"
+    -W no-dev
+    -G Ninja
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D BUILD_SHARED_LIBS=ON
+    -D SKIP_BUILD_TEST=ON
+    -D BUILD_DOC=OFF
+  )
+
+  cmake "${cmake_options[@]}"
+
+  cmake --build build
 }
 
 package() {
-  cd ${pkgname}-${pkgver}
-  make prefix="${pkgdir}/usr" install
-  install -Dm 644 COPYING -t "${pkgdir}/usr/share/licenses/${pkgname}"
-  install -Dm 644 README.md -t "${pkgdir}/usr/share/doc/${pkgname}"
+  DESTDIR="$pkgdir" cmake --install build
+
+  cd "$pkgname"
+
+  # documentation
+  install -vDm644 -t "$pkgdir/usr/share/doc/$pkgname" README.md
+
+  # license
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" COPYING
 }
 
 # vim: ts=2 sw=2 et:
