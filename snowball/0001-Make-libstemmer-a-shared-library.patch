@@ -10,39 +10,39 @@ Subject: [PATCH] Make libstemmer a shared library
  create mode 100644 libstemmer/symbol.map
 
 diff --git a/GNUmakefile b/GNUmakefile
-index e1403be3c85b..e014388a2e92 100644
+index 830a831ca615..a29886a16168 100644
 --- a/GNUmakefile
 +++ b/GNUmakefile
-@@ -190,20 +190,19 @@ C_OTHER_OBJECTS = $(C_OTHER_SOURCES:.c=.o)
+@@ -294,12 +294,11 @@ C_OTHER_OBJECTS = $(C_OTHER_SOURCES:.c=.o)
  JAVA_CLASSES = $(JAVA_SOURCES:.java=.class)
- JAVA_RUNTIME_CLASSES=$(JAVARUNTIME_SOURCES:.java=.class)
+ JAVA_RUNTIME_CLASSES=$(JAVA_RUNTIME_SOURCES:.java=.class)
  
--CFLAGS=-g -O2 -W -Wall -Wmissing-prototypes -Wmissing-declarations -Wshadow $(WERROR)
+-CFLAGS=-g -O2 -W -Wall -Wcast-qual -Wmissing-prototypes -Wmissing-declarations -Wshadow $(WERROR)
 -CPPFLAGS=
-+CFLAGS+=-fPIC -W -Wall -Wmissing-prototypes -Wmissing-declarations -Wshadow $(WERROR)
++CFLAGS+=-fPIC -W -Wall -Wcast-qual -Wmissing-prototypes -Wmissing-declarations -Wshadow $(WERROR)
  
  INCLUDES=-Iinclude
  
 -all: snowball$(EXEEXT) libstemmer.a stemwords$(EXEEXT) $(C_OTHER_SOURCES) $(C_OTHER_HEADERS) $(C_OTHER_OBJECTS)
 +all: snowball$(EXEEXT) libstemmer.so.0 stemwords$(EXEEXT) $(C_OTHER_SOURCES) $(C_OTHER_HEADERS) $(C_OTHER_OBJECTS)
  
- algorithms.mk: libstemmer/mkalgorithms.pl libstemmer/modules.txt
- 	libstemmer/mkalgorithms.pl algorithms.mk libstemmer/modules.txt
- 
- clean:
- 	rm -f $(COMPILER_OBJECTS) $(RUNTIME_OBJECTS) \
+ algorithms.mk: GNUmakefile libstemmer/mkalgorithms.pl $(MODULES)
+ 	libstemmer/mkalgorithms.pl algorithms.mk $(MODULES)
+@@ -358,7 +357,7 @@ $(COMPILER_OBJECTS): $(COMPILER_HEADERS)
+ # each target language section.
+ CLEANFILES := $(COMPILER_OBJECTS) $(RUNTIME_OBJECTS) \
  	      $(LIBSTEMMER_OBJECTS) $(LIBSTEMMER_UTF8_OBJECTS) $(STEMWORDS_OBJECTS) snowball$(EXEEXT) \
 -	      libstemmer.a stemwords$(EXEEXT) \
 +	      libstemmer.so.0 stemwords$(EXEEXT) \
                libstemmer/modules.h \
                libstemmer/modules_utf8.h \
- 	      $(C_LIB_SOURCES) $(C_LIB_HEADERS) $(C_LIB_OBJECTS) \
-@@ -254,19 +253,19 @@ libstemmer/modules_utf8.h libstemmer/mkinc_utf8.mak: libstemmer/mkmodules.pl lib
+ 	      stemtest$(EXEEXT) $(STEMTEST_OBJECTS) \
+@@ -404,19 +403,19 @@ libstemmer/modules_utf8.h libstemmer/mkinc_utf8.mak: libstemmer/mkmodules.pl $(M
  
  libstemmer/libstemmer.o: libstemmer/modules.h $(C_LIB_HEADERS)
  
 -libstemmer.a: libstemmer/libstemmer.o $(RUNTIME_OBJECTS) $(C_LIB_OBJECTS)
--	$(AR) -cru $@ $^
+-	$(AR) $(ARFLAGS) $@ $^
 +libstemmer.so.0: libstemmer/libstemmer.o $(RUNTIME_OBJECTS) $(C_LIB_OBJECTS)
 +	$(CC) $(CFLAGS) -shared $(LDFLAGS) -Wl,-soname,$@,-version-script,libstemmer/symbol.map -o $@ $^
  
@@ -60,7 +60,7 @@ index e1403be3c85b..e014388a2e92 100644
 +stemtest$(EXEEXT): $(STEMTEST_OBJECTS) libstemmer.so.0
  	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
  
- csharp_stemwords$(EXEEXT): $(CSHARP_STEMWORDS_SOURCES) $(CSHARP_RUNTIME_SOURCES) $(CSHARP_SOURCES)
+ $(c_src_dir)/stem_UTF_8_%.c $(c_src_dir)/stem_UTF_8_%.h: $(ALGORITHMS)/%.sbl snowball$(EXEEXT)
 diff --git a/libstemmer/symbol.map b/libstemmer/symbol.map
 new file mode 100644
 index 000000000000..7a3d42356362
