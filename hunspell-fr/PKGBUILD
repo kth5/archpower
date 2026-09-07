@@ -1,51 +1,69 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Bruno Pagani <archange@archlinux.org>
 
-pkgname=hunspell-fr
+pkgbase=hunspell-fr
+pkgname=($pkgbase-{classical,comprehensive,revised})
 pkgver=7.7
-pkgrel=1
-pkgdesc="French (classic/modern) hunspell dictionaries"
+pkgrel=2
+pkgdesc="French Hunspell dictionary"
 arch=(any)
-url="https://grammalecte.net/download.php?prj=fr"
-license=(MPL2)
+url="https://grammalecte.net/"
+license=(MPL-2.0)
 makedepends_x86_64=(qt6-webengine)
-provides=('hunspell-dictionary')
+conflicts=(hunspell-fr)
+provides=(hunspell-fr hunspell-dictionary)
 optdepends=('hunspell: the spell checking libraries and apps')
-source=(https://grammalecte.net/oxt/lo-oo-ressources-linguistiques-fr-v${pkgver}.oxt)
-sha256sums=('9f679889ff60f787a06e74f271ed1b40d2fa0ee8cdd10ecbe56134cba9c71b05')
+source=(https://www.grammalecte.net/dic/hunspell-french-dictionaries-v${pkgver}.zip)
+sha256sums=('44314d992f94b4658c31a86ef2351724a43067531b0af3643f91bf0220eee616')
 
-package() {
-  cd dictionaries
+package_hunspell-fr-classical() {
+  pkgdesc+=" (classical variant)"
+  _package 'classique'
+}
 
-  install -Dm644 fr-classique.dic "${pkgdir}"/usr/share/hunspell/fr_FR.dic
-  install -Dm644 fr-classique.aff "${pkgdir}"/usr/share/hunspell/fr_FR.aff
+package_hunspell-fr-comprehensive() {
+  pkgdesc+=" (comprehensive variant)"
+  _package 'toutesvariantes'
+}
+
+package_hunspell-fr-revised() {
+  pkgdesc+=" (revised variant)"
+  _package 'reforme1990'
+}
+
+_package() {
+  aliases="fr_BE fr_CA fr_CH fr_LU"
+  _dicname=$1
+  cd "${srcdir}/"
+
+  install -dm755 ${pkgdir}/usr/share/hunspell
+  install -Dm644 fr-${_dicname}.dic "${pkgdir}"/usr/share/hunspell/fr_FR.dic
+  install -Dm644 fr-${_dicname}.aff "${pkgdir}"/usr/share/hunspell/fr_FR.aff
+  install -Dm644 README_dict_fr.txt -t "${pkgdir}"/usr/share/doc/${pkgname}/
 
   pushd "${pkgdir}"/usr/share/hunspell/
-  fr_FR_aliases="fr_BE fr_CA fr_CH fr_LU"
-  for lang in ${fr_FR_aliases}; do
+  for lang in ${aliases}; do
     ln -s fr_FR.aff ${lang}.aff
     ln -s fr_FR.dic ${lang}.dic
   done
-  popd
-
   # the symlinks
   install -dm755 "${pkgdir}"/usr/share/myspell/dicts
-  pushd "${pkgdir}"/usr/share/myspell/dicts
-    for file in "${pkgdir}"/usr/share/hunspell/*; do
-      ln -sv /usr/share/hunspell/$(basename ${file}) .
-    done
+  for file in *; do
+    ln -rs ${file} "${pkgdir}"/usr/share/myspell/dicts
+  done
   popd
 
-  # docs
-  install -Dm644 README_dict_fr.txt -t "${pkgdir}"/usr/share/doc/${pkgname}/
-
-  # Install webengine dictionaries
-  if [ "${CARCH}" == 'x86_64' ]; then
-    install -d "$pkgdir"/usr/share/qt{,6}/qtwebengine_dictionaries/
-    for _file in "$pkgdir"/usr/share/hunspell/*.dic; do
-      _filename=$(basename $_file)
-      /usr/lib/qt6/qwebengine_convert_dict $_file "$pkgdir"/usr/share/qt6/qtwebengine_dictionaries/${_filename/\.dic/\.bdic}
-      ln -rs "$pkgdir"/usr/share/qt6/qtwebengine_dictionaries/${_filename/\.dic/\.bdic} "$pkgdir"/usr/share/qt/qtwebengine_dictionaries/
-    done
-  fi
+  case "${CARCH}" in
+    x86_64)
+      # Install webengine dictionaries
+      install -d "$pkgdir"/usr/share/qt{,6}/qtwebengine_dictionaries/
+      pushd "$pkgdir"/usr/share/qt6/qtwebengine_dictionaries/
+      /usr/lib/qt6/qwebengine_convert_dict "$pkgdir"/usr/share/hunspell/fr_FR.dic fr_FR.bdic
+      ln -rs fr_FR.bdic "$pkgdir"/usr/share/qt/qtwebengine_dictionaries/
+      for lang in ${aliases}; do
+        ln -rs fr_FR.bdic ${lang}.bdic
+        ln -rs fr_FR.bdic "$pkgdir"/usr/share/qt/qtwebengine_dictionaries/${lang}.bdic
+      done
+      popd
+    ;;
+  esac
 }
