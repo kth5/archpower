@@ -1,41 +1,76 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Gaetan Bisson <bisson@archlinux.org>
+# Contributor: Gaetan Bisson <bisson@archlinux.org>
 # Contributor: Kevin Piche <kevin@archlinux.org>
 # Contributor: Tom Newsom <Jeepster@gmx.co.uk>
 
 pkgname=sharutils
 pkgver=4.15.2
-pkgrel=5.1
+pkgrel=6
 pkgdesc='Makes so-called shell archives out of many files'
 url='https://www.gnu.org/software/sharutils/'
 license=('GPL-3.0-or-later')
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 depends=('glibc')
 makedepends=('gettext')
 validpgpkeys=('1F967B15DEB2349CACDF3D71D9204CB5BFBF0221')
-source=("https://ftp.gnu.org/gnu/${pkgname}/${pkgname}-${pkgver}.tar.xz"{,.sig})
+source=(
+  "https://ftp.gnu.org/gnu/${pkgname}/${pkgname}-${pkgver}.tar.xz"{,.sig}
+  sharutils-4.14.2-Pass-compilation-with-Werror-format-security.patch
+  sharutils-4.15.2-Fix-building-with-GCC-10.patch
+  sharutils-4.15.2-Do-not-include-lib-md5.c-into-src-shar.c.patch
+  sharutils-4.15.2-ISO-C23-Backport-stdbool.m4-from-gnulib-devel-0-52.2.patch
+  sharutils-4.15.2-fflush-adjust-to-glibc-2.28-libio.h-removal.patch
+  sharutils-4.15.2-ISO-C23-Port-getcwd.m4-to-ISO-C23.patch
+  sharutils-4.15.2-Fix-a-heap-buffer-overflow-in-find_archive.patch
+  sharutils-4.15.2-ISO-C23-Port-the-code-to-ISO-C23.patch
+)
 sha256sums=('2b05cff7de5d7b646dc1669bc36c35fdac02ac6ae4b6c19cb3340d87ec553a9a'
-            'SKIP')
+            'SKIP'
+            '6178d525c208cf948b23dc0eaee8de794f1101717d50448061f348d35b8a5791'
+            'f29c85f74354fad949d024e0f0b8584b66982438a65c7f4a60dbd86733b9ae70'
+            '88500b140c4698df6e73985b75f5eb63071fc6cf4385a9453f10da339010c576'
+            '770b2ab19b29e7d671578a593c940ca471227af8d2d569343d821f424d1bb9b8'
+            '3a82ddd2459b27df6016d3a7e03ffa993961f76547a0a3a20c4da7b1fcd71c54'
+            '8adf6f9d93e2093ee9ff5056f201f7c8046e6dcde940adf60fa9bf3513eb4c91'
+            '9ce1083bc8c7cc64f9279ce4a38ba11610e89ece3f5801c6f51ea78a2bad6e7b'
+            'bf55ab88dcaa1f2f888054a197c30cfcc3df53a99d2e90f2cd0808277e7e383e')
 
 prepare() {
-	cd "${srcdir}/${pkgname}-${pkgver}"
-	sed 's/FUNC_FFLUSH_STDIN/-1/g' -i lib/fseeko.c
+  cd "${srcdir}/${pkgname}-${pkgver}"
+
+  local src
+  for src in "${source[@]}"; do
+    src="${src%%::*}"
+    src="${src##*/}"
+    src="${src%.zst}"
+    [[ $src = *.patch ]] || continue
+    echo "Applying patch $src..."
+    patch -Np1 < "../$src"
+  done
+
+  autoreconf -fiv
 }
 
 build() {
-	cd "${srcdir}/${pkgname}-${pkgver}"
-	CFLAGS+=' -fcommon' # https://wiki.gentoo.org/wiki/Gcc_10_porting_notes/fno_common
-	CFLAGS+=' -Wno-format-security' # fix build with gettext function
-	./configure \
-                --build=${CHOST} \
-		--prefix=/usr \
-		--mandir=/usr/share/man \
-		--infodir=/usr/share/info \
+  cd "${srcdir}/${pkgname}-${pkgver}"
 
-	make
+  ./configure \
+    --prefix=/usr \
+    --mandir=/usr/share/man \
+    --infodir=/usr/share/info \
+    --disable-dependency-tracking
+
+  make
+}
+
+check() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+
+  make check
 }
 
 package() {
-	cd "${srcdir}/${pkgname}-${pkgver}"
-	make DESTDIR="${pkgdir}" install
+  cd "${srcdir}/${pkgname}-${pkgver}"
+
+  make DESTDIR="${pkgdir}" install
 }
