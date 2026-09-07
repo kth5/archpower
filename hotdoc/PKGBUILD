@@ -3,11 +3,11 @@
 # Contributor: Eli Schwartz <eschwartz@archlinux.org>
 
 pkgname=hotdoc
-pkgver=0.17.4
-pkgrel=4
+pkgver=0.18.2
+pkgrel=1
 pkgdesc="The tastiest API documentation system"
-url="https://github.com/hotdoc/hotdoc"
 arch=(x86_64 powerpc64le powerpc64)
+url="https://github.com/hotdoc/hotdoc"
 license=(LGPL-2.1-or-later)
 depends=(
   bash
@@ -18,7 +18,6 @@ depends=(
   python
   python-appdirs
   python-dbus-deviation
-  python-faust-cchardet
   python-feedgen
   python-lxml
   python-networkx
@@ -31,6 +30,8 @@ depends=(
 makedepends=(
   cmake
   git
+  meson-python
+  nodejs-lts-iron
   npm
   python-build
   python-installer
@@ -43,36 +44,30 @@ optdepends=(
 )
 source=(
   "git+https://github.com/hotdoc/hotdoc#tag=$pkgver"
-  "git+https://github.com/MathieuDuponchelle/cmark"
-  "git+https://github.com/PrismJS/prism"
-  "git+https://github.com/hotdoc/hotdoc_bootstrap_theme"
-  "0001-Simplify-deps-for-Python-3.11.patch"
+  "$pkgname-cmark::git+https://github.com/MathieuDuponchelle/cmark"
+  "$pkgname-prism::git+https://github.com/PrismJS/prism"
+  "$pkgname-hotdoc_bootstrap_theme::git+https://github.com/hotdoc/hotdoc_bootstrap_theme"
 )
-sha256sums=('9ba11a71cb8e4c5fa2bb33bc4f27f5fee02cf8328b5f8a2bcb4986116f98d443'
-            'SKIP'
-            'SKIP'
-            'SKIP'
-            '865812a0c5a66822ece814e898b4b3ca46553ba51190adc944bb4f01c0db6cf0')
+b2sums=('5806ae4f5db23a1a23e711c06e09253860df689d3c5c3a43fc1199210978ebcbee97e4cba2932fbff3e010922660ffdf335bd6452a44b94a7835020b217c1156'
+        'SKIP'
+        'SKIP'
+        'SKIP')
 
 prepare() {
   cd $pkgname
-
-  patch -Np1 -i "$srcdir/0001-Simplify-deps-for-Python-3.11.patch"
-
   git submodule init
-  git config submodule.cmark.url "$srcdir/cmark"
-  git config submodule.hotdoc/extensions/syntax_highlighting/prism.url "$srcdir/prism"
-  git config submodule.hotdoc/hotdoc_bootstrap_theme.url "$srcdir/hotdoc_bootstrap_theme"
+  git config submodule.cmark.url ../$pkgname-cmark
+  git config submodule.hotdoc/extensions/syntax_highlighting/prism.url ../$pkgname-prism
+  git config submodule.hotdoc/hotdoc_bootstrap_theme.url ../$pkgname-hotdoc_bootstrap_theme
   git -c protocol.file.allow=always submodule update
 
-  sed -e '/CMP0048/d' -i cmark/CMakeLists.txt # Fix build with CMake 4
-
-  git cherry-pick -n adf8518431fafb78c9b47862a0a9a58824b6a421 # Fix build with GCC 15
+  # Place submodules in subprojects/ so meson doesn't clone them
+  cp -a cmark subprojects/cmark
+  cp -a hotdoc/hotdoc_bootstrap_theme subprojects/hotdoc_bootstrap_theme
 }
 
 build() {
   cd $pkgname
-  export CMAKE_POLICY_VERSION_MINIMUM=3.5
   python -m build --wheel --no-isolation
 }
 
