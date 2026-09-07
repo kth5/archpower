@@ -2,37 +2,38 @@
 # Maintainer: Caleb Maclennan <caleb@alerque.com>
 
 pkgname=netpbm
-pkgver=10.86.49
-pkgrel=1
+pkgver=10.86.50
+_rev=5219 # "Release 10.86.50", 2026-06-27
+pkgrel=2
 pkgdesc='A toolkit for manipulation of graphic images'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(Artistic-1.0 GPL-2.0-only LGPL-2.0-only MIT)
 url="http://netpbm.sourceforge.net/"
 depends=(bash
-         gcc-libs
          glibc
          jbigkit
+         libgcc
          libjpeg-turbo
          libpng
          libtiff
          libxml2
          perl
          zlib)
-# Get docs with: wget --recursive --relative -nH http://netpbm.sourceforge.net/doc/
+makedepends=(python subversion)
 source=(https://downloads.sourceforge.net/project/netpbm/super_stable/$pkgver/netpbm-$pkgver.tgz
-        https://sources.archlinux.org/other/packages/netpbm/netpbm-doc-31Jan2014.tar.xz{,.sig}
+        "netpbm-userguide::svn+http://svn.code.sf.net/p/netpbm/code/userguide#revision=$_rev"
         netpbm-CAN-2005-2471.patch
         netpbm-security-code.patch
         netpbm-security-scripts.patch
+        netpbm-build-manpages.patch
         reproducible-man-gzip.patch)
-sha256sums=('98c1abdad8e593a20e36b597c6b5b4427c80349544d466eed7761ecec69f6daf'
-            '74bcf840ee643c6917330c382484010cb99c004a3fcf05391bebcac63815acb3'
+sha256sums=('9d9f0b08505961e7bff43b93bf7b00310f1b0e7315bc32a0321116e6bedd95c8'
             'SKIP'
             '7348274b72b8285add042d0f45d124c9833206ee3440bd1846cfc792b9b4d5e5'
             '698645215d46bcee515d75847fc550ce99c5fcb6fae63dacdba1d773f327c80e'
             '5ee27b4187577cbb9e85f6b36c5e5a421e03927f9195f888be7be2b647a5ac9d'
+            'c289ec584097e2fdd7a975299d5a51e8266a706832c3d39105e4dd99e57ee94b'
             'b0be94fbfbf247552c5cc3f1cdd93e2d549f59c3d218350ccc1bea44e9bebc9b')
-validpgpkeys=('5357F3B111688D88C1D88119FCF2CB179205AC90')
 
 prepare() {
   cd $pkgname-$pkgver
@@ -40,11 +41,12 @@ prepare() {
   patch -p1 < ../netpbm-CAN-2005-2471.patch
   patch -p1 < ../netpbm-security-code.patch
   patch -p1 < ../netpbm-security-scripts.patch
+  patch -p1 < ../netpbm-build-manpages.patch
   patch -p1 < ../reproducible-man-gzip.patch
 
   cp config.mk.in  config.mk
   echo 'CFLAGS_SHLIB = -fPIC' >> config.mk
-  echo "NETPBM_DOCURL = file://${srcdir}/doc" >> config.mk
+  echo "NETPBM_DOCURL = file:///usr/share/doc/${pkgname}/html" >> config.mk
   echo 'TIFFLIB = libtiff.so' >> config.mk
   echo 'JPEGLIB = libjpeg.so' >> config.mk
   echo 'PNGLIB = libpng.so' >> config.mk
@@ -60,15 +62,23 @@ build() {
   cd $pkgname-$pkgver
   CFLAGS+=' -std=gnu17'
   make
+
   # Generating useful man pages with html doc
-  # TODO: Enable when we have it updated
-  # make MAKEMAN="${srcdir}/$pkgname-$pkgver/buildtools/makeman" USERGUIDE="-v ." \
-  #   -C ../doc -f "${srcdir}/$pkgname-$pkgver/buildtools/manpage.mk" manpages
+  mkdir -p man
+  make -C man USERGUIDE=../../netpbm-userguide -f ../buildtools/manpage.mk manpages
 }
 
 package() {
   cd $pkgname-$pkgver
   make pkgdir="${pkgdir}/usr" PKGMANDIR=share/man install-run install-dev
+
+  install -m755 -d "${pkgdir}/usr/share/man/man1"
+  install -m755 -d "${pkgdir}/usr/share/man/man3"
+  install -m755 -d "${pkgdir}/usr/share/man/man5"
+
+  make -C man MANDIR="${pkgdir}/usr/share/man" USERGUIDE=../../netpbm-userguide -f ../buildtools/manpage.mk installman
+
+  install -D -m644 -t "${pkgdir}/usr/share/doc/${pkgname}/html" ../netpbm-userguide/*
 
 # Replace obsolete utility
   echo -e '#!/bin/sh\npamditherbw $@ | pamtopnm\n' > "${pkgdir}/usr/bin/pgmtopbm"
