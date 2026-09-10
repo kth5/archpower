@@ -1,0 +1,20 @@
+--- a/arch/powerpc/kernel/syscall.c
++++ b/arch/powerpc/kernel/syscall.c
+@@ -28,6 +28,17 @@
+ 			_exception(SIGILL, regs, ILL_ILLOPC, regs->nip);
+ 			return regs->gpr[3];
+ 		}
++		/*
++		 * -1 means the syscall was skipped: by seccomp (SECCOMP_RET_ERRNO,
++		 * _TRAP, _TRACE) or by ptrace (PTRACE_SYSEMU, tracer rejection).
++		 * The return value, and CR0.SO for sc, has already been stored in
++		 * regs by syscall_set_return_value() and must be returned as-is.
++		 * Other architectures leave the value in pt_regs, but on powerpc
++		 * the exit path takes it from r3, so returning -ENOSYS here turns
++		 * every SECCOMP_RET_ERRNO into ENOSYS.
++		 */
++		if (r0 == (unsigned long)-1)
++			return regs->gpr[3];
+ 		return -ENOSYS;
+ 	}
+ 
