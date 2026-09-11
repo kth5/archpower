@@ -3,27 +3,42 @@
 # Contributor: Daniel Wallace <danielwallace at gtmanfred dot com>
 
 pkgname=python-cmd2
-pkgver=2.6.2
-pkgrel=2
+pkgver=3.2.2
+pkgrel=1
 pkgdesc="A tool for building interactive command line apps"
 arch=(any)
 url="https://github.com/python-cmd2/cmd2"
 license=('MIT')
-depends=('python-attrs' 'python-colorama' 'python-pyperclip' 'python-wcwidth')
+depends=('python-pyperclip' 'python-rich' 'python-rich-argparse')
 makedepends=('git' 'python-setuptools-scm' 'python-build' 'python-installer' 'python-wheel')
-checkdepends=('python-pytest' 'python-pytest-mock' 'python-pytest-xdist' 'vim')
+checkdepends=('python-pytest' 'python-pytest-mock' 'vim')
 source=("git+https://github.com/python-cmd2/cmd2.git#tag=$pkgver")
-sha512sums=('8d1f9191bbe4bd414dfe187ed2bd07e40da754edd17354d15968e5392a7b83e78075b016fe5a1cd53aa4d37a34657a0cdb6ed504fbfe91b269f82111d4621def')
+sha512sums=('109243015a4aba146ebec0c5eb1aa839819f2221a8c104a4b3c3b7b60d1f4bda194636809ac3bfc52865ca9f3208f4a757802817280395a396ff2ad7e4c484ce')
+
+prepare() {
+  cd cmd2
+
+  # Keep CompletionItem deepcopy-safe; upstream fixed the refactored code in PR #1642.
+  sed -e '/        self._orig_value = value/a\
+\
+    def __deepcopy__(self, memo: dict[int, Any]) -> "CompletionItem":\
+        return self\
+' -i cmd2/argparse_custom.py
+}
 
 build() {
   cd cmd2
-  python -m build --wheel --no-isolation
+  SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CMD2=$pkgver python -m build --wheel --no-isolation
 }
 
 check() {
-  return 0
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
   cd cmd2
-  PYTHONPATH="$PWD/cmd2" pytest --override-ini="addopts="
+  PYTHONPATH="$PWD/cmd2" pytest --override-ini="addopts=" \
+    --deselect tests/test_rich_utils.py::test_from_ansi_wrapper
 }
 
 package() {
