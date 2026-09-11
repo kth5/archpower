@@ -1,5 +1,4 @@
 #!/bin/bash
-
 #
 # Copyright © 2018-2021, Sébastien Luttringer
 #
@@ -22,7 +21,7 @@ run() {
   echo "==> $*"
   "$@" > /dev/null
   local ret=$?
-  (( $ret )) && echo "==> WARNING: \`$*' exited $ret"
+  (( ret )) && echo "==> WARNING: \`$*' exited $ret"
   return $ret
 }
 
@@ -56,9 +55,11 @@ check_buildexclusive() {
 all_kver() {
   pushd "$install_tree" >/dev/null
   local path
+  shopt -s nullglob
   for path in */build/; do
     echo "${path%%/*}"
   done
+  shopt -u nullglob
   popd >/dev/null
 }
 
@@ -120,7 +121,7 @@ dkms_install() {
   # let's build and install
   local nvk mod mver
   local -i retry=1
-  while (( $retry > 0 )); do
+  while (( retry > 0 )); do
     retry=0
     for nvk in "${!tobuild[@]}"; do
       [[ "$nvk" =~ ([^/]+)/([^/]+)/(.+) ]] || continue
@@ -157,7 +158,7 @@ dkms_install() {
     done
   done
   # run depmod later for performance improvments
-  if (( $DKMS_DEPMOD )); then
+  if (( DKMS_DEPMOD )); then
     for kver in "${!depmods[@]}"; do
       run depmod "$kver"
     done
@@ -180,8 +181,7 @@ dkms_remove() {
   for nv in "${!DKMS_MODULES[@]}"; do
     # try to remove modules one by one to keep the depmod optimization
     for kver in $(built_kver_from_nv "$nv"); do
-      run dkms remove --no-depmod "$nv" -k "$kver"
-      if (( $? == 0 )); then
+      if run dkms remove --no-depmod "$nv" -k "$kver"; then
         # register kernel version for later depmod
         depmods[$kver]=''
       else
@@ -190,15 +190,15 @@ dkms_remove() {
     done
     # ensure module removal (even if only added)
     if [[ $(dkms status "$nv") ]]; then
-      run dkms remove "$nv"
-      (( $? == 0 )) || ERROR_MESSAGES+=("Failed to remove module $nv.")
+      if ! run dkms remove "$nv"; then
+        ERROR_MESSAGES+=("Failed to remove module $nv.")
+      fi
     fi
   done
   # remove modules for a specific kernel version
   for kver in "${!KERNEL_VERSIONS[@]}"; do
     for nv in $(built_nv_from_kver "$kver"); do
-      run dkms remove --no-depmod "$nv" -k "$kver"
-      if (( $? == 0 )); then
+      if run dkms remove --no-depmod "$nv" -k "$kver"; then
         # register kernel version for later depmod
         depmods[$kver]=''
       else
@@ -207,7 +207,7 @@ dkms_remove() {
     done
   done
   # run depmod later for performance improvments
-  if (( $DKMS_DEPMOD )); then
+  if (( DKMS_DEPMOD )); then
     for kver in "${!depmods[@]}"; do
       run depmod "$kver"
     done
@@ -220,7 +220,7 @@ usage() {
 usage: ${0##*/} <options> install|remove
 options: -D  Do not run depmod
 EOF
-  exit ${1:-1}
+  exit "${1:-1}"
 }
 
 # emulated program entry point
