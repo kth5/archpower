@@ -1,37 +1,72 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+# Contributor: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=python-jaraco.test
-pkgver=5.5.1
-pkgrel=2
-pkgdesc="Testing support by jaraco"
-url="https://github.com/jaraco/jaraco.test"
-license=('MIT')
+pkgver=5.7.0
+pkgrel=1
+pkgdesc='Testing support by jaraco'
 arch=(any)
-depends=('python' 'python-jaraco.collections' 'python-jaraco.context' 'python-jaraco.functools')
-makedepends=('git' 'python-setuptools-scm' 'python-wheel' 'python-build' 'python-installer')
-checkdepends=('python-pytest')
-source=("git+https://github.com/jaraco/jaraco.test.git#tag=v$pkgver")
-sha512sums=('d432cde578b256e0c8b3cbd6430c36e8a235fe6375d784cdc762fe7d48466d65f904be781ef4e1303ada6edb9801e9af019ba11368604e62f84c05046b086265')
+url='https://github.com/jaraco/jaraco.test'
+license=(MIT)
+depends=(
+  python
+  python-jaraco.collections
+  python-jaraco.context
+  python-jaraco.functools
+)
+makedepends=(
+  git
+  python-build
+  python-installer
+  python-setuptools
+  python-setuptools-scm
+  python-wheel
+)
+checkdepends=(python-pytest)
+source=(
+  "$pkgname::git+$url#tag=v$pkgver"
+  remove-unnecessary-dependencies.patch
+)
+sha512sums=('7817b70bc780b573ee1e2c6021d7b13c5bf80a4776c9471f375792cbcc1298ff1ad8cc84911b4400b46955a9c3662dbd7586c4bae9fa80dcab5392270506b282'
+            'caa08f462820e6d11a9286fd038d36161113b3896ba90b991aae6549dc38d2c8b7c90f76320a707cf2bb64544757801a007b05c1bb07403f4441e31d0bf560bc')
+b2sums=('99484f932d24473b977e13d2dce727e2d5a7698e65dbe9c58e2f649ef3ddc6ee7d1805e1283e63070f7c7087a21e69d420a7224a6a9cd1d95d8980221db9e73c'
+        '4684fd4824449f294a29530b88aa15c426e52ee745c39dfef8cf6997d0fb89adaba13371be92f5de39fa866e553088d86d8410da9f92e1486af8af194dabd713')
+
+prepare() {
+  cd "$pkgname"
+
+  # this crap is useless & overengineered
+  patch -p1 -i "$srcdir/remove-unnecessary-dependencies.patch"
+}
 
 build() {
-  cd jaraco.test
+  cd "$pkgname"
+
+  export SETUPTOOLS_SCM_PRETEND_VERSION="$pkgver"
+
   python -m build --wheel --no-isolation
 }
 
 check() {
+  cd "$pkgname"
+
   local pytest_options=(
     -vv
     # ignore doctests to not pull in more dependencies
-    --deselect jaraco/test/cpython.py::jaraco.test.cpython
-    --deselect jaraco/test/cpython.py::jaraco.test.cpython.from_test_support
+    --deselect jaraco/test/cpython.py::test.cpython
+    --deselect jaraco/test/cpython.py::test.cpython.from_test_support
+    # weird jaraco shit
+    --deselect tests/test_http.py::test_needs_internet
   )
-  cd jaraco.test
-  python -m pytest "${pytest_options[@]}"
+
+  pytest "${pytest_options[@]}"
 }
 
 package() {
-  cd jaraco.test
+  cd "$pkgname"
+
   python -m installer --destdir="$pkgdir" dist/*.whl
-  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
+
+  # no license because upstream
 }
