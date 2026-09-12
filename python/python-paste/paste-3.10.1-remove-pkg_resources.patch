@@ -1,0 +1,134 @@
+diff --git a/paste/__init__.py b/paste/__init__.py
+deleted file mode 100644
+index ec8b065..0000000
+--- a/paste/__init__.py
++++ /dev/null
+@@ -1,22 +0,0 @@
+-# (c) 2005 Ian Bicking and contributors; written for Paste (http://pythonpaste.org)
+-# Licensed under the MIT license: http://www.opensource.org/licenses/mit-license.php
+-
+-import warnings
+-
+-try:
+-    with warnings.catch_warnings():
+-        warnings.simplefilter("ignore", category=DeprecationWarning)
+-        import pkg_resources
+-        pkg_resources.declare_namespace(__name__)
+-except (AttributeError, ImportError):
+-    # don't prevent use of paste if pkg_resources isn't installed
+-    from pkgutil import extend_path
+-    __path__ = extend_path(__path__, __name__)
+-
+-try:
+-    import modulefinder
+-except ImportError:
+-    pass
+-else:
+-    for p in __path__:
+-        modulefinder.AddPackagePath(__name__, p)
+diff --git a/paste/util/template.py b/paste/util/template.py
+index ee6b25f..94df3b6 100644
+--- a/paste/util/template.py
++++ b/paste/util/template.py
+@@ -682,12 +682,13 @@ strings.
+ """
+ 
+ def fill_command(args=None):
+-    import sys, optparse, pkg_resources, os
++    import sys, optparse, os
++    from importlib.metadata import distribution
+     if args is None:
+         args = sys.argv[1:]
+-    dist = pkg_resources.get_distribution('Paste')
++    dist = distribution('Paste')
+     parser = optparse.OptionParser(
+-        version=str(dist),
++        version=dist.version,
+         usage=_fill_command_usage)
+     parser.add_option(
+         '-o', '--output',
+diff --git a/setup.py b/setup.py
+index cd1ac04..c0c9a50 100644
+--- a/setup.py
++++ b/setup.py
+@@ -9,7 +9,7 @@
+ 
+ __version__ = '3.10.1'
+ 
+-from setuptools import setup, find_packages
++from setuptools import setup, find_namespace_packages
+ import sys, os
+ sys.path.append(os.path.join(os.path.dirname(__file__),
+                                 'paste', 'util'))
+@@ -49,10 +49,9 @@ setup(name="Paste",
+         "Documentation": "https://pythonpaste.readthedocs.io"
+       },
+       license="MIT",
+-      packages=find_packages(exclude=['ez_setup', 'examples', 'packages', 'tests*']),
++      packages=find_namespace_packages(include=['paste*']),
+       package_data=finddata.find_package_data(
+           exclude_directories=finddata.standard_exclude_directories + ('tests',)),
+-      namespace_packages=['paste'],
+       zip_safe=False,
+       install_requires=[
+         'setuptools',  # pkg_resources
+diff --git a/tests/__init__.py b/tests/__init__.py
+index 2f10103..7e2c6c5 100644
+--- a/tests/__init__.py
++++ b/tests/__init__.py
+@@ -4,4 +4,3 @@ import os
+ 
+ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+ 
+-import pkg_resources
+diff --git a/tests/cgiapp_data/form.cgi b/tests/cgiapp_data/form.cgi
+index 21dca13..4005dc3 100755
+--- a/tests/cgiapp_data/form.cgi
++++ b/tests/cgiapp_data/form.cgi
+@@ -4,20 +4,11 @@ print('Content-type: text/plain')
+ print('')
+ 
+ import sys
+-import warnings
+ from os.path import dirname
+ 
+ base_dir = dirname(dirname(dirname(__file__)))
+ sys.path.insert(0, base_dir)
+ 
+-with warnings.catch_warnings():
+-    warnings.simplefilter("ignore", category=DeprecationWarning)
+-    try:
+-        import pkg_resources
+-    except ImportError:
+-        # Ignore
+-        pass
+-
+ from paste.util.field_storage import FieldStorage
+ 
+ class FormFieldStorage(FieldStorage):
+diff --git a/tests/test_urlparser.py b/tests/test_urlparser.py
+index c0cf622..17b190a 100644
+--- a/tests/test_urlparser.py
++++ b/tests/test_urlparser.py
+@@ -1,9 +1,6 @@
+ import os
+-import warnings
+ 
+-with warnings.catch_warnings():
+-    warnings.simplefilter("ignore", category=DeprecationWarning)
+-    from pkg_resources import get_distribution
++import pytest
+ 
+ from paste.fixture import TestApp
+ from paste.urlparser import PkgResourcesParser, StaticURLParser, URLParser
+@@ -140,7 +137,10 @@ def test_static_parser():
+     res = testapp.get('/dir%20with%20spaces/%2e%2e/%2e%2e/secured.txt', status=404)
+     res = testapp.get('/dir%20with%20spaces/', status=404)
+ 
++@pytest.mark.filterwarnings("ignore:pkg_resources is deprecated:DeprecationWarning")
+ def test_egg_parser():
++    pkg_resources = pytest.importorskip("pkg_resources")
++    from pkg_resources import get_distribution
+     app = PkgResourcesParser('Paste', 'paste')
+     testapp = TestApp(app)
+     res = testapp.get('', status=301)
