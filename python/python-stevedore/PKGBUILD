@@ -1,28 +1,61 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Evangelos Foutras <foutrelis@archlinux.org
+# Maintainer: Claudia Pellegrino <auerhuhn@archlinux.org>
+# Contributor: Evangelos Foutras <foutrelis@archlinux.org
 
 pkgname=python-stevedore
-pkgver=5.4.1
+pkgver=5.7.0
 pkgrel=1
 pkgdesc="Manage dynamic plugins for Python applications"
 arch=(any)
 url="https://github.com/openstack/stevedore"
 license=('Apache-2.0')
 depends=('python')
-makedepends=('git' 'python-pbr' 'python-setuptools')
+makedepends=(
+  'git'
+  'python-build'
+  'python-installer'
+  'python-pbr'
+  'python-wheel'
+)
+checkdepends=(
+  'python-docutils'
+  'python-pytest'
+  'python-sphinx'
+  'python-testtools'
+)
+optdepends=(
+  'python-docutils: for the Sphinx extension'
+  'python-setuptools: to build the included examples'
+  'python-sphinx: for the Sphinx extension'
+)
 options=('!emptydirs')
 source=("git+https://opendev.org/openstack/stevedore.git#tag=$pkgver")
-sha256sums=('5d1fb4b0603bd73236d647e0a9720938c1d69f249dd6fcb8a18906eebe87139d')
+sha256sums=('fe503190a5e175ab5590d5ef3b5bb8db8476618baaf3972d3ca2e1ff0b048910')
 
 prepare() {
+  # Exclude examples and unit tests from the wheel
+  printf 'prune stevedore/%s\n' 'example' 'example2' 'tests' \
+    > stevedore/MANIFEST.in
+}
+
+build() {
   cd stevedore
-  # Remove dependency on pbr; it's not a runtime dependency
-  sed -i '/pbr/d' requirements.txt
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd stevedore
+  # Example files which go inside `/usr/share` do not need `.pyc` files
+  python -B -m pytest
 }
 
 package() {
   cd stevedore
-  python setup.py install --root="$pkgdir" -O1
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  install -d "${pkgdir}/usr/share/${pkgname}"
+  cp -R --preserve=mode -t "${pkgdir}/usr/share/${pkgname}" \
+    stevedore/example stevedore/example2
 }
 
 # vim:set ts=2 sw=2 et:
