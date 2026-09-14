@@ -8,9 +8,13 @@ pkgver=4.3
 pkgrel=1
 pkgdesc='Open Source H265/HEVC video encoder'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
-url=https://bitbucket.org/multicoreware/x265_git
-license=(GPL)
-depends=(gcc-libs)
+url=https://www.x265.org/
+license=(GPL-2.0-or-later)
+depends=(
+  glibc
+  libgcc
+  libstdc++
+)
 makedepends=(
   cmake
   git
@@ -18,27 +22,20 @@ makedepends=(
 )
 makedepends_x86_64=(nasm)
 provides=(libx265.so)
-_tag=f21b135c3414ade4e22305d008bf07d23d0595fb
 source=(
-  "git+https://bitbucket.org/multicoreware/x265_git#tag=${_tag}"
+  "git+https://github.com/Multicorewareinc/x265.git#tag=${pkgver}"
   0001-Fix-build-with-GCC-15.patch
+  "${pkgname}-${pkgver}-32bit-atomics.patch::https://patch-diff.githubusercontent.com/raw/pavel-odintsov/fastnetmon/pull/705.patch"
 )
-b2sums=('26be1f78e43a93ddbec87003d26e302b0759913bd500c571a5bbdd73d62d787b81529729988743a146b955983483d1067e9934f61d915b3b6854ac6aae459191'
-        'af2ee0460c0c2f6f36e4f124a9ac16610e3884001262a6f08043fa1de4a85e2b5fd4fb12c64b8c94cfb59c3031bb7a1324e307fa2049e3378e2add9a58f5bd9e')
-
-pkgver() {
-  cd x265_git
-
-  git describe --tags
-}
+b2sums=('bbbe9e0e595c1de114ddc08c4f13f6ce1e7490837749cb389682a9aaa28fe42707abcdea856aebb5fe805ea5c0500c4350c35afe90b7280fd1ea295fd5d469ab'
+        'af2ee0460c0c2f6f36e4f124a9ac16610e3884001262a6f08043fa1de4a85e2b5fd4fb12c64b8c94cfb59c3031bb7a1324e307fa2049e3378e2add9a58f5bd9e'
+        '2f846c706345da170ee0209d12b34e05281f0d93671d56e1cd19cecdea559439fb932cc7a025cc8f4ffbe3b7830cd170c752a49a3bf877df1dd01ca89433af34')
 
 prepare() {
-  cd x265_git
+  cd x265
 
-  # Fix build with CMake 4.0
-  git cherry-pick -n b354c009a60bcd6d7fc04014e200a1ee9c45c167 \
-                     51ae8e922bcc4586ad4710812072289af91492a8 \
-                     78e5ac35c13c5cbccc5933083edceb0d3eaeaa21
+  # 32bit lacks _sync_atomic_add_fetch_8 # PR932
+  git cherry-pick --no-commit c023445b884cc949dde26e9b1ea1ce32bf289c9d 
 
   # Fix build with GCC 15
   git apply -3 ../0001-Fix-build-with-GCC-15.patch
@@ -64,7 +61,7 @@ build() {
   esac
 
 
-  cmake -S x265_git/source -B build-12 -G Ninja \
+  cmake -S x265/source -B build-12 -G Ninja \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DHIGH_BIT_DEPTH=TRUE \
@@ -75,7 +72,7 @@ build() {
     -Wno-dev ${cmake_options_12[@]}
   ninja -C build-12
 
-  cmake -S x265_git/source -B build-10 -G Ninja \
+  cmake -S x265/source -B build-10 -G Ninja \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DHIGH_BIT_DEPTH=TRUE \
@@ -85,7 +82,7 @@ build() {
     -Wno-dev ${cmake_options_10[@]}
   ninja -C build-10
 
-  cmake -S x265_git/source -B build -G Ninja \
+  cmake -S x265/source -B build -G Ninja \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DENABLE_SHARED=TRUE \
