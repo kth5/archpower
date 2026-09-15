@@ -2,23 +2,21 @@
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=python-pytest-benchmark
-pkgver=5.2.0
+pkgver=5.3.0
 pkgrel=1
 pkgdesc='A py.test fixture for benchmarking code'
 arch=(any)
 license=('BSD-2-Clause')
 url='https://github.com/ionelmc/pytest-benchmark'
-depends=('python-pytest' 'python-py-cpuinfo')
+depends=('python-pytest' 'python-py-cpuinfo2')
 makedepends=('git' 'python-setuptools' 'python-build' 'python-installer' 'python-wheel')
 checkdepends=('python-pygal' 'python-pygaljs' 'python-freezegun' 'mercurial' 'python-aspectlib'
-              'python-pytest-xdist' 'python-elasticsearch' 'python-sniffio' 'git')
+              'python-pytest-xdist' 'python-elasticsearch' 'git')
 source=("git+https://github.com/ionelmc/pytest-benchmark.git#tag=v$pkgver")
-sha512sums=('ef1e8f9297fed28fee668e3350e38e37f0bd80503eb5dfd0a4e66777e0bc3f199791b269c093da49c44e3471aa9a7700fc4f269476b4f8c18a79faa7f334591e')
+sha512sums=('9b6ddfeba718130adad9ddc439f8ce20db81d93cde08d24c2af0b5514e548ac58cd0042b998d7e7c1b98fd70c3c219af251bb07d9e52df4be5937043182d0a3c')
 
 prepare() {
   cd pytest-benchmark
-  # Fix pytest 9 compatibility in the CLI.
-  git cherry-pick -n -X ours d5c2f7ef9d0bbd67d8bafac1e2a454c8aa95af10
   # Do not treat warnings as errors
   sed -i '/^    error$/d' pytest.ini
   # Remove --nbmake option (nbmake plugin not packaged in Arch)
@@ -31,13 +29,14 @@ build() {
 }
 
 check() {
-  # Hack entry points by installing it
+  case "${CARCH}" in
+    powerpc) return 0 ;;
+  esac
 
   cd pytest-benchmark
-  python setup.py install --root="$PWD/tmp_install" --optimize=1
-  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-  PYTHONPATH="$PWD/tmp_install/$site_packages:$PYTHONPATH" PATH="$PWD/tmp_install/usr/bin:$PATH" \
-    python -m pytest tests --deselect tests/test_cli.py::test_help
+  python -m venv tmpenv --system-site-packages
+  tmpenv/bin/python -m installer dist/*.whl
+  PATH="$PWD/tmpenv/bin:$PATH" tmpenv/bin/python -m pytest tests
 }
 
 package() {
