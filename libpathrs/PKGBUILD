@@ -1,0 +1,53 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Frederik Schwan <freswa at archlinux dot org>
+# Contributor: a821 at mail de
+
+pkgname=libpathrs
+pkgver=0.2.6
+pkgrel=1
+pkgdesc="C-friendly API to make path resolution safer on Linux"
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url="https://github.com/cyphar/libpathrs"
+license=('MPL-2.0 OR LGPL-3.0-or-later')
+depends=(
+  glibc
+  libgcc
+)
+makedepends=(
+  cargo
+)
+source=(
+  "$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.xz"{,.asc}
+  crate-type.patch
+)
+validpgpkeys=(
+  'C9C370B246B09F6DBCFC744C34401015D1D2D386' # Aleksa Sarai <cyphar@cyphar.com>
+)
+sha256sums=('7b1e3a2c3cc0bd9f94187edbb6d1ba9737deb2bf7f724df1ee37653ea405b2b0'
+            'SKIP'
+            '90b4746465e64b7fb8126ed37413cf0801df8ca7aae38b4b9a1c2a6750d54d8f')
+options=(
+  !lto
+  staticlibs
+)
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  # derived from upstream Makefile
+  # original Makefile breaks at sed backup file creation
+  patch -Np1 < ../crate-type.patch
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target host-tuple
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  RUSTFLAGS="-C panic=abort" cargo build --frozen --release --features=capi
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  ./install.sh DESTDIR="$pkgdir" --prefix=/usr --lib=/usr/lib
+}
+
