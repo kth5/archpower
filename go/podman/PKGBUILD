@@ -1,20 +1,21 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Morten Linderud <foxboron@archlinux.org>
 # Maintainer: David Runge <dvzrv@archlinux.org>
+# Maintainer: Robin Candau <antiz@archlinux.org>
+# Contributor: Morten Linderud <foxboron@archlinux.org>
 # Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 
 pkgbase=podman
 pkgname=(podman podman-docker)
-pkgver=5.8.1
-pkgrel=2
-pkgdesc='Tool and library for running OCI-based containers in pods'
+pkgver=6.1.2
+pkgrel=1
+pkgdesc='A tool for managing OCI containers and pods.'
 arch=(x86_64 powerpc64le powerpc64)
-url='https://github.com/containers/podman'
+url='https://github.com/podman-container-tools/podman'
 license=(Apache-2.0)
 makedepends=(
   apparmor
   btrfs-progs
   catatonit
+  containers-common
   git
   go
   go-md2man
@@ -37,23 +38,35 @@ validpgpkeys=(
   7CE1E6F8C90CB53E7E4D8F2D502E08DB0BBF8EEE  # Ashley Cui <acui@redhat.com>
   9E33DD8704CC03E2DEB84D9A1C1EDD7CC7C3A0DD  # Lokesh Mandvekar <lsm5@redhat.com>
 )
-sha512sums=('387bde3fe0056c24c3af1d0c67f531d35df475973b3d778efed054affbdb8bd55d46da6e294bc69d130a66b30bbee2c3c1c64add9f1b280e47c0ebaa5e83707e')
-b2sums=('563c1c3d076662f52c814b141a560911b3ee2d437361d57434bf67d33dee8073431f527ec56c11bbab65f56d8586fc923109fe9029ab44e8fa7f75facd17a1be')
+sha512sums=('440820c87a7563c2b3cda8641221fcabb20d8a0c6da5a11c8504e8c53870290a1b490b226fa71f17dbbafadfa4cf7a35d19691aa6f2557d60d688178c2e98a94')
+b2sums=('8db0660ac9563bf6c2f05fdfbbd4d94693ddb1d6c25495baf33bf4b842d9343d6ea5603fe90cd6d82287e6f073b6cd4a4d5781c400ff1ccd1e3e6664228b87ab')
 
 build() {
   export CGO_CPPFLAGS="${CPPFLAGS}"
   export CGO_CFLAGS="${CFLAGS}"
   export CGO_CXXFLAGS="${CXXFLAGS}"
   export CGO_LDFLAGS="${LDFLAGS}"
-  case "${CARCH}" in
-    x86_64|powerpc64le)
-      export GOFLAGS="-buildmode=pie"
-    ;;
-  esac
+  export GOFLAGS="-buildmode=pie"
   export GOPATH="${srcdir}"
 
-  make EXTRA_LDFLAGS='-compressdwarf=false -linkmode=external' PREFIX=/usr -C $pkgbase
+  make EXTRA_LDFLAGS='-linkmode=external' PREFIX=/usr -C $pkgbase
   make docker-docs -C $pkgbase
+}
+
+check() {
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
+  local container_libs_version="$(</usr/share/containers/container-libs.version)"
+  local project_container_libs_version="$(sed --regexp-extended --quiet 's|.*go.podman.io/common v(.*)|\1|p' "$pkgbase/go.mod")"
+
+  printf '%s %s (container-libs %s) - system container-libs %s\n' "$pkgbase" "$pkgver" "${project_container_libs_version%.*}" "${container_libs_version%.*}"
+
+  if (( $(vercmp "${container_libs_version%.*}" "${project_container_libs_version%.*}") != 0 )); then
+    printf '%s %s requires container-libs/common in version %s but we have version %s\n' "$pkgbase" "$pkgver" "${project_container_libs_version%.*}" "${container_libs_version%.*}"
+    exit 1
+  fi
 }
 
 package_podman() {
@@ -62,10 +75,10 @@ package_podman() {
     conmon
     containers-common
     oci-runtime
-    gcc-libs
     glibc
-    iptables
+    nftables
     gpgme libgpgme.so
+    libgcc
     libseccomp libseccomp.so
     passt
     shadow
@@ -79,7 +92,6 @@ package_podman() {
     'podman-compose: for docker-compose compatibility'
     'podman-desktop: GUI and tray to manage Podman containers (and Kubernetes pods)'
     'podman-docker: for Docker-compatible CLI'
-    'slirp4netns: for alternative rootless network support'
   )
 
   make install install.completions DESTDIR="$pkgdir" PREFIX=/usr LIBEXECDIR=/usr/lib -C $pkgbase
