@@ -1,0 +1,51 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
+
+pkgname=python-ast-serialize
+pkgver=0.11.2
+pkgrel=1
+pkgdesc='Fast Python parser that generates a serialized AST'
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url=https://github.com/mypyc/ast_serialize
+license=(MIT)
+depends=(
+  glibc
+  libgcc
+)
+makedepends=(
+  cargo
+  git
+  python-build
+  python-installer
+  python-maturin
+)
+provides=(python-ast_serialize)
+source=("$pkgname::git+$url.git#tag=v$pkgver")
+b2sums=('33f7f56e5a002a47e0cf8d9b42895189945250977abfa71459c0cd5dfd9fbb01ddb2da34c7803cfa8982577781758ee7aeddfb10a704701b11c99ef2f8a01c20')
+
+prepare() {
+  cd $pkgname
+  cargo fetch --locked
+}
+
+build() {
+  cd $pkgname
+  export RUSTUP_TOOLCHAIN=stable
+  export MATURIN_PEP517_ARGS="--frozen"
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd $pkgname
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer dist/*.whl
+  test-env/bin/python test_ast_serialize.py
+}
+
+package() {
+  cd $pkgname
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
+  install -vDm644 crates/LICENSE \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE-ruff"
+}
