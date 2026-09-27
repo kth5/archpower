@@ -1,0 +1,66 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+
+pkgname=python-dunamai
+pkgver=1.26.2
+pkgrel=1
+pkgdesc='A library for producing dynamic version strings, derived from VCS tags'
+arch=('any')
+url='https://github.com/mtkennerly/dunamai'
+license=('MIT')
+depends=(
+  'python'
+  'python-packaging'
+)
+makedepends=(
+  'git'
+  'python-build'
+  'python-installer'
+  'python-poetry-core'
+)
+checkdepends=('python-pytest' 'python-setuptools')
+source=("$pkgname::git+$url#tag=v$pkgver")
+sha512sums=('4dc6b3f585f6d863d2a9b183f7dcc7fe61bf78c0c35175190dd60cb018c2723659ef162768fae886bb1a3db20cbf5adf93d8503294874893638a9b6c6114398b')
+b2sums=('2b79604c85a2e7c881002653ba340013ade89d0124cc589d498482445635bde5199610926caae82d179cd4819b6caac3f961ecb1f40e2ee4e76e74f3f14c31a0')
+
+build() {
+  cd "$pkgname"
+
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "$pkgname"
+
+  # temporary install so that:
+  # * pkg_resources can pick up the package
+  # * the required binary can be added to $PATH
+  python -m installer --destdir="$(pwd)/tmp" dist/*.whl
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  export PATH="$(pwd)/tmp/usr/bin:$PATH"
+  export PYTHONPATH="$(pwd)/tmp/$site_packages"
+
+  # skip tests that require messing with global git config
+  local deselected=(
+    tests/integration/test_dunamai.py::test__version__from_git__with_annotated_tags
+    tests/integration/test_dunamai.py::test__version__from_git__with_lightweight_tags
+    tests/integration/test_dunamai.py::test__version__from_git__with_mixed_tags
+    tests/integration/test_dunamai.py::test__version__from_git__with_nonchronological_commits
+    tests/integration/test_dunamai.py::test__version__from_git__gitflow
+    tests/integration/test_dunamai.py::test__version__from_git__exclude_decoration
+    tests/integration/test_dunamai.py::test__version__from_git__broken_ref
+    tests/integration/test_dunamai.py::test__version__from_git__trace_env_var
+    tests/integration/test_dunamai.py::test__version__from_git__initial_commit_empty_and_tagged
+  )
+
+  pytest -v ${deselected[@]/#/--deselect }
+}
+
+package() {
+  cd "$pkgname"
+
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # license
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
+}
