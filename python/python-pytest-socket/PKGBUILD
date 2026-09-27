@@ -1,59 +1,65 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer:
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
 # Contributor: Felix Yan <felixonmars@archlinux.org>
 
-_name=pytest-socket
 pkgname=python-pytest-socket
-pkgver=0.7.0
-pkgrel=7
-pkgdesc='Pytest Plugin to disable socket calls during tests'
+pkgver=0.8.1
+pkgrel=1
+pkgdesc='Pytest plugin to disable socket calls during tests'
 arch=(any)
+url='https://github.com/miketheman/pytest-socket'
 license=(MIT)
-url="https://github.com/miketheman/pytest-socket"
 depends=(
   python
   python-pytest
 )
 makedepends=(
+  git
   python-build
   python-installer
-  python-poetry-core
-  python-wheel
+  python-uv-build
 )
 checkdepends=(
   python-httpx
+  python-pytest
+  python-pytest-benchmark
   python-pytest-httpbin
   python-requests
   python-starlette
 )
-source=($url/archive/$pkgver/$pkgname-$pkgver.tar.gz)
-sha512sums=('fe8888819fef0f192f88a7509fe153b992c12a1fd1d56ae69c844a592fc403e3b5b13c4c3c4be89c8bf114f18d84fb6d6e8a8e3604d7fe454d090272689136f1')
-b2sums=('1609a75907f743e8cbd38e48c6df74bb9ce329cda68bde02fd2a02fa7105a688853723b22a57259c1050e33ed41b23ad34a9ca37365b71939b44834c5d02e6db')
+source=("$pkgname::git+$url#tag=$pkgver")
+sha512sums=('fcf0c33dcbe28c55730bee99ee4f48b8651f831c26621612dc33d679653da44c338aa50f718ce30643e6b752688c4cc1ae27e0038391c480066df0f3c18a1809')
+b2sums=('a3695021d40352819dc4fdd22e48c3876bea66cceebe3209ee2c224719196600de0deddefc2b8c3963b7d4505182c6350d597b1b9f929eba10a43de83956c97d')
 
 build() {
-  cd $_name-$pkgver
+  cd "$pkgname"
+
   python -m build --wheel --no-isolation
 }
 
 check() {
+  cd "$pkgname"
+
+  # temporary install as importlib is used
+  python -m installer --destdir="$(pwd)/tmp" dist/*.whl
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  export PYTHONPATH="$PYTHONPATH:$(pwd)/tmp/$site_packages"
+
   local pytest_options=(
     -vv
     --deselect tests/test_socket.py::test_urllib_succeeds_by_default
     --deselect tests/test_socket.py::test_enabled_urllib_succeeds
   )
-  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
 
-  cd $_name-$pkgver
-  # install to temporary location, as importlib is used
-  python -m installer --destdir=test_dir dist/*.whl
-  export PYTHONPATH="test_dir/$site_packages:$PYTHONPATH"
   pytest "${pytest_options[@]}"
 }
 
 package() {
-  cd $_name-$pkgver
-  python -m installer --destdir="$pkgdir" dist/*.whl
-  install -vDm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
-}
+  cd "$pkgname"
 
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  # license
+  install -vDm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
+}
 # vim:set ts=2 sw=2 et:
