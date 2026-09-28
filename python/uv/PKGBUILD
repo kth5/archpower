@@ -7,46 +7,79 @@
 # Contributor: Daniel M. Capella <polyzen@archlinux.org>
 # Contributor: Guillaume Gauvrit <guillaume@gauvr.it>
 
+# LTO passes may not produce any output for quite some time
+# especially on slower systems
+apb_output_timeout=7200
+
 pkgbase=uv
 pkgname=("$pkgbase" "python-$pkgbase"{,-build})
-pkgver=0.9.17
-pkgrel=2
+pkgver=0.12.19
+pkgrel=1
 pkgdesc='An extremely fast Python package installer and resolver written in Rust'
-arch=(powerpc espresso)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://github.com/astral-sh/uv"
 license=('MIT' 'Apache-2.0')
-depends=('gcc-libs' # 'libgcc_s.so'
-         'glibc' # 'libc.so' 'libm.so'
-         'zlib' # 'libz.so'
-         'bzip2' # 'libbz2.so'
-         )
-makedepends=('cargo' 'maturin' 'python-installer' 'cmake' 'git')
-checkdepends=('python' 'python-zstandard' 'libxcrypt-compat' 'clang')
+makedepends=(bzip2
+             cargo
+             cmake
+             git
+             glibc
+             jemalloc
+             libgcc
+             maturin
+             python
+             python-installer
+             xz
+             zstd)
+source=("git+$url.git#tag=$pkgver")
+sha256sums=('f3894ef92cb828717fb5061f26adbfa2771117a2578af0ebc0c15f74fcb4586b')
+
 options=('!lto')
 case "${CARCH}" in
   powerpc) options+=('!debug') ;;
 esac
-source=("git+$url.git#tag=$pkgver")
-sha256sums=('06afa305f26830d202f8e2923bed468566f79bb5f7457f08ceb4974904373449')
+
+_srcenv() {
+  cd "$pkgbase"
+  export CARGO_HOME="$srcdir"
+  export CARGO_PROFILE_RELEASE_STRIP=false
+
+  case "${CARCH}" in
+    powerpc)
+      export CARGO_PROFILE_RELEASE_DEBUG=0
+      export CARGO_PROFILE_RELEASE_STRIP=false
+      export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+      export CARGO_PROFILE_RELEASE_OPT_LEVEL=1
+    ;;
+    powerpc64*|x86_64)
+      export CARGO_PROFILE_RELEASE_DEBUG=2
+      export CARGO_PROFILE_RELEASE_STRIP=false
+      export CARGO_PROFILE_RELEASE_LTO=thin
+      export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+      export CARGO_PROFILE_RELEASE_OPT_LEVEL=3
+      CFLAGS+=' -ffat-lto-objects'
+    ;;
+  esac
+}
 
 prepare() {
-  cd "$pkgbase"
-  # reduce memory usage during build enabling 32bit builds
-  sed -i -e '/lto/s:fat:thin:' Cargo.toml
-
-  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+  _srcenv
+  cargo fetch --locked --target host-tuple
   mkdir -p completions
 }
 
 # Note --frozen doesn't work here because cargo fetch didn't get everything
 # maturin ends up trying to use so we make do with --locked ...
 build() {
-  cd "$pkgbase"
-  local tripple="$(rustc -vV | sed -n 's/host: //p')"
+  _srcenv
+  local tripple="$(rustc --print host-tuple)"
 
   case "${CARCH}" in
     powerpc) RUSTFLAGS="-C link-args=-Wl,--no-keep-memory -C link-args=-Wl,--reduce-memory-overheads" ;;
   esac
+  export ZSTD_SYS_USE_PKG_CONFIG=1
+  export JEMALLOC_OVERRIDE=/usr/lib/libjemalloc.so
+  export CARGO_FEATURE_UNPREFIXED_MALLOC_ON_SUPPORTED_PLATFORMS=1
 
   # Note: do not use --all-features as in enables a self-updater
   maturin build --locked --release --target "$tripple" --strip --compatibility linux
@@ -59,12 +92,12 @@ build() {
 }
 
 check() {
-  cd "$pkgbase"
+  _srcenv
   # The upstream cargo tests are unit tests against a matrix of Python versions
   # using vendored Python installs. Even collapsing the matrix to match our
   # system Python version and patching around the path issues to use it,
   # a majority of the unit tests are irrelevant.
-  local tripple="$(rustc -vV | sed -n 's/host: //p')"
+  local tripple="$(rustc --print host-tuple)"
   local _target="target/$tripple/release/uv"
   $_target -V | grep -F "$pkgname $pkgver"
 }
@@ -75,9 +108,17 @@ _package_common() {
 }
 
 package_uv() {
+  depends=(
+    bzip2
+    libgcc
+    glibc
+    jemalloc
+    zstd
+  )
+
   cd "$pkgbase"
   _package_common
-  local _target="target/$(rustc -vV | sed -n 's/host: //p')/release/uv"
+  local _target="target/$(rustc --print host-tuple)/release/uv"
   install -Dm0755 -t "$pkgdir/usr/bin/" "$_target"
   install -Dm0755 -t "$pkgdir/usr/bin/" "${_target}x"
   install -Dm 644 "completions/$pkgbase" -t "$pkgdir/usr/share/bash-completion/completions/"
@@ -87,16 +128,25 @@ package_uv() {
 }
 
 package_python-uv() {
-  desc+=' (python wrapper)'
+  pkgdesc+=' - Python wrapper'
+  depends=(python "$pkgbase=$pkgver")
   cd "$pkgbase"
   _package_common
-  depends=(python "$pkgbase=$pkgver")
   python -m installer -d "$pkgdir" target/wheels/uv-$pkgver-*.whl
   rm -rf "$pkgdir/usr/bin"
 }
 
 package_python-uv-build() {
-  desc+=' (python build backend)'
+  pkgdesc+=' - Python build backend'
+  depends=(
+    bzip2
+    libgcc
+    glibc
+    python
+    xz
+  )
+  groups=(python-build-backend)
+
   cd "$pkgbase"
   _package_common
   python -m installer -d "$pkgdir" target/wheels/uv_build-$pkgver-*.whl
