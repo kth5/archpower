@@ -6,7 +6,7 @@
 
 pkgbase=ruff
 pkgname=("$pkgbase" "python-$pkgbase")
-pkgver=0.15.9
+pkgver=0.16.9
 pkgrel=1
 pkgdesc='An extremely fast Python linter, written in Rust'
 arch=(x86_64 powerpc64le powerpc64)
@@ -22,21 +22,34 @@ makedepends=(
   maturin
   python-installer
 )
-options=(!lto)
 source=("git+$url.git#tag=$pkgver")
-sha512sums=('7114030c729f929f7be2b1f0b61866e38aadf68a833b8c1d74039b927b1ab2cfdb2bbd73a82fa0113a0a086a6b7ab6a182459fb5338b97c0afa005a69716552d')
-b2sums=('cf6d9c4d2dfe51372e515266a7576ee98a9acd32415af2fcfba0b0933f62ed2915cfcc1ccc35a6e6f6c45c6f7458fd7d2bd7a3ae2f3dceaad64b9d288bf71515')
+sha512sums=('8ad899d4b30784897d73e710ccc23f9b80b54b6a1411a6891f4d826e93b8454b1ae758b545359794c148de9007b3bc6fcf52774335355d990ebfb14c8cede10c')
+b2sums=('d071c214b6a5395008d9717c0c4fe1143aa5a8bbc64ddf083b7608f6ae606e160ba80506bf6116661349c8a7ae60b85ed587c66cc36cb5e0ef46490ca5ccfc2e')
+
+_srcenv() {
+  cd "$pkgbase"
+  export CARGO_HOME="$srcdir"
+  export CARGO_PROFILE_RELEASE_DEBUG=2
+  export CARGO_PROFILE_RELEASE_STRIP=false
+  export CARGO_PROFILE_RELEASE_LTO=thin
+  export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+  export CARGO_PROFILE_RELEASE_OPT_LEVEL=3
+  CFLAGS+=' -ffat-lto-objects'
+}
 
 prepare() {
   cd $pkgbase
-  cargo fetch --locked --target "$(rustc --print host-tuple)"
+  cargo fetch --locked --target host-tuple
 }
 
 build() {
   local target=$(rustc --print host-tuple)
   local target_binary=target/$target/release/$pkgbase
 
-  cd $pkgbase
+  # https://github.com/gnzlbg/jemallocator/issues/170
+  [[ $CARCH == "aarch64" ]] && export JEMALLOC_SYS_WITH_LG_PAGE=16
+
+  _srcenv
   maturin build --locked --release --all-features --target "$target" --strip
 
   for completion in bash elvish fish nushell zsh; do
@@ -45,7 +58,7 @@ build() {
 }
 
 check() {
-  cd $pkgbase
+  _srcenv
   cargo test -p ruff --frozen --all-features -- --skip display_default_settings
 }
 
@@ -58,7 +71,7 @@ package_ruff() {
   cd $pkgbase
   _package_common
   install -Dm0755 -t "$pkgdir/usr/bin/" "target/$(rustc --print host-tuple)/release/ruff"
-  install -Dm0644 bash-completions "$pkgdir/usr/share/bash-completion/completions/$pkgbase.bash"
+  install -Dm0644 bash-completions "$pkgdir/usr/share/bash-completion/completions/$pkgbase"
   install -Dm0644 elvish-completions "$pkgdir/usr/share/elvish/lib/$pkgbase.elv"
   install -Dm0644 fish-completions "$pkgdir/usr/share/fish/vendor_completions.d/$pkgbase.fish"
   install -Dm0644 nushell-completions "$pkgdir/usr/share/nushell/vendor/autoload/$pkgbase.nu"
