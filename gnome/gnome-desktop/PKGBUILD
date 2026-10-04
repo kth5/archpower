@@ -1,5 +1,6 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+# Maintainer: Fabian Bornschein <fabiscafe@archlinux.org>
 # Contributor: Jan de Groot <jan@archlinux.org>
 
 pkgbase=gnome-desktop
@@ -9,7 +10,7 @@ pkgname=(
   gnome-desktop-4
   gnome-desktop-docs
 )
-pkgver=44.5
+pkgver=51.0
 pkgrel=1
 epoch=1
 pkgdesc="Provides API shared by several apps on the GNOME desktop"
@@ -45,10 +46,17 @@ makedepends=(
   yelp-tools
 )
 checkdepends=(xorg-server-xvfb)
-source=("git+https://gitlab.gnome.org/GNOME/gnome-desktop.git#tag=${pkgver/[a-z]/.&}")
-b2sums=('f74ddc9f55508ff1a8ed8d2ac22286162bfabf49335f38a8eeb9d0d1084f3f8f54ce37a406ca0eb038a3dbc4b6d7327bb3f3654e42c5a7578687bd19e13d56a1')
+source=(
+  "git+https://gitlab.gnome.org/GNOME/gnome-desktop.git#tag=${pkgver/[a-z]/.&}"
+  "git+https://github.com/nayuki/QR-Code-generator.git#commit=8329a7108fc22be3e1eec0a9f9318978579e3621"
+)
+b2sums=('020fdca37b46b9ead69bbabd118247ae572f3741630c06545423df29cca936323c08ee158baf58b0288d7ee613c84736f3f80aff69004935529c5b6713a3fda5'
+        '6edb307fd99bf028177423b6c58925a276139b0f1f44d61026a9d59d0007984564eb187a8f5d612ba3d53f94b8b48eb5b5015eadb9d0b1f50554bdad1ef386a1')
 
 prepare() {
+  # Inject subprojects
+  ln -s QR-Code-generator qrcodegen
+
   cd $pkgbase
 }
 
@@ -57,6 +65,9 @@ build() {
     -D debug_tools=false
     -D gtk_doc=true
   )
+
+  # Inject subprojects
+  export MESON_PACKAGE_CACHE_DIR="$srcdir"
 
   arch-meson $pkgbase build "${meson_options[@]}"
   meson compile -C build
@@ -81,7 +92,7 @@ package_gnome-desktop-common() {
   pkgdesc+=" (common files)"
   depends=()
 
-  meson install -C build --destdir "$pkgdir"
+  meson install -C build --no-rebuild --destdir "$pkgdir"
 
   cd "$pkgdir"
 
@@ -117,7 +128,7 @@ package_gnome-desktop-4() {
     "gnome-desktop-common=$epoch:$pkgver-$pkgrel"
     gtk4
   )
-  provides=(libgnome-{bg,desktop,rr}-4.so)
+  provides=(libgnome-{bg,desktop,qr,qr-gtk}-4.so)
 
   mv gtk4/* "$pkgdir"
 }
