@@ -2,6 +2,10 @@
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Maintainer: Fabian Bornschein <fabiscafe@archlinux.org>
 
+# LTO passes may not produce any output for quite some time
+# especially on slower systems
+apb_output_timeout=7200
+
 pkgbase=gtk4
 pkgname=(
   gtk4
@@ -9,7 +13,7 @@ pkgname=(
   gtk4-docs
   gtk-update-icon-cache
 )
-pkgver=4.22.4
+pkgver=4.24.1
 pkgrel=1
 epoch=1
 pkgdesc="GObject-based multi-platform GUI toolkit"
@@ -85,21 +89,28 @@ source=(
   gtk-update-icon-cache.{hook,script}
   gtk4-querymodules.{hook,script}
 )
-b2sums=('c79cc041aafc1e4a286eb896f4b382d44e5b851c44e2176641417eef0b379cb20564b07bcb24c8153d81636ac3671aa56b48c4adbaf93f9aa916bc7e03808e1f'
+b2sums=('824667f399ee085521f149f5ed2bffeb52a72034dc59f25fc88beeefb567a37e70f30ec911e39a9b5b29ca8961795555c46d50a3b1d4e8dd5d9dd0b2e021ef5b'
         '136bdb410c46daf769175e8e8837286576391797a4762b8cf388217e893dd6c5087c5c91c347cbdf7d3e9dcd2c978c2fb275b5af1f3425c9f7979fbc65a81324'
         '6bcd839ef82296d864587e0cc7acc0145bdea8e5235af304747cf3c0e564c2757cc67c0373dc044bec83dccfc57dc899546c2fccea96cff2bba22f09978a3814'
         'dd589bd1ad2b13f0e06f6899776a083f20a1aac24d4308d666ffd0d1cff38457b8257b8366f92e767b4233b3d86b6b54fa50339faf84c4801a824986366dce30'
         '4b90eb8d582509b09aab401313d4399cc139ad21b5dd7d45d79860d0764c7494c60714e0794e09823e51d1894ac032a994f27d79d1499abf24ee6f59bdb0c243')
-
-case "${CARCH}" in
-  powerpc) options=(!lto) ;;
-esac
 
 prepare() {
   cd gtk
 }
 
 build() {
+  case "${CARCH}" in
+    powerpc*)
+      # low threadcount like on x86/arm won't make this noticable
+      # but LTO+ninja easily becomes a process bomb
+      export NINJAFLAGS+="${MAKEFLAGS} -l $(( $(nproc) / 2 ))"
+      export CFLAGS=${CFLAGS/-flto=[0-9a-z]+ /-flto=jobserver }
+      export CXXFLAGS=${CXXFLAGS/-flto=[0-9a-z]+ /-flto=jobserver }
+      export LDFLAGS=${LDFLAGS/-flto=[0-9a-z]+ /-flto=jobserver }
+    ;;
+  esac
+
   local meson_options=(
     -D broadway-backend=true
     -D cloudproviders=enabled
@@ -110,17 +121,9 @@ build() {
     -D tracker=enabled
   )
 
-  case "${CARCH}" in
-    powerpc) meson_options+=(
-               -D vulkan=disabled
-               #-D build-testsuite=false
-               #-D build-tests=false
-             ) ;;
-  esac
-
   CFLAGS+=" -DG_DISABLE_CAST_CHECKS"
   arch-meson gtk build "${meson_options[@]}"
-  meson compile -C build -j "$(($(nproc)/2))"
+  meson compile -C build
 }
 
 _pick() {
@@ -134,10 +137,10 @@ _pick() {
 }
 
 package_gtk4() {
-  optdepends=('evince: Default print preview command')
+  optdepends=('papers: default print previewer')
   provides=(libgtk-4.so)
 
-  meson install -C build --destdir "$pkgdir"
+  meson install -C build --no-rebuild --destdir "$pkgdir"
 
   install -Dm644 /dev/stdin "$pkgdir/usr/share/gtk-4.0/settings.ini" <<END
 [Settings]
@@ -151,10 +154,10 @@ END
 
   cd "$pkgdir"
 
-  _pick demo usr/bin/gtk4-{demo,demo-application,node-editor,print-editor,widget-factory,icon-editor}
-  _pick demo usr/share/applications/org.gtk.{Demo4,PrintEditor4,WidgetFactory4,gtk4.NodeEditor,Shaper}.desktop
+  _pick demo usr/bin/gtk4-{demo,demo-application,node-editor,print-editor,widget-factory}
+  _pick demo usr/share/applications/org.gtk.{Demo4,PrintEditor4,WidgetFactory4,gtk4.NodeEditor}.desktop
   _pick demo usr/share/glib-2.0/schemas/org.gtk.Demo4.gschema.xml
-  _pick demo usr/share/icons/hicolor/*/apps/org.gtk.{Demo4,PrintEditor4,WidgetFactory4,gtk4.NodeEditor,Shaper}[-.]*
+  _pick demo usr/share/icons/hicolor/*/apps/org.gtk.{Demo4,PrintEditor4,WidgetFactory4,gtk4.NodeEditor}[-.]*
   _pick demo usr/share/man/man1/gtk4-{demo,demo-application,node-editor,widget-factory}.1
   _pick demo usr/share/metainfo/org.gtk.{Demo4,PrintEditor4,WidgetFactory4,gtk4.NodeEditor}.appdata.xml
 
