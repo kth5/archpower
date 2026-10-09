@@ -1,0 +1,85 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=ruby-async-utilization
+pkgver=0.5.0
+pkgrel=1
+pkgdesc='High-performance utilization metrics for Async services using shared memory'
+arch=(any)
+url='https://github.com/socketry/async-utilization'
+license=(MIT)
+depends=(
+  ruby
+  ruby-console
+)
+makedepends=(
+  git
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-bake
+  ruby-bake-test
+  ruby-bake-test-external
+  ruby-bundler
+  ruby-covered
+  ruby-sus
+  ruby-sus-fixtures-console
+)
+options=(!emptydirs)
+source=("git+https://github.com/socketry/async-utilization.git#tag=v$pkgver")
+sha512sums=('6d92bdb138968b56c6f89f4dfe42ab4d48a61afba79c9cfd0d31024c9750931c483a7dc3f98447333743c80bdff2ca1c30e66c1c85c4bae5838b791d92797373')
+b2sums=('d24ce5eaf47fa4e64d682251bf9cc8735a8641ad8dabf3d1035cbd0b7d4c12e4265b31306580ea370f466055e87058eeb17a292d68472e7be4a36c89ca33f6f2')
+
+prepare() {
+  cd async-utilization
+
+  sed -r -e 's|~>|>=|g' -e '/signing_key/d' -i async-utilization.gemspec
+  sed -i \
+    -e '/group :maintenance/,/end/d' \
+    -e '/rubocop/d' \
+    gems.rb
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd async-utilization
+
+  gem build async-utilization.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    async-utilization-$pkgver.gem
+
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.so" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  rm -r "tmp_install/$_gemdir/cache"
+}
+
+check() {
+  local _gemdir="$(gem env gemdir)"
+  cd async-utilization
+
+  GEM_HOME="tmp_install/$_gemdir" bake test
+}
+
+package() {
+  cd async-utilization
+
+  cp -a tmp_install/* "$pkgdir"/
+  install -vDm 644 readme.md -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -vDm 644 license.md -t "$pkgdir/usr/share/licenses/$pkgname/"
+}
