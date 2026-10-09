@@ -1,7 +1,7 @@
-From caa5be9340b0f9afa9beb55cfd747f8c43fceff7 Mon Sep 17 00:00:00 2001
+From 52ece741d7e60350a7f197a16a58822e4fa4665b Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
 Date: Sun, 5 Jul 2026 10:54:17 +1000
-Subject: [PATCH 3/8] Add PPC64BE VSX instructions for libwebp
+Subject: [PATCH 3/9] Add PPC64BE VSX instructions for libwebp
 
 Assisted-by: Lance Albertson <lance@osuosl.org>
 Assisted-by: Thushan Fernando <thushan@thushanfernando.com>
@@ -10,17 +10,17 @@ Assisted-by: James Zern <jzern@google.com>
  media/libwebp/src/dsp/alpha_processing_vsx.c |  58 ++-
  media/libwebp/src/dsp/cpu.h                  |  10 +-
  media/libwebp/src/dsp/dec_vsx.c              | 397 ++++++++++++-------
- media/libwebp/src/dsp/filters_vsx.c          |  42 +-
+ media/libwebp/src/dsp/filters_vsx.c          |  52 ++-
  media/libwebp/src/dsp/lossless_vsx.c         |  93 +++--
  media/libwebp/src/dsp/moz.build              |   2 +-
  media/libwebp/src/dsp/rescaler_vsx.c         |  23 +-
  media/libwebp/src/dsp/upsampling_vsx.c       | 149 +++----
  media/libwebp/src/dsp/yuv.h                  |  16 +
  media/libwebp/src/dsp/yuv_vsx.c              | 258 ++++++++++--
- 10 files changed, 735 insertions(+), 313 deletions(-)
+ 10 files changed, 743 insertions(+), 315 deletions(-)
 
 diff --git a/media/libwebp/src/dsp/alpha_processing_vsx.c b/media/libwebp/src/dsp/alpha_processing_vsx.c
-index 2aad1cd8b648..7e6c7cc8a05c 100644
+index 1f0163f82dbd..a710a30a9a27 100644
 --- a/media/libwebp/src/dsp/alpha_processing_vsx.c
 +++ b/media/libwebp/src/dsp/alpha_processing_vsx.c
 @@ -1,4 +1,4 @@
@@ -63,7 +63,7 @@ index 2aad1cd8b648..7e6c7cc8a05c 100644
  static int DispatchAlpha_VSX(const uint8_t* WEBP_RESTRICT alpha,
                               int alpha_stride, int width, int height,
                               uint8_t* WEBP_RESTRICT dst, int dst_stride) {
-@@ -73,6 +88,7 @@ static int DispatchAlpha_VSX(const uint8_t* WEBP_RESTRICT alpha,
+@@ -76,6 +91,7 @@ static int DispatchAlpha_VSX(const uint8_t* WEBP_RESTRICT alpha,
    }
    return (alpha_and != 0xff);
  }
@@ -71,7 +71,7 @@ index 2aad1cd8b648..7e6c7cc8a05c 100644
  
  static void DispatchAlphaToGreen_VSX(const uint8_t* WEBP_RESTRICT alpha,
                                       int alpha_stride, int width, int height,
-@@ -81,17 +97,19 @@ static void DispatchAlphaToGreen_VSX(const uint8_t* WEBP_RESTRICT alpha,
+@@ -84,17 +100,19 @@ static void DispatchAlphaToGreen_VSX(const uint8_t* WEBP_RESTRICT alpha,
    int i, j;
    const u8x16 zero = vec_splats((unsigned char)0);
    const u16x8 z16 = vec_splats((unsigned short)0);
@@ -98,7 +98,7 @@ index 2aad1cd8b648..7e6c7cc8a05c 100644
        vec_xst(g0, 0, &dst[i + 0]);
        vec_xst(g1, 0, &dst[i + 4]);
        vec_xst(g2, 0, &dst[i + 8]);
-@@ -109,14 +127,23 @@ static int ExtractAlpha_VSX(const uint8_t* WEBP_RESTRICT argb, int argb_stride,
+@@ -112,6 +130,13 @@ static int ExtractAlpha_VSX(const uint8_t* WEBP_RESTRICT argb, int argb_stride,
    uint32_t alpha_and = 0xff;
    int i, j, k;
    const u32x4 a_mask = vec_splats((uint32_t)0xff);  // keeps the low byte
@@ -110,8 +110,9 @@ index 2aad1cd8b648..7e6c7cc8a05c 100644
 +  const u32x4 a_shift = vec_splats((unsigned int)0);
 +#endif
    u8x16 all_and = vec_splats((unsigned char)0xff);
-   const int limit = width & ~7;
- 
+   // As in DispatchAlpha: the 32-byte reads may reach 3 bytes past the last
+   // pixel they cover, so leave at least one pixel to the scalar tail.
+@@ -120,8 +145,10 @@ static int ExtractAlpha_VSX(const uint8_t* WEBP_RESTRICT argb, int argb_stride,
    for (j = 0; j < height; ++j) {
      const uint32_t* src = (const uint32_t*)argb;
      for (i = 0; i < limit; i += 8) {
@@ -124,7 +125,7 @@ index 2aad1cd8b648..7e6c7cc8a05c 100644
        const i16x8 c0 = vec_packs((i32x4)a0, (i32x4)a1);
        const u8x16 d0 = vec_packsu(c0, c0);  // 8 alpha bytes in the low half
        memcpy(&alpha[i], &d0, 8);
-@@ -164,6 +191,10 @@ static void ExtractGreen_VSX(const uint32_t* WEBP_RESTRICT argb,
+@@ -169,6 +196,10 @@ static void ExtractGreen_VSX(const uint32_t* WEBP_RESTRICT argb,
  //------------------------------------------------------------------------------
  // Premultiply.
  
@@ -135,7 +136,7 @@ index 2aad1cd8b648..7e6c7cc8a05c 100644
  #define MULTIPLIER(a) ((a) * 32897U)
  #define PREMULTIPLY(x, m) (((x) * (m)) >> 23)
  
-@@ -226,14 +257,19 @@ static void ApplyAlphaMultiply_VSX(uint8_t* rgba, int alpha_first, int w, int h,
+@@ -231,14 +262,19 @@ static void ApplyAlphaMultiply_VSX(uint8_t* rgba, int alpha_first, int w, int h,
  
  #undef MULTIPLIER
  #undef PREMULTIPLY
@@ -859,7 +860,7 @@ index e0c1cbc3b71b..0b22340786fa 100644
    int y;
    for (y = 0; y < 4; ++y) {
 diff --git a/media/libwebp/src/dsp/filters_vsx.c b/media/libwebp/src/dsp/filters_vsx.c
-index 6c875eb8893f..71826b53bafd 100644
+index 6c875eb8893f..0501c68f40e8 100644
 --- a/media/libwebp/src/dsp/filters_vsx.c
 +++ b/media/libwebp/src/dsp/filters_vsx.c
 @@ -1,4 +1,4 @@
@@ -926,7 +927,16 @@ index 6c875eb8893f..71826b53bafd 100644
    }
    for (; i < width; ++i) out[i] = (uint8_t)(in[i] + out[i - 1]);
  }
-@@ -107,8 +125,8 @@ static void GradientPredictInverse_VSX(const uint8_t* in, const uint8_t* top,
+@@ -103,12 +121,16 @@ static void GradientPredictInverse_VSX(const uint8_t* in, const uint8_t* top,
+     int i;
+     const int max_pos = length & ~7;
+     const u8x16 zero = vec_splats((unsigned char)0);
+-    u8x16 A = vec_insert((unsigned char)row[-1], zero, 0);  // left sample
++    // The left sample is consumed as a 16-bit lane by the vec_add below,
++    // so it must sit in the low half of lane 0. Inserting it as a byte at
++    // index 0 only does that on little-endian; on big-endian byte 0 is the
++    // lane's high half, which scaled the sample by 256.
++    u8x16 A = (u8x16)vec_insert((unsigned short)row[-1], (u16x8)zero, 0);
      for (i = 0; i < max_pos; i += 8) {
        const u8x16 t0 = Load8(top + i);
        const u8x16 t1 = Load8(top + i - 1);
@@ -937,7 +947,7 @@ index 6c875eb8893f..71826b53bafd 100644
        const u8x16 D = Load8(in + i);  // base input
        const u16x8 E = vec_sub(B, C);  // unclipped gradient basis b - c
        u8x16 out = zero;               // accumulator for output
-@@ -121,9 +139,9 @@ static void GradientPredictInverse_VSX(const uint8_t* in, const uint8_t* top,
+@@ -121,11 +143,13 @@ static void GradientPredictInverse_VSX(const uint8_t* in, const uint8_t* top,
          A = vec_and(tmp5, mask_hi);  // keep new sample
          out = vec_or(out, A);        // accumulate output
          if (--k == 0) break;
@@ -948,8 +958,13 @@ index 6c875eb8893f..71826b53bafd 100644
 +        mask_hi = SLLI(mask_hi, 1);  // rotate mask
 +        A = (u8x16)WMERGEH(A, zero);  // convert 8b -> 16b
        }
-       A = SRLI(A, 7);  // prepare left sample for next iteration
+-      A = SRLI(A, 7);  // prepare left sample for next iteration
++      // Same reasoning as the initial sample: widen the carried-over byte
++      // so its value lands in the low half of lane 0 on both endiannesses.
++      A = (u8x16)WMERGEH(SRLI(A, 7), zero);
        memcpy(row + i, &out, 8);
+     }
+     for (; i < length; ++i) {
 diff --git a/media/libwebp/src/dsp/lossless_vsx.c b/media/libwebp/src/dsp/lossless_vsx.c
 index 89da30c9589c..3739067547d0 100644
 --- a/media/libwebp/src/dsp/lossless_vsx.c

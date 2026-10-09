@@ -1,7 +1,7 @@
-From ce82ce471b69a19d2ff30d1ec569b4f923371647 Mon Sep 17 00:00:00 2001
+From 5be19ed8ca194dfa2d15e104ee60240b01101c31 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
 Date: Sun, 5 Jul 2026 22:03:59 +1000
-Subject: [PATCH 7/8] Add big-endian rendering support for Skia and software
+Subject: [PATCH 7/9] Add big-endian rendering support for Skia and software
  WebRender
 
 Big-endian used to flip the OS_RGBA surface format synonyms to the
@@ -20,49 +20,54 @@ blitter load/store boundaries: solid fills, the blit_row_color32
 kernel, A8 glyph masks, LCD16 subpixel text, BW masks, the black
 blitter, and the direct-blit fill value. Alpha extraction always uses
 the unconverted value. The SurfaceFormatBit shifts mirror on
-big-endian so channel accessors keep addressing the same bytes, and
-kARGBAlphaOffset moves to byte 0 for the RGBX verification.
+big-endian so channel accessors keep addressing the same bytes.
+
+SkRasterPipeline's 8888 stages have the same problem: they address a
+pixel's channels by byte offset but load and store it as a native
+uint32_t, so on big-endian they read and write the A8R8G8B8 layout.
+Swap bytes around the load and the store in from_8888, store_8888 and
+the fused srcover_rgba_8888 stage, in both the highp and lowp
+pipelines, so every Skia path produces the same B8G8R8A8 bytes. Image
+surfaces drawn through the pipeline (decoded rasters, gradient fills)
+and through the scalar blitters (solid fills, which is what toolbar
+icons are) therefore agree, and no fix-up pass over a finished surface
+is needed.
+
+SkRasterPipelineBlitter's memset fast path for constant-color Src
+blits stores one pixel to the start of its uint64_t fMemsetColor and
+then narrows that integer to the pixel width. On big-endian the store
+lands in the most significant bytes while the narrowing takes the
+least significant ones, so every memsettable solid fill wrote zeros.
+Shift the value down to the low-order end after running the color
+pipeline. This is most visible through alpha-only (A8) surfaces: a CSS
+mask whose gradient does not vary over the area being painted collapses
+to a solid fill, so the mask came out fully transparent and the masked
+content disappeared entirely, which is what hid the DevTools toolbar
+labels.
 
 Software WebRender resolves frames in the B8G8R8A8 memory layout, but
 X11 consumes native-endian 32-bit pixel values, so swizzle the dirty
 region to the A8R8G8B8 layout when handing the buffer to the widget.
-Skia-drawn image surfaces get the inverse reorder in imgFrame before
-they enter the surface cache.
 
-Known gap: SkRasterPipeline's load/store stages and the headless
-screenshot readback still assume little-endian and are unchanged.
+Known gap: the headless screenshot readback still assumes
+little-endian and is unchanged.
 ---
- gfx/2d/DrawTargetSkia.cpp                     |  4 +-
  gfx/2d/Types.h                                | 24 +++++-----
  gfx/skia/skia/src/core/SkBlitRow_D32.cpp      |  6 ++-
  gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp   | 47 ++++++++++---------
  gfx/skia/skia/src/core/SkColorData.h          | 12 +++++
+ .../skia/src/core/SkRasterPipelineBlitter.cpp |  8 ++++
  gfx/skia/skia/src/opts/SkBlitMask_opts.h      |  7 ++-
  gfx/skia/skia/src/opts/SkBlitRow_opts.h       |  5 +-
+ .../skia/src/opts/SkRasterPipeline_opts.h     | 24 ++++++++--
  .../RenderCompositorSWGL.cpp                  | 23 +++++++++
- image/imgFrame.cpp                            | 14 ++++++
- 9 files changed, 102 insertions(+), 40 deletions(-)
+ 9 files changed, 112 insertions(+), 44 deletions(-)
 
-diff --git a/gfx/2d/DrawTargetSkia.cpp b/gfx/2d/DrawTargetSkia.cpp
-index 388864567e20..4dd3767cbb51 100644
---- a/gfx/2d/DrawTargetSkia.cpp
-+++ b/gfx/2d/DrawTargetSkia.cpp
-@@ -176,7 +176,9 @@ static IntRect CalculateSurfaceBounds(const IntSize& aSize, const Rect* aBounds,
- }
- 
- static const int kARGBAlphaOffset =
--    SurfaceFormat::A8R8G8B8_UINT32 == SurfaceFormat::B8G8R8A8 ? 3 : 0;
-+    std::endian::native != std::endian::little
-+        ? 0
-+        : (SurfaceFormat::A8R8G8B8_UINT32 == SurfaceFormat::B8G8R8A8 ? 3 : 0);
- 
- static bool VerifyRGBXFormat(uint8_t* aData, const IntSize& aSize,
-                              const int32_t aStride, SurfaceFormat aFormat) {
 diff --git a/gfx/2d/Types.h b/gfx/2d/Types.h
-index cd1f1b2781a4..e0e5a8c073c8 100644
+index c5b08fa19013..3031b8cd4f0d 100644
 --- a/gfx/2d/Types.h
 +++ b/gfx/2d/Types.h
-@@ -109,13 +109,12 @@ enum class SurfaceFormat : int8_t {
+@@ -112,13 +112,12 @@ enum class SurfaceFormat : int8_t {
  
    // The following values are endian-independent synonyms. The _UINT32 suffix
    // indicates that the name reflects the layout when viewed as a uint32_t
@@ -82,7 +87,7 @@ index cd1f1b2781a4..e0e5a8c073c8 100644
  
    // The following values are OS and endian-independent synonyms.
    //
-@@ -272,11 +271,12 @@ enum class SurfaceFormatBit : uint32_t {
+@@ -283,11 +282,12 @@ enum class SurfaceFormatBit : uint32_t {
    R8G8B8A8_B = std::endian::native == std::endian::little ? 16 : 8,
    R8G8B8A8_A = std::endian::native == std::endian::little ? 24 : 0,
  
@@ -298,6 +303,25 @@ index 8357089701d4..a7b8cc1632ee 100644
  ////////////////////////////////////////////////////////////////////////////////////////////
  // Convert a 16bit pixel to a 32bit pixel
  
+diff --git a/gfx/skia/skia/src/core/SkRasterPipelineBlitter.cpp b/gfx/skia/skia/src/core/SkRasterPipelineBlitter.cpp
+index 7df8fb23a809..98b88caf75f9 100644
+--- a/gfx/skia/skia/src/core/SkRasterPipelineBlitter.cpp
++++ b/gfx/skia/skia/src/core/SkRasterPipelineBlitter.cpp
+@@ -450,6 +450,14 @@ SkBlitter* SkRasterPipelineBlitter::Create(const SkPixmap& dst,
+         blitter->appendStore(&p);
+         p.run(0,0,1,1);
+ 
++#ifdef SK_CPU_BENDIAN
++        // The store wrote bytesPerPixel bytes to the start of fMemsetColor,
++        // which on big-endian is its most significant end, while the memsets
++        // below take the value from the least significant end.
++        blitter->fMemsetColor >>= 8 * (sizeof(blitter->fMemsetColor) -
++                                       dst.info().bytesPerPixel());
++#endif
++
+         switch (blitter->fDst.shiftPerPixel()) {
+             case 0: blitter->fMemset2D = [](SkPixmap* dst, int x,int y, int w,int h, uint64_t c) {
+                 void* p = dst->writable_addr(x,y);
 diff --git a/gfx/skia/skia/src/opts/SkBlitMask_opts.h b/gfx/skia/skia/src/opts/SkBlitMask_opts.h
 index 6b1aa7411610..c766624fc7bf 100644
 --- a/gfx/skia/skia/src/opts/SkBlitMask_opts.h
@@ -346,6 +370,77 @@ index 9090549ed25c..c40076b413c0 100644
              r = (mull(s,a) >> 8) + c;
          return sk_bit_cast<U32>(skvx::cast<uint8_t>(r));
      };
+diff --git a/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h b/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h
+index 601c0b5e579c..cc5ddc901669 100644
+--- a/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h
++++ b/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h
+@@ -2035,7 +2035,20 @@ SI void from_4444(U16 _4444, F* r, F* g, F* b, F* a) {
+     *b = cast(wide & (15<< 4)) * (1.0f / (15<< 4));
+     *a = cast(wide & (15<< 0)) * (1.0f / (15<< 0));
+ }
++// The 8888 stages address a pixel's channels by their byte offset in memory,
++// but load and store it as a native uint32_t. On big-endian that puts memory
++// byte 0 in the top bits, so swap bytes around the load and the store.
++template <typename V>
++SI V swap_8888_bytes(V v) {
++#ifdef SK_CPU_BENDIAN
++    return (v >> 24) | ((v >> 8) & 0x0000ff00) | ((v << 8) & 0x00ff0000) | (v << 24);
++#else
++    return v;
++#endif
++}
++
+ SI void from_8888(U32 _8888, F* r, F* g, F* b, F* a) {
++    _8888 = swap_8888_bytes(_8888);
+     *r = cast((_8888      ) & 0xff) * (1/255.0f);
+     *g = cast((_8888 >>  8) & 0xff) * (1/255.0f);
+     *b = cast((_8888 >> 16) & 0xff) * (1/255.0f);
+@@ -2625,7 +2638,7 @@ HIGHP_STAGE(luminosity, NoCtx) {
+ HIGHP_STAGE(srcover_rgba_8888, const SkRasterPipelineContexts::MemoryCtx* ctx) {
+     auto ptr = ptr_at_xy<uint32_t>(ctx, dx,dy);
+ 
+-    U32 dst = load<U32>(ptr);
++    U32 dst = swap_8888_bytes(load<U32>(ptr));
+     dr = cast((dst      ) & 0xff);
+     dg = cast((dst >>  8) & 0xff);
+     db = cast((dst >> 16) & 0xff);
+@@ -2644,7 +2657,7 @@ HIGHP_STAGE(srcover_rgba_8888, const SkRasterPipelineContexts::MemoryCtx* ctx) {
+         | to_unorm(g, /*scale=*/1, /*bias=*/0.f, /*maxI=*/255) <<  8
+         | to_unorm(b, /*scale=*/1, /*bias=*/0.f, /*maxI=*/255) << 16
+         | to_unorm(a, /*scale=*/1, /*bias=*/0.f, /*maxI=*/255) << 24;
+-    store(ptr, dst);
++    store(ptr, swap_8888_bytes(dst));
+ }
+ 
+ SI F clamp_01_(F v) { return min(max(0.0f, v), 1.0f); }
+@@ -3200,7 +3213,7 @@ HIGHP_STAGE(store_8888, const SkRasterPipelineContexts::MemoryCtx* ctx) {
+            | to_unorm(g, 255) <<  8
+            | to_unorm(b, 255) << 16
+            | to_unorm(a, 255) << 24;
+-    store(ptr, px);
++    store(ptr, swap_8888_bytes(px));
+ }
+ 
+ HIGHP_STAGE(load_rg88, const SkRasterPipelineContexts::MemoryCtx* ctx) {
+@@ -6352,6 +6365,7 @@ SI void store(T* ptr, V v) {
+ // ~~~~~~ 32-bit memory loads and stores ~~~~~~ //
+ 
+ SI void from_8888(U32 rgba, U16* r, U16* g, U16* b, U16* a) {
++    rgba = swap_8888_bytes(rgba);
+ #if defined(SKRP_CPU_ML4)
+     // Turns [0xAABBGGRR, 0xAABBGGRR, 0xAABBGGRR, ... 13 more times] to
+     //       [0xGGRR, 0xGGRR, 0xGGRR, ...]
+@@ -6465,8 +6479,8 @@ SI void store_8888_(uint32_t* ptr, U16 r, U16 g, U16 b, U16 a) {
+     }};
+     vst4_u8((uint8_t*)(ptr), rgba);
+ #else
+-    store(ptr, cast<U32>(r | (g<<8)) <<  0
+-             | cast<U32>(b | (a<<8)) << 16);
++    store(ptr, swap_8888_bytes(cast<U32>(r | (g<<8)) <<  0
++                              | cast<U32>(b | (a<<8)) << 16));
+ #endif
+ #endif
+ }
 diff --git a/gfx/webrender_bindings/RenderCompositorSWGL.cpp b/gfx/webrender_bindings/RenderCompositorSWGL.cpp
 index d143cf92f5b5..849ffb15eca5 100644
 --- a/gfx/webrender_bindings/RenderCompositorSWGL.cpp
@@ -389,38 +484,3 @@ index d143cf92f5b5..849ffb15eca5 100644
    if (mSurface) {
      // If we're using a data surface, unmap it and draw it to the DT if there
      // are any supplied dirty rects.
-diff --git a/image/imgFrame.cpp b/image/imgFrame.cpp
-index ddb44676c8bf..953746686b4d 100644
---- a/image/imgFrame.cpp
-+++ b/image/imgFrame.cpp
-@@ -14,9 +14,12 @@
- #include "gfxPlatform.h"
- #include "gfxUtils.h"
- #include "mozilla/EndianUtils.h"
-+
-+#include <bit>
- #include "mozilla/MemoryReporting.h"
- #include "mozilla/ProfilerLabels.h"
- #include "mozilla/StaticPrefs_browser.h"
-+#include "mozilla/gfx/Swizzle.h"
- #include "mozilla/gfx/Tools.h"
- #include "nsMargin.h"
- #include "nsRefreshDriver.h"
-@@ -376,6 +379,17 @@ nsresult imgFrame::InitWithDrawable(gfxDrawable* aDrawable,
-     return NS_ERROR_OUT_OF_MEMORY;
-   }
- 
-+  if (std::endian::native != std::endian::little && canUseDataSurface &&
-+      aBackend == gfx::BackendType::SKIA) {
-+    // On big-endian, Skia stores its little-endian-convention pixel values
-+    // with native byte order, leaving A8R8G8B8 bytes in a surface that is
-+    // consumed as B8G8R8A8. Reorder in place.
-+    gfx::SwizzleData(mRawSurface->GetData(), mRawSurface->Stride(),
-+                     gfx::SurfaceFormat::A8R8G8B8, mRawSurface->GetData(),
-+                     mRawSurface->Stride(), gfx::SurfaceFormat::B8G8R8A8,
-+                     mRawSurface->GetSize());
-+  }
-+
-   if (!canUseDataSurface) {
-     // We used an offscreen surface, which is an "optimized" surface from
-     // imgFrame's perspective.

@@ -1,7 +1,7 @@
-From d908c45059e9efcda121eb794a546fb01a519bd6 Mon Sep 17 00:00:00 2001
+From ec0c5872015d146f981fc10aa6d693ffcdc307fb Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
 Date: Fri, 12 Jun 2026 15:30:13 +1000
-Subject: [PATCH 2/8] Add PPC64LE VSX instructions for libwebp
+Subject: [PATCH 2/9] Add PPC64LE VSX instructions for libwebp
 
 Gated to little-endian: the VSX kernels assume the ppc64le vector-register
 byte order, so big-endian falls back to the portable C paths.
@@ -10,7 +10,7 @@ Assisted-by: Lance Albertson <lance@osuosl.org>
 Assisted-by: Thushan Fernando <thushan@thushanfernando.com>
 ---
  media/libwebp/src/dsp/alpha_processing.c     |   6 +
- media/libwebp/src/dsp/alpha_processing_vsx.c | 246 +++++++
+ media/libwebp/src/dsp/alpha_processing_vsx.c | 251 +++++++
  media/libwebp/src/dsp/cpu.h                  |  18 +-
  media/libwebp/src/dsp/dec.c                  |   6 +
  media/libwebp/src/dsp/dec_vsx.c              | 737 +++++++++++++++++++
@@ -27,7 +27,7 @@ Assisted-by: Thushan Fernando <thushan@thushanfernando.com>
  media/libwebp/src/dsp/yuv.h                  |  21 +
  media/libwebp/src/dsp/yuv_vsx.c              | 206 ++++++
  media/libwebp/src/moz/cpu.cpp                |   4 +
- 18 files changed, 2259 insertions(+), 1 deletion(-)
+ 18 files changed, 2264 insertions(+), 1 deletion(-)
  create mode 100644 media/libwebp/src/dsp/alpha_processing_vsx.c
  create mode 100644 media/libwebp/src/dsp/dec_vsx.c
  create mode 100644 media/libwebp/src/dsp/filters_vsx.c
@@ -62,10 +62,10 @@ index 4927e73e81bf..5f9152bf701a 100644
  
 diff --git a/media/libwebp/src/dsp/alpha_processing_vsx.c b/media/libwebp/src/dsp/alpha_processing_vsx.c
 new file mode 100644
-index 000000000000..2aad1cd8b648
+index 000000000000..1f0163f82dbd
 --- /dev/null
 +++ b/media/libwebp/src/dsp/alpha_processing_vsx.c
-@@ -0,0 +1,246 @@
+@@ -0,0 +1,251 @@
 +// Copyright 2014 Google Inc. All Rights Reserved.
 +//
 +// Use of this source code is governed by a BSD-style license
@@ -105,7 +105,10 @@ index 000000000000..2aad1cd8b648
 +  const u16x8 z16 = vec_splats((unsigned short)0);
 +  const u32x4 a_mask = vec_splats((uint32_t)0xff);  // selects the low byte
 +  u8x16 all_and = vec_splats((unsigned char)0xff);
-+  const int limit = width & ~15;
++  // The alpha byte may be the last byte of its pixel, so the 16-byte accesses
++  // reach 3 bytes past the last pixel they cover: leave at least one pixel to
++  // the scalar tail, as the SSE2 version does.
++  const int limit = (width - 1) & ~15;
 +
 +  for (j = 0; j < height; ++j) {
 +    uint8_t* ptr = dst;
@@ -178,7 +181,9 @@ index 000000000000..2aad1cd8b648
 +  int i, j, k;
 +  const u32x4 a_mask = vec_splats((uint32_t)0xff);  // keeps the low byte
 +  u8x16 all_and = vec_splats((unsigned char)0xff);
-+  const int limit = width & ~7;
++  // As in DispatchAlpha: the 32-byte reads may reach 3 bytes past the last
++  // pixel they cover, so leave at least one pixel to the scalar tail.
++  const int limit = (width - 1) & ~7;
 +
 +  for (j = 0; j < height; ++j) {
 +    const uint32_t* src = (const uint32_t*)argb;

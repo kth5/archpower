@@ -1,0 +1,70 @@
+From: Jordan Bettcher <thebettcher@gmail.com>
+Date: Fri, 2 Oct 2026 23:00:00 -0600
+Subject: [PATCH] ppc64: fix PPC_xsmaxdp/PPC_xsmindp constants emitting ISA 3.0
+
+The XX3-form opcode constants for the ISA 2.06 base-form scalar min/max
+hold the encodings of the ISA 3.0 (POWER9) Type-C instructions instead:
+
+    PPC_xsmaxdp = 0xF0000400   is xsmaxcdp   (XO=128)
+    PPC_xsmindp = 0xF0000440   is xsmincdp   (XO=136)
+
+The XX3 XO field is at bits 21-28, so the constant is XO << 3. The real
+base forms are XO=160 and XO=168, i.e. 0xF0000500 and 0xF0000540. The
+comment directly above the constants already says "Base (ISA 2.06)
+forms", so this is a transcription error rather than a design choice.
+
+The consequence is that the POWER8 fallback in MacroAssembler-ppc64-inl.h
+-- which is correctly gated behind !HasPOWER9() and correctly reached --
+emits a POWER9 instruction. Every Math.min()/Math.max() on doubles that
+Ion compiles therefore SIGILLs on POWER8. Observed on a POWER8 machine
+running firefox 154.0.1 as:
+
+    Program terminated with signal SIGILL, Illegal instruction.
+    => 0xfce5f58a96c:  xsmincdp vs1,vs1,vs2
+
+which is exactly what as_xsmindp(srcDest, srcDest, other) assembles to
+with srcDest=vs1, other=vs2 under the wrong constant. POWER9 is
+unaffected because HasPOWER9() selects the xsminjdp/xsmaxjdp path.
+
+Simulator-ppc64.cpp decodes the same two instructions and carries the
+same error in its case labels (XO8 128/136 rather than 160/168), so the
+simulator would mis-decode the corrected encodings; fixed alongside.
+
+Upstreamable: yes -- this is a bug in runlevel5's firefox-ppc64 patchset
+(0004-Add-PPC64LE-JIT-backend.patch), not a local workaround.
+---
+--- a/js/src/jit/ppc64/Assembler-ppc64.h
++++ b/js/src/jit/ppc64/Assembler-ppc64.h
+@@ -777,8 +777,8 @@
+   // Base (ISA 2.06) forms: NaN operands are suppressed in favor of the
+   // numeric operand (minNum/maxNum style), so these are only ECMA-correct
+   // once NaN inputs have been excluded.
+-  PPC_xsmaxdp = 0xF0000400,
+-  PPC_xsmindp = 0xF0000440,
++  PPC_xsmaxdp = 0xF0000500,
++  PPC_xsmindp = 0xF0000540,
+   PPC_xxbrd = 0xF017076C,
+   PPC_xxbrq = 0xF01F076C,  // VSX vector byte-reverse quadword (whole 16 bytes)
+   PPC_xvabsdp = 0xF0000764,
+--- a/js/src/jit/ppc64/Simulator-ppc64.cpp
++++ b/js/src/jit/ppc64/Simulator-ppc64.cpp
+@@ -6055,8 +6055,8 @@
+     // a QNaN operand loses to the numeric operand (minNum/maxNum style);
+     // both-QNaN returns src1; ±0 ties follow signed-zero ordering
+     // (max -> +0, min -> -0).
+-    case 256: case 257:    // xsmaxdp  (XO8=128 → 9-bit 256/257)
+-    case 272: case 273: {  // xsmindp  (XO8=136 → 9-bit 272/273)
++    case 320: case 321:    // xsmaxdp  (XO8=160 → 9-bit 320/321)
++    case 336: case 337: {  // xsmindp  (XO8=168 → 9-bit 336/337)
+       int xa = int(instr->raValue() | (instr->bit(2) << 5));
+       int xb = int(instr->rbValue() | (instr->bit(1) << 5));
+       int xt = int(instr->rtValue() | (instr->bit(0) << 5));
+@@ -6066,7 +6066,7 @@
+       double a, b;
+       memcpy(&a, ab + 8, 8);
+       memcpy(&b, bb + 8, 8);
+-      bool isMax = (xo >> 1) == 128;
++      bool isMax = (xo >> 1) == 160;
+       auto isSNaN = [](double v) {
+         uint64_t bits;
+         memcpy(&bits, &v, 8);
