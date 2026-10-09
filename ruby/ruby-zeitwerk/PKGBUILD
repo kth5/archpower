@@ -1,100 +1,73 @@
-# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
 # Maintainer: David Runge <dvzrv@archlinux.org>
 # Maintainer: Andreas 'Segaja' Schleifer <archlinux at segaja dot de>
 
-_name=zeitwerk
-pkgname=ruby-zeitwerk
-pkgver=2.7.3
+_gemname='zeitwerk'
+pkgname="ruby-${_gemname}"
+pkgver=2.8.2
 pkgrel=1
 pkgdesc="Efficient and thread-safe code loader for Ruby"
 arch=(any)
-url="https://github.com/fxn/zeitwerk"
-license=(MIT)
-depends=(ruby)
+url="https://github.com/fxn/${_gemname}"
+license=('MIT')
+depends=(
+  ruby
+)
 makedepends=(
-  ruby-rake
   ruby-rdoc
 )
 checkdepends=(
   ruby-minitest
-  # ruby-minitest-focus  # TODO: package
   ruby-minitest-proveit
   ruby-minitest-reporters
+  ruby-minitest-sprint
   ruby-warning
 )
-options=(!emptydirs)
-source=($pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz)
-sha512sums=('c84a5175f0c1b7c616ae9ff1ee2a3f46ba550e0d49f6a08a8862bc3181eadafc1b95adfb97cb3fc8015971fa26d68439f6eadec3eb375abb727ccd6c3ac78cec')
-b2sums=('6c9f51bdb4215c7d6ac108c5574b9fc506b08aea19fc6279052a5bf5c9c140f8af79eb7860b28e7acf9fe83a717aad8944afa54f54d6b000eaf7d543ca459332')
+options=('!emptydirs')
+source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('c50f0b105cf177f86ed4966d8d116e8838c5afb88e2d921057cd77c256bde0b3d21c827ada4abf2e4df0d05b2d28587d1c4af1be240af3e6f4005b558232a320')
+b2sums=('995d2ff4c061538ea6ccce70fa4fd701e5c4cba5b99c7e07bd6404c3641e2f4fce2fba712003a9eb3d88d029407d62c67d2765c0aff9422c7c49d1ee30c73a23')
 
 prepare() {
-  cd $_name-$pkgver
+  cd "${_gemname}-${pkgver}"
 
   # update gemspec/Gemfile to allow newer version of the dependencies
-  sed -i -e 's|~>|>=|g' $_name.gemspec
+  sed --in-place --regexp-extended \
+    --expression 's|~>|>=|g' \
+    --expression '/signing_key/d' \
+    "${_gemname}.gemspec"
+
   # remove ruby-minitest-focus requirement
   sed '/minitest\/focus/d' -i test/test_helper.rb
 }
 
 build() {
-  local gemdir="$(gem env gemdir)"
-  local gem_install_options=(
-    --local
-    --verbose
-    --ignore-dependencies
-    --no-user-install
-    --install-dir tmp_install/$gemdir
-    --bindir tmp_install/usr/bin
-    $_name-$pkgver.gem
-  )
-  local unrepro_files=(
-    tmp_install/$gemdir/cache/
-    tmp_install/$gemdir/gems/$_name-$pkgver/vendor/
-    tmp_install/$gemdir/doc/$_name-$pkgver/ri/ext/
-  )
+  cd "${_gemname}-${pkgver}"
 
-  cd $_name-$pkgver
+  local _gemdir="$(gem env gemdir)"
 
-  gem build $_name.gemspec
-  gem install "${gem_install_options[@]}"
+  gem build --verbose "${_gemname}.gemspec"
 
-  # remove unrepreducible files
-  rm -frv "${unrepro_files[@]}"
-
-  find tmp_install/$gemdir/gems/ \
-    -type f \
-    \( \
-      -iname "*.o" -o \
-      -iname "*.c" -o \
-      -iname "*.so" -o \
-      -iname "*.time" -o \
-      -iname "gem.build_complete" -o \
-      -iname "Makefile" \
-    \) \
-    -delete
-
-  find tmp_install/$gemdir/extensions/ \
-    -type f \
-    \( \
-      -iname "mkmf.log" -o \
-      -iname "gem_make.out" \
-    \) \
-    -delete
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --build-root "tmp_install" \
+    "${_gemname}-${pkgver}.gem"
 }
 
 check() {
-  local gemdir="$(gem env gemdir)"
+  cd "${_gemname}-${pkgver}"
 
-  cd $_name-$pkgver
+  local _gemdir="$(gem env gemdir)"
 
-  GEM_HOME="tmp_install/$gemdir" rake test
+  GEM_HOME="tmp_install/${_gemdir}" minitest
 }
 
 package() {
-  cd $_name-$pkgver
+  cd "${_gemname}-${pkgver}"
 
-  mv -v tmp_install/* "$pkgdir/"
+  cp --archive --verbose tmp_install/* "${pkgdir}"
 
-  install -vDm 644 MIT-LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
-  install -vDm 644 {CHANGELOG,README}.md -t "$pkgdir/usr/share/doc/$pkgname/"
+  install --verbose -D --mode=0644 MIT-LICENSE --target-directory "${pkgdir}/usr/share/licenses/${pkgname}/"
+  install --verbose -D --mode=0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}/"
 }
