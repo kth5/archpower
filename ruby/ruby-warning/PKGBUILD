@@ -3,8 +3,8 @@
 
 _name=warning
 pkgname=ruby-warning
-pkgver=1.5.0
-pkgrel=2
+pkgver=1.6.0
+pkgrel=1
 pkgdesc="Add custom processing for warnings"
 arch=(any)
 url="https://github.com/jeremyevans/ruby-warning"
@@ -22,8 +22,8 @@ checkdepends=(
 )
 options=(!emptydirs)
 source=($pkgname-$pkgver.tar.gz::$url/archive/refs/tags/$pkgver.tar.gz)
-sha512sums=('2b11487b7d137679ea8a8aac409952fca50fc5d6e63442ff98e0b6c05778a943e5d5b6aa07639390a9772ad2e49facde41521f8b08c9d2ef7de5230c48735622')
-b2sums=('81db55934eaeb477846e3e2ecc836f5b7bc152f51316dadd49ebd63a88f77209b168440bf2e28693965c2fa94157d26a54b06ea2f059d1a92d4edf72154c9d68')
+sha512sums=('34110576d5bf44cdb155b0c7c6c1b1085ed3a385e46519dd9ef4b607e637f18fe8b025f55f2f7ce9933e5249db761cb1ee7f5abdafb5df532567189cdeca8055')
+b2sums=('d4bb04ca030116c765df8f8a68fbe17c58ecb21a16bdd985fbc87c5161004247142aa63f341b841c8785b94519b5f09aef1b1a91bea586bc086eac87a471c243')
 
 prepare() {
   cd $pkgname-$pkgver
