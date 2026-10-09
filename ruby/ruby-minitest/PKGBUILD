@@ -5,7 +5,7 @@
 
 _gemname='minitest'
 pkgname="ruby-${_gemname}"
-pkgver=5.26.1
+pkgver=5.27.0
 pkgrel=1
 pkgdesc='Complete suite of testing facilities supporting TDD, BDD, mocking, and benchmarking'
 url="https://github.com/minitest/${_gemname}"
@@ -15,8 +15,8 @@ depends=('ruby')
 makedepends=('ruby-hoe' 'ruby-rake' 'ruby-rdoc')
 options=('!emptydirs')
 source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('cdd745f43b4e136097a5a0714d11463f88adc3386a4feaa1a3041aac49abe8b7471d5f010c21d8475536f27ffe8812605fbde4c9cfc78574f00a3a9363c2429a')
-b2sums=('a7875791d330fc934b86d5ceebf700e59673404369da1e328c9f0f893a6b871bcb8d390243d19a7c3caa22d1a9faab449f4ccbef347069a2be583ee024627716')
+sha512sums=('0af701e1213d7b24d00986d4cfcfffe35df2f042c356acadd9dbf92df5d6f4587fc97fe96da6be55158ee5e3a62b63ba58222c236da67a9445d436761f3f7c10')
+b2sums=('0ec48105e75701f759bfa8d17fb4c800bd987ecc7aa693a8358fd9b73010ab70836b20fcdd8c927cfe06c390b34dac31a88d68a8eb8496aa4962ee257cb7ef6d')
 
 build() {
   cd "${_gemname}-${pkgver}"
