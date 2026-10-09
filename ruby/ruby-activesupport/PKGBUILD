@@ -3,7 +3,7 @@
 
 _name=activesupport
 pkgname=ruby-activesupport
-pkgver=8.1.2
+pkgver=8.1.3
 pkgrel=1
 pkgdesc='A collection of utility classes and standard library extensions'
 arch=(any)
@@ -30,70 +30,31 @@ makedepends=(
   ruby-rdoc
 )
 options=(!emptydirs)
-source=($pkgname::git+https://github.com/rails/rails#tag=v$pkgver?signed)
-sha512sums=('167f8ce56dceef5c10550acb5e2260410081c4afd4e1e30317f0df44a5a211ffba57148403ee56046f231b12b5e29c83f193865ff5260e965d8d04e5b9d26aa3')
-b2sums=('b2bd1f48507249de9fff05770f34fb0cbc67305e33f098d95cf7d5247a19623b9fb62eb07eded5e8b660060a59cb254bce9baa6edc65ea8963ea66636f1c3632')
-validpgpkeys=(
-  '54FE550EA35E26D7C75362C1FC23B6D0F1EEE948'  # Rafael Mendonça França <rafael.ufs@gmail.com>
-  '4CE91B75A79828E86B1AA8BB953170BCB4FFAFC6'  # Aaron Patterson <tenderlove@ruby-lang.org>
-)
-
-pkgver() {
-  cd $pkgname
-  git describe --tags | sed 's/\([^-]*-g\)/r\1/;s/-/./g;s/v//g'
-}
+source=("$pkgname::git+https://github.com/rails/rails#tag=v$pkgver")
+sha512sums=('81a42a57e2f5fde1bd0c8e5ecd529f5b9b5956b36a814026105c7af39337326631af486e74f4d98fdcd9b65b7ed1b28b9dec65595cf459bf609a549b6a7aba25')
+b2sums=('5422595085a4192545153b4d8121c22cc0dd749ff6635c7dbb0bd22734e85c6726a367f075f2533bbcc0d7550aa45e59223f272d31dea52e6cfd0cd523d01a64')
 
 prepare() {
   cd $pkgname/$_name
 
   # update gemspec/Gemfile to allow newer version of the dependencies
-  sed -i -e 's|~>|>=|g' $_name.gemspec
+  sed --in-place --regexp-extended \
+    --expression 's|~>|>=|g' \
+    --expression '/signing_key/d' \
+    "${_name}.gemspec"
 }
 
 build() {
-  local gemdir="$(gem env gemdir)"
-  local gem_install_options=(
-    --local
-    --verbose
-    --ignore-dependencies
-    --no-user-install
-    --install-dir tmp_install/$gemdir
-    --bindir tmp_install/usr/bin
-    $_name-$pkgver.gem
-  )
-  local unrepro_files=(
-    tmp_install/$gemdir/cache/
-    tmp_install/$gemdir/gems/$_name-$pkgver/vendor/
-    tmp_install/$gemdir/doc/$_name-$pkgver/ri/ext/
-  )
-
   cd $pkgname/$_name
 
   gem build $_name.gemspec
-  gem install "${gem_install_options[@]}"
 
-  # remove unrepreducible files
-  rm -frv "${unrepro_files[@]}"
-
-  find tmp_install/$gemdir/gems/ \
-    -type f \
-    \( \
-      -iname "*.o" -o \
-      -iname "*.c" -o \
-      -iname "*.so" -o \
-      -iname "*.time" -o \
-      -iname "gem.build_complete" -o \
-      -iname "Makefile" \
-    \) \
-    -delete
-
-  find tmp_install/$gemdir/extensions/ \
-    -type f \
-    \( \
-      -iname "mkmf.log" -o \
-      -iname "gem_make.out" \
-    \) \
-    -delete
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --build-root tmp_install \
+    $_name-$pkgver.gem
 }
 
 # NOTE: probably requires a specific git checkout of ruby-mysql2
