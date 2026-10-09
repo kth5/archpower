@@ -3,7 +3,7 @@
 
 _name=i18n
 pkgname=ruby-i18n
-pkgver=1.14.8
+pkgver=1.15.2
 pkgrel=1
 pkgdesc="New wave internationalisation support for Ruby"
 arch=(any)
@@ -25,8 +25,8 @@ checkdepends=(
 )
 options=(!emptydirs)
 source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('0be488e2350f9ef6c707986de7dccc62888ef2b555633c61d16c2ecaac598b28758cfbc7fce8e357490a849a8865ec2472c1e71c1706000fe735648aa6fff8ab')
-b2sums=('b0838c185159f2906d5ddc2b294d146eaa145bf69917a0a5b84cddd176c4ef67f9bfbde6db9844b3323615521fa71a81db13d4ddfd53bf7afa42b511dfa62374')
+sha512sums=('906963eb8c4a9e318b4ab8d5dab394eebe9f388cbb432637502b2b2d6988a0442a7c48f18b2b8d58dc1dd22b89b4a4cba600a0ecabe616b4f54ca67e2797bcf4')
+b2sums=('f063053dae3ff49467b02f187dd85e28912b88e1116b32a4dd848721a0bad31daa4bed66b9677df89f2991510f3bc6f37b70ce2af9fc7fd55421be9f42182b1a')
 
 prepare() {
   cd $_name-$pkgver
