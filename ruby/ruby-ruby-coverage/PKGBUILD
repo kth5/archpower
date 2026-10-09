@@ -1,0 +1,80 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+_gemname='ruby-coverage'
+pkgname="ruby-${_gemname}"
+pkgver=0.1.3
+pkgrel=1
+pkgdesc="Native reimplementation of Ruby's Coverage module with accumulating line counts"
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url='https://github.com/socketry/ruby-coverage'
+license=(MIT)
+depends=(
+  ruby
+)
+makedepends=(
+  git
+  ruby-rdoc
+)
+checkdepends=(
+  ruby-covered
+  ruby-sus
+)
+options=(!emptydirs)
+source=("git+https://github.com/socketry/ruby-coverage.git#tag=v$pkgver")
+sha512sums=('c461c45d060009997c06cf925fb79c87defd0e815e31fafee53e8f5d6519d85f94a45c524c8b26f325773c427503afc09785757caad7452bc8ec392954bcc445')
+b2sums=('fa6d01e66607257f648bcccb953c5b8e206d0d605cfc626589ae069e0564b3db131f9a383eb27215116568c532222009c052c052db19067fa826713112540536')
+
+prepare() {
+  cd ruby-coverage
+
+  sed -i '/signing_key/d' ruby-coverage.gemspec
+}
+
+build() {
+  local _gemdir="$(gem env gemdir)"
+  cd ruby-coverage
+  gem build ruby-coverage.gemspec
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install/$_gemdir" \
+    --bindir "tmp_install/usr/bin" \
+    ruby-coverage-$pkgver.gem
+  find "tmp_install/$_gemdir/gems/" \
+    -type f \
+    \( \
+        -iname "*.o" -o \
+        -iname "*.c" -o \
+        -iname "*.so" -o \
+        -iname "*.time" -o \
+        -iname "gem.build_complete" -o \
+        -iname "Makefile" \
+    \) \
+    -delete
+  find "tmp_install/$_gemdir/extensions/" \
+    -type f \
+    \( \
+        -iname "mkmf.log" -o \
+        -iname "gem_make.out" \
+    \) \
+    -delete
+  rm -r tmp_install/$_gemdir/cache
+}
+
+check() {
+  local _gemdir="$(gem env gemdir)"
+  cd ruby-coverage
+
+  GEM_HOME="tmp_install/$_gemdir" sus
+}
+
+package() {
+  cd ruby-coverage
+  cp -a tmp_install/* "$pkgdir"/
+
+  install -Dm644 license.md -t "$pkgdir"/usr/share/licenses/$pkgname/
+  install -Dm644 readme.md -t "$pkgdir"/usr/share/doc/$pkgname/
+}
