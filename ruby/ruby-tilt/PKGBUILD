@@ -1,38 +1,74 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Andreas 'Segaja' Schleifer <segaja at archlinux dot org>
 
-_gemname=tilt
-pkgname=ruby-tilt
-pkgver=2.3.0
-pkgrel=5
-pkgdesc='Generic interface to multiple Ruby template engines'
-url='https://github.com/rtomayko/tilt'
-arch=('any')
+_gemname='tilt'
+pkgname="ruby-${_gemname}"
+pkgver=2.8.0
+pkgrel=1
+pkgdesc='Generic interface to multiple Ruby template engines.'
+arch=(any)
+url="https://github.com/jeremyevans/${_gemname}"
 license=('MIT')
-depends=('ruby')
-makedepends=('ruby-rdoc')
+depends=(
+  ruby
+)
+makedepends=(
+  ruby-rdoc
+)
+optdepends=(
+  'asciidoctor: .ad, .adoc, .asciidoc'
+  'ruby-builder: .builder'
+  'ruby-csv: .rcsv'
+  'ruby-erb: .erb, .rhtml'
+  'ruby-erubi: .erb, .rhtml, .erubi'
+  'ruby-haml: .haml'
+  'ruby-kramdown: .markdown, .mkd, .md'
+  'ruby-liquid: .liquid'
+  'ruby-maruku: .markdown, .mkd, .md'
+  'ruby-nokogiri: .nokogiri'
+  'ruby-pandoc-ruby: .markdown, .mkd, .md, .rst'
+  'ruby-rdiscount: .erb, .rhtml'
+  'ruby-rdoc: .rdoc'
+  'ruby-redcarpet: .markdown, .mkd, .md'
+  'ruby-redcloth: .textile'
+  'ruby-sass-embedded: .sass, .scss'
+  'ruby-slim: .slim'
+)
 options=('!emptydirs')
-source=(${pkgname}-${pkgver}.tar.gz::https://github.com/jeremyevans/tilt/archive/v${pkgver}.tar.gz)
-sha256sums=('344882278fc0a50a760a562e3c25f0997fc9b8816b4c5c259b4188604bf8d5c9')
-sha512sums=('3438c196c2e0936f2c3551fe3786d71b1336118352b97c95d3504b900082ce4248bbaf715f3f812eb7fe6e959767c75e316bf6cd5b659c216bbfd630dbf678bc')
+source=("${url}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('3683d7f17b38cb22aadee2811cba309a28601c117d183464d1c9c1d3bbbb4956cf7c04ef4210f276f8b969a67d88bc17d88ddc6904475d1db1e71bf5569fabf1')
+b2sums=('4f2019484688938ef0645304967047b61b1ce906db1e8c2550a17883687477423907ae082690bed48f76090fd2f10d17aaa3f74247ffb0860e94c1dd0916f1e0')
 
 prepare() {
-  cd ${_gemname}-${pkgver}
-  sed -r 's|~>|>=|g' -i ${_gemname}.gemspec # don't give a fuck about rubys bla bla
+  cd "${_gemname}-${pkgver}"
+
+  # update gemspec/Gemfile to allow newer version of the dependencies
+  sed --in-place --regexp-extended \
+    --expression 's|~>|>=|g' \
+    --expression '/signing_key/d' \
+    "${_gemname}.gemspec"
 }
 
 build() {
-  cd ${_gemname}-${pkgver}
-  gem build ${_gemname}.gemspec
+  cd "${_gemname}-${pkgver}"
+
+  gem build --verbose "${_gemname}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --build-root "tmp_install" \
+    "${_gemname}-${pkgver}.gem"
 }
 
 package() {
-  cd ${_gemname}-${pkgver}
-  local _gemdir="$(gem env gemdir)"
-  gem install --ignore-dependencies --no-user-install -i "${pkgdir}${_gemdir}" -n "${pkgdir}/usr/bin" ${_gemname}-${pkgver}.gem
-  install -Dm 644 README.md CHANGELOG.md -t "${pkgdir}/usr/share/doc/${pkgname}"
-  install -Dm 644 COPYING -t "${pkgdir}/usr/share/licenses/${pkgname}"
-  rm "${pkgdir}/${_gemdir}/cache/${_gemname}-${pkgver}.gem"
+  cd "${_gemname}-${pkgver}"
+
+  cp --archive --verbose tmp_install/* "${pkgdir}"
+
+  install --verbose -D --mode 0644 COPYING --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
+  install --verbose -D --mode 0644 *.md --target-directory "${pkgdir}/usr/share/doc/${pkgname}"
 }
 
-# vim: ts=2 sw=2 et:
+# vim: tabstop=2 shiftwidth=2 expandtab:
