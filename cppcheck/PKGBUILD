@@ -1,0 +1,104 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+# Contributor: Jelle van der Waa <jelle@archlinux.org>
+# Contributor: Stéphane Gaudreault <stephane@archlinux.org>
+
+pkgname=cppcheck
+pkgver=2.22.0
+pkgrel=1
+pkgdesc='A tool for static C/C++ code analysis'
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url='http://cppcheck.sourceforge.net/'
+license=(GPL-3.0-or-later)
+depends=(
+  glibc
+  libgcc
+  libstdc++
+  python
+  python-pygments
+  tinyxml2
+)
+makedepends=(
+  git
+  docbook-xsl
+  qt6-tools
+  qt6-base
+  qt6-declarative
+  cmake
+  clang
+  ninja
+)
+optdepends=(
+  'qt6-tools: run cppcheck-gui'
+  'clang: for cppcheck-gui integration'
+)
+source=(
+  "$pkgname::git+https://github.com/danmar/cppcheck.git#tag=$pkgver"
+  translations-location.patch
+)
+sha512sums=('159b9e585dca742c46b5dddbf3adf525b153820a16f7fa30a18b17d41cb72e37ba54257d73f547a32424e3082d4971a9f72c9e1acee529f126ba9635e55f77d2'
+            'd3528834d719017ec3a0e08005a293089b556622928defa1b37f940e62cb01165dcbd741e6d5e989c0156fb8789f7e63702af8b2390738648b2300a92f4ab0ae')
+b2sums=('73b3dde98a93abc4c556b6c19d61c11f9d3b6d998b93db11d1163617dc2a4d083b9a0abda9f6db086d165aca1470a19f75de65e76201a2af286f4f8b91096b6a'
+        '8156920eacc630cb5eceb2387937b747c84c6325bef906717cfbad68c122bdd27965da1e8070a560a0bed3a7b7c59ff5f0e116bb1d035c4c42f430c927a75b1f')
+
+prepare() {
+  cd "$pkgname"
+
+  # fix location of translations
+  patch -p1 -i "$srcdir/translations-location.patch"
+}
+
+build() {
+  export CXXFLAGS+=" -DNDEBUG"
+
+  # Manuals
+  pushd "$pkgname"
+  xsversion=$(pacman -Qi docbook-xsl | grep ^Version | sed -e 's/.*: //' -e 's/-[0-9]$//')
+  make DB2MAN=/usr/share/xml/docbook/xsl-stylesheets-${xsversion}-nons/manpages/docbook.xsl man
+  popd
+
+  cd "$pkgname"
+
+  local cmake_options=(
+    -B build
+    -S .
+    -G Ninja
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_BUILD_TYPE=RelWithDebInfo
+    -D USE_MATCHCOMPILER=ON
+    -D HAVE_RULES=OFF
+    -D BUILD_GUI=ON
+    -D BUILD_SHARED_LIBS=OFF
+    -D BUILD_TESTS=ON
+    -D FILESDIR=/usr/share/cppcheck
+    -D USE_BUNDLED_TINYXML2=OFF
+    -D USE_QT6=ON
+    -W no-dev
+  )
+
+  cmake "${cmake_options[@]}"
+
+  cmake --build build
+}
+
+check() {
+  case "${CARCH}" in
+    powerpc) return 0 ;;
+  esac
+
+  cd "$pkgname/build/bin"
+  ./testrunner -q
+}
+
+package() {
+  cd "$pkgname"
+
+  DESTDIR="$pkgdir" cmake --install build
+
+  install -vDm644 -t "$pkgdir/usr/share/man/man1" cppcheck.1
+  install -vDm755 -t "$pkgdir/usr/bin" htmlreport/cppcheck-htmlreport
+
+  # Fix location of language files
+  install -d "${pkgdir}"/usr/share/cppcheck/cfg/lang
+  mv "${pkgdir}"/usr/bin/cppcheck_*.qm "${pkgdir}"/usr/share/cppcheck/cfg/lang/
+}
