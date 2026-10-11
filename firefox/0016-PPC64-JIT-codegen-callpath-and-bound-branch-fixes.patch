@@ -1,0 +1,1620 @@
+From: Jordan Bettcher <thebettcher@gmail.com>
+Date: Sun, 04 Oct 2026 21:00:00 -0700
+Subject: [PATCH] ppc64 JIT: codegen, call-path and bound-branch fixes
+
+Three independent sets of changes to js/src/jit/ppc64 plus small shared
+fixes, measured together on a POWER8 (Octane 2.0 in the JS shell, on top
+of the load64-immediate and veneer patches): 12812 -> 13820, Crypto +37%,
+EarleyBoyer +15%, DeltaBlue +12%, RayTrace +13%, Gameboy +13%. jit-test
+suite PASSED ALL, also with --jitflags=all.
+
+Codegen (MacroAssembler-ppc64*.h, CodeGenerator-ppc64.cpp):
+ - Value tag tests use sradi + cmpdi (tags all have bit 16 set, so the
+   arithmetic shift yields a small negative constant) instead of
+   srdi/xoris/cmplwi or srdi/lis/ori/cmpd; ma_cmp against an ImmTag is
+   xoris + cmpldi; relational tag tests (GCThing, Double, Number,
+   Primitive) compare the whole value against tag << 47.
+ - Boxing an int32 is li/sldi/rldimi (3 insns, was 6); shifted-tag and
+   magic constants load with li + sldi.
+ - Overflow-checked add/sub/mul no longer re-sign-extend the result (the
+   fall-through path already proves dest == extsw(dest)); and32/rshift32
+   with immediates, add32(imm,src,dest) drop redundant mr/extsw.
+ - Zero-offset BaseIndex loads/stores use the indexed forms; absolute
+   address loads fold the low 16 bits into the displacement; andPtr with
+   a high-run mask is clrrdi.
+
+Call path (ppc64 + shared, ppc64-guarded where behaviour changes):
+ - CodeGenerator-shared.cpp ensureOsiSpace emitted one 4-byte nop per
+   padding BYTE on fixed-width ISAs (up to 40 nops after nearly every
+   call where 10 were meant); step by NopSize(). x86 unchanged.
+ - Ion/Baseline prologue is mflr/std/stdu/mr and the epilogue
+   ld/mr/ld/mtlr/addi/blr with a single stack adjust each way; frame
+   layout unchanged.
+ - EmitPreBarrier tests the needs-barrier flag before saving LR.
+ - Calls/jumps to trampolines within +-32 MiB are rewritten to bl/b at
+   executableCopy time (Assembler::shortenNearJitBranches), the way
+   arm64 does; only HARDCODED targets inside JIT memory are touched.
+ - call(Register) emits b S; L: bctr; S: mtctr r12; bl L so the callee's
+   mflr does not wait on the load -> mtctr -> bctrl chain.
+
+Bound-branch fix (MacroAssembler-ppc64.h ma_b):
+ - The bound short-branch displacement was computed before as_bc emitted
+   its condition prefix, with a fixed -4 for every DoubleCondition.
+   DoubleOrdered/DoubleUnordered emit no prefix (branch landed 4 bytes
+   early); Overflow/NotOverflow emit 3 XER insns on POWER8 / mcrxrx on
+   POWER9 (landed 12/4 bytes late). Now the prefix is emitted first and
+   the displacement measured from the bc; the long form inverts the
+   normalised BO bit instead of re-running the prefix. Latent in
+   practice (Ion never emits such a backward branch), covered by a new
+   jsapi-test (testJitMacroAssembler_ppc64BoundBranchPrefix) that fails
+   before and passes after.
+
+Rebased onto 157.0.1 (FaultingCodeRange return types in the ppc64
+BaseIndex load/store helpers). Also teaches wasm::SummarizeTrapInstruction
+about lwax (X-form XO 341), which the zero-offset BaseIndex load32 now emits
+at wasm trap sites; without it a wasm GC null-check through lwax is not
+identified (debug: appendAndVerify assertion; release: stack-map lookup
+failure), caught by the big-endian debug shell.
+
+---
+diff -ruN a/js/src/jit/BaselineCodeGen.cpp b/js/src/jit/BaselineCodeGen.cpp
+--- a/js/src/jit/BaselineCodeGen.cpp	2026-10-09 17:01:19.752839636 -0700
++++ b/js/src/jit/BaselineCodeGen.cpp	2026-10-09 17:01:45.529000000 -0700
+@@ -6993,13 +6993,18 @@
+ bool BaselineCodeGen<Handler>::emitPrologue() {
+   AutoCreatedBy acb(masm, "BaselineCodeGen<Handler>::emitPrologue");
+ 
+-#ifdef JS_USE_LINK_REGISTER
++#if defined(JS_CODEGEN_PPC64)
++  // Push link register from generateEnterJIT()'s BLR, then the frame pointer.
++  masm.pushReturnAddressAndFramePointer();
++#else
++#  ifdef JS_USE_LINK_REGISTER
+   // Push link register from generateEnterJIT()'s BLR.
+   masm.pushReturnAddress();
+-#endif
++#  endif
+ 
+   masm.push(FramePointer);
+   masm.moveStackPtrTo(FramePointer);
++#endif
+ 
+   masm.checkStackAlignment();
+ 
+@@ -7081,10 +7086,14 @@
+ 
+   emitProfilerExitFrame();
+ 
++#if defined(JS_CODEGEN_PPC64)
++  masm.popFramePointerAndReturn();
++#else
+   masm.moveToStackPtr(FramePointer);
+   masm.pop(FramePointer);
+ 
+   masm.ret();
++#endif
+   return true;
+ }
+ 
+diff -ruN a/js/src/jit/MacroAssembler.h b/js/src/jit/MacroAssembler.h
+--- a/js/src/jit/MacroAssembler.h	2026-10-09 17:01:19.763608839 -0700
++++ b/js/src/jit/MacroAssembler.h	2026-10-09 17:01:45.531116763 -0700
+@@ -5290,6 +5290,9 @@
+     bind(&done);
+   }
+ 
++ public:
++  // Public so link-register backends can save LR only on the path where the
++  // barrier is actually needed (see EmitPreBarrier in SharedICHelpers-ppc64.h).
+   template <typename T>
+   void guardedCallPreBarrier(const T& address, MIRType type) {
+     Label done;
+diff -ruN a/js/src/jit/ppc64/Assembler-ppc64.cpp b/js/src/jit/ppc64/Assembler-ppc64.cpp
+--- a/js/src/jit/ppc64/Assembler-ppc64.cpp	2026-10-09 17:12:06.696373423 -0700
++++ b/js/src/jit/ppc64/Assembler-ppc64.cpp	2026-10-09 17:01:45.532264718 -0700
+@@ -231,13 +231,13 @@
+ }
+ 
+ void Assembler::executableCopy(void* buffer) {
+-  MOZ_ASSERT(isFinished);
+-  m_buffer.executableCopy(static_cast<uint8_t*>(buffer));
++  executableCopy(static_cast<uint8_t*>(buffer));
+ }
+ 
+ void Assembler::executableCopy(uint8_t* buffer) {
+   MOZ_ASSERT(isFinished);
+   m_buffer.executableCopy(buffer);
++  shortenNearJitBranches(buffer);
+ }
+ 
+ size_t Assembler::size() const {
+@@ -3089,6 +3089,62 @@
+   return (inst0[2].encode() >> 21) & 0x1f;
+ }
+ 
++// Called once the code is at its final address (executableCopy; like
++// arm64's executableCopy, which retargets pending branches the same way).
++// call(ImmPtr) / jump(ImmPtr) emit a 10-slot absolute stanza
++//   [load64 rX] x8, mtctr rX, bctr[l]
++// When the target is other JIT code (a trampoline) within +/-32 MiB of the
++// stanza, turn it into a direct branch:
++//   call: slot [0] = b .+36, slot [9] = bl target   (2 insns executed)
++//   jump: slot [0] = b target                       (1 insn executed)
++// so the call is predicted from the branch target in the I-stream and the
++// return is predicted by the link stack, instead of going through mtctr and
++// the count cache. A call keeps its return address (end of the stanza), so
++// safepoints, OSI points and frame walking are unaffected.
++//
++// Only RelocationKind::HARDCODED entries are rewritten. Their stanza value is
++// never read back: no jump relocation is recorded for them (GC tracing only
++// decodes JITCODE entries) and no patcher targets them (ToggleCall and
++// PatchWrite_NearCall write whole stanzas or only touch toggledCall, which is
++// JITCODE). JITCODE entries are left alone. Targets outside JIT executable
++// memory (C++ functions) are left alone too: ELFv2 callees need r12 = entry
++// to set up their TOC, and they are out of `bl` range anyway. Nothing here
++// changes the stanza footprint (kNoPoolPatchableBranchInsns).
++void Assembler::shortenNearJitBranches(uint8_t* buffer) {
++  for (const RelativePatch& rp : jumps_) {
++    if (rp.kind != RelocationKind::HARDCODED ||
++        !AddressIsInExecutableMemory(rp.target)) {
++      continue;
++    }
++    Instruction* i0 = (Instruction*)(buffer + rp.offset.getOffset());
++    uint32_t rd = Load64StanzaDestReg(i0);
++    uint32_t mtctr = PPC_mtspr | (rd << 21) | PPC_SPR(spr_ctr);
++    if (i0[8].encode() != mtctr ||
++        ExtractLoad64Value(i0) != uint64_t(uintptr_t(rp.target))) {
++      continue;
++    }
++    bool isCall;
++    if (i0[9].encode() == (uint32_t(PPC_bctr) | uint32_t(LinkB))) {
++      isCall = true;
++    } else if (i0[9].encode() == uint32_t(PPC_bctr)) {
++      isCall = false;
++    } else {
++      continue;
++    }
++    Instruction* branch = isCall ? &i0[9] : &i0[0];
++    intptr_t disp = intptr_t(rp.target) - intptr_t(branch);
++    if (!JOffImm26::IsInRange(disp)) {
++      continue;
++    }
++    if (isCall) {
++      i0[9].setData(PPC_b | JOffImm26(disp).encode() | LinkB);
++      i0[0].setData(PPC_b | JOffImm26(9 * sizeof(Instruction)).encode());
++    } else {
++      i0[0].setData(PPC_b | JOffImm26(disp).encode());
++    }
++  }
++}
++
+ /* static */
+ void Assembler::WriteLoad64Instructions(Instruction* inst0, Register reg,
+                                         uint64_t value) {
+diff -ruN a/js/src/jit/ppc64/Assembler-ppc64.h b/js/src/jit/ppc64/Assembler-ppc64.h
+--- a/js/src/jit/ppc64/Assembler-ppc64.h	2026-10-09 17:12:06.697291990 -0700
++++ b/js/src/jit/ppc64/Assembler-ppc64.h	2026-10-09 17:01:45.532859140 -0700
+@@ -2152,6 +2152,7 @@
+                                    CompactBufferReader& reader);
+ 
+   void executableCopy(uint8_t* buffer);
++  void shortenNearJitBranches(uint8_t* buffer);
+ 
+   static uint32_t PatchWrite_NearCallSize();
+   static void PatchWrite_NearCall(CodeLocationLabel start,
+diff -ruN a/js/src/jit/ppc64/CodeGenerator-ppc64.cpp b/js/src/jit/ppc64/CodeGenerator-ppc64.cpp
+--- a/js/src/jit/ppc64/CodeGenerator-ppc64.cpp	2026-10-09 17:12:06.697948994 -0700
++++ b/js/src/jit/ppc64/CodeGenerator-ppc64.cpp	2026-10-09 17:01:45.533527083 -0700
+@@ -345,6 +345,27 @@
+ // ===============================================================
+ // Visitors: Integer Arithmetic
+ 
++// dest = lhs + imm (64-bit imm, lhs a canonical int32), branching to
++// |overflow| when the int32 add overflows. The 64-bit sum goes to a scratch,
++// dest gets its sign-extension, and the two differ exactly on overflow:
++// addi/add + extsw + cmpd + bne, with no separate copy of lhs into dest.
++static void AddImm32CheckOverflow(MacroAssembler& masm, Register lhs,
++                                  int64_t imm, Register dest,
++                                  Label* overflow) {
++  UseScratchRegisterScope temps(masm);
++  Register scratch = temps.Acquire();
++  MOZ_ASSERT(scratch != dest && scratch != lhs);
++  if (is_intN(imm, 16)) {
++    masm.as_addi(scratch, lhs, int16_t(imm));
++  } else {
++    masm.movePtr(ImmWord(uint64_t(imm)), scratch);
++    masm.as_add(scratch, lhs, scratch);
++  }
++  masm.as_extsw(dest, scratch);
++  masm.as_cmpd(scratch, dest);
++  masm.ma_b(Assembler::NotEqual, overflow);
++}
++
+ void CodeGenerator::visitAddI(LAddI* ins) {
+   LAllocation* lhs = ins->getOperand(0);
+   LAllocation* rhs = ins->getOperand(1);
+@@ -353,9 +374,9 @@
+   if (rhs->isConstant()) {
+     Imm32 imm(ToInt32(rhs));
+     if (ins->snapshot()) {
+-      masm.move32(ToRegister(lhs), dest);
+       Label overflow;
+-      masm.branchAdd32(Assembler::Overflow, imm, dest, &overflow);
++      AddImm32CheckOverflow(masm, ToRegister(lhs), int64_t(imm.value), dest,
++                            &overflow);
+       bailoutFrom(&overflow, ins->snapshot());
+     } else {
+       masm.add32(imm, ToRegister(lhs), dest);
+@@ -370,7 +391,8 @@
+       Label overflow;
+       masm.as_cmpd(dest, SecondScratchReg);
+       masm.ma_b(Assembler::NotEqual, &overflow);
+-      masm.as_extsw(dest, dest);
++      // No trailing extsw: on the fall-through path dest == extsw(dest), so
++      // it is already the canonical sign-extended int32.
+       bailoutFrom(&overflow, ins->snapshot());
+     } else {
+       masm.as_add(dest, ToRegister(lhs), rhsReg);
+@@ -417,10 +439,12 @@
+   if (rhs->isConstant()) {
+     Imm32 imm(ToInt32(rhs));
+     if (ins->snapshot()) {
+-      masm.move32(ToRegister(lhs), dest);
+       Label overflow;
+-      masm.branchSub32(Assembler::Overflow, imm, dest, &overflow);
++      AddImm32CheckOverflow(masm, ToRegister(lhs), -int64_t(imm.value), dest,
++                            &overflow);
+       bailoutFrom(&overflow, ins->snapshot());
++    } else if (imm.value != INT32_MIN) {
++      masm.add32(Imm32(-imm.value), ToRegister(lhs), dest);
+     } else {
+       masm.move32(ToRegister(lhs), dest);
+       masm.sub32(imm, dest);
+@@ -435,7 +459,8 @@
+       Label overflow;
+       masm.as_cmpd(dest, SecondScratchReg);
+       masm.ma_b(Assembler::NotEqual, &overflow);
+-      masm.as_extsw(dest, dest);
++      // No trailing extsw: on the fall-through path dest == extsw(dest), so
++      // it is already the canonical sign-extended int32.
+       bailoutFrom(&overflow, ins->snapshot());
+     } else {
+       masm.as_subf(dest, rhsReg, ToRegister(lhs));
+@@ -573,7 +598,7 @@
+     Label overflow;
+     masm.as_cmpd(dest, SecondScratchReg);
+     masm.ma_b(Assembler::NotEqual, &overflow);
+-    masm.as_extsw(dest, dest);
++    // dest == extsw(dest) on the fall-through path: already canonical.
+     bailoutFrom(&overflow, ins->snapshot());
+   } else {
+     masm.as_mullw(dest, lhs, rhsReg);
+diff -ruN a/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h b/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h	2026-10-09 17:01:19.765944169 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h	2026-10-09 17:01:45.534501019 -0700
+@@ -197,6 +197,10 @@
+ }
+ 
+ void MacroAssembler::andPtr(Imm32 imm, Register dest) {
++  andPtr(imm, dest, dest);
++}
++
++void MacroAssembler::andPtr(Imm32 imm, Register src, Register dest) {
+   // andi. handles 16-bit unsigned immediates in 1 insn (sets CR0).
+   // For wider positive immediates, IsContigMask32 → rlwinm (1 insn,
+   // also sets CR0). NOTE: andPtr sign-extends Imm32 to 64-bit before
+@@ -204,25 +208,27 @@
+   // non-negative (high bit clear) — rlwinm always zeros the high 32.
+   uint32_t uimm = uint32_t(imm.value);
+   if (is_uintN(uimm, 16)) {
+-    as_andi_rc(dest, dest, uimm);
++    as_andi_rc(dest, src, uimm);
+     return;
+   }
+   unsigned mb, me;
+   if (imm.value >= 0 && IsContigMask32(uimm, mb, me)) {
+-    as_rlwinm_rc(dest, dest, 0, mb, me);
++    as_rlwinm_rc(dest, src, 0, mb, me);
++    return;
++  }
++  // Negative immediate that sign-extends to a run of high bits (alignment
++  // masks such as ~gc::ChunkMask): clrrdi, 1 insn instead of lis + and.
++  uint64_t mask64 = uint64_t(int64_t(imm.value));
++  unsigned lsb, width;
++  if (imm.value < 0 && IsContigMask64(mask64, lsb, width) &&
++      lsb + width == 64) {
++    as_rldicr(dest, src, 0, width - 1);
+     return;
+   }
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+   movePtr(ImmWord(uintptr_t(intptr_t(imm.value))), scratch);
+-  as_and_(dest, dest, scratch);
+-}
+-
+-void MacroAssembler::andPtr(Imm32 imm, Register src, Register dest) {
+-  if (src != dest) {
+-    xs_mr(dest, src);
+-  }
+-  andPtr(imm, dest);
++  as_and_(dest, src, scratch);
+ }
+ 
+ void MacroAssembler::andPtr(Imm32 imm, const Address& dest) {
+@@ -277,32 +283,36 @@
+ }
+ 
+ void MacroAssembler::and32(Imm32 imm, Register dest) {
++  and32(imm, dest, dest);
++}
++
++void MacroAssembler::and32(Imm32 imm, Register src, Register dest) {
+   uint32_t uimm = uint32_t(imm.value);
+   if (is_uintN(uimm, 16)) {
+-    as_andi_rc(dest, dest, uimm);
+-  } else {
+-    unsigned mb, me;
+-    if (IsContigMask32(uimm, mb, me)) {
+-      // rlwinm.SH=0 ANDs with the contiguous mask; record form sets CR0
+-      // to match the side-effect of the andi. fast path above.
+-      as_rlwinm_rc(dest, dest, 0, mb, me);
+-    } else {
+-      UseScratchRegisterScope temps(asMasm());
+-      Register scratch = temps.Acquire();
+-      move32(imm, scratch);
+-      as_and_(dest, dest, scratch);
++    // andi. zeroes bits 16..63: the result is a non-negative int32 that is
++    // already canonical (sign-extended), whatever src's high half held.
++    as_andi_rc(dest, src, uimm);
++    return;
++  }
++  unsigned mb, me;
++  if (IsContigMask32(uimm, mb, me)) {
++    // rlwinm.SH=0 ANDs with the contiguous mask (IsContigMask32 never
++    // returns a wrapping mask, so bits 0..31 of the result are zero); record
++    // form sets CR0 like the andi. path above. If the mask excludes bit 31
++    // (mb > 0) the result is non-negative and therefore canonical.
++    as_rlwinm_rc(dest, src, 0, mb, me);
++    if (mb == 0) {
++      as_extsw(dest, dest);
+     }
++    return;
+   }
++  UseScratchRegisterScope temps(asMasm());
++  Register scratch = temps.Acquire();
++  move32(imm, scratch);
++  as_and_(dest, src, scratch);
+   as_extsw(dest, dest);
+ }
+ 
+-void MacroAssembler::and32(Imm32 imm, Register src, Register dest) {
+-  if (src != dest) {
+-    xs_mr(dest, src);
+-  }
+-  and32(imm, dest);
+-}
+-
+ void MacroAssembler::and32(Imm32 imm, const Address& dest) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+@@ -704,9 +714,13 @@
+ }
+ 
+ void MacroAssembler::add32(Imm32 imm, Register src, Register dest) {
+-  // Plain value transfer only: add32 canonicalizes with its trailing extsw,
+-  // so move32's extsw here would be redundant (and a no-op-with-cost when
+-  // src == dest, the common increment shape).
++  // add32 canonicalizes with its trailing extsw, so only a raw transfer is
++  // needed; for a 16-bit immediate addi does the transfer for free.
++  if (is_intN(imm.value, 16) && src != r0) {  // addi RA=r0 reads as 0
++    as_addi(dest, src, imm.value);
++    as_extsw(dest, dest);
++    return;
++  }
+   if (src != dest) {
+     as_or_(dest, src, src);
+   }
+@@ -1339,7 +1353,11 @@
+ 
+ void MacroAssembler::rshift32(Imm32 imm, Register src, Register dest) {
+   x_srwi(dest, src, imm.value & 0x1f);
+-  as_extsw(dest, dest);
++  // srwi by >= 1 leaves bits 0..32 zero: already a canonical non-negative
++  // int32. Only a zero shift can leave bit 31 set with a zero high half.
++  if ((imm.value & 0x1f) == 0) {
++    as_extsw(dest, dest);
++  }
+ }
+ 
+ void MacroAssembler::flexibleRshift32(Register src, Register dest) {
+@@ -1730,8 +1748,7 @@
+                               Register rhs, Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  ma_loadAbsAddr(scratch, lhs.addr);
+-  load32(Address(scratch, 0), scratch);
++  load32(ma_absAddress(lhs.addr, scratch), scratch);
+   Condition c = ma_cmp(scratch, rhs, cond, true);
+   ma_b(c, label);
+ }
+@@ -1740,8 +1757,7 @@
+                               Imm32 rhs, Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  ma_loadAbsAddr(scratch, lhs.addr);
+-  load32(Address(scratch, 0), scratch);
++  load32(ma_absAddress(lhs.addr, scratch), scratch);
+   Condition c = ma_cmp(scratch, rhs, cond, true);
+   ma_b(c, label);
+ }
+@@ -1892,8 +1908,7 @@
+                                Register rhs, Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  movePtr(ImmWord((uintptr_t)lhs.addr), scratch);
+-  loadPtr(Address(scratch, 0), scratch);
++  loadPtr(ma_absAddress(lhs.addr, scratch), scratch);
+   Condition c = ma_cmp(scratch, rhs, cond);
+   ma_b(c, label);
+ }
+@@ -1902,8 +1917,7 @@
+                                ImmWord rhs, Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  movePtr(ImmWord((uintptr_t)lhs.addr), scratch);
+-  loadPtr(Address(scratch, 0), scratch);
++  loadPtr(ma_absAddress(lhs.addr, scratch), scratch);
+   Condition c = ma_cmp(scratch, rhs, cond);
+   ma_b(c, label);
+ }
+@@ -2298,8 +2312,7 @@
+              cond == NotSigned);
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  ma_loadAbsAddr(scratch, lhs.addr);
+-  branchTest32(cond, Address(scratch, 0), rhs, label);
++  branchTest32(cond, ma_absAddress(lhs.addr, scratch), rhs, label);
+ }
+ 
+ void MacroAssembler::branchTestPtr(Condition cond, Register lhs, Register rhs,
+@@ -2408,7 +2421,7 @@
+                                          Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  splitTag(value, scratch);
++  splitTagSigned(value.valueReg(), scratch);
+   branchTestTag(cond, scratch, ImmTag(JSVAL_TAG_UNDEFINED), label);
+ }
+ 
+@@ -2416,7 +2429,7 @@
+                                          Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_UNDEFINED), label);
+ }
+ 
+@@ -2425,7 +2438,7 @@
+                                          Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_UNDEFINED), label);
+ }
+ 
+@@ -2440,7 +2453,7 @@
+                                      Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  splitTag(value, scratch);
++  splitTagSigned(value.valueReg(), scratch);
+   branchTestTag(cond, scratch, ImmTag(JSVAL_TAG_INT32), label);
+ }
+ 
+@@ -2448,7 +2461,7 @@
+                                      Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_INT32), label);
+ }
+ 
+@@ -2456,7 +2469,7 @@
+                                      Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_INT32), label);
+ }
+ 
+@@ -2479,26 +2492,35 @@
+ 
+ void MacroAssembler::branchTestDouble(Condition cond, const ValueOperand& value,
+                                       Label* label) {
++  MOZ_ASSERT(cond == Equal || cond == NotEqual);
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  splitTag(value, scratch);
+-  branchTestDouble(cond, scratch, label);
++  branchValueTagBound(cond == Equal ? Below : AboveOrEqual, value.valueReg(),
++                      JSVAL_TAG_MAX_DOUBLE + 1, scratch, label);
+ }
+ 
+ void MacroAssembler::branchTestDouble(Condition cond, const Address& address,
+                                       Label* label) {
++  MOZ_ASSERT(cond == Equal || cond == NotEqual);
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
+-  branchTestDouble(cond, tag, label);
++  loadValueWord(address, scratch);  // may borrow the other scratch briefly
++  Register bound = temps.Acquire();
++  // tag <= MAX_DOUBLE  <=>  tag < MAX_DOUBLE + 1
++  branchValueTagBound(cond == Equal ? Below : AboveOrEqual, scratch,
++                      JSVAL_TAG_MAX_DOUBLE + 1, bound, label);
+ }
+ 
+ void MacroAssembler::branchTestDouble(Condition cond, const BaseIndex& address,
+                                       Label* label) {
++  MOZ_ASSERT(cond == Equal || cond == NotEqual);
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
+-  branchTestDouble(cond, tag, label);
++  loadValueWord(address, scratch);  // may borrow the other scratch briefly
++  Register bound = temps.Acquire();
++  // tag <= MAX_DOUBLE  <=>  tag < MAX_DOUBLE + 1
++  branchValueTagBound(cond == Equal ? Below : AboveOrEqual, scratch,
++                      JSVAL_TAG_MAX_DOUBLE + 1, bound, label);
+ }
+ 
+ void MacroAssembler::branchTestDoubleTruthy(bool b, FloatRegister value,
+@@ -2522,10 +2544,11 @@
+ 
+ void MacroAssembler::branchTestNumber(Condition cond, const ValueOperand& value,
+                                       Label* label) {
++  MOZ_ASSERT(cond == Equal || cond == NotEqual);
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  splitTag(value, scratch);
+-  branchTestNumber(cond, scratch, label);
++  branchValueTagBound(cond == Equal ? Below : AboveOrEqual, value.valueReg(),
++                      JS::detail::ValueUpperInclNumberTag + 1, scratch, label);
+ }
+ 
+ void MacroAssembler::branchTestBoolean(Condition cond, Register tag,
+@@ -2540,7 +2563,7 @@
+                                        Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  splitTag(value, scratch);
++  splitTagSigned(value.valueReg(), scratch);
+   branchTestTag(cond, scratch, ImmTag(JSVAL_TAG_BOOLEAN), label);
+ }
+ 
+@@ -2548,7 +2571,7 @@
+                                        Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_BOOLEAN), label);
+ }
+ 
+@@ -2556,7 +2579,7 @@
+                                        Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_BOOLEAN), label);
+ }
+ 
+@@ -2580,7 +2603,7 @@
+                                       Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  splitTag(value, scratch);
++  splitTagSigned(value.valueReg(), scratch);
+   branchTestTag(cond, scratch, ImmTag(JSVAL_TAG_STRING), label);
+ }
+ 
+@@ -2588,7 +2611,7 @@
+                                       Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_STRING), label);
+ }
+ 
+@@ -2596,7 +2619,7 @@
+                                       Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_STRING), label);
+ }
+ 
+@@ -2621,7 +2644,7 @@
+                                       Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  splitTag(value, scratch);
++  splitTagSigned(value.valueReg(), scratch);
+   branchTestTag(cond, scratch, ImmTag(JSVAL_TAG_SYMBOL), label);
+ }
+ 
+@@ -2629,7 +2652,7 @@
+                                       Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_SYMBOL), label);
+ }
+ 
+@@ -2637,7 +2660,7 @@
+                                       Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_SYMBOL), label);
+ }
+ 
+@@ -2652,7 +2675,7 @@
+                                       Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  splitTag(value, scratch);
++  splitTagSigned(value.valueReg(), scratch);
+   branchTestTag(cond, scratch, ImmTag(JSVAL_TAG_BIGINT), label);
+ }
+ 
+@@ -2660,7 +2683,7 @@
+                                       Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_BIGINT), label);
+ }
+ 
+@@ -2668,7 +2691,7 @@
+                                       Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_BIGINT), label);
+ }
+ 
+@@ -2693,7 +2716,7 @@
+                                     Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  splitTag(value, scratch);
++  splitTagSigned(value.valueReg(), scratch);
+   branchTestTag(cond, scratch, ImmTag(JSVAL_TAG_NULL), label);
+ }
+ 
+@@ -2701,7 +2724,7 @@
+                                     Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_NULL), label);
+ }
+ 
+@@ -2709,7 +2732,7 @@
+                                     Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_NULL), label);
+ }
+ 
+@@ -2724,7 +2747,7 @@
+                                       Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  splitTag(value, scratch);
++  splitTagSigned(value.valueReg(), scratch);
+   branchTestTag(cond, scratch, ImmTag(JSVAL_TAG_OBJECT), label);
+ }
+ 
+@@ -2732,7 +2755,7 @@
+                                       Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_OBJECT), label);
+ }
+ 
+@@ -2740,17 +2763,18 @@
+                                       Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_OBJECT), label);
+ }
+ 
+ void MacroAssembler::branchTestPrimitive(Condition cond,
+                                          const ValueOperand& value,
+                                          Label* label) {
++  MOZ_ASSERT(cond == Equal || cond == NotEqual);
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  splitTag(value, scratch);
+-  branchTestPrimitive(cond, scratch, label);
++  branchValueTagBound(cond == Equal ? Below : AboveOrEqual, value.valueReg(),
++                      JS::detail::ValueUpperExclPrimitiveTag, scratch, label);
+ }
+ 
+ void MacroAssembler::branchTestGCThing(Condition cond, const Address& address,
+@@ -2774,12 +2798,16 @@
+                                            Label* label) {
+   MOZ_ASSERT(cond == Equal || cond == NotEqual);
+   UseScratchRegisterScope temps(asMasm());
+-  Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
+-  Condition actual = (cond == Equal) ? AboveOrEqual : Below;
+-  Condition c =
+-      ma_cmp(tag, Imm32(JS::detail::ValueLowerInclGCThingTag), actual);
+-  ma_b(c, label);
++  Register value;
++  if constexpr (std::is_same_v<T, ValueOperand>) {
++    value = address.valueReg();
++  } else {
++    value = temps.Acquire();
++    loadValueWord(address, value);  // may borrow the other scratch briefly
++  }
++  Register bound = temps.Acquire();
++  branchValueTagBound(cond == Equal ? AboveOrEqual : Below, value,
++                      JS::detail::ValueLowerInclGCThingTag, bound, label);
+ }
+ 
+ void MacroAssembler::branchTestPrimitive(Condition cond, Register tag,
+@@ -2802,7 +2830,7 @@
+                                      Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_MAGIC), label);
+ }
+ 
+@@ -2810,7 +2838,7 @@
+                                      Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  Register tag = extractTag(address, scratch);
++  Register tag = extractTagSigned(address, scratch);
+   branchTestTag(cond, tag, ImmTag(JSVAL_TAG_MAGIC), label);
+ }
+ 
+@@ -2818,7 +2846,7 @@
+                                      Label* label) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  splitTag(value, scratch);
++  splitTagSigned(value.valueReg(), scratch);
+   branchTestTag(cond, scratch, ImmTag(JSVAL_TAG_MAGIC), label);
+ }
+ 
+@@ -3240,9 +3268,8 @@
+              type == JSVAL_TYPE_SYMBOL || type == JSVAL_TYPE_BIGINT);
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-  splitTag(src, scratch);
+-  Condition c = ma_cmp(scratch, ImmTag(JSVAL_TYPE_TO_TAG(type)), NotEqual);
+-  ma_b(c, fail);
++  splitTagSigned(src.valueReg(), scratch);
++  branchTestTag(NotEqual, scratch, ImmTag(JSVAL_TYPE_TO_TAG(type)), fail);
+   unboxNonDouble(src, dest, type);
+ }
+ 
+diff -ruN a/js/src/jit/ppc64/MacroAssembler-ppc64.cpp b/js/src/jit/ppc64/MacroAssembler-ppc64.cpp
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	2026-10-09 17:12:06.712000000 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	2026-10-09 17:01:45.535911435 -0700
+@@ -532,8 +532,28 @@
+   if (reg != CallReg) {
+     movePtr(reg, CallReg);
+   }
++  // Indirect call through a per-call-site `bctr` reached by a direct `bl`:
++  //
++  //       b     S
++  //   L:  bctr            ; tail-jump to the target, LR untouched
++  //   S:  mtctr r12
++  //       bl    L         ; LR = R
++  //   R:
++  //
++  // instead of `mtctr r12; bctrl`. A `bctrl` writes LR only when it executes,
++  // i.e. after CTR is known, so the callee's prologue `mflr` waits for the
++  // whole target-load -> mtctr -> bctrl chain (on Ion->Ion calls this showed
++  // up as the hottest instruction of small callees). A direct `bl` writes LR
++  // without any input dependency. The link stack still sees a matched
++  // bl/blr pair (it pushes R), and the `bctr` is predicted per call site.
++  // The return address and the call's footprint after it are unchanged; the
++  // sequence must not be split by a constant pool.
++  m_buffer.enterNoPool(4);
++  as_b(JOffImm26(2 * sizeof(Instruction)));
++  as_bctr();
+   xs_mtctr(CallReg);
+-  as_bctr(LinkB);
++  as_b(JOffImm26(-int32_t(2 * sizeof(Instruction))), RelativeBranch, LinkB);
++  m_buffer.leaveNoPool();
+   return CodeOffset(currentOffset());
+ }
+ CodeOffset MacroAssembler::call(Label* label) {
+@@ -1021,9 +1041,10 @@
+ CodeOffset MacroAssembler::wasmMarkedSlowCall(const wasm::CallSiteDesc& desc,
+                                               const Register reg) {
+   // wasmCheckSlowCallsite reads the instruction at the return address, so
+-  // no pool or veneer island may be dumped between the bctrl and the
+-  // marker. call(Register) is at most mr + mtctr + bctrl.
+-  m_buffer.enterNoPool(4);
++  // no pool or veneer island may be dumped between the call and the
++  // marker. call(Register) is at most mr + b + bctr + mtctr + bl (5), plus
++  // the marker.
++  m_buffer.enterNoPool(6);
+   CodeOffset offset = call(desc, reg);
+   wasmMarkCallAsSlow();
+   m_buffer.leaveNoPool();
+diff -ruN a/js/src/jit/ppc64/MacroAssembler-ppc64.h b/js/src/jit/ppc64/MacroAssembler-ppc64.h
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.h	2026-10-09 17:12:06.728856910 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.h	2026-10-09 17:08:48.635200615 -0700
+@@ -293,6 +293,26 @@
+     }
+   }
+ 
++  // X-form fast path for a zero-offset BaseIndex: on success *rb is set so
++  // that the access is (address.base, *rb) -- index itself for TimesOne, else
++  // the index shifted into |scratch| -- saving the add of
++  // computeScaledAddress. RA=r0 reads as 0 in X-form, hence the base check.
++  bool xformIndex(const BaseIndex& address, Register scratch, Register* rb) {
++    if (address.offset != 0 || address.base == r0) {
++      return false;
++    }
++    if (address.scale == TimesOne) {
++      *rb = address.index;
++      return true;
++    }
++    if (scratch == address.base) {
++      return false;
++    }
++    x_sldi(scratch, address.index, address.scale);
++    *rb = scratch;
++    return true;
++  }
++
+   void computeEffectiveAddress(const Address& address, Register dest) {
+     if (address.offset == 0) {
+       if (dest != address.base) {
+@@ -390,6 +410,13 @@
+       xs_mr(dest, src);
+     }
+   }
++  static bool IsShiftedInt16(uintptr_t v) {
++    if (v == 0) {
++      return false;
++    }
++    int tz = __builtin_ctzll(uint64_t(v));
++    return is_intN(int64_t(v) >> tz, 16);
++  }
+   void movePtr(ImmWord imm, Register dest) {
+     if (imm.value == 0) {
+       xs_li(dest, 0);
+@@ -409,6 +436,12 @@
+       // 5-insn fallback for values in (33-34)-bit signed range.
+       // 8 bytes vs 20 bytes; one slot temp register is no longer needed.
+       as_paddi(dest, r0, (int64_t)imm.value, /*R=*/false);
++    } else if (IsShiftedInt16(imm.value)) {
++      // int16 << n (shifted Value tags like JSVAL_SHIFTED_TAG_INT32 =
++      // -15 << 47, the magic-hole pattern, etc.): li + sldi, 2 insns.
++      int tz = __builtin_ctzll(uint64_t(imm.value));
++      xs_li(dest, int16_t(int64_t(imm.value) >> tz));
++      x_sldi(dest, dest, tz);
+     } else if ((uint32_t)imm.value == 0) {
+       // High half only (the shifted-tag shape from Value boxing): build the
+       // high 32 bits in the low half, then shift up. The rotate discards any
+@@ -482,6 +515,33 @@
+   // POWER9+ (addpcis + ld, or a single prefixed pld) rather than the 3-5
+   // instruction immediate build. Not for patchable or serialized code; the
+   // AbsoluteAddress branch helpers are the intended callers.
++  // Materialize |addr| as base+displacement for a following D-form access:
++  // the sign-extended low 16 bits become the displacement, and the rest is
++  // built with li + sldi 32 + oris (user addresses are < 2^47, so the high
++  // word always fits li). 3 insns instead of the 5-insn 64-bit chain plus a
++  // zero-displacement access.
++  // |dsAlign|: the displacement must be a multiple of 4 for DS-form (ld/lwa)
++  // accesses, else this falls back to a zero displacement.
++  Address ma_absAddress(const void* addr, Register scratch,
++                        bool dsForm = true) {
++    int64_t a = int64_t(uintptr_t(addr));
++    int64_t disp = int64_t(int16_t(a & 0xFFFF));
++    int64_t base = a - disp;
++    int64_t hi = base >> 32;
++    if (scratch == r0 || !is_intN(hi, 16) || is_intN(base, 32) ||
++        (dsForm && (disp & 3))) {
++      movePtr(ImmWord(uintptr_t(addr)), scratch);
++      return Address(scratch, 0);
++    }
++    xs_li(scratch, int16_t(hi));
++    x_sldi(scratch, scratch, 32);
++    uint16_t mid = uint16_t(uint64_t(base) >> 16);
++    if (mid) {
++      as_oris(scratch, scratch, mid);
++    }
++    return Address(scratch, int32_t(disp));
++  }
++
+   void ma_loadAbsAddr(Register dest, const void* addr) {
+     if (HasPOWER9() && !m_buffer.poolsInhibited() && !oom()) {
+       loadFromPoolGPR64(dest, uint64_t(uintptr_t(addr)));
+@@ -601,6 +661,12 @@
+       int32_t offset = label->offset() - currentOffset();
+       if (JOffImm26::IsInRange(offset)) {
+         BufferOffset bo = as_b(offset);
++        // Not needed for correctness (a MIPS delay-slot leftover: nothing
++        // patches or measures this shape; toggledJump/ToggleToCmp rewrite only
++        // the `b` word). Never executed, but removing it moves every block
++        // that follows an unconditional jump and measured as a repeatable
++        // ~2.5% Richards loss on POWER8 (code layout, not work). Keep until
++        // block/loop-header alignment is handled deliberately.
+         writeInst(NopInst);
+         m_buffer.leaveNoPool();
+         return bo;
+@@ -659,33 +725,33 @@
+       }
+     }
+     if (label->bound()) {
+-      // Open the no-pool window BEFORE computing the displacement. Same
+-      // hazard as jump(): enterNoPool may itself flush a pending pool,
+-      // advancing currentOffset(); the bc must emit with a displacement
+-      // computed against the post-flush offset. Budget covers max 6
+-      // instructions: POWER8 Overflow XER ops (3) + cror (1) + bc (1) +
+-      // nop (1) for the worst-case DoubleCondition+Overflow short path.
+-      m_buffer.enterNoPool(6);
+-      // For DoubleCondition, as_bc emits cror/crandc before the bc
+-      // instruction, advancing currentOffset() by 4. Account for this
+-      // in the offset calculation.
+-      int32_t crAdjust = 0;
+-      if constexpr (std::is_same_v<CondT, DoubleCondition>) {
+-        crAdjust = -(int32_t)sizeof(uint32_t);
+-      }
+-      int32_t offset = label->offset() - currentOffset() + crAdjust;
++      // Open the no-pool window BEFORE emitting anything. Same hazard as
++      // jump(): enterNoPool may itself flush a pending pool, advancing
++      // currentOffset(). One window covers both outcomes (the long form is
++      // the larger): condition prefix (0-3: POWER8 XER moves, POWER9
++      // mcrxrx, or a cror/crandc/crorc for double conditions) + bc +
++      // load64 stanza (8) + mtctr + bctr = kNoPoolCondLongBranchInsnsP8Max.
++      m_buffer.enterNoPool(kNoPoolCondLongBranchInsnsP8Max);
++      // Emit the condition prefix first, then measure the displacement from
++      // where the bc actually lands. The prefix length depends on the
++      // condition and the CPU, so it cannot be guessed up front.
++      uint16_t op = computeConditionCode(cond);
++      int32_t offset = label->offset() - currentOffset();
+       if (BOffImm16::IsInRange(offset)) {
+-        as_bc((int16_t)offset, cond);
++        as_bc((int16_t)offset, op);
++        // Not needed for correctness either (same origin as in jump());
++        // removing it measured as a wash, so the emitted shape is unchanged.
+         writeInst(NopInst);
+         m_buffer.leaveNoPool();
+         return;
+       }
+-      m_buffer.leaveNoPool();
+-      // Long conditional branch for bound label.
+-      // XER ops(0-3) + cror(0-1) + bc(1) + stanza(8) + mtctr(1) + bctr(1).
+-      // P8 Overflow: mfxer+rlwinm+mtcrf+bc+stanza+mtctr+bctr = 14 max.
+-      m_buffer.enterNoPool(kNoPoolCondLongBranchInsnsP8Max);
+-      as_bc((int16_t)44, InvertCondition(cond));
++      // Long conditional branch for bound label: skip over the far jump
++      // when the condition is false. Flipping the BO sense bit of the
++      // already-normalized op is exactly the inverse predicate (the prefix
++      // folded FU into the tested bit), and it must not re-emit a prefix: a
++      // second cror/crandc would read the bit the first one rewrote.
++      // bc + stanza(8) + mtctr + bctr = 11 instructions = 44 bytes.
++      as_bc((int16_t)44, uint16_t(op ^ BranchOptionInvert));
+       BufferOffset boLoad =
+           emitLoad64Stanza(SecondScratchReg, LabelBase::INVALID_OFFSET);
+       xs_mtctr(SecondScratchReg);
+@@ -907,6 +973,14 @@
+     bool isUnsigned = (cond & ConditionUnsigned) != 0;
+     UseScratchRegisterScope temps(*this);
+     Register scratch = temps.Acquire();
++    if (base == Equal || base == NotEqual) {
++      // (lhs ^ (hi << 16)) == lo  <=>  lhs == tag, for any 64-bit lhs:
++      // xoris only touches bits 16..31, and the 64-bit cmpldi checks the rest.
++      uint32_t t = uint32_t(rhs.value);
++      as_xoris(scratch, lhs, t >> 16);
++      as_cmpldi(scratch, t & 0xFFFF);
++      return base;
++    }
+     move32(Imm32(rhs.value), scratch);
+     if (isUnsigned) {
+       as_cmpld(lhs, scratch);
+@@ -916,14 +990,13 @@
+     return base;
+   }
+ 
+-  // Compare a tag register against an ImmTag constant and branch, WITHOUT
+-  // acquiring a scratch register.  Uses xoris+cmplwi which MODIFIES tagReg.
+-  // Only safe when tagReg is a scratch register owned by the caller.
+-  void branchTestTag(Condition cond, Register tagReg, ImmTag tag, Label* label) {
++  // Compare a SIGNED tag register (produced by splitTagSigned /
++  // extractTagSigned, i.e. sradi by JSVAL_TAG_SHIFT) against an ImmTag
++  // constant and branch: a single cmpdi, no scratch.
++  void branchTestTag(Condition cond, Register signedTagReg, ImmTag tag,
++                     Label* label) {
+     MOZ_ASSERT(cond == Equal || cond == NotEqual);
+-    uint32_t t = tag.value;
+-    as_xoris(tagReg, tagReg, t >> 16);
+-    as_cmplwi(tagReg, t & 0xFFFF);
++    as_cmpdi(signedTagReg, SignedTagImm(tag.value));
+     Condition c = (cond == Equal) ? Equal : NotEqual;
+     ma_b(c, label);
+   }
+@@ -1014,6 +1087,35 @@
+     splitTag(value, tag);
+   }
+ 
++  // "Signed" tag: sradi instead of srdi. Every JSValueTag is in
++  // [JSVAL_TAG_MAX_DOUBLE, 0x1FFFF] (bit 16 set), so the arithmetic shift
++  // yields tag - 0x20000, a value in [-16, -1] that cmpdi can test against a
++  // 16-bit immediate directly (no xoris / lis+ori constant build). Only
++  // equality tests may use a signed tag (see branchTestTag).
++  static int16_t SignedTagImm(uint32_t tag) {
++    MOZ_ASSERT(tag >= uint32_t(JSVAL_TAG_MAX_DOUBLE) && tag <= 0x1FFFF);
++    return int16_t(int32_t(tag) - 0x20000);
++  }
++  void splitTagSigned(Register src, Register dest) {
++    as_sradi(dest, src, JSVAL_TAG_SHIFT);
++  }
++
++  // Unsigned tag range test without extracting the tag:
++  //   tag(v) >= T  <=>  v >=u (T << JSVAL_TAG_SHIFT)
++  // and the boundary constant for any tag (bit 16 set) is (tag - 0x20000)
++  // << 47, which movePtr builds with li + sldi. |cond| is AboveOrEqual or
++  // Below and is applied as "tag cond tagBound".
++  void branchValueTagBound(Condition cond, Register value, uint32_t tagBound,
++                           Register scratch, Label* label) {
++    MOZ_ASSERT(cond == AboveOrEqual || cond == Below);
++    MOZ_ASSERT(scratch != value);
++    MOZ_ASSERT(tagBound >= uint32_t(JSVAL_TAG_MAX_DOUBLE) && tagBound <= 0x1FFFF);
++    movePtr(ImmWord(uint64_t(tagBound) << JSVAL_TAG_SHIFT), scratch);
++    as_cmpld(value, scratch);
++    ma_b(static_cast<Condition>(cond & ~(ConditionUnsigned | ConditionZero)),
++         label);
++  }
++
+   // PUNBOX64: the int32/boolean payload is the low 32 bits of the 64-bit Value.
+   // In memory those bytes are at offset +4 on a big-endian target and +0 on
+   // little-endian, so a 32-bit payload load must skip the tag word on BE.
+@@ -1169,15 +1271,19 @@
+   }
+   void tagValueWithScratch(JSValueType type, Register payload,
+                            ValueOperand dest, Register scratch) {
+-    movePtr(ImmShiftedTag(type), scratch);
+     if (type == JSVAL_TYPE_INT32 || type == JSVAL_TYPE_BOOLEAN ||
+         type == JSVAL_TYPE_MAGIC) {
+       if (payload != dest.valueReg()) {
+-        movePtr(payload, dest.valueReg());
++        // tag (li+sldi) then insert the low 32 payload bits: 3 insns.
++        movePtr(ImmShiftedTag(type), dest.valueReg());
++        as_rldimi(dest.valueReg(), payload, 0, 32);
++      } else {
++        movePtr(ImmShiftedTag(type), scratch);
++        as_rldimi(scratch, payload, 0, 32);
++        xs_mr(dest.valueReg(), scratch);
+       }
+-      as_rldicl(dest.valueReg(), dest.valueReg(), 0, 32);
+-      as_or_(dest.valueReg(), dest.valueReg(), scratch);
+     } else {
++      movePtr(ImmShiftedTag(type), scratch);
+       if (payload != dest.valueReg()) {
+         movePtr(payload, dest.valueReg());
+       }
+@@ -1195,9 +1301,10 @@
+                            Register scratch) {
+     if (type == JSVAL_TYPE_INT32 || type == JSVAL_TYPE_BOOLEAN ||
+         type == JSVAL_TYPE_MAGIC) {
+-      as_rldicl(dest, src, 0, 32);
+-      movePtr(ImmShiftedTag(type), scratch);
+-      as_or_(dest, dest, scratch);
++      // dest != src (asserted by callers): tag, then insert payload low 32.
++      MOZ_ASSERT(src != dest);
++      movePtr(ImmShiftedTag(type), dest);
++      as_rldimi(dest, src, 0, 32);
+     } else {
+       movePtr(ImmShiftedTag(type), scratch);
+       xs_mr(dest, src);
+@@ -1500,6 +1607,9 @@
+   FaultingCodeRange load32(const BaseIndex& address, Register dest) {
+     UseScratchRegisterScope temps(*this);
+     Register scratch = temps.Acquire();
++    if (Register rb = InvalidReg; xformIndex(address, scratch, &rb)) {
++      return FaultingCodeRange(as_lwax(dest, address.base, rb).getOffset());
++    }
+     computeScaledAddress(address, scratch);
+     if (is_intN(address.offset, 16) && (address.offset & 3) == 0) {
+       return FaultingCodeRange(
+@@ -1515,8 +1625,7 @@
+     return FaultingCodeRange(as_lwax(dest, scratch, dest).getOffset());
+   }
+   void load32(AbsoluteAddress address, Register dest) {
+-    movePtr(ImmWord((uintptr_t)address.addr), dest);
+-    as_lwa(dest, dest, 0);
++    load32(ma_absAddress(address.addr, dest), dest);
+   }
+   void load32(wasm::SymbolicAddress address, Register dest) {
+     movePtr(address, dest);
+@@ -1558,6 +1667,9 @@
+   FaultingCodeRange loadPtr(const BaseIndex& src, Register dest) {
+     UseScratchRegisterScope temps(*this);
+     Register scratch = temps.Acquire();
++    if (Register rb = InvalidReg; xformIndex(src, scratch, &rb)) {
++      return FaultingCodeRange(as_ldx(dest, src.base, rb).getOffset());
++    }
+     computeScaledAddress(src, scratch);
+     if (is_intN(src.offset, 16) && !(src.offset & 0x3)) {
+       return FaultingCodeRange(as_ld(dest, scratch, src.offset).getOffset());
+@@ -1567,8 +1679,8 @@
+     return FaultingCodeRange(as_ldx(dest, scratch, dest).getOffset());
+   }
+   void loadPtr(AbsoluteAddress address, Register dest) {
+-    movePtr(ImmWord((uintptr_t)address.addr), dest);
+-    as_ld(dest, dest, 0);
++    Address a = ma_absAddress(address.addr, dest);
++    as_ld(dest, a.base, a.offset);
+   }
+   void loadPtr(wasm::SymbolicAddress address, Register dest) {
+     movePtr(address, dest);
+@@ -1597,6 +1709,9 @@
+   FaultingCodeRange loadDouble(const BaseIndex& src, FloatRegister dest) {
+     UseScratchRegisterScope temps(*this);
+     Register scratch = temps.Acquire();
++    if (Register rb = InvalidReg; xformIndex(src, scratch, &rb)) {
++      return FaultingCodeRange(as_lfdx(dest, src.base, rb).getOffset());
++    }
+     computeScaledAddress(src, scratch);
+     if (is_intN(src.offset, 16)) {
+       return FaultingCodeRange(as_lfd(dest, scratch, src.offset).getOffset());
+@@ -1701,6 +1816,38 @@
+   }
+   [[nodiscard]] Register extractTag(const BaseIndex& address,
+                                     Register scratch) {
++    loadValueWordForTag(address, scratch);
++    x_srdi(scratch, scratch, JSVAL_TAG_SHIFT);
++    return scratch;
++  }
++  // Signed-tag variants for branchTestTag (equality tests only).
++  [[nodiscard]] Register extractTagSigned(const Address& address,
++                                          Register scratch) {
++    loadPtr(address, scratch);
++    splitTagSigned(scratch, scratch);
++    return scratch;
++  }
++  [[nodiscard]] Register extractTagSigned(const BaseIndex& address,
++                                          Register scratch) {
++    loadValueWordForTag(address, scratch);
++    splitTagSigned(scratch, scratch);
++    return scratch;
++  }
++  // Load the 64-bit Value word at |address| into |dest|, using |dest| itself
++  // for any address arithmetic (at most one other scratch, released on
++  // return), so callers may hold one scratch register across it.
++  void loadValueWord(const Address& address, Register dest) {
++    loadPtr(address, dest);
++  }
++  void loadValueWord(const BaseIndex& address, Register dest) {
++    loadValueWordForTag(address, dest);
++  }
++  void loadValueWordForTag(const BaseIndex& address, Register scratch) {
++    if (Register rb = InvalidReg;
++        scratch != r0 && xformIndex(address, scratch, &rb)) {
++      as_ldx(scratch, address.base, rb);
++      return;
++    }
+     if (scratch == r0) {
+       // r0 cannot be used as a base register in D-form/X-form loads,
+       // so we need a separate temp for the intermediate address.
+@@ -1714,8 +1861,6 @@
+       computeScaledAddress(address, scratch);
+       loadPtr(Address(scratch, address.offset), scratch);
+     }
+-    x_srdi(scratch, scratch, JSVAL_TAG_SHIFT);
+-    return scratch;
+   }
+   [[nodiscard]] Register extractTag(const ValueOperand& value,
+                                     Register scratch) {
+@@ -1760,10 +1905,8 @@
+     {
+       UseScratchRegisterScope temps(*this);
+       Register tag = temps.Acquire();
+-      splitTag(value, tag);
+-      uint32_t t = JSVAL_TAG_OBJECT;
+-      as_xoris(tag, tag, t >> 16);
+-      as_cmplwi(tag, t & 0xFFFF);
++      splitTagSigned(value.valueReg(), tag);
++      as_cmpdi(tag, SignedTagImm(JSVAL_TAG_OBJECT));
+     }
+     ma_cmp_set(dest, cond);
+   }
+@@ -1773,11 +1916,8 @@
+     {
+       UseScratchRegisterScope temps(*this);
+       Register tag = temps.Acquire();
+-      splitTag(value, tag);
+-      // Use xoris+cmplwi to compare without a second scratch.
+-      uint32_t t = JSVAL_TAG_UNDEFINED;
+-      as_xoris(tag, tag, t >> 16);
+-      as_cmplwi(tag, t & 0xFFFF);
++      splitTagSigned(value.valueReg(), tag);
++      as_cmpdi(tag, SignedTagImm(JSVAL_TAG_UNDEFINED));
+     }
+     ma_cmp_set(dest, cond);
+   }
+@@ -1786,10 +1926,8 @@
+     {
+       UseScratchRegisterScope temps(*this);
+       Register tag = temps.Acquire();
+-      splitTag(value, tag);
+-      uint32_t t = JSVAL_TAG_NULL;
+-      as_xoris(tag, tag, t >> 16);
+-      as_cmplwi(tag, t & 0xFFFF);
++      splitTagSigned(value.valueReg(), tag);
++      as_cmpdi(tag, SignedTagImm(JSVAL_TAG_NULL));
+     }
+     ma_cmp_set(dest, cond);
+   }
+@@ -1912,6 +2050,9 @@
+   FaultingCodeRange store32(Register src, const BaseIndex& address) {
+     UseScratchRegisterScope temps(*this);
+     Register scratch = temps.Acquire();
++    if (Register rb = InvalidReg; xformIndex(address, scratch, &rb)) {
++      return FaultingCodeRange(as_stwx(src, address.base, rb).getOffset());
++    }
+     computeScaledAddress(address, scratch);
+     if (is_intN(address.offset, 16)) {
+       return FaultingCodeRange(
+@@ -2010,6 +2151,9 @@
+   FaultingCodeRange storePtr(Register src, const BaseIndex& address) {
+     UseScratchRegisterScope temps(*this);
+     Register scratch = temps.Acquire();
++    if (Register rb = InvalidReg; xformIndex(address, scratch, &rb)) {
++      return FaultingCodeRange(as_stdx(src, address.base, rb).getOffset());
++    }
+     computeScaledAddress(address, scratch);
+     if (is_intN(address.offset, 16) && !(address.offset & 0x3)) {
+       return FaultingCodeRange(
+@@ -2085,6 +2229,39 @@
+ 
+   void abiret() { as_blr(); }
+ 
++  // Fused JIT frame entry for link-register frames. Equivalent to
++  //   pushReturnAddress(); push(FramePointer); moveStackPtrTo(FramePointer);
++  // (same layout: [FP+8] = return address, [FP+0] = caller FP), but with a
++  // single SP update instead of two dependent stdu's:
++  //   mflr r11; std r11,-8(r1); stdu r31,-16(r1); mr r31,r1
++  // Does not touch framePushed (none of the replaced pushes did either).
++  void pushReturnAddressAndFramePointer() {
++    UseScratchRegisterScope temps(*this);
++    Register scratch = temps.Acquire();
++    xs_mflr(scratch);
++    as_std(scratch, StackPointer, -int16_t(sizeof(uintptr_t)));
++    as_stdu(FramePointer, StackPointer, -int16_t(2 * sizeof(uintptr_t)));
++    xs_mr(FramePointer, StackPointer);
++  }
++
++  // Fused JIT frame exit, the inverse of pushReturnAddressAndFramePointer.
++  // Equivalent to
++  //   moveToStackPtr(FramePointer); pop(FramePointer); ret();
++  // but issues the return-address load first, with both loads based on FP,
++  // so the ld -> mtlr -> blr chain starts as early as possible, and uses one
++  // SP adjustment instead of two. Nothing is read below SP.
++  //   ld r11,8(r31); mr r1,r31; ld r31,0(r31); mtlr r11; addi r1,r1,16; blr
++  void popFramePointerAndReturn() {
++    UseScratchRegisterScope temps(*this);
++    Register scratch = temps.Acquire();
++    as_ld(scratch, FramePointer, int16_t(sizeof(uintptr_t)));
++    xs_mr(StackPointer, FramePointer);
++    as_ld(FramePointer, FramePointer, 0);
++    xs_mtlr(scratch);
++    as_addi(StackPointer, StackPointer, int16_t(2 * sizeof(uintptr_t)));
++    as_blr();
++  }
++
+   void profilerEnterFrame(Register framePtr, Register scratch);
+   void profilerExitFrame();
+ 
+diff -ruN a/js/src/jit/ppc64/SharedICHelpers-ppc64.h b/js/src/jit/ppc64/SharedICHelpers-ppc64.h
+--- a/js/src/jit/ppc64/SharedICHelpers-ppc64.h	2026-10-09 17:01:19.710712222 -0700
++++ b/js/src/jit/ppc64/SharedICHelpers-ppc64.h	2026-10-09 17:01:45.537569169 -0700
+@@ -41,8 +41,8 @@
+   // R2 won't be active when we call ICs, so we can use it as scratch.
+   masm.loadPtr(Address(ICStubReg, ICStub::offsetOfStubCode()), R2.scratchReg());
+ 
+-  // Call the stubcode. On PPC64 call(Register) emits mtctr + bctrl,
+-  // which sets LR to the address after bctrl.
++  // Call the stubcode. On PPC64 call(Register) ends in a `bl` (to a
++  // per-site `bctr`), which sets LR to the address after the sequence.
+   masm.call(R2.scratchReg());
+   *callOffset = CodeOffset(masm.currentOffset());
+ }
+@@ -75,12 +75,20 @@
+ template <typename AddrType>
+ inline void EmitPreBarrier(MacroAssembler& masm, const AddrType& addr,
+                            MIRType type) {
+-  // On PPC64, LR is clobbered by guardedCallPreBarrier. Save it first.
++  // On PPC64, LR is clobbered by the call to the pre-barrier trampoline, so
++  // it must be saved around it. Test the needs-marking flag first and only
++  // save/restore LR on the (rare) incremental-marking path, instead of paying
++  // mflr/stdu/ld/addi/mtlr on every barriered store. Same register usage as
++  // guardedCallPreBarrier (the flag test only uses the assembler scratch
++  // registers, never r0).
++  Label done;
++  masm.branchTestNeedsMarkingBarrier(Assembler::Zero, &done);
+   masm.xs_mflr(r0);
+   masm.push(r0);
+-  masm.guardedCallPreBarrier(addr, type);
++  masm.unguardedCallPreBarrier(addr, type);
+   masm.pop(r0);
+   masm.xs_mtlr(r0);
++  masm.bind(&done);
+ }
+ 
+ inline void EmitStubGuardFailure(MacroAssembler& masm) {
+diff -ruN a/js/src/jit/shared/CodeGenerator-shared.cpp b/js/src/jit/shared/CodeGenerator-shared.cpp
+--- a/js/src/jit/shared/CodeGenerator-shared.cpp	2026-10-09 17:01:19.715367357 -0700
++++ b/js/src/jit/shared/CodeGenerator-shared.cpp	2026-10-09 17:01:45.537765294 -0700
+@@ -142,13 +142,16 @@
+   MOZ_ASSERT(masm.framePushed() == 0);
+   MOZ_ASSERT(!gen->compilingWasm());
+ 
+-#ifdef JS_USE_LINK_REGISTER
+-  masm.pushReturnAddress();
+-#endif
+-
+   // Frame prologue.
++#if defined(JS_CODEGEN_PPC64)
++  masm.pushReturnAddressAndFramePointer();
++#else
++#  ifdef JS_USE_LINK_REGISTER
++  masm.pushReturnAddress();
++#  endif
+   masm.push(FramePointer);
+   masm.moveStackPtrTo(FramePointer);
++#endif
+ 
+   // Ensure that the Ion frame is properly aligned.
+   masm.assertStackAlignment(JitStackAlignment, 0);
+@@ -177,11 +180,16 @@
+   }
+ 
+   MOZ_ASSERT(masm.framePushed() == frameSize());
++#if defined(JS_CODEGEN_PPC64)
++  masm.popFramePointerAndReturn();
++  masm.setFramePushed(0);
++#else
+   masm.moveToStackPtr(FramePointer);
+   masm.pop(FramePointer);
+   masm.setFramePushed(0);
+ 
+   masm.ret();
++#endif
+ 
+   // On systems that use a constant pool, this is a good time to emit.
+   masm.flushBuffer();
+@@ -952,7 +960,11 @@
+       Assembler::PatchWrite_NearCallSize()) {
+     int32_t paddingSize = Assembler::PatchWrite_NearCallSize();
+     paddingSize -= masm.currentOffset() - lastOsiPointOffset_;
+-    for (int32_t i = 0; i < paddingSize; ++i) {
++    // paddingSize is in bytes; each nop() emits Assembler::NopSize() bytes
++    // (1 on x86, 4 on the fixed-width ISAs). Stepping by one byte per nop
++    // over-padded by 4x on fixed-width ISAs (up to 40 nops instead of 10 on
++    // ppc64, where PatchWrite_NearCallSize is 40 bytes).
++    for (int32_t i = 0; i < paddingSize; i += Assembler::NopSize()) {
+       masm.nop();
+     }
+   }
+--- a/js/src/jsapi-tests/testJitMacroAssembler.cpp	2026-10-05 10:51:03.000000000 -0700
++++ b/js/src/jsapi-tests/testJitMacroAssembler.cpp	2026-10-09 17:01:45.538142513 -0700
+@@ -875,3 +875,172 @@
+ END_TEST(testJitMacroAssembler_rshift64)
+ 
+ #endif
++
++#if defined(JS_CODEGEN_PPC64)
++
++// Regression tests for backward conditional branches to bound labels whose
++// condition makes as_bc emit extra instructions in front of the bc (POWER8
++// XER moves or POWER9 mcrxrx for Overflow/NotOverflow), or none at all
++// (DoubleOrdered/DoubleUnordered, which test FU directly). The displacement
++// must be measured from the bc itself. Each loop starts with a run of
++// single-instruction counter increments and is preceded by an instruction
++// that resets the counter, so a back-edge landing a few instructions early or
++// late changes the final count. Every case runs twice: once with a short
++// back-edge (single bc) and once with a body padded past the 32 KiB bc range,
++// which takes the long form (inverted bc over a load64 + mtctr + bctr).
++
++static constexpr int kPPCIncs = 4;
++
++static constexpr int kPPCFarPadInsns = 8400;  // > 32 KiB of nops.
++
++static void PPCEmitCountedLoopHead(MacroAssembler& masm, Register counter,
++                                   Label* loop, bool far) {
++  masm.movePtr(ImmWord(0), counter);  // Single li; lands here if 4 early.
++  masm.bind(loop);
++  for (int i = 0; i < kPPCIncs; i++) {
++    masm.addPtr(Imm32(1), counter);  // Single addi.
++  }
++  if (far) {
++    for (int i = 0; i < kPPCFarPadInsns; i++) {
++      masm.nop();
++    }
++  }
++}
++
++enum PPCBoundBranchCase {
++  PPCCaseOverflow,
++  PPCCaseNotOverflow,
++  PPCCaseDoubleUnordered,
++  PPCCaseDoubleOrdered,
++  PPCCaseDoubleLessThan,
++  PPCCaseDoubleGreaterThanOrUnordered,
++  PPCCaseCount
++};
++static const char* const PPCCaseNames[PPCCaseCount] = {
++    "Overflow",     "NotOverflow",    "DoubleUnordered",
++    "DoubleOrdered", "DoubleLessThan", "DoubleGreaterThanOrUnordered"};
++static intptr_t PPCCaseCounts[2][PPCCaseCount];  // [far][case]
++
++// Record the loop's final count; checked from C++ after the code has run.
++static void PPCEmitRecordCount(MacroAssembler& masm, Register counter,
++                               PPCBoundBranchCase which, bool far) {
++  masm.storePtr(counter, AbsoluteAddress(&PPCCaseCounts[far][which]));
++}
++
++BEGIN_TEST(testJitMacroAssembler_ppc64BoundBranchPrefix) {
++  TempAllocator tempAlloc(&cx->tempLifoAlloc());
++  JitContext jcx(cx);
++  StackMacroAssembler masm(cx, tempAlloc);
++  AutoCreatedBy acb(masm, __func__);
++
++  PrepareJit(masm);
++
++  AllocatableGeneralRegisterSet gprs(GeneralRegisterSet::Volatile());
++  Register counter = gprs.takeAny();
++  Register acc = gprs.takeAny();
++  Register mul = gprs.takeAny();
++  Register tmp = gprs.takeAny();
++  // f0 is ScratchDoubleReg; f1-f3 are volatile and not used by masm.
++  FloatRegister fcur = f1;
++  FloatRegister fnext = f2;
++
++  for (int farIdx = 0; farIdx < 2; farIdx++) {
++    bool far = farIdx != 0;
++    // Overflow back-edge: iteration 1 multiplies 2^62 by 2 (overflows, loops),
++    // iteration 2 multiplies by 1 (no overflow, exits).
++    {
++      Label loop;
++      masm.movePtr(ImmWord(2), mul);
++      PPCEmitCountedLoopHead(masm, counter, &loop, far);
++      masm.movePtr(mul, tmp);
++      masm.movePtr(ImmWord(1), mul);
++      masm.movePtr(ImmWord(uintptr_t(1) << 62), acc);
++      masm.branchMulPtr(Assembler::Overflow, tmp, acc, &loop);
++      PPCEmitRecordCount(masm, counter, PPCCaseOverflow, far);
++    }
++
++    // NotOverflow back-edge: iteration 1 multiplies by 1 (loops), iteration 2
++    // multiplies 2^62 by 2 (overflows, exits).
++    {
++      Label loop;
++      masm.movePtr(ImmWord(1), mul);
++      PPCEmitCountedLoopHead(masm, counter, &loop, far);
++      masm.movePtr(mul, tmp);
++      masm.movePtr(ImmWord(2), mul);
++      masm.movePtr(ImmWord(uintptr_t(1) << 62), acc);
++      masm.as_mulldo(acc, acc, tmp);
++      masm.ma_b(Assembler::NotOverflow, &loop);
++      PPCEmitRecordCount(masm, counter, PPCCaseNotOverflow, far);
++    }
++
++    // DoubleUnordered back-edge: NaN on iteration 1 (loops), then 1.0.
++    {
++      Label loop;
++      masm.loadConstantDouble(JS::GenericNaN(), fnext);
++      PPCEmitCountedLoopHead(masm, counter, &loop, far);
++      masm.moveDouble(fnext, fcur);
++      masm.loadConstantDouble(1.0, fnext);
++      masm.branchDouble(Assembler::DoubleUnordered, fcur, fcur, &loop);
++      PPCEmitRecordCount(masm, counter, PPCCaseDoubleUnordered, far);
++    }
++
++    // DoubleOrdered back-edge: 1.0 on iteration 1 (loops), NaN on iteration 2.
++    {
++      Label loop;
++      masm.loadConstantDouble(1.0, fnext);
++      PPCEmitCountedLoopHead(masm, counter, &loop, far);
++      masm.moveDouble(fnext, fcur);
++      masm.loadConstantDouble(JS::GenericNaN(), fnext);
++      masm.branchDouble(Assembler::DoubleOrdered, fcur, fcur, &loop);
++      PPCEmitRecordCount(masm, counter, PPCCaseDoubleOrdered, far);
++    }
++
++    // Controls: double conditions that do emit a CR fixup before the bc
++    // (crandc for DoubleLessThan, cror for DoubleGreaterThanOrUnordered).
++    {
++      FloatRegister fbound = f3;
++      Label loop;
++      masm.loadConstantDouble(0.5, fbound);
++      masm.loadConstantDouble(0.0, fnext);
++      PPCEmitCountedLoopHead(masm, counter, &loop, far);
++      masm.moveDouble(fnext, fcur);
++      masm.loadConstantDouble(1.0, fnext);
++      masm.branchDouble(Assembler::DoubleLessThan, fcur, fbound, &loop);
++      PPCEmitRecordCount(masm, counter, PPCCaseDoubleLessThan, far);
++
++      Label loop2;
++      masm.loadConstantDouble(JS::GenericNaN(), fnext);
++      PPCEmitCountedLoopHead(masm, counter, &loop2, far);
++      masm.moveDouble(fnext, fcur);
++      masm.loadConstantDouble(0.0, fnext);
++      masm.branchDouble(Assembler::DoubleGreaterThanOrUnordered, fcur, fbound,
++                        &loop2);
++      PPCEmitRecordCount(masm, counter, PPCCaseDoubleGreaterThanOrUnordered,
++                         far);
++    }
++  }
++
++  for (auto& row : PPCCaseCounts) {
++    for (intptr_t& count : row) {
++      count = -1;
++    }
++  }
++  CHECK(ExecuteJit(cx, masm));
++  bool ok = true;
++  for (int far = 0; far < 2; far++) {
++    for (int i = 0; i < PPCCaseCount; i++) {
++      if (PPCCaseCounts[far][i] != 2 * kPPCIncs) {
++        fprintf(stderr,
++                "ppc64 bound %s back-edge %s: count %d, expected %d\n",
++                far ? "far" : "near", PPCCaseNames[i],
++                int(PPCCaseCounts[far][i]), 2 * kPPCIncs);
++        ok = false;
++      }
++    }
++  }
++  CHECK(ok);
++  return true;
++}
++END_TEST(testJitMacroAssembler_ppc64BoundBranchPrefix)
++
++#endif
+--- a/js/src/wasm/WasmSummarizeInsn.cpp	2026-10-09 17:03:15.528682357 -0700
++++ b/js/src/wasm/WasmSummarizeInsn.cpp	2026-10-09 17:50:05.633417283 -0700
+@@ -2292,7 +2292,8 @@
+       case 279:  // lhzx
+       case 343:  // lhax
+         return SummarizeResult(TrapMachineInsn::Load16, 4);
+-      case 23:  // lwzx
++      case 23:   // lwzx
++      case 341:  // lwax
+         return SummarizeResult(TrapMachineInsn::Load32, 4);
+       case 21:  // ldx
+         return SummarizeResult(TrapMachineInsn::Load64, 4);

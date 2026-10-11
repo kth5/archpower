@@ -1,0 +1,33 @@
+From: daedalao <daedalao@hotmail.com>
+Subject: [PATCH 9/9] SWGL: big-endian swizzle only for X11, not Wayland
+
+0007 swizzles SWGL's B8G8R8A8 frames to the A8R8G8B8 memory layout on
+big-endian because X11 consumes native-endian pixel values. On Wayland the
+frame is attached as WL_SHM_FORMAT_ARGB8888, which is little-endian, i.e.
+already the B8G8R8A8 layout, so the swizzle swapped red and blue (and moved
+alpha). Skip it when the GDK display is Wayland.
+
+Tested: Arch POWER powerpc64 (BE), river/wlroots pixman, software WebRender:
+colour stripes correct on both X11 (Xwayland) and Wayland.
+---
+--- a/gfx/webrender_bindings/RenderCompositorSWGL.cpp	2026-09-26 10:12:52.812048800 -0700
++++ b/gfx/webrender_bindings/RenderCompositorSWGL.cpp	2026-09-26 10:12:52.830419078 -0700
+@@ -215,7 +215,17 @@
+   wr_swgl_init_default_framebuffer(mContext, 0, 0, 0, 0, 0, nullptr);
+   // If we have a draw target at this point, mapping must have succeeded.
+   MOZ_ASSERT(mMappedData != nullptr);
+-  if (aDirty && std::endian::native != std::endian::little) {
++  bool swizzleForNativeEndian =
++      aDirty && std::endian::native != std::endian::little;
++#ifdef MOZ_WIDGET_GTK
++  // Only X11 consumes native-endian pixel values. On Wayland the buffer is
++  // attached as WL_SHM_FORMAT_ARGB8888, which is little-endian: exactly the
++  // B8G8R8A8 layout SWGL resolved, so it must be left alone.
++  if (widget::GdkIsWaylandDisplay()) {
++    swizzleForNativeEndian = false;
++  }
++#endif
++  if (swizzleForNativeEndian) {
+     // SWGL resolves pixels in the little-endian B8G8R8A8 memory layout, but
+     // the window surface consumes native-endian 32-bit pixel values, so on
+     // big-endian rewrite to the A8R8G8B8 memory layout. Only the dirty

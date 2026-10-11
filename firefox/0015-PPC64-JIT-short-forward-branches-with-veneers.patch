@@ -1,0 +1,962 @@
+From: Jordan Bettcher <thebettcher@gmail.com>
+Date: Sun, 04 Oct 2026 18:30:00 -0700
+Subject: [PATCH] ppc64 JIT: short forward branches with veneers instead of
+ 10-slot padding
+
+A forward ma_b(cond, Label*) or jump(Label*) to an unbound label used to
+reserve an inverted bc plus a 10-slot trap-tagged stanza so that bind()
+could patch in a load64 + mtctr + bctr if the label ended up out of the
+16-bit bc range. In practice the label almost always binds in range (Ion
+guards to out-of-line paths), bind() rewrote the bc short and turned all
+10 slots into NOPs, and the fall-through path then executed them. Hot
+Ion functions on POWER8 were 38-56% NOPs by instruction count; a
+microbenchmark puts the cost at ~1.3 cycles per guard, and jumping over
+the padding instead is worse (a taken branch costs more than the NOPs).
+
+Do what the ARM64 backend does: emit the bc / b alone, keep the label-use
+chain in the branch displacement field, register a deadline with the
+constant-pool buffer (numShortBranchRanges = 1, veneerSize = 1) and let
+it emit a veneer -- a single b in the pool island -- before the bc would
+go out of range. bind() patches the bc directly when the target is in
+reach, otherwise it leaves the bc pointing at its veneer and binds the
+veneer. retarget() joins chains in whichever direction the link encodes.
+The tagged stanza is still used by call(Label*) and the patchable
+call/jump/far-jump sites, whose fixed footprints are unchanged.
+
+Because POWER8 now gets pool islands, the places that relied on nothing
+ever being inserted are fenced: haltingAlign/nopAlign no longer call
+size() (which flushes everything), the wasm trap-site flushes use a new
+flushPoolEntries() that empties the pool without forcing veneers, the
+marked slow call and writeCodePointer sit in no-pool windows, the
+out-of-line table switch is wrapped in one, and the *WithPatch helpers
+take their patch offsets from the instructions they actually emit.
+
+jit-test suite: PASSED ALL (on top of the load64-immediate patch). Two
+stress tests with >32 KiB of Ion and wasm code pass under every
+jit-test flag configuration. Octane 2.0 in the JS shell on POWER8, over
+the load64-immediate patch: DeltaBlue 4423 -> 6334, Richards 4144 ->
+5299, EarleyBoyer 12960 -> 15794, Crypto 4988 -> 5957.
+
+Rebased onto 157.0.1 (archpower 0004/0005 backend: the maintainer already
+takes the stanza offsets from the emitted instruction; trap sites now use
+FaultingCodeRange/appendAndVerify, so only the pool flush changes remain).
+
+---
+diff -ruN a/js/src/jit/ppc64/Assembler-ppc64.cpp b/js/src/jit/ppc64/Assembler-ppc64.cpp
+--- a/js/src/jit/ppc64/Assembler-ppc64.cpp	2026-10-09 17:12:06.649354357 -0700
++++ b/js/src/jit/ppc64/Assembler-ppc64.cpp	2026-10-09 17:12:06.696373423 -0700
+@@ -276,48 +276,47 @@
+ }
+ 
+ // Alignment.
+-BufferOffset Assembler::haltingAlign(int alignment) {
++//
++// Neither routine may call size(): Assembler::size() does a full
++// flushPool(), which (with short-range branch tracking) turns every pending
++// forward `bc` into a branch-to-veneer, and nopAlign(CodeAlignment) runs at
++// every wasm loop header. Instead, open a no-pool window large enough for
++// the worst-case fill plus the first aligned instruction, so a pool/veneer
++// island can only be dumped *before* the fill (enterNoPool flushes up front
++// if needed), never inside it or right at the aligned position.
++BufferOffset Assembler::alignWith(int alignment, uint32_t fill) {
+   BufferOffset ret;
+   MOZ_ASSERT(m_buffer.isAligned(4));
+-  if (alignment == 8) {
+-    if (!m_buffer.isAligned(alignment)) {
+-      BufferOffset tmp = xs_trap();
+-      if (!ret.assigned()) {
+-        ret = tmp;
+-      }
+-    }
+-  } else {
+-    MOZ_ASSERT((alignment & (alignment - 1)) == 0);
+-    while (size() & (alignment - 1)) {
+-      BufferOffset tmp = xs_trap();
+-      if (!ret.assigned()) {
+-        ret = tmp;
+-      }
++  MOZ_ASSERT((alignment & (alignment - 1)) == 0);
++  MOZ_ASSERT(alignment >= 4);
++  if (m_buffer.isAligned(alignment)) {
++    return ret;
++  }
++  m_buffer.enterNoPool(size_t(alignment) / 4 + 1);
++  while (!m_buffer.isAligned(alignment) && !m_buffer.oom()) {
++    BufferOffset tmp = writeInst(fill);
++    if (!ret.assigned()) {
++      ret = tmp;
+     }
+   }
++  m_buffer.leaveNoPool();
+   return ret;
+ }
+ 
+-BufferOffset Assembler::nopAlign(int alignment) {
+-  BufferOffset ret;
+-  MOZ_ASSERT(m_buffer.isAligned(4));
+-  if (alignment == 8) {
+-    if (!m_buffer.isAligned(alignment)) {
+-      BufferOffset tmp = as_nop();
+-      if (!ret.assigned()) {
+-        ret = tmp;
+-      }
+-    }
+-  } else {
+-    MOZ_ASSERT((alignment & (alignment - 1)) == 0);
+-    while (size() & (alignment - 1)) {
+-      BufferOffset tmp = as_nop();
+-      if (!ret.assigned()) {
+-        ret = tmp;
+-      }
+-    }
++BufferOffset Assembler::haltingAlign(int alignment) {
++  if (alignment == int(sizeof(void*))) {
++    // Only used right before jump tables (Ion table switch, Baseline
++    // interpreter op table), which are emitted as a sequence of
++    // writeCodePointer() calls with no surrounding no-pool region in shared
++    // code. Empty the constant pool and veneer every pending short-range
++    // branch now, so nothing can be dumped in the middle of the table.
++    m_buffer.flushPool();
+   }
+-  return ret;
++  return alignWith(alignment, PPC_trap);
++}
++
++BufferOffset Assembler::nopAlign(int alignment) {
++  return alignWith(alignment, NopInst);
+ }
+ 
+ // Primitive instructions.
+@@ -2356,40 +2355,186 @@
+     return;
+   }
+ 
+-  if (i0->isOpcode(PPC_b)) {
+-    // Short unconditional branch — set offset, nop next-in-chain slot.
+-    MOZ_ASSERT(JOffImm26::IsInRange(offset));
+-    i0->setData((i0->encode() & ~0x03FFFFFC) | JOffImm26(offset).encode());
+-    i0->next()->makeNop();
++  // Short `b`/`bc` chain elements carry their link in the displacement field
++  // (no chain word follows them) and are resolved by bindShortBranch() from
++  // bind(Label*), which knows the following chain element. They must never
++  // reach this function: the old "short branch + chain word" layout that
++  // used to be handled here is no longer emitted.
++  MOZ_CRASH("Unexpected instruction in bind");
++}
++
++// ========================================================================
++// Label-use chains.
++//
++// Unbound labels hold the offset of their most recent use (the chain head).
++// Each use links to the next one: tagged stanzas through the absolute offset
++// stored in the word after the tw, short `b`/`bc` through a relative byte
++// displacement in their own displacement field (0 = end), mirroring ARM64's
++// use of the branch immediate as the link.
++//
++// Invariant (as on ARM64): the tail of every chain can reach the current
++// end of the buffer. A short `bc` that is still registered with the buffer
++// has a deadline beyond nextOffset(); one whose deadline expired was given a
++// veneer `b`, which the buffer inserted *after* it in the chain
++// (PatchShortRangeBranchToVeneer), so it is never the tail. A `b` reaches
++// +/-32 MiB and a tagged stanza any offset.
++// ========================================================================
++
++BufferOffset Assembler::nextLink(BufferOffset cur) {
++  Instruction* inst = editSrc(cur);
++  uint32_t enc = inst->encode();
++  if (IsTaggedTrapInst(enc)) {
++    uint32_t word = inst->next()->encode();
++    if (word == LabelBase::INVALID_OFFSET) {
++      return BufferOffset();
++    }
++    return BufferOffset(int(word));
++  }
++  int32_t disp;
++  if (IsShortChainBc(enc)) {
++    disp = DecodeBcDisplacement(enc);
++  } else if (IsShortChainB(enc)) {
++    disp = DecodeBDisplacement(enc);
++  } else {
++    MOZ_CRASH("Unexpected instruction in label use chain");
++  }
++  if (disp == 0) {
++    return BufferOffset();
++  }
++  return BufferOffset(cur.getOffset() + disp);
++}
++
++bool Assembler::setNextLink(BufferOffset cur, BufferOffset next) {
++  Instruction* inst = editSrc(cur);
++  uint32_t enc = inst->encode();
++  if (IsTaggedTrapInst(enc)) {
++    inst->next()->setData(next.assigned() ? uint32_t(next.getOffset())
++                                          : LabelBase::INVALID_OFFSET);
++    return true;
++  }
++  int32_t disp = 0;
++  if (next.assigned()) {
++    disp = next.getOffset() - cur.getOffset();
++    MOZ_ASSERT(disp != 0, "a branch cannot link to itself");
++  }
++  if (IsShortChainBc(enc)) {
++    if (!BOffImm16::IsInRange(disp)) {
++      return false;
++    }
++    inst->setData(EncodeBcDisplacement(enc, disp));
++    return true;
++  }
++  if (IsShortChainB(enc)) {
++    if (!JOffImm26::IsInRange(disp)) {
++      return false;
++    }
++    inst->setData(EncodeBDisplacement(enc, disp));
++    return true;
++  }
++  MOZ_CRASH("Unexpected instruction in label use chain");
++}
++
++BufferOffset Assembler::chainTail(BufferOffset head) {
++  BufferOffset tail = head;
++  for (BufferOffset next = nextLink(tail); next.assigned();
++       next = nextLink(tail)) {
++    tail = next;
++  }
++  return tail;
++}
++
++void Assembler::linkShortBranchUse(BufferOffset branch, Label* label) {
++  MOZ_ASSERT(!label->bound());
++  if (oom() || !branch.assigned()) {
++    return;
++  }
++  MOZ_ASSERT(nextLink(branch).assigned() == false,
++             "fresh short branch must carry an end-of-chain link");
++  if (!label->used()) {
++    label->use(branch.getOffset());
++    return;
++  }
++  // Common case: prepend; the new branch links back to the current head.
++  BufferOffset head(label);
++  if (setNextLink(branch, head)) {
++    label->use(branch.getOffset());
+     return;
+   }
++  // The head is out of (backward) reach of the new branch. Append the new
++  // branch at the tail instead: by the chain invariant the tail reaches the
++  // current end of the buffer, i.e. the new branch.
++  BufferOffset tail = chainTail(head);
++  if (!setNextLink(tail, branch)) {
++    JitSpew(JitSpew_Codegen,
++            "ppc64: label chain tail @%d cannot reach new use @%d",
++            tail.getOffset(), branch.getOffset());
++    MOZ_ASSERT(IsShortChainB(editSrc(tail)->encode()),
++               "only a >32 MiB b link can fail here");
++    m_buffer.fail_oom();
++  }
++}
+ 
+-  if (i0->isOpcode(PPC_bc)) {
+-    // Short conditional branch — preserve upper 16 bits, set offset.
+-    MOZ_ASSERT(BOffImm16::IsInRange(offset));
+-    i0->setData((i0->encode() & 0xFFFF0003) | BOffImm16(offset).encode());
+-    i0->next()->makeNop();
++void Assembler::bindShortBranch(BufferOffset cur, BufferOffset next,
++                                BufferOffset target) {
++  Instruction* inst = editSrc(cur);
++  uint32_t enc = inst->encode();
++  int32_t offset = target.getOffset() - cur.getOffset();
++
++  if (IsShortChainBc(enc)) {
++    // Stop tracking this branch. If a veneer was already emitted for it the
++    // buffer has dropped the deadline and this is a no-op.
++    m_buffer.unregisterBranchDeadline(
++        BcRangeIdx, BufferOffset(cur.getOffset() + BcMaxForwardOffset));
++    if (BOffImm16::IsInRange(offset)) {
++      inst->setData(EncodeBcDisplacement(enc, offset));
++      return;
++    }
++    // Out of reach. If the bc currently branches to the following chain
++    // element and that element is an unconditional `b` (a veneer, or a plain
++    // forward jump to this same label), leave it: that `b` is bound to the
++    // target later in this walk, so going through it is equivalent.
++    if (next.assigned() &&
++        DecodeBcDisplacement(enc) == next.getOffset() - cur.getOffset() &&
++        IsShortChainB(editSrc(next)->encode())) {
++      return;
++    }
++    // A forward target can only be out of reach if the veneer machinery
++    // failed; a backward one can come from retarget() to a far, already
++    // bound label, which this short form cannot express. Fail the
++    // compilation rather than emit a wrong branch.
++    MOZ_ASSERT(offset < 0, "forward bc out of range without a veneer");
++    JitSpew(JitSpew_Codegen, "ppc64: bc @%d cannot reach label @%d",
++            cur.getOffset(), target.getOffset());
++    m_buffer.fail_oom();
+     return;
+   }
+ 
+-  MOZ_CRASH("Unexpected instruction in bind");
++  MOZ_ASSERT(IsShortChainB(enc));
++  if (JOffImm26::IsInRange(offset)) {
++    inst->setData(EncodeBDisplacement(enc, offset));
++    return;
++  }
++  // Only possible if a single buffer exceeds 32 MiB.
++  JitSpew(JitSpew_Codegen, "ppc64: b @%d cannot reach label @%d",
++          cur.getOffset(), target.getOffset());
++  m_buffer.fail_oom();
+ }
+ 
+ void Assembler::bind(Label* label, BufferOffset boff) {
+-  if (label->used()) {
+-    bool more;
++  if (label->used() && !oom()) {
+     BufferOffset b(label);
+-    do {
+-      BufferOffset next;
+-      InstImm* inst = (InstImm*)editSrc(b);
+-      Instruction* i1 = ((Instruction*)inst)->next();
+-      more = (i1->encode() != LabelBase::INVALID_OFFSET);
+-      if (more) {
+-        next = BufferOffset(i1->encode());
++    while (b.assigned()) {
++      // Read the link before the element gets patched.
++      BufferOffset next = nextLink(b);
++      Instruction* inst = editSrc(b);
++      uint32_t enc = inst->encode();
++      if (IsShortChainBc(enc) || IsShortChainB(enc)) {
++        bindShortBranch(b, next, boff);
++      } else {
++        bind((InstImm*)inst, b.getOffset(), boff.getOffset());
+       }
+-      bind(inst, b.getOffset(), boff.getOffset());
+       b = next;
+-    } while (more);
++    }
+   }
+   label->bind(boff.getOffset());
+ }
+@@ -2400,24 +2545,23 @@
+     if (target->bound()) {
+       bind(label, BufferOffset(target));
+     } else if (target->used()) {
+-      // Prepend label's use chain to target's use chain.
+-      BufferOffset b(label);
+-      BufferOffset next;
+-      do {
+-        Instruction* inst = (Instruction*)editSrc(b);
+-        Instruction* i1 = inst->next();
+-        if (i1->encode() != LabelBase::INVALID_OFFSET) {
+-          next = BufferOffset(i1->encode());
+-        } else {
+-          // End of label's chain — link to target's head.
+-          i1->setData(target->offset());
+-          break;
+-        }
+-        b = next;
+-      } while (true);
+-    }
+-    // Transfer label's use list to target.
+-    if (!target->bound()) {
++      // Concatenate the two chains. Prefer prepending label's chain to
++      // target's (label's tail -> target's head); if that link is not
++      // encodable, append label's chain to target's instead.
++      BufferOffset labelHead(label);
++      BufferOffset targetHead(target);
++      if (setNextLink(chainTail(labelHead), targetHead)) {
++        target->use(label->offset());
++      } else if (setNextLink(chainTail(targetHead), labelHead)) {
++        // target keeps its head.
++      } else {
++        JitSpew(JitSpew_Codegen,
++                "ppc64: retarget cannot link use chains (%d, %d)",
++                labelHead.getOffset(), targetHead.getOffset());
++        m_buffer.fail_oom();
++      }
++    } else {
++      // Transfer label's use list to target.
+       target->use(label->offset());
+     }
+   }
+@@ -2759,11 +2903,50 @@
+ }
+ 
+ /* static */
+-void Assembler::PatchShortRangeBranchToVeneer(PPCBuffer*, unsigned rangeIdx,
++void Assembler::PatchShortRangeBranchToVeneer(PPCBuffer* buffer,
++                                              unsigned rangeIdx,
+                                               BufferOffset deadline,
+                                               BufferOffset veneer) {
+-  // PPC64 does not use short-range branch tracking (NumShortBranchRanges = 0).
+-  MOZ_CRASH("PatchShortRangeBranchToVeneer: should not be called");
++  // Called from AssemblerBufferWithConstantPools::finishPool() for a forward
++  // `bc` to a still-unbound label that is about to go out of range. `veneer`
++  // is one instruction slot (after the pool guard/header/data, so it is
++  // never on the fall-through path) at or before `deadline`.
++  //
++  // Reconstruct the branch from (rangeIdx, deadline), then splice the veneer
++  // into the label-use chain right after it:
++  //
++  //   label -> ... -> bc -> next -> ...   becomes
++  //   label -> ... -> bc -> veneer(b) -> next -> ...
++  //
++  // The bc's link now points at the veneer, which is also its branch target
++  // until bind(): bindShortBranch() either retargets the bc directly (target
++  // in reach) or leaves it pointing at the veneer, which is bound like any
++  // other short `b` in the chain.
++  MOZ_RELEASE_ASSERT(rangeIdx == BcRangeIdx);
++  BufferOffset branch(deadline.getOffset() - BcMaxForwardOffset);
++  Instruction* branchInst = buffer->getInst(branch);
++  Instruction* veneerInst = buffer->getInst(veneer);
++  uint32_t enc = branchInst->encode();
++  MOZ_ASSERT(IsShortChainBc(enc), "deadline does not belong to a short bc");
++
++  int32_t link = DecodeBcDisplacement(enc);
++  int32_t veneerLink = 0;
++  if (link != 0) {
++    // Same chain successor, re-expressed relative to the veneer. The bc
++    // reaches it (|link| <= 32 KiB) and the veneer is <= 32 KiB after the
++    // bc, so this always fits the 26-bit field.
++    veneerLink = branch.getOffset() + link - veneer.getOffset();
++    MOZ_ASSERT(veneerLink != 0);
++    MOZ_ASSERT(JOffImm26::IsInRange(veneerLink));
++  }
++  veneerInst->setData(EncodeBDisplacement(uint32_t(PPC_b), veneerLink));
++
++  int32_t toVeneer = veneer.getOffset() - branch.getOffset();
++  MOZ_ASSERT(toVeneer > 0 && toVeneer <= BcMaxForwardOffset);
++  branchInst->setData(EncodeBcDisplacement(enc, toVeneer));
++
++  JitSpew(JitSpew_Pools, "ppc64: veneer @%d for bc @%d (deadline %d)",
++          veneer.getOffset(), branch.getOffset(), deadline.getOffset());
+ }
+ 
+ // Two stanza shapes are emitted, sharing the same 8-slot footprint:
+@@ -3120,8 +3303,10 @@
+   FlushICache(i8, 2 * sizeof(Instruction));
+ }
+ 
+-// toggledJump emits a trap stanza via jump(label). After binding, the first
+-// instruction becomes "b offset" (short branch). We toggle between b and ori:
++// toggledJump emits a single short `b` at the returned offset (see
++// MacroAssemblerPPC64Compat::emitUnboundJump); after binding it is
++// "b offset".
++// We toggle between b and ori:
+ //   b offset:       [010010][LI:24][0][0]
+ //   ori r0,r0,imm:  [011000][00000][00000][UI:16]
+ // For short forward jumps (offset < 64KB), bits 25:16 of LI are 0, so
+diff -ruN a/js/src/jit/ppc64/Assembler-ppc64.h b/js/src/jit/ppc64/Assembler-ppc64.h
+--- a/js/src/jit/ppc64/Assembler-ppc64.h	2026-10-09 17:01:19.808543783 -0700
++++ b/js/src/jit/ppc64/Assembler-ppc64.h	2026-10-09 17:12:06.697291990 -0700
+@@ -1106,15 +1106,28 @@
+ // NumShortBranchRanges template arg were dropped: PPC64 previously passed
+ // instBufferAlign=8 (unused on this backend; pool entries are 4-byte aligned)
+ // and NumShortBranchRanges=0.
++//
++// Short-range branch tracking (one range): forward conditional branches to
++// unbound labels are emitted as a single `bc` whose BD field doubles as the
++// label-use chain link (see Assembler::nextLink). Each such `bc` registers a
++// deadline (range Assembler::BcRangeIdx) with the buffer; if the label is not
++// bound before the `bc` would go out of its +32 KiB reach, the buffer emits a
++// one-instruction veneer (`b`, +/-32 MiB) with the next pool and calls
++// Assembler::PatchShortRangeBranchToVeneer. Unconditional `b` branches (and
++// the veneers themselves) are not tracked, as on ARM64: a single assembler
++// buffer is assumed to stay well below 32 MiB (Assembler::bind fails the
++// compilation with OOM if that assumption is ever violated).
+ using PPCBuffer = js::jit::AssemblerBufferWithConstantPools<
+     Instruction, Assembler,
+     js::jit::AssemblerBufferSettings{
+         .instSize = 4,
+         .guardSize = 1,
+         .headerSize = 1,
++        .veneerSize = 1,
+         .pcBias = 0,
+         .alignFillInst = NopInst,
+         .nopFillInst = NopInst,
++        .numShortBranchRanges = 1,
+     }>;
+ 
+ // Inherits executableCopy() and appendRawCode() from
+@@ -1296,6 +1309,45 @@
+                                             BufferOffset deadline,
+                                             BufferOffset veneer);
+ 
++  // Short-range branch tracking. Range 0 is the 16-bit `bc` displacement
++  // (BD field, -32768..+32764 bytes). The deadline registered for a `bc` at
++  // offset X is X + BcMaxForwardOffset, the last offset it reaches directly.
++  static constexpr unsigned BcRangeIdx = 0;
++  static constexpr int32_t BcMaxForwardOffset = 32764;
++
++  // Label-use chain encodings. A chain element is one of:
++  //   - a tw-tagged stanza (BTag/BCTag/CallTag): link = absolute buffer
++  //     offset in the following word, LabelBase::INVALID_OFFSET = end;
++  //   - a short `bc` (AA=0, LK=0): link = signed byte displacement in BD;
++  //   - a short `b` (AA=0, LK=0; forward jump or veneer): link = signed byte
++  //     displacement in LI.
++  // For the short forms a displacement of 0 means end of chain.
++  static bool IsTaggedTrapInst(uint32_t enc) {
++    return (enc & 0xFC0007FE) == uint32_t(PPC_tw);
++  }
++  static bool IsShortChainBc(uint32_t enc) {
++    return (enc & uint32_t(PPC_MAJOR_OPCODE_MASK)) == uint32_t(PPC_bc) &&
++           (enc & 3) == 0;
++  }
++  static bool IsShortChainB(uint32_t enc) {
++    return (enc & uint32_t(PPC_MAJOR_OPCODE_MASK)) == uint32_t(PPC_b) &&
++           (enc & 3) == 0;
++  }
++  static int32_t DecodeBcDisplacement(uint32_t enc) {
++    return int32_t(int16_t(uint16_t(enc & 0xFFFC)));
++  }
++  static int32_t DecodeBDisplacement(uint32_t enc) {
++    return int32_t((enc & 0x03FFFFFC) << 6) >> 6;
++  }
++  static uint32_t EncodeBcDisplacement(uint32_t enc, int32_t disp) {
++    MOZ_ASSERT(BOffImm16::IsInRange(disp) && (disp & 3) == 0);
++    return (enc & 0xFFFF0003) | (uint32_t(disp) & 0xFFFC);
++  }
++  static uint32_t EncodeBDisplacement(uint32_t enc, int32_t disp) {
++    MOZ_ASSERT(JOffImm26::IsInRange(disp) && (disp & 3) == 0);
++    return (enc & 0xFC000003) | (uint32_t(disp) & 0x03FFFFFC);
++  }
++
+   static Condition InvertCondition(Condition cond);
+   static DoubleCondition InvertCondition(DoubleCondition cond);
+ 
+@@ -1399,6 +1451,11 @@
+  public:
+   BufferOffset haltingAlign(int alignment);
+   BufferOffset nopAlign(int alignment);
++
++ private:
++  BufferOffset alignWith(int alignment, uint32_t fill);
++
++ public:
+   BufferOffset as_nop();
+ 
+   // --- Instruction emission
+@@ -2004,6 +2061,26 @@
+   void bind(CodeLabel* label) { label->target()->bind(currentOffset()); }
+   uint32_t currentOffset() { return nextOffset().getOffset(); }
+   void retarget(Label* label, Label* target);
++
++  // --- Label-use chain helpers (see IsTaggedTrapInst & co. above).
++  // Next element after `cur` in a label-use chain; unassigned at the end.
++  BufferOffset nextLink(BufferOffset cur);
++  // Point chain element `cur` at `next` (unassigned = end of chain). Returns
++  // false, leaving `cur` untouched, if the link is not encodable in `cur`.
++  bool setNextLink(BufferOffset cur, BufferOffset next);
++  // Last element of the chain starting at `head`.
++  BufferOffset chainTail(BufferOffset head);
++  // Add the freshly emitted short `b`/`bc` at `branch` (with a zero link) to
++  // the use chain of the unbound `label`.
++  void linkShortBranchUse(BufferOffset branch, Label* label);
++
++ private:
++  // Resolve one short `b`/`bc` chain element at `cur` to `target`. `next` is
++  // the element that followed it in the chain (needed to recognise a veneer).
++  void bindShortBranch(BufferOffset cur, BufferOffset next,
++                       BufferOffset target);
++
++ public:
+   void call(Label* label);
+   void call(void* target);
+ 
+@@ -2042,6 +2119,11 @@
+ 
+  public:
+   void flushBuffer() { m_buffer.flushPool(); }
++  // Used right before recording a wasm trap site (FaultingCodeOffset): dump
++  // any pending constant pool so no pool body lands between the recorded
++  // offset and the faulting instruction. Unlike flushBuffer(), this does not
++  // turn every pending short-range `bc` into a branch-to-veneer.
++  void flushPoolForTrapSite() { m_buffer.flushPoolEntries(); }
+   void comment(const char* msg) { spew("; %s", msg); }
+   static uint32_t NopSize() { return 4; }
+ 
+diff -ruN a/js/src/jit/ppc64/CodeGenerator-ppc64.cpp b/js/src/jit/ppc64/CodeGenerator-ppc64.cpp
+--- a/js/src/jit/ppc64/CodeGenerator-ppc64.cpp	2026-10-09 17:01:19.765338636 -0700
++++ b/js/src/jit/ppc64/CodeGenerator-ppc64.cpp	2026-10-09 17:12:06.697948994 -0700
+@@ -192,7 +192,13 @@
+ void CodeGeneratorPPC64::visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool) {
+   MTableSwitch* mir = ool->mir();
+ 
++  // haltingAlign(sizeof(void*)) empties the constant pool and veneers all
++  // pending short-range branches; the no-pool window then guarantees (and
++  // asserts in DEBUG builds) that no pool or veneer island is dumped inside
++  // the table, whose entries are indexed from jumpLabel.
+   masm.haltingAlign(sizeof(void*));
++  masm.enterNoPool(std::max<size_t>(1, mir->numCases()) *
++                   (sizeof(void*) / sizeof(uint32_t)));
+   masm.bind(ool->jumpLabel());
+   masm.addCodeLabel(*ool->jumpLabel());
+ 
+@@ -206,6 +212,7 @@
+     cl.target()->bind(caseoffset);
+     masm.addCodeLabel(cl);
+   }
++  masm.leaveNoPool();
+ }
+ 
+ void CodeGeneratorPPC64::visitOutOfLineWasmTruncateCheck(
+diff -ruN a/js/src/jit/ppc64/MacroAssembler-ppc64.cpp b/js/src/jit/ppc64/MacroAssembler-ppc64.cpp
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	2026-10-09 17:12:06.650743544 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	2026-10-09 17:12:06.712000000 -0700
+@@ -994,7 +994,7 @@
+ // Wasm support.
+ 
+ FaultingCodeRange MacroAssembler::wasmTrapInstruction() {
+-  m_buffer.flushPool();  // see comment in wasmLoadImpl
++  flushPoolForTrapSite();  // see comment in wasmLoadImpl
+   FaultingCodeRange fco = FaultingCodeRange(currentOffset());
+   xs_trap();
+   return fco;
+@@ -1020,8 +1020,13 @@
+ 
+ CodeOffset MacroAssembler::wasmMarkedSlowCall(const wasm::CallSiteDesc& desc,
+                                               const Register reg) {
++  // wasmCheckSlowCallsite reads the instruction at the return address, so
++  // no pool or veneer island may be dumped between the bctrl and the
++  // marker. call(Register) is at most mr + mtctr + bctrl.
++  m_buffer.enterNoPool(4);
+   CodeOffset offset = call(desc, reg);
+   wasmMarkCallAsSlow();
++  m_buffer.leaveNoPool();
+   return offset;
+ }
+ 
+@@ -1733,8 +1738,14 @@
+   // Subtract a placeholder value (will be patched).
+   // Use addi with positive placeholder (128), which will be patched to
+   // addi with negative value. The immediate is in the addi instruction.
+-  as_addi(scratch, scratch, 128);
+-  CodeOffset patchPoint = CodeOffset(currentOffset());
++  BufferOffset addiOffset = as_addi(scratch, scratch, 128);
++  // patchSub32FromMemAndBranchIfNegative patches the instruction 4 bytes
++  // before patchPoint: derive it from the addi itself rather than from
++  // currentOffset(), which a pool/veneer island dumped right after the addi
++  // would shift.
++  CodeOffset patchPoint =
++      CodeOffset(addiOffset.assigned() ? addiOffset.getOffset() + 4
++                                       : currentOffset());
+   store32(scratch, address);
+   // Branch if result is negative (signed).
+   as_cmpwi(scratch, 0);
+@@ -2314,7 +2325,7 @@
+     masm.bind(&again);
+ 
+     if (access) {
+-      masm.flushBuffer();  // see comment in wasmLoadImpl
++      masm.flushPoolForTrapSite();  // see comment in wasmLoadImpl
+     }
+     FaultingCodeRange fcr(masm.currentOffset());
+     masm.as_lwarx(output, r0, scratch);
+@@ -2362,7 +2373,7 @@
+   masm.bind(&again);
+ 
+   if (access) {
+-    masm.flushBuffer();  // see comment in wasmLoadImpl
++    masm.flushPoolForTrapSite();  // see comment in wasmLoadImpl
+   }
+   FaultingCodeRange fcr(masm.currentOffset());
+   switch (nbytes) {
+@@ -2462,7 +2473,7 @@
+   masm.bind(&tryAgain);
+ 
+   if (access) {
+-    masm.flushBuffer();  // see comment in wasmLoadImpl
++    masm.flushPoolForTrapSite();  // see comment in wasmLoadImpl
+   }
+   FaultingCodeRange fcr(masm.currentOffset());
+   masm.as_ldarx(output.reg, r0, scratch);
+@@ -2544,7 +2555,7 @@
+     masm.bind(&again);
+ 
+     if (access) {
+-      masm.flushBuffer();  // see comment in wasmLoadImpl
++      masm.flushPoolForTrapSite();  // see comment in wasmLoadImpl
+     }
+     FaultingCodeRange fcr(masm.currentOffset());
+     masm.as_lwarx(output, r0, memTemp);
+@@ -2580,7 +2591,7 @@
+   masm.bind(&again);
+ 
+   if (access) {
+-    masm.flushBuffer();  // see comment in wasmLoadImpl
++    masm.flushPoolForTrapSite();  // see comment in wasmLoadImpl
+   }
+   FaultingCodeRange fcr(masm.currentOffset());
+   if (nbytes == 1) {
+@@ -2657,7 +2668,7 @@
+   masm.bind(&tryAgain);
+ 
+   if (access) {
+-    masm.flushBuffer();  // see comment in wasmLoadImpl
++    masm.flushPoolForTrapSite();  // see comment in wasmLoadImpl
+   }
+   FaultingCodeRange fcr(masm.currentOffset());
+   masm.as_ldarx(output.reg, r0, scratch);
+@@ -2715,7 +2726,7 @@
+     masm.bind(&again);
+ 
+     if (access) {
+-      masm.flushBuffer();  // see comment in wasmLoadImpl
++      masm.flushPoolForTrapSite();  // see comment in wasmLoadImpl
+     }
+     FaultingCodeRange fcr(masm.currentOffset());
+     masm.as_lwarx(output, r0, memTemp);
+@@ -2790,7 +2801,7 @@
+   masm.bind(&again);
+ 
+   if (access) {
+-    masm.flushBuffer();  // see comment in wasmLoadImpl
++    masm.flushPoolForTrapSite();  // see comment in wasmLoadImpl
+   }
+   FaultingCodeRange fcr(masm.currentOffset());
+   if (nbytes == 1) {
+@@ -2881,7 +2892,7 @@
+   masm.bind(&tryAgain);
+ 
+   if (access) {
+-    masm.flushBuffer();  // see comment in wasmLoadImpl
++    masm.flushPoolForTrapSite();  // see comment in wasmLoadImpl
+   }
+   FaultingCodeRange fcr(masm.currentOffset());
+   masm.as_ldarx(output.reg, r0, scratch);
+@@ -2966,7 +2977,7 @@
+     masm.bind(&again);
+ 
+     if (access) {
+-      masm.flushBuffer();  // see comment in wasmLoadImpl
++      masm.flushPoolForTrapSite();  // see comment in wasmLoadImpl
+     }
+     FaultingCodeRange fcr(masm.currentOffset());
+     masm.as_lwarx(scratch2, r0, scratch);
+@@ -3031,7 +3042,7 @@
+   masm.bind(&again);
+ 
+   if (access) {
+-    masm.flushBuffer();  // see comment in wasmLoadImpl
++    masm.flushPoolForTrapSite();  // see comment in wasmLoadImpl
+   }
+   FaultingCodeRange fcr(masm.currentOffset());
+   if (nbytes == 1) {
+@@ -3463,7 +3474,7 @@
+   as_addi(probeAddr, ptr, int16_t(size - 1));
+   // Record the probe as a wasm trap site so its SIGSEGV dispatches
+   // through the wasm signal handler the same way the real access would.
+-  m_buffer.flushPool();
++  flushPoolForTrapSite();
+   FaultingCodeRange fcr(currentOffset());
+   // Probing 1-byte load; result discarded.
+   as_lbzx(probeAddr, memoryBase, probeAddr);
+@@ -3511,7 +3522,7 @@
+   // otherwise a pool body inserted between the recorded offset and the
+   // emitted load shifts the load and leaves the pool guard branch at the
+   // recorded offset (SummarizeTrapInstruction then rejects the trap site).
+-  m_buffer.flushPool();
++  flushPoolForTrapSite();
+   FaultingCodeRange fcr(currentOffset());
+ 
+   switch (access.type()) {
+@@ -3721,7 +3732,7 @@
+ #endif
+   FaultingCodeRange fcr;
+   if (!deferTrapSite) {
+-    m_buffer.flushPool();
++    flushPoolForTrapSite();
+     fcr = FaultingCodeRange(currentOffset());
+   }
+ 
+@@ -3762,7 +3773,7 @@
+       UseScratchRegisterScope temps(asMasm());
+       Register tmp = temps.Acquire();
+       as_mfvsrd(tmp, value.fpu());
+-      m_buffer.flushPool();
++      flushPoolForTrapSite();
+       fcr = FaultingCodeRange(currentOffset());
+       as_stdbrx(tmp, memoryBase, ptr);
+     }
+@@ -3778,7 +3789,7 @@
+       UseScratchRegisterScope temps(asMasm());
+       Register tmp = temps.Acquire();
+       asMasm().moveFloat32ToGPR(value.fpu(), tmp);
+-      m_buffer.flushPool();
++      flushPoolForTrapSite();
+       fcr = FaultingCodeRange(currentOffset());
+       as_stwbrx(tmp, memoryBase, ptr);
+     }
+@@ -3792,7 +3803,7 @@
+         // wasm v128 memory is little-endian: byte-reverse (xxbrq) into a
+         // scratch, then store. Record the trap site at the faulting stxvx.
+         as_xxbrq(ScratchSimd128Reg, value.fpu());
+-        m_buffer.flushPool();
++        flushPoolForTrapSite();
+         fcr = FaultingCodeRange(currentOffset());
+         as_stxvx(ScratchSimd128Reg, memoryBase, ptr);
+ #else
+@@ -3808,7 +3819,7 @@
+ #else
+         as_xxpermdi(ScratchSimd128Reg, value.fpu(), value.fpu(), 2);
+ #endif
+-        m_buffer.flushPool();  // see comment in wasmLoadImpl
++        flushPoolForTrapSite();  // see comment in wasmLoadImpl
+         fcr = FaultingCodeRange(currentOffset());
+         as_stxvd2x(ScratchSimd128Reg, memoryBase, ptr);
+       }
+@@ -3838,7 +3849,7 @@
+   wasmProbeLastByte(access, memoryBase, ptr);
+ 
+   asMasm().memoryBarrierBefore(access.sync());
+-  m_buffer.flushPool();  // see comment in wasmLoadImpl
++  flushPoolForTrapSite();  // see comment in wasmLoadImpl
+   FaultingCodeRange fcr(currentOffset());
+ 
+   switch (access.type()) {
+@@ -3912,7 +3923,7 @@
+   wasmProbeLastByte(access, memoryBase, ptr);
+ 
+   asMasm().memoryBarrierBefore(access.sync());
+-  m_buffer.flushPool();  // see comment in wasmLoadImpl
++  flushPoolForTrapSite();  // see comment in wasmLoadImpl
+   FaultingCodeRange fcr(currentOffset());
+ 
+   switch (access.type()) {
+diff -ruN a/js/src/jit/ppc64/MacroAssembler-ppc64.h b/js/src/jit/ppc64/MacroAssembler-ppc64.h
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.h	2026-10-09 17:12:06.651581419 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.h	2026-10-09 17:12:06.728856910 -0700
+@@ -45,10 +45,12 @@
+ //   same budget:
+ //     - load64 stanza (8) + mtctr + bctr[l]  = 10  (bound call/jump)
+ //     - 9 NOPs + bl                          = 10  (short bound call)
+-//     - xs_trap_tagged(TAG) + chain + 8 NOPs = 10  (fwd-ref stanza)
++//     - xs_trap_tagged(TAG) + chain + 8 NOPs = 10  (fwd-ref stanza; now
++//       only emitted by call(Label*) as CallTag -- forward jump(Label*) and
++//       ma_b(cond, Label*) emit a single short b/bc, see PPCBuffer)
+ //
+-// kNoPoolCondLongBranchInsnsP8Max (14): conditional long branch, POWER8
+-//   Overflow worst case. POWER8 has no mcrxrx so overflow/carry test is
++// kNoPoolCondLongBranchInsnsP8Max (14): conditional long branch to a bound
++//   label out of bc range, POWER8 Overflow worst case. POWER8 has no mcrxrx so overflow/carry test is
+ //   mfxer+rlwinm+mtcrf (3 insns) on top of the base shape. Budget =
+ //   3 (XER inspection) + 1 (bc) + 8 (load64 stanza) + 2 (mtctr+bctr) = 14.
+ static constexpr size_t kNoPoolLoad64StanzaInsns = 8;
+@@ -612,22 +614,17 @@
+       addLongJump(bo, BufferOffset(label->offset()));
+       return bo;
+     }
+-    // Unbound label: emit trap-tagged stanza (10 slots).
+-    m_buffer.enterNoPool(kNoPoolPatchableBranchInsns);
+-    BufferOffset bo = xs_trap_tagged(BTag);
+-    writeInst(label->used() ? label->offset() : LabelBase::INVALID_OFFSET);
+-    writeInst(NopInst);
+-    writeInst(NopInst);
+-    writeInst(NopInst);
+-    writeInst(NopInst);
+-    writeInst(NopInst);
+-    writeInst(NopInst);
+-    writeInst(NopInst);
+-    writeInst(NopInst);
+-    m_buffer.leaveNoPool();
+-    if (!oom()) {
+-      label->use(bo.getOffset());
+-    }
++    return emitUnboundJump(label);
++  }
++
++  // Forward jump to an unbound label: a single `b` (+/-32 MiB) whose LI field
++  // holds the label-use chain link until bind() patches in the real
++  // displacement. Not registered as a short-range branch (see PPCBuffer).
++  // Returns the offset of the `b` itself (toggledJump relies on this).
++  BufferOffset emitUnboundJump(Label* label) {
++    MOZ_ASSERT(!label->bound());
++    BufferOffset bo = as_b(0);
++    linkShortBranchUse(bo, label);
+     return bo;
+   }
+   void jump(Register reg) {
+@@ -697,25 +694,22 @@
+       addLongJump(boLoad, BufferOffset(label->offset()));
+       return;
+     }
+-    // Forward reference: emit BCTag stanza.
+-    // XER ops(0-3) + cror(0-1) + bc(1) + trap_tagged(1) + chain(1) + 8 NOPs.
+-    // P8 Overflow: mfxer+rlwinm+mtcrf+bc+trap+chain+8NOPs = 14 max.
+-    m_buffer.enterNoPool(kNoPoolCondLongBranchInsnsP8Max);
+-    as_bc((int16_t)44, InvertCondition(cond));
+-    BufferOffset bo = xs_trap_tagged(BCTag);
+-    writeInst(label->used() ? label->offset() : LabelBase::INVALID_OFFSET);
+-    writeInst(NopInst);
+-    writeInst(NopInst);
+-    writeInst(NopInst);
+-    writeInst(NopInst);
+-    writeInst(NopInst);
+-    writeInst(NopInst);
+-    writeInst(NopInst);
+-    writeInst(NopInst);
+-    m_buffer.leaveNoPool();
+-    if (!oom()) {
+-      label->use(bo.getOffset());
++    // Forward reference: a single short `bc` to the target. Its BD field
++    // holds the label-use chain link until bind(); its deadline (last offset
++    // it reaches, +32764) is registered with the buffer, which inserts a `b`
++    // veneer with the next pool if the label is not bound in time (see
++    // Assembler::PatchShortRangeBranchToVeneer).
++    // Window: XER ops (0-3, POWER8 Overflow) or cror/crandc (0-1, double
++    // conditions) + bc = 4 instructions max, plus the one new deadline (so
++    // enterNoPool accounts for its potential veneer).
++    m_buffer.enterNoPool(4, /* maxNewDeadlines = */ 1);
++    BufferOffset bo = as_bc((int16_t)0, cond);
++    if (!oom() && bo.assigned()) {
++      m_buffer.registerBranchDeadline(
++          BcRangeIdx, BufferOffset(bo.getOffset() + BcMaxForwardOffset));
+     }
++    m_buffer.leaveNoPool();
++    linkShortBranchUse(bo, label);
+   }
+ 
+   // Set dest = 1 if CR0 satisfies cond, else dest = 0.
+@@ -2037,11 +2031,15 @@
+   void zeroDouble(FloatRegister reg) { as_xxlxor(reg, reg, reg); }
+ 
+   void writeCodePointer(CodeLabel* label) {
++    // Keep the two words together and bind patchAt to the first of them, not
++    // to an offset where a pool or veneer island might be dumped.
++    m_buffer.enterNoPool(2);
+     label->patchAt()->bind(currentOffset());
+     label->setLinkMode(CodeLabel::RawPointer);
+     m_buffer.ensureSpace(sizeof(void*));
+     writeInst(-1);
+     writeInst(-1);
++    m_buffer.leaveNoPool();
+   }
+   void writeDataRelocation(const Value& val) {
+     if (val.isGCThing()) {
+diff -ruN a/js/src/jit/shared/IonAssemblerBufferWithConstantPools.h b/js/src/jit/shared/IonAssemblerBufferWithConstantPools.h
+--- a/js/src/jit/shared/IonAssemblerBufferWithConstantPools.h	2026-10-09 17:01:19.715573189 -0700
++++ b/js/src/jit/shared/IonAssemblerBufferWithConstantPools.h	2026-10-09 17:12:06.703645203 -0700
+@@ -1092,6 +1092,24 @@
+     finishPool(SIZE_MAX);
+   }
+ 
++  // Like flushPool(), dump the pending constant pool entries (if any), but
++  // only emit veneers for short-range branches that would expire within the
++  // ShortRangeBranchHysteresis window. flushPool() passes SIZE_MAX, which
++  // turns *every* pending short-range branch into a branch-to-veneer; this
++  // variant keeps branches that are not about to expire short.
++  //
++  // After this returns (and absent OOM) the constant pool is empty and no
++  // registered short-range branch expires within ShortRangeBranchHysteresis
++  // bytes, so the next few plain instructions are emitted without an
++  // intervening pool or veneer island.
++  void flushPoolEntries() {
++    if (this->oom()) {
++      return;
++    }
++    JitSpew(JitSpew_Pools, "Requesting a pool flush (keeping short branches)");
++    finishPool(0);
++  }
++
+   // Whether the buffer is inside an enterNoPool region, where allocEntry with
+   // pool data is forbidden. Lets emitters choose a poolless fallback sequence.
+   bool poolsInhibited() const { return inhibitPools_ > 0; }

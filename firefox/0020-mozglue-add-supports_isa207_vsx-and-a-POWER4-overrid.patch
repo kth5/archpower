@@ -1,0 +1,107 @@
+From bc317355559565ceb414a12c9c1484c56ca899ee Mon Sep 17 00:00:00 2001
+From: daedalao <daedalao@hotmail.com>
+Date: Sat, 10 Oct 2026 12:08:54 -0700
+Subject: [PATCH 20/22] mozglue: add supports_isa207_vsx() and a POWER4
+ override to mozilla/ppc.h
+
+mozilla/ppc.h only answers "has VSX" (POWER7 and later) and "has ISA 3.0"
+(POWER9). Code built with -mcpu=power8 -mvsx needs ISA 2.07 as well, so a
+POWER7 must not take those paths either. Add supports_isa207_vsx(), true
+when AT_HWCAP has PPC_FEATURE_HAS_VSX and AT_HWCAP2 has
+PPC_FEATURE2_ARCH_2_07.
+
+Also honour MOZ_PPC64_FORCE_POWER4=1 (the variable the PPC64 JIT uses for
+its pre-POWER8 tier): it clears the VSX, VSX-3 and ISA 2.07 flags while
+keeping AltiVec, which makes a POWER8 or newer machine take the same code
+paths as a PowerPC 970. This is how the baseline fallbacks get exercised
+without 970 hardware.
+---
+ mozglue/build/ppc.cpp | 17 +++++++++++++++++
+ mozglue/build/ppc.h   | 15 +++++++++++++++
+ 2 files changed, 32 insertions(+)
+
+diff --git a/mozglue/build/ppc.cpp b/mozglue/build/ppc.cpp
+index cc7626f760..a177d11a1f 100644
+--- a/mozglue/build/ppc.cpp
++++ b/mozglue/build/ppc.cpp
+@@ -14,11 +14,17 @@
+ #  ifndef PPC_FEATURE2_ARCH_3_00
+ #    define PPC_FEATURE2_ARCH_3_00 0x00800000
+ #  endif
++#  ifndef PPC_FEATURE2_ARCH_2_07
++#    define PPC_FEATURE2_ARCH_2_07 0x80000000
++#  endif
++#  include <stdlib.h>
++#  include <string.h>
+ #endif
+ 
+ const unsigned PPC_FLAG_VMX = 1;
+ const unsigned PPC_FLAG_VSX = 2;
+ const unsigned PPC_FLAG_VSX3 = 4;
++const unsigned PPC_FLAG_ISA207_VSX = 8;
+ 
+ static signed get_ppc_cpu_flags(void) {
+   // This could be expensive, so cache the result.
+@@ -40,9 +46,19 @@ static signed get_ppc_cpu_flags(void) {
+   if (cap & PPC_FEATURE_HAS_VSX) {
+     cpu_flags |= PPC_FLAG_VSX;
+   }
++  if ((cap & PPC_FEATURE_HAS_VSX) && (cap2 & PPC_FEATURE2_ARCH_2_07)) {
++    cpu_flags |= PPC_FLAG_ISA207_VSX;
++  }
+   if (cap2 & PPC_FEATURE2_ARCH_3_00) {
+     cpu_flags |= PPC_FLAG_VSX3;
+   }
++
++  // Testing aid: behave like a pre-POWER7 CPU (PowerPC 970 class) that has
++  // AltiVec but no VSX. The JIT honours the same variable.
++  const char* force = getenv("MOZ_PPC64_FORCE_POWER4");
++  if (force && *force && strcmp(force, "0") != 0) {
++    cpu_flags &= ~(PPC_FLAG_VSX | PPC_FLAG_VSX3 | PPC_FLAG_ISA207_VSX);
++  }
+ #else
+   // Non-Linux detection here. Currently, on systems other than Linux,
+   // no CPU SIMD features will be detected.
+@@ -56,5 +72,6 @@ namespace ppc_private {
+ bool vmx_enabled = !!(get_ppc_cpu_flags() & PPC_FLAG_VMX);
+ bool vsx_enabled = !!(get_ppc_cpu_flags() & PPC_FLAG_VSX);
+ bool vsx3_enabled = !!(get_ppc_cpu_flags() & PPC_FLAG_VSX3);
++bool isa207_vsx_enabled = !!(get_ppc_cpu_flags() & PPC_FLAG_ISA207_VSX);
+ }  // namespace ppc_private
+ }  // namespace mozilla
+diff --git a/mozglue/build/ppc.h b/mozglue/build/ppc.h
+index 9527d8dadd..9053448193 100644
+--- a/mozglue/build/ppc.h
++++ b/mozglue/build/ppc.h
+@@ -16,6 +16,7 @@ namespace ppc_private {
+ extern bool MFBT_DATA vmx_enabled;
+ extern bool MFBT_DATA vsx_enabled;
+ extern bool MFBT_DATA vsx3_enabled;
++extern bool MFBT_DATA isa207_vsx_enabled;
+ }  // namespace ppc_private
+ 
+ inline bool supports_vmx() {
+@@ -34,6 +35,20 @@ inline bool supports_vsx() {
+ #endif
+ }
+ 
++// True when the CPU implements Power ISA 2.07 (POWER8) including VSX, i.e.
++// when code compiled with -mcpu=power8 -mvsx may run. Pre-POWER8 CPUs that
++// do have VSX (POWER7) and CPUs without it (PowerPC 970, POWER5/6) report
++// false. Setting MOZ_PPC64_FORCE_POWER4=1 in the environment forces this,
++// supports_vsx() and supports_vsx3() to false so that the baseline code
++// paths can be exercised on POWER8 and newer hardware.
++inline bool supports_isa207_vsx() {
++#ifdef __powerpc__
++  return ppc_private::isa207_vsx_enabled;
++#else
++  return false;
++#endif
++}
++
+ inline bool supports_vsx3() {
+ #ifdef __powerpc__
+   return ppc_private::vsx3_enabled;
+-- 
+2.55.0
+

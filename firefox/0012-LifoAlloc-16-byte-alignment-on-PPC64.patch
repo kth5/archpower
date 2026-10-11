@@ -1,0 +1,50 @@
+From: daedalao <daedalao@hotmail.com>
+Date: Thu, 9 Oct 2026 15:10:00 -0700
+Subject: [PATCH] LifoAlloc: 16-byte alignment on PPC64 (fixes Ion crashes on
+ big-endian)
+
+FloatRegisters::SetType on PPC64 is __uint128_t (3 kinds x 32 registers do
+not fit in 64 bits), so every LSafepoint / LiveRegisterSet has alignof 16.
+These objects are placement-new'ed into TempAllocator / LifoAlloc memory,
+which only guarantees LIFO_ALLOC_ALIGN = 8.
+
+With -mcpu=powerpc64 (no VSX) GCC zero-initializes the 16-byte members with
+AltiVec `stvx`, which silently ignores the low four bits of the effective
+address. For an LSafepoint at an 8-mod-16 address the constructor therefore
+zeroes 8 bytes *before* the object (clobbering whatever LifoAlloc handed out
+just before it) and leaves the low 8 bytes of liveRegs_.fpus() holding
+LifoAlloc's 0xce poison. Observed on big-endian POWER8 as
+  Assertion failure: safepoint->liveRegs().empty(), RegisterAllocator.cpp
+in a debug shell, and in release builds as random register-allocator
+crashes (BacktrackingAllocator::mergeAndQueueRegisters) and Ion code loading
+through r0 (`ld r8,0(0)`), i.e. Firefox dying within seconds unless
+javascript.options.ion=false.
+
+ppc64le builds use -mcpu=power8/power9 and get VSX stxvd2x, which tolerates
+misalignment, so the same under-alignment is harmless there. Raising
+LIFO_ALLOC_ALIGN to 16 on PPC64 gives the objects the alignment the compiler
+is entitled to assume.
+---
+ js/src/ds/LifoAlloc.h | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+--- a/js/src/ds/LifoAlloc.h
++++ b/js/src/ds/LifoAlloc.h
+@@ -387,7 +387,17 @@
+   }
+ };
+ 
++#if defined(__powerpc64__)
++// FloatRegisters::SetType is __uint128_t on PPC64, so LSafepoint and the
++// other LiveRegisterSet holders placed in TempAllocator memory require 16-byte
++// alignment. GCC relies on it: without VSX it zeroes such members with stvx,
++// which drops the low four address bits, so an 8-byte-aligned object is only
++// half initialized and the 8 bytes before it are clobbered. Provide the
++// alignment the compiler assumes.
++static const size_t LIFO_ALLOC_ALIGN = 16;
++#else
+ static const size_t LIFO_ALLOC_ALIGN = 8;
++#endif
+ 
+ MOZ_ALWAYS_INLINE
+ uint8_t* AlignPtr(uint8_t* orig) {

@@ -1,0 +1,54 @@
+From 9afef164bf94012be3a28780470b6617068bf4f4 Mon Sep 17 00:00:00 2001
+From: daedalao <daedalao@hotmail.com>
+Date: Sat, 10 Oct 2026 12:08:55 -0700
+Subject: [PATCH 21/22] libwebp: select the VSX DSP code at runtime on ppc64
+
+On ppc64 media/libwebp/src/dsp/moz.build always builds the *_vsx.c files
+with -mcpu=power8 -mvsx and defines WEBP_HAVE_VSX, so every DSP init
+function asks VP8GetCPUInfo(kVSX) before installing them. Mozilla's
+MozCPUInfo answered that question at compile time: it returned 1 when
+src/moz/cpu.cpp itself was built with __VSX__ and 0 otherwise. A
+little-endian build (POWER8 baseline) therefore used them everywhere, and
+a big-endian build with the distribution's baseline flags never used
+them, even on POWER8/POWER9.
+
+Answer kVSX from mozilla::supports_isa207_vsx() instead, which checks
+AT_HWCAP/AT_HWCAP2 for VSX and ISA 2.07. Big-endian builds now get the
+VSX DSP functions on POWER8 and newer and keep the C code on CPUs without
+VSX such as the PowerPC 970; MOZ_PPC64_FORCE_POWER4=1 forces the C code.
+---
+ media/libwebp/src/moz/cpu.cpp | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/media/libwebp/src/moz/cpu.cpp b/media/libwebp/src/moz/cpu.cpp
+index 82986d2f63..205a225424 100644
+--- a/media/libwebp/src/moz/cpu.cpp
++++ b/media/libwebp/src/moz/cpu.cpp
+@@ -9,6 +9,9 @@
+ #include "../dsp/dsp.h"
+ #include "mozilla/arm.h"
+ #include "mozilla/SSE.h"
++#if defined(__powerpc64__)
++#include "mozilla/ppc.h"
++#endif
+ 
+ extern "C" {
+ extern VP8CPUInfo VP8GetCPUInfo;
+@@ -36,9 +39,12 @@ static int MozCPUInfo(CPUFeature feature)
+     case kMSA:
+       return 1;
+ #endif
+-#if defined(WEBP_USE_VSX)
++#if defined(__powerpc64__)
++    // On ppc64 the *_vsx.c files are always built, with -mcpu=power8 -mvsx
++    // regardless of the global flags (see dsp/moz.build), so only hand them
++    // out on a CPU that can run them.
+     case kVSX:
+-      return 1;
++      return mozilla::supports_isa207_vsx();
+ #endif
+     default:
+       return 0;
+-- 
+2.55.0
+

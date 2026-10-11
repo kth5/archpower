@@ -1,0 +1,292 @@
+From: Jordan Bettcher <thebettcher@gmail.com>
+Date: Sun, 04 Oct 2026 12:30:00 -0700
+Subject: [PATCH] ppc64: vectorize mozglue SIMD string search with VSX
+
+On PPC64 the string search helpers in mozglue/misc/SIMD.cpp (memchr16/32/64
+and memchr2x8/2x16, used by String.prototype.indexOf and friends) never
+vectorize: the whole SIMD implementation is guarded by MOZILLA_PRESUME_SSE2,
+so everything other than memchr8 falls back to scalar loops.
+
+Add a VSX implementation for the non-SSE2 path:
+
+ - memchr16/32/64 compare four 16-byte blocks per iteration and rescan
+   scalar only once something matched. memchr64 additionally needs
+   __POWER8_VECTOR__ for the doubleword compare.
+ - memchr2x16 loads each block twice, one element apart, so a pair is two
+   compares and an AND with no state carried across blocks.
+ - memchr2x8 keeps hopping between candidates with libc memchr while the
+   first value is rare, and switches to the pair search once it keeps
+   stopping on candidates that are not followed by the second value.
+ - memchr8 is left on libc memchr, which is already vectorized on POWER8
+   and faster than a 16-byte-per-iteration loop.
+
+The code is gated on __VSX__ at compile time only. No movemask equivalent
+is needed, which keeps it endianness-neutral. Needles are cast to the
+unsigned lane type before vec_splats: with clang a char16_t otherwise
+promotes to int and splats the wrong lane width, and uint64_t is ambiguous.
+
+Tested natively on ppc64le (POWER8) with clang 22 and gcc 16 against a
+scalar reference, 400k random trials per function plus a page-boundary
+over-read check. 64K-element scans without a match, clang -O2 -mcpu=power8:
+
+    memchr16                  57.4 us ->  6.0 us
+    memchr32 (8K elements)     7.2 us ->  1.4 us
+    memchr64 (8K elements)     7.2 us ->  2.8 us
+    memchr2x16                56.7 us -> 13.4 us
+    memchr2x8, v1 rare         1.5 us ->  1.5 us
+    memchr2x8, v1 everywhere   520 us ->  6.5 us
+
+---
+--- a/mozglue/misc/SIMD.cpp
++++ b/mozglue/misc/SIMD.cpp
+@@ -18,6 +18,12 @@
+ 
+ #endif
+ 
++#if defined(__GNUC__) && defined(__VSX__)
++
++#  include <altivec.h>
++
++#endif
++
+ namespace mozilla {
+ 
+ template <typename TValue>
+@@ -511,6 +517,147 @@
+ 
+ #else
+ 
++#  if defined(__GNUC__) && defined(__VSX__)
++
++// AltiVec/VSX implementation for PPC64. This is gated at compile time only:
++// when __VSX__ is defined the compiler is already free to emit VSX anywhere
++// in this file, so a runtime check would not buy anything.
++
++// Maps the size of the value types of the memchrX functions below to the
++// matching 16-byte vector type. All lanes are unsigned, which is
++// bit-preserving, so lane-wise equality is exact regardless of the scalar
++// type used at the callsite. The explicit lane type also matters for
++// vec_splats: char16_t would otherwise promote to int and pick the wrong
++// overload, and uint64_t (unsigned long) is ambiguous.
++template <size_t Size>
++struct VSXLaneFor;
++
++template <>
++struct VSXLaneFor<1> {
++  using vector_t = __vector unsigned char;
++  using scalar_t = unsigned char;
++};
++
++template <>
++struct VSXLaneFor<2> {
++  using vector_t = __vector unsigned short;
++  using scalar_t = unsigned short;
++};
++
++template <>
++struct VSXLaneFor<4> {
++  using vector_t = __vector unsigned int;
++  using scalar_t = unsigned int;
++};
++
++#    ifdef __POWER8_VECTOR__
++template <>
++struct VSXLaneFor<8> {
++  using vector_t = __vector unsigned long long;
++  using scalar_t = unsigned long long;
++};
++#    endif
++
++template <typename TValue>
++static inline typename VSXLaneFor<sizeof(TValue)>::vector_t LoadVSX(
++    uintptr_t addr) {
++  using Lane = typename VSXLaneFor<sizeof(TValue)>::scalar_t;
++  return vec_xl(0, reinterpret_cast<const Lane*>(addr));
++}
++
++template <typename TMask>
++static inline bool AnyLaneSetVSX(TMask mask) {
++  const __vector unsigned char zero = vec_splats(static_cast<unsigned char>(0));
++  return vec_any_ne(reinterpret_cast<__vector unsigned char>(mask), zero);
++}
++
++// PPC64 has no cheap movemask equivalent, so the hot loops only ask "did
++// anything in here match?" and the block that did is rescanned scalar. That
++// also keeps the code endianness-neutral.
++template <typename TValue>
++const TValue* FindInBufferVSX(const TValue* ptr, TValue value, size_t length) {
++  using V = typename VSXLaneFor<sizeof(TValue)>::vector_t;
++  using Lane = typename VSXLaneFor<sizeof(TValue)>::scalar_t;
++
++  const V needle = vec_splats(static_cast<Lane>(value));
++
++  uintptr_t cur = reinterpret_cast<uintptr_t>(ptr);
++  const uintptr_t end = cur + length * sizeof(TValue);
++
++  // Skip four blocks at a time while none of them match.
++  while (end - cur >= 4 * sizeof(V)) {
++    const V a = LoadVSX<TValue>(cur);
++    const V b = LoadVSX<TValue>(cur + sizeof(V));
++    const V c = LoadVSX<TValue>(cur + 2 * sizeof(V));
++    const V d = LoadVSX<TValue>(cur + 3 * sizeof(V));
++    if (AnyLaneSetVSX(vec_or(
++            vec_or(vec_cmpeq(a, needle), vec_cmpeq(b, needle)),
++            vec_or(vec_cmpeq(c, needle), vec_cmpeq(d, needle))))) {
++      break;
++    }
++    cur += 4 * sizeof(V);
++  }
++
++  while (end - cur >= sizeof(V)) {
++    if (vec_any_eq(LoadVSX<TValue>(cur), needle)) {
++      break;
++    }
++    cur += sizeof(V);
++  }
++
++  // Either the block at cur matched, or less than a block is left.
++  const TValue* p = reinterpret_cast<const TValue*>(cur);
++  const TValue* bufferEnd = reinterpret_cast<const TValue*>(end);
++  while (p < bufferEnd) {
++    if (*p == value) {
++      return p;
++    }
++    p++;
++  }
++  return nullptr;
++}
++
++// Searches for v1 immediately followed by v2. Each iteration loads the block
++// at cur and the block one element further on, so every pair starting in the
++// block is checked with two compares and no state is carried across blocks.
++template <typename TValue>
++const TValue* FindTwoInBufferVSX(const TValue* ptr, TValue v1, TValue v2,
++                                 size_t length) {
++  using V = typename VSXLaneFor<sizeof(TValue)>::vector_t;
++  using Lane = typename VSXLaneFor<sizeof(TValue)>::scalar_t;
++
++  const V needle1 = vec_splats(static_cast<Lane>(v1));
++  const V needle2 = vec_splats(static_cast<Lane>(v2));
++
++  uintptr_t cur = reinterpret_cast<uintptr_t>(ptr);
++  const uintptr_t end = cur + length * sizeof(TValue);
++
++  while (end - cur >= sizeof(V) + sizeof(TValue)) {
++    const V first = LoadVSX<TValue>(cur);
++    const V second = LoadVSX<TValue>(cur + sizeof(TValue));
++    if (AnyLaneSetVSX(
++            vec_and(vec_cmpeq(first, needle1), vec_cmpeq(second, needle2)))) {
++      break;
++    }
++    cur += sizeof(V);
++  }
++
++  // Either a pair starts in the block at cur, or at most a block is left.
++  const TValue* p = reinterpret_cast<const TValue*>(cur);
++  const TValue* bufferEnd = reinterpret_cast<const TValue*>(end);
++  while (p + 1 < bufferEnd) {
++    if (p[0] == v1 && p[1] == v2) {
++      return p;
++    }
++    p++;
++  }
++  return nullptr;
++}
++
++#  endif
++
++// libc's memchr is already vectorized on every platform that gets here, so
++// there is nothing to gain from doing our own for 8-bit values.
+ const char* SIMD::memchr8(const char* ptr, char value, size_t length) {
+   const void* result = ::memchr(reinterpret_cast<const void*>(ptr),
+                                 static_cast<int>(value), length);
+@@ -523,7 +670,11 @@
+ 
+ const char16_t* SIMD::memchr16(const char16_t* ptr, char16_t value,
+                                size_t length) {
++#  if defined(__GNUC__) && defined(__VSX__)
++  return FindInBufferVSX(ptr, value, length);
++#  else
+   return FindInBufferNaive<char16_t>(ptr, value, length);
++#  endif
+ }
+ 
+ const char16_t* SIMD::memchr16SSE2(const char16_t* ptr, char16_t value,
+@@ -533,31 +684,64 @@
+ 
+ const uint32_t* SIMD::memchr32(const uint32_t* ptr, uint32_t value,
+                                size_t length) {
++#  if defined(__GNUC__) && defined(__VSX__)
++  return FindInBufferVSX(ptr, value, length);
++#  else
+   return FindInBufferNaive<uint32_t>(ptr, value, length);
++#  endif
+ }
+ 
+ const uint64_t* SIMD::memchr64(const uint64_t* ptr, uint64_t value,
+                                size_t length) {
++#  if defined(__GNUC__) && defined(__VSX__) && defined(__POWER8_VECTOR__)
++  return FindInBufferVSX(ptr, value, length);
++#  else
+   return FindInBufferNaive<uint64_t>(ptr, value, length);
++#  endif
+ }
+ 
+ const char* SIMD::memchr2x8(const char* ptr, char v1, char v2, size_t length) {
+   const char* end = ptr + length - 1;
++#  if defined(__GNUC__) && defined(__VSX__)
++  // Hopping from one v1 to the next with memchr is the fastest thing to do
++  // as long as v1 is rare, but it degrades badly once it keeps stopping on a
++  // v1 that is not followed by v2. After a few of those in close succession,
++  // hand the rest of the buffer to the pair search, whose cost does not
++  // depend on how common v1 is.
++  const ptrdiff_t kCloseHit = 64;
++  const unsigned kMaxCloseHits = 4;
++  unsigned closeHits = 0;
++#  endif
+   while (ptr < end) {
+-    ptr = memchr8(ptr, v1, end - ptr);
+-    if (!ptr) {
++    const char* hit = memchr8(ptr, v1, end - ptr);
++    if (!hit) {
+       return nullptr;
+     }
+-    if (ptr[1] == v2) {
+-      return ptr;
++    if (hit[1] == v2) {
++      return hit;
+     }
+-    ptr++;
++#  if defined(__GNUC__) && defined(__VSX__)
++    closeHits = hit - ptr < kCloseHit ? closeHits + 1 : 0;
++    ptr = hit + 1;
++    if (closeHits == kMaxCloseHits) {
++      const unsigned char* result = FindTwoInBufferVSX(
++          reinterpret_cast<const unsigned char*>(ptr),
++          static_cast<unsigned char>(v1), static_cast<unsigned char>(v2),
++          static_cast<size_t>(end + 1 - ptr));
++      return reinterpret_cast<const char*>(result);
++    }
++#  else
++    ptr = hit + 1;
++#  endif
+   }
+   return nullptr;
+ }
+ 
+ const char16_t* SIMD::memchr2x16(const char16_t* ptr, char16_t v1, char16_t v2,
+                                  size_t length) {
++#  if defined(__GNUC__) && defined(__VSX__)
++  return FindTwoInBufferVSX(ptr, v1, v2, length);
++#  else
+   const char16_t* end = ptr + length - 1;
+   while (ptr < end) {
+     ptr = memchr16(ptr, v1, end - ptr);
+@@ -570,6 +754,7 @@
+     ptr++;
+   }
+   return nullptr;
++#  endif
+ }
+ 
+ #endif

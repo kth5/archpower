@@ -1,0 +1,57 @@
+From 868a0e377fe4497be726e3f055025d2db0847367 Mon Sep 17 00:00:00 2001
+From: daedalao <daedalao@hotmail.com>
+Date: Sat, 10 Oct 2026 12:40:12 -0700
+Subject: [PATCH] PPC64: disable wasm on the POWER4 tier
+
+The ppc64 wasm compilers depend on ISA 2.07 + VSX throughout: SIMD128
+is lowered to VSX, sub-word atomics use lbarx/lharx/stbcx./sthcx.,
+the little-endian heap on big-endian hosts uses ldbrx/stdbrx and VSX
+byte reversal, and the FP truncations use fctiduz. Porting all of that
+to a PowerPC 970 is not worth it, so report no wasm platform support
+when HasISA207() is false, and no wasm SIMD.
+
+On POWER8 and later nothing changes. On the 970 Firefox falls back to
+running without wasm, like on other platforms without wasm support.
+---
+ js/src/jit/ppc64/Assembler-ppc64.h |  3 ++-
+ js/src/wasm/WasmFeatures.cpp       | 10 ++++++++++
+ 2 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/js/src/jit/ppc64/Assembler-ppc64.h b/js/src/jit/ppc64/Assembler-ppc64.h
+index 6f778e8ed5..37775ae4ba 100644
+--- a/js/src/jit/ppc64/Assembler-ppc64.h
++++ b/js/src/jit/ppc64/Assembler-ppc64.h
+@@ -2097,7 +2097,8 @@ class Assembler : public AssemblerShared {
+ 
+   // --- Static capability queries.
+   static bool SupportsFloatingPoint() { return true; }
+-  static bool SupportsWasmSimd() { return true; }
++  // Wasm SIMD128 is lowered to VSX; the POWER4 tier has no wasm at all.
++  static bool SupportsWasmSimd() { return HasISA207(); }
+   static bool SupportsUnalignedAccesses() { return true; }
+   static bool SupportsFastUnalignedFPAccesses() { return true; }
+   // POWER9 has scalar FP16 hardware (xscvdphp/xscvhpdp); POWER8 doesn't.
+diff --git a/js/src/wasm/WasmFeatures.cpp b/js/src/wasm/WasmFeatures.cpp
+index 73575b9a48..887dcb6200 100644
+--- a/js/src/wasm/WasmFeatures.cpp
++++ b/js/src/wasm/WasmFeatures.cpp
+@@ -254,6 +254,16 @@ bool wasm::HasPlatformSupport() {
+     return false;
+   }
+ 
++#ifdef JS_CODEGEN_PPC64
++  // The ppc64 wasm compilers assume ISA 2.07 + VSX (POWER8): VSX for SIMD128
++  // and the FP/GPR moves, lbarx/lharx for sub-word atomics, ldbrx/stdbrx for
++  // the little-endian heap on big-endian hosts. The POWER4 tier (PowerPC
++  // 970) has none of these, so wasm is unavailable there.
++  if (!jit::HasISA207()) {
++    return false;
++  }
++#endif
++
+   if (gc::SystemPageSize() > wasm::StandardPageSizeBytes) {
+     return false;
+   }
+-- 
+2.55.0
+

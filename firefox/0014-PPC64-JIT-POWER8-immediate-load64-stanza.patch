@@ -1,0 +1,360 @@
+From: Jordan Bettcher <thebettcher@gmail.com>
+Date: Sun, 04 Oct 2026 17:30:00 -0700
+Subject: [PATCH] ppc64 JIT: POWER8 load64 stanza as patchable immediates
+
+On POWER8 (no addpcis) every 64-bit constant the JIT materialises --
+shape pointers in guards, GC pointers, call targets -- went through an
+8-slot "stanza" that bounces through the link register to find its own
+address and loads the value from inline data:
+
+    mflr r0 / bcl 20,0,.+4 / mflr rD / mtlr r0 / ld rD,16(rD) / b .+12
+    .quad VALUE
+
+Six dynamic instructions, two SPR moves and a taken branch per constant,
+plus data in the instruction stream. Profiling Octane on a POWER8 shows
+these stanzas taking 40-55% of the samples in the hottest Ion functions
+of EarleyBoyer and Splay.
+
+Replace the POWER8 shape with a branch-free immediate build in the same
+8-slot footprint, so no patcher offset or size constant moves:
+
+    lis rD,hi / ori rD,rD / rldicr rD,rD,32,31 / oris rD,rD / ori rD,rD
+    nop / nop / nop
+
+ExtractLoad64Value / UpdateLoad64Value decode and re-encode the four
+16-bit immediates instead of reading the .quad; the shape is recognised
+by the lis at slot 0 plus the exact rldicr at slot 2, which cannot
+collide with the addpcis (POWER9) or legacy mflr shapes. bind(),
+ToggleCall, patchFarJump and Load64StanzaDestReg accept the new shape;
+patchNearAddressMove now flushes the I-cache over the stanza because the
+patch rewrites instructions rather than data. POWER9+ output is
+unchanged.
+
+jit-test suite: PASSED ALL. Octane 2.0 in the JS shell on POWER8:
+8993 -> 10407 (EarleyBoyer +53%, Box2D +39%, Richards +36%, RayTrace
++29%, zlib +27%, DeltaBlue +26%, Typescript +15%), no test regressed.
+
+---
+diff a/js/src/jit/ppc64/Assembler-ppc64.cpp b/js/src/jit/ppc64/Assembler-ppc64.cpp
+--- a/js/src/jit/ppc64/Assembler-ppc64.cpp	2026-10-04 15:52:16.505159830 -0700
++++ b/js/src/jit/ppc64/Assembler-ppc64.cpp	2026-10-04 16:01:57.682000000 -0700
+@@ -2221,6 +2221,7 @@
+ // Forward-declared shape helpers; full definitions and the layout
+ // commentary live with the WriteLoad64Instructions section below.
+ static bool IsAddpcisLoad64Stanza(uint32_t enc0);
++static bool IsImmLoad64Stanza(const Instruction* inst0);
+ static uint8_t Load64StanzaDestReg(Instruction* inst0);
+ static uint64_t* PoolEntryFromGPR64Load(Instruction* inst0);
+ 
+@@ -2237,12 +2238,12 @@
+   intptr_t offset = target - branch;
+   Instruction* i0 = (Instruction*)inst;
+ 
+-  if (i0->next()->encode() == PPC_bcl_always_plus4 ||
++  if (IsImmLoad64Stanza(i0) || i0->next()->encode() == PPC_bcl_always_plus4 ||
+       IsAddpcisLoad64Stanza(i0->encode())) {
+-    // Pre-existing long stanza, either P8 (mflr + bcl marker at [1]) or
+-    // P9+ (addpcis at [0]; major opcode 19). Either way, just register
+-    // the long jump — the stanza's .quad at [6..7] gets patched later
+-    // via UpdateLoad64Value.
++    // Pre-existing long stanza: P8 immediate form (lis at [0], sldi at
++    // [2]), legacy P8 LR-bounce form (bcl marker at [1]), or P9+ (addpcis
++    // at [0]; major opcode 19). Either way, just register the long jump —
++    // the stanza's value gets patched later via UpdateLoad64Value.
+     addLongJump(BufferOffset(branch), BufferOffset(target));
+     return;
+   }
+@@ -2430,14 +2431,9 @@
+ }
+ 
+ // ========================================================================
+-// Load64 instruction sequence (8 slots, literal pool format):
+-//   [0] mflr r0            — save LR
+-//   [1] bcl 20,0,.+4      — LR = address of [2]
+-//   [2] mflr rD            — rD = address of [2]
+-//   [3] mtlr r0            — restore LR
+-//   [4] ld rD, 16(rD)      — load from [6..7] (offset = 24 - 8 = 16)
+-//   [5] b .+12             — skip data
+-//   [6..7] .quad VALUE     — 8-byte data
++// Load64 instruction sequence (8 slots). See the shape commentary above
++// IsAddpcisLoad64Stanza below: POWER8 = 5-insn patchable immediate + 3
++// NOPs; POWER9+ = addpcis + ld + b + 3 NOPs + .quad at [6..7].
+ // ========================================================================
+ 
+ // ========================================================================
+@@ -2770,18 +2766,15 @@
+   MOZ_CRASH("PatchShortRangeBranchToVeneer: should not be called");
+ }
+ 
+-// Two stanza shapes share the same 8-slot footprint and the same .quad
+-// location at slots [6..7] (so ExtractLoad64Value / UpdateLoad64Value are
+-// shape-agnostic):
++// Two stanza shapes are emitted, sharing the same 8-slot footprint:
+ //
+-//   POWER8 (no addpcis):
+-//     [0] mflr r0
+-//     [1] bcl 20,0,.+4         (LR := pc of [2])
+-//     [2] mflr rD
+-//     [3] mtlr r0
+-//     [4] ld rD, 16(rD)
+-//     [5] b .+12
+-//     [6..7] .quad VALUE
++//   POWER8 (no addpcis) — patchable immediate, no data in the I-stream:
++//     [0] lis    rD, hi16(hi32)    (addis rD,0,X: major opcode 15, RA=0)
++//     [1] ori    rD, rD, lo16(hi32)
++//     [2] rldicr rD, rD, 32, 31    (sldi rD,rD,32; discards lis sign-ext)
++//     [3] oris   rD, rD, hi16(lo32)
++//     [4] ori    rD, rD, lo16(lo32)
++//     [5..7] NOP, NOP, NOP
+ //
+ //   POWER9+ (addpcis):
+ //     [0] addpcis rD, 0        (rD := NIA = pc of [1])
+@@ -2790,13 +2783,73 @@
+ //     [3..5] NOP, NOP, NOP
+ //     [6..7] .quad VALUE
+ //
+-// The P9+ form drops the bcl/mflr/mtlr LR-bounce (no RAS thrash) and runs
+-// 2 dynamic insns instead of 6. Distinguished at patch time by inst[0]'s
+-// major opcode: 31 = mfspr (P8) vs 19 = addpcis (P9+).
++// A third, legacy POWER8 shape (mflr r0 / bcl 20,0,.+4 / mflr rD / mtlr r0 /
++// ld rD,16(rD) / b .+12 / .quad at [6..7]) is no longer emitted; it is still
++// recognised by the asserts and, since its .quad sits where the P9+ one
++// does, by the .quad fallback in Extract/UpdateLoad64Value.
++//
++// Distinguished at patch time by inst[0]'s major opcode: 15 = addis (P8
++// immediate) vs 19 = addpcis (P9+) vs 31 = mfspr (legacy P8). The P8
++// immediate form additionally requires the exact `rldicr rX,rX,32,31` at [2].
++// Unlike the .quad shapes, updating the P8 value rewrites instruction words,
++// so every in-place update of live code must be followed by an I-cache flush
++// of the stanza (all current callers do: see FlushICache / the
++// AutoWritableJitCode and Linker scopes).
+ static bool IsAddpcisLoad64Stanza(uint32_t enc0) {
+   return ((enc0 >> 26) & 0x3f) == 19;
+ }
+ 
++// `rldicr rX, rX, 32, 31` with the register fields masked off: MD-form,
++// opcode 30, sh[0:4]=0, me field = 31 encoded as (me<<1 | me>>5)<<5 = 0x7C0,
++// XO=1, sh5=1, Rc=0.
++static constexpr uint32_t kLoad64ImmSldi32 = uint32_t(PPC_rldicr) | 0x7C2u;
++static constexpr uint32_t kLoad64ImmSldi32Mask = 0xFC00FFFFu;
++static_assert(kLoad64ImmSldi32 == 0x780007C6u, "sldi rX,rX,32 encoding");
++
++static bool IsImmLoad64Stanza(const Instruction* inst0) {
++  // [0] addis rD, 0, X  and  [2] rldicr rS, rA, 32, 31. Check [0] first and
++  // short-circuit: bind() calls this on 2-slot short b/bc use sites too, and
++  // their [2] may lie past the end of the reserved region.
++  return (inst0[0].encode() & 0xFC1F0000u) == uint32_t(PPC_addis) &&
++         (inst0[2].encode() & kLoad64ImmSldi32Mask) == kLoad64ImmSldi32;
++}
++
++#ifdef DEBUG
++// Full structural check of the P8 immediate stanza (all five insns target
++// the same rD), used only in assertions.
++static bool IsWellFormedImmLoad64Stanza(const Instruction* inst0) {
++  if (!IsImmLoad64Stanza(inst0)) {
++    return false;
++  }
++  uint32_t rd = (inst0[0].encode() >> 21) & 0x1f;
++  uint32_t self = (rd << 21) | (rd << 16);
++  return (inst0[1].encode() & 0xFFFF0000u) == (uint32_t(PPC_ori) | self) &&
++         (inst0[2].encode() & 0xFFFF0000u) ==
++             ((kLoad64ImmSldi32 & 0xFFFF0000u) | self) &&
++         (inst0[3].encode() & 0xFFFF0000u) == (uint32_t(PPC_oris) | self) &&
++         (inst0[4].encode() & 0xFFFF0000u) == (uint32_t(PPC_ori) | self);
++}
++#endif
++
++// Rewrite the four 16-bit immediates of a P8 immediate stanza, preserving
++// the opcode and register fields.
++static void SetImmLoad64Value(Instruction* inst0, uint64_t value) {
++  uint32_t hi32 = uint32_t(value >> 32);
++  uint32_t lo32 = uint32_t(value);
++  inst0[0].setData((inst0[0].encode() & 0xFFFF0000u) | (hi32 >> 16));
++  inst0[1].setData((inst0[1].encode() & 0xFFFF0000u) | (hi32 & 0xFFFFu));
++  inst0[3].setData((inst0[3].encode() & 0xFFFF0000u) | (lo32 >> 16));
++  inst0[4].setData((inst0[4].encode() & 0xFFFF0000u) | (lo32 & 0xFFFFu));
++}
++
++static uint64_t GetImmLoad64Value(const Instruction* inst0) {
++  uint64_t hi32 = (uint64_t(inst0[0].encode() & 0xFFFFu) << 16) |
++                  uint64_t(inst0[1].encode() & 0xFFFFu);
++  uint64_t lo32 = (uint64_t(inst0[3].encode() & 0xFFFFu) << 16) |
++                  uint64_t(inst0[4].encode() & 0xFFFFu);
++  return (hi32 << 32) | lo32;
++}
++
+ // Recognize a patched PoolLoadGPR64 site — pld (possibly behind the
+ // alignment nop) or addpcis r16 + ld rD, lo(r16) — and return the address of
+ // its 8-byte pool entry. The addpcis pool form is distinguished from the
+@@ -2845,8 +2898,9 @@
+ // Extract the destination register from a load64 stanza in either shape.
+ // P8 stores rD in `mflr rD` at slot [2]; P9+ stores rD in `addpcis rD, 0`
+ // at slot [0]. Both encode RT at LE bits [21..25].
++// The P8 immediate shape stores rD in `lis rD` at slot [0] (same RT field).
+ static uint8_t Load64StanzaDestReg(Instruction* inst0) {
+-  if (IsAddpcisLoad64Stanza(inst0->encode())) {
++  if (IsAddpcisLoad64Stanza(inst0->encode()) || IsImmLoad64Stanza(inst0)) {
+     return (inst0[0].encode() >> 21) & 0x1f;
+   }
+   return (inst0[2].encode() >> 21) & 0x1f;
+@@ -2863,7 +2917,33 @@
+   Instruction* i6 = i5->next();
+   Instruction* i7 = i6->next();
+ 
+-  if (HasPOWER9()) {
++  if (!HasPOWER9()) {
++    // POWER8: 5-insn patchable immediate + 3 NOPs (no LR/r0 clobber, no
++    // data in the I-stream). Immediates are filled by SetImmLoad64Value.
++    uint32_t rd = uint32_t(reg.code());
++    uint32_t self = (rd << 21) | (rd << 16);
++    // [0] lis rD, 0           (addis rD, 0, 0)
++    inst0->setData(uint32_t(PPC_addis) | (rd << 21));
++    // [1] ori rD, rD, 0
++    i1->setData(uint32_t(PPC_ori) | self);
++    // [2] rldicr rD, rD, 32, 31  (sldi rD, rD, 32)
++    i2->setData(kLoad64ImmSldi32 | self);
++    // [3] oris rD, rD, 0
++    i3->setData(uint32_t(PPC_oris) | self);
++    // [4] ori rD, rD, 0
++    i4->setData(uint32_t(PPC_ori) | self);
++    // [5..7] NOP filler, keeps the 8-slot footprint patchers rely on.
++    i5->setData(NopInst);
++    i6->setData(NopInst);
++    i7->setData(NopInst);
++    SetImmLoad64Value(inst0, value);
++    MOZ_ASSERT(IsWellFormedImmLoad64Stanza(inst0));
++    MOZ_ASSERT(GetImmLoad64Value(inst0) == value);
++    return;
++  }
++
++  // POWER9+ (unchanged).
++  {
+     // [0] addpcis rD, 0   (DX-form: opcode=19, XO=2, all D fields = 0)
+     inst0->setData(0x4C000004u | (uint32_t(reg.code()) << 21));
+     // [1] ld rD, 20(rD)   (rD := *(slot[1] + 20) = *(slot[6]) = .quad)
+@@ -2875,19 +2955,6 @@
+     i3->setData(NopInst);
+     i4->setData(NopInst);
+     i5->setData(NopInst);
+-  } else {
+-    // [0] mflr r0
+-    inst0->setData(PPC_mfspr | (r0.code() << 21) | PPC_SPR(spr_lr));
+-    // [1] bcl 20,0,.+4
+-    i1->setData(PPC_bcl_always_plus4);
+-    // [2] mflr rD
+-    i2->setData(PPC_mfspr | (reg.code() << 21) | PPC_SPR(spr_lr));
+-    // [3] mtlr r0
+-    i3->setData(PPC_mtspr | (r0.code() << 21) | PPC_SPR(spr_lr));
+-    // [4] ld rD, 16(rD)
+-    i4->setData(PPC_ld | (reg.code() << 21) | (reg.code() << 16) | 16);
+-    // [5] b .+12
+-    i5->setData(PPC_b | (12 & 0x03FFFFFC));
+   }
+ 
+   // [6..7] .quad VALUE. The trailing `ld` is a native 64-bit load, so the two
+@@ -2909,7 +2976,13 @@
+     memcpy(&v, entry, sizeof(v));
+     return v;
+   }
+-  // The 8-byte value is at inst0[6..7] in both shapes.
++  if (IsImmLoad64Stanza(inst0)) {
++    // POWER8 immediate shape: value is split across the 16-bit immediates
++    // of [0], [1], [3], [4].
++    MOZ_ASSERT(IsWellFormedImmLoad64Stanza(inst0));
++    return GetImmLoad64Value(inst0);
++  }
++  // The 8-byte value is at inst0[6..7] in the .quad shapes (P9+, legacy P8).
+   Instruction* i6 = inst0 + 6;
+   Instruction* i7 = inst0 + 7;
+ 
+@@ -2930,6 +3003,13 @@
+     memcpy(entry, &value, sizeof(value));
+     return;
+   }
++  if (IsImmLoad64Stanza(inst0)) {
++    // POWER8 immediate shape: rewrites instruction words. Callers patching
++    // live code must flush the I-cache over the stanza afterwards.
++    MOZ_ASSERT(IsWellFormedImmLoad64Stanza(inst0));
++    SetImmLoad64Value(inst0, value);
++    return;
++  }
+   // Sanity-check that inst0 is the start of a load64 stanza in either shape.
+   // P8: inst0[1] == bcl 20,0,.+4. P9+: inst0[0] is addpcis (major opcode 19).
+   MOZ_ASSERT(inst0[1].encode() == PPC_bcl_always_plus4 ||
+@@ -3011,10 +3091,12 @@
+   Instruction* i8 = (Instruction*)(inst_.raw() + 8 * sizeof(uint32_t));
+   Instruction* i9 = (Instruction*)(inst_.raw() + 9 * sizeof(uint32_t));
+ 
+-  // Accept either P8 stanza (mflr r0 at slot [0]) or P9+ stanza (addpcis at
+-  // slot [0]; major opcode 19).
+-  MOZ_ASSERT(i0->encode() == (PPC_mfspr | (r0.code() << 21) | PPC_SPR(spr_lr)) ||
+-                 IsAddpcisLoad64Stanza(i0->encode()));
++  // Accept the P8 immediate stanza (lis at [0], sldi at [2]), the legacy P8
++  // stanza (mflr r0 at slot [0]) or the P9+ stanza (addpcis at slot [0];
++  // major opcode 19).
++  MOZ_ASSERT(IsImmLoad64Stanza(i0) ||
++             i0->encode() == (PPC_mfspr | (r0.code() << 21) | PPC_SPR(spr_lr)) ||
++             IsAddpcisLoad64Stanza(i0->encode()));
+ 
+   // ToggleCall is idempotent across the same `enabled` value: re-enabling
+   // an already-enabled site (or re-disabling a disabled one) is a no-op.
+diff a/js/src/jit/ppc64/MacroAssembler-ppc64.cpp b/js/src/jit/ppc64/MacroAssembler-ppc64.cpp
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	2026-10-04 15:52:16.505393408 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.cpp	2026-10-04 15:58:55.518000000 -0700
+@@ -848,6 +848,14 @@
+                                           CodeLocationLabel target) {
+   Instruction* inst = (Instruction*)loc.raw();
+   UpdateLoad64Value(inst, (uint64_t)target.raw());
++  // On POWER8 the value is encoded in instruction immediates, so the
++  // update rewrites code. The only current caller (BaselineInterpreter)
++  // patches while its Linker is still live, whose writable scope flushes
++  // the whole code on destruction; flush here anyway so the helper is safe
++  // on its own. POWER9+ only rewrites the .quad data, as before.
++  if (!HasPOWER9()) {
++    FlushICache(inst, kNoPoolLoad64StanzaInsns * sizeof(Instruction));
++  }
+ }
+ 
+ // Return address operations (link register architectures).
+@@ -1184,12 +1192,14 @@
+ void MacroAssembler::patchFarJump(CodeOffset farJump, uint32_t targetOffset) {
+   Instruction* inst =
+       (Instruction*)m_buffer.getInst(BufferOffset(farJump.offset()));
+-  // Extract the destination register from the existing stanza. Both shapes
++  // Extract the destination register from the existing stanza. All shapes
+   // encode rD at LE bits [21..25] of their first "register-touching" slot:
+-  // P8 = mflr rD at [2], P9+ = addpcis rD at [0]. Major opcode of slot [0]
+-  // distinguishes (31 = mfspr, 19 = addpcis).
++  // P8 immediate = lis rD at [0], P9+ = addpcis rD at [0], legacy P8 =
++  // mflr rD at [2]. Major opcode of slot [0] distinguishes (15 = addis,
++  // 19 = addpcis, 31 = mfspr).
+   uint32_t i0 = inst[0].encode();
+-  uint32_t regCode = (((i0 >> 26) & 0x3f) == 19)
++  uint32_t op0 = (i0 >> 26) & 0x3f;
++  uint32_t regCode = (op0 == 19 || op0 == 15)
+                          ? ((i0 >> 21) & 0x1f)
+                          : ((inst[2].encode() >> 21) & 0x1f);
+   Register reg = Register::FromCode(regCode);
+diff a/js/src/jit/ppc64/MacroAssembler-ppc64.h b/js/src/jit/ppc64/MacroAssembler-ppc64.h
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.h	2026-10-04 15:52:16.505454996 -0700
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.h	2026-10-04 15:58:55.520000000 -0700
+@@ -32,12 +32,13 @@
+ //
+ // kNoPoolLoad64StanzaInsns (8): emitLoad64Stanza body — 8 NOPs that
+ //   WriteLoad64Instructions later overwrites in place. Two shapes share
+-//   the same 8-slot footprint with the .quad fixed at slots [6..7]:
+-//     - POWER9+ (HasPOWER9()): addpcis + ld + b + 3 NOPs (2 dynamic insns,
+-//       no LR clobber). Preferred path.
+-//     - POWER8 fallback: mflr/bcl/mflr/mtlr/ld/b LR-bouncing sequence
+-//       (6 dynamic insns, RAS-thrashing — kept only because P8 has no
+-//       addpcis).
++//   the same 8-slot footprint:
++//     - POWER9+ (HasPOWER9()): addpcis + ld + b + 3 NOPs + .quad at
++//       slots [6..7] (2 dynamic insns, no LR clobber).
++//     - POWER8: lis/ori/sldi/oris/ori patchable immediate + 3 NOPs (no
++//       LR/r0 clobber, no data in the I-stream). Updating the value
++//       rewrites instructions, so live-code patchers must flush the
++//       I-cache over all 8 slots.
+ //
+ // kNoPoolPatchableBranchInsns (10): patchable far call / jump /
+ //   unconditional branch. Three alternative shapes, all fitting the

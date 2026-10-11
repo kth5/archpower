@@ -1,0 +1,546 @@
+From 8a97521d7e2d0ee343817e2acde1b50b5d0c578b Mon Sep 17 00:00:00 2001
+From: daedalao <daedalao@hotmail.com>
+Date: Sat, 10 Oct 2026 12:08:57 -0700
+Subject: [PATCH 22/22] mozglue: dispatch the PPC64 VSX string search at
+ runtime
+
+The VSX memchr16/32/64 and memchr2x8/2x16 kernels in SIMD.cpp were gated
+on __VSX__ at compile time. A big-endian ppc64 build with the
+distribution's baseline flags (-mcpu=powerpc64 -maltivec) therefore never
+got them, and a build that enabled VSX globally to get them would no
+longer run on CPUs without VSX such as the PowerPC 970.
+
+Move the kernels unchanged into SIMD_vsx.cpp, built with -mcpu=power8
+-mvsx the same way SIMD_avx2.cpp is built with -mavx2, and call them from
+SIMD.cpp only when AT_HWCAP/AT_HWCAP2 report VSX and ISA 2.07. The check
+is done once and cached; when SIMD.cpp itself is built for POWER8 (the
+little-endian baseline) it folds to a constant. MOZ_PPC64_FORCE_POWER4=1
+forces the scalar code. SIMD_vsx.cpp includes no Mozilla or C++ library
+headers so that no POWER8-compiled inline or template definition can be
+picked by the linker for callers elsewhere in mozglue.
+
+mozglue/misc is also linked into the standalone JS shell, which does not
+have the mozilla/ppc.h runtime (mozglue/build/ppc.cpp), so the check is
+done locally with getauxval().
+
+Tested on POWER8 (ppc64le) with gcc 16 and clang 22, SIMD.cpp built for
+POWER7 to force the dispatch path: 800k randomized trials against a naive
+reference plus a page-boundary over-read check, with and without
+MOZ_PPC64_FORCE_POWER4=1. memchr16 over 64K char16_t without a match:
+5.6 us dispatched to VSX, 45.5 us with the override.
+---
+ mozglue/misc/SIMD.cpp     | 222 ++++++++++++--------------------------
+ mozglue/misc/SIMD_vsx.cpp | 189 ++++++++++++++++++++++++++++++++
+ mozglue/misc/moz.build    |   7 ++
+ 3 files changed, 262 insertions(+), 156 deletions(-)
+ create mode 100644 mozglue/misc/SIMD_vsx.cpp
+
+diff --git a/mozglue/misc/SIMD.cpp b/mozglue/misc/SIMD.cpp
+index 195c6b7cca..3ac6c81809 100644
+--- a/mozglue/misc/SIMD.cpp
++++ b/mozglue/misc/SIMD.cpp
+@@ -18,9 +18,10 @@
+ 
+ #endif
+ 
+-#if defined(__GNUC__) && defined(__VSX__)
++#if defined(__powerpc64__) && defined(__GNUC__) && !defined(MOZILLA_PRESUME_SSE2)
+ 
+-#  include <altivec.h>
++#  include <stdlib.h>
++#  include <sys/auxv.h>
+ 
+ #endif
+ 
+@@ -517,144 +518,48 @@ const char16_t* SIMD::memchr2x16(const char16_t* ptr, char16_t v1, char16_t v2,
+ 
+ #else
+ 
+-#  if defined(__GNUC__) && defined(__VSX__)
+-
+-// AltiVec/VSX implementation for PPC64. This is gated at compile time only:
+-// when __VSX__ is defined the compiler is already free to emit VSX anywhere
+-// in this file, so a runtime check would not buy anything.
+-
+-// Maps the size of the value types of the memchrX functions below to the
+-// matching 16-byte vector type. All lanes are unsigned, which is
+-// bit-preserving, so lane-wise equality is exact regardless of the scalar
+-// type used at the callsite. The explicit lane type also matters for
+-// vec_splats: char16_t would otherwise promote to int and pick the wrong
+-// overload, and uint64_t (unsigned long) is ambiguous.
+-template <size_t Size>
+-struct VSXLaneFor;
+-
+-template <>
+-struct VSXLaneFor<1> {
+-  using vector_t = __vector unsigned char;
+-  using scalar_t = unsigned char;
+-};
+-
+-template <>
+-struct VSXLaneFor<2> {
+-  using vector_t = __vector unsigned short;
+-  using scalar_t = unsigned short;
+-};
+-
+-template <>
+-struct VSXLaneFor<4> {
+-  using vector_t = __vector unsigned int;
+-  using scalar_t = unsigned int;
+-};
+-
+-#    ifdef __POWER8_VECTOR__
+-template <>
+-struct VSXLaneFor<8> {
+-  using vector_t = __vector unsigned long long;
+-  using scalar_t = unsigned long long;
+-};
+-#    endif
+-
+-template <typename TValue>
+-static inline typename VSXLaneFor<sizeof(TValue)>::vector_t LoadVSX(
+-    uintptr_t addr) {
+-  using Lane = typename VSXLaneFor<sizeof(TValue)>::scalar_t;
+-  return vec_xl(0, reinterpret_cast<const Lane*>(addr));
+-}
+-
+-template <typename TMask>
+-static inline bool AnyLaneSetVSX(TMask mask) {
+-  const __vector unsigned char zero = vec_splats(static_cast<unsigned char>(0));
+-  return vec_any_ne(reinterpret_cast<__vector unsigned char>(mask), zero);
+-}
+-
+-// PPC64 has no cheap movemask equivalent, so the hot loops only ask "did
+-// anything in here match?" and the block that did is rescanned scalar. That
+-// also keeps the code endianness-neutral.
+-template <typename TValue>
+-const TValue* FindInBufferVSX(const TValue* ptr, TValue value, size_t length) {
+-  using V = typename VSXLaneFor<sizeof(TValue)>::vector_t;
+-  using Lane = typename VSXLaneFor<sizeof(TValue)>::scalar_t;
+-
+-  const V needle = vec_splats(static_cast<Lane>(value));
+-
+-  uintptr_t cur = reinterpret_cast<uintptr_t>(ptr);
+-  const uintptr_t end = cur + length * sizeof(TValue);
+-
+-  // Skip four blocks at a time while none of them match.
+-  while (end - cur >= 4 * sizeof(V)) {
+-    const V a = LoadVSX<TValue>(cur);
+-    const V b = LoadVSX<TValue>(cur + sizeof(V));
+-    const V c = LoadVSX<TValue>(cur + 2 * sizeof(V));
+-    const V d = LoadVSX<TValue>(cur + 3 * sizeof(V));
+-    if (AnyLaneSetVSX(vec_or(
+-            vec_or(vec_cmpeq(a, needle), vec_cmpeq(b, needle)),
+-            vec_or(vec_cmpeq(c, needle), vec_cmpeq(d, needle))))) {
+-      break;
+-    }
+-    cur += 4 * sizeof(V);
+-  }
+-
+-  while (end - cur >= sizeof(V)) {
+-    if (vec_any_eq(LoadVSX<TValue>(cur), needle)) {
+-      break;
+-    }
+-    cur += sizeof(V);
+-  }
+-
+-  // Either the block at cur matched, or less than a block is left.
+-  const TValue* p = reinterpret_cast<const TValue*>(cur);
+-  const TValue* bufferEnd = reinterpret_cast<const TValue*>(end);
+-  while (p < bufferEnd) {
+-    if (*p == value) {
+-      return p;
+-    }
+-    p++;
++#  if defined(__powerpc64__) && defined(__GNUC__)
++
++// The VSX kernels live in SIMD_vsx.cpp, which is the only file built with
++// -mcpu=power8 -mvsx. Everything here is baseline code, so the same binary
++// keeps working on CPUs without VSX (PowerPC 970, POWER5/6) and uses the
++// vector paths on POWER8 and newer. When the whole build already targets
++// POWER8 the runtime check folds away.
++namespace detail {
++const char16_t* memchr16VSX(const char16_t* ptr, char16_t value,
++                            size_t length);
++const uint32_t* memchr32VSX(const uint32_t* ptr, uint32_t value,
++                            size_t length);
++const uint64_t* memchr64VSX(const uint64_t* ptr, uint64_t value,
++                            size_t length);
++const unsigned char* memchr2x8VSX(const unsigned char* ptr, unsigned char v1,
++                                  unsigned char v2, size_t length);
++const char16_t* memchr2x16VSX(const char16_t* ptr, char16_t v1, char16_t v2,
++                              size_t length);
++}  // namespace detail
++
++#    if defined(__VSX__) && defined(__POWER8_VECTOR__)
++static inline bool HasISA207VSX() { return true; }
++#    else
++// AT_HWCAP / AT_HWCAP2 bits from the kernel's asm/cputable.h.
++static bool DetectISA207VSX() {
++  const unsigned long kHasVSX = 0x00000080;     // PPC_FEATURE_HAS_VSX
++  const unsigned long kArch207 = 0x80000000;    // PPC_FEATURE2_ARCH_2_07
++  if (!(getauxval(AT_HWCAP) & kHasVSX) || !(getauxval(AT_HWCAP2) & kArch207)) {
++    return false;
+   }
+-  return nullptr;
++  // Testing aid shared with the JIT: behave like a PowerPC 970.
++  const char* force = getenv("MOZ_PPC64_FORCE_POWER4");
++  return !(force && *force && strcmp(force, "0") != 0);
+ }
+ 
+-// Searches for v1 immediately followed by v2. Each iteration loads the block
+-// at cur and the block one element further on, so every pair starting in the
+-// block is checked with two compares and no state is carried across blocks.
+-template <typename TValue>
+-const TValue* FindTwoInBufferVSX(const TValue* ptr, TValue v1, TValue v2,
+-                                 size_t length) {
+-  using V = typename VSXLaneFor<sizeof(TValue)>::vector_t;
+-  using Lane = typename VSXLaneFor<sizeof(TValue)>::scalar_t;
+-
+-  const V needle1 = vec_splats(static_cast<Lane>(v1));
+-  const V needle2 = vec_splats(static_cast<Lane>(v2));
+-
+-  uintptr_t cur = reinterpret_cast<uintptr_t>(ptr);
+-  const uintptr_t end = cur + length * sizeof(TValue);
+-
+-  while (end - cur >= sizeof(V) + sizeof(TValue)) {
+-    const V first = LoadVSX<TValue>(cur);
+-    const V second = LoadVSX<TValue>(cur + sizeof(TValue));
+-    if (AnyLaneSetVSX(
+-            vec_and(vec_cmpeq(first, needle1), vec_cmpeq(second, needle2)))) {
+-      break;
+-    }
+-    cur += sizeof(V);
+-  }
+-
+-  // Either a pair starts in the block at cur, or at most a block is left.
+-  const TValue* p = reinterpret_cast<const TValue*>(cur);
+-  const TValue* bufferEnd = reinterpret_cast<const TValue*>(end);
+-  while (p + 1 < bufferEnd) {
+-    if (p[0] == v1 && p[1] == v2) {
+-      return p;
+-    }
+-    p++;
+-  }
+-  return nullptr;
++static inline bool HasISA207VSX() {
++  static const bool sHas = DetectISA207VSX();
++  return sHas;
+ }
+-
+-#  endif
++#    endif
++#    define MOZ_SIMD_PPC64_DISPATCH 1
++#  endif  // __powerpc64__ && __GNUC__
+ 
+ // libc's memchr is already vectorized on every platform that gets here, so
+ // there is nothing to gain from doing our own for 8-bit values.
+@@ -670,11 +575,12 @@ const char* SIMD::memchr8SSE2(const char* ptr, char value, size_t length) {
+ 
+ const char16_t* SIMD::memchr16(const char16_t* ptr, char16_t value,
+                                size_t length) {
+-#  if defined(__GNUC__) && defined(__VSX__)
+-  return FindInBufferVSX(ptr, value, length);
+-#  else
+-  return FindInBufferNaive<char16_t>(ptr, value, length);
++#  ifdef MOZ_SIMD_PPC64_DISPATCH
++  if (HasISA207VSX()) {
++    return detail::memchr16VSX(ptr, value, length);
++  }
+ #  endif
++  return FindInBufferNaive<char16_t>(ptr, value, length);
+ }
+ 
+ const char16_t* SIMD::memchr16SSE2(const char16_t* ptr, char16_t value,
+@@ -684,25 +590,28 @@ const char16_t* SIMD::memchr16SSE2(const char16_t* ptr, char16_t value,
+ 
+ const uint32_t* SIMD::memchr32(const uint32_t* ptr, uint32_t value,
+                                size_t length) {
+-#  if defined(__GNUC__) && defined(__VSX__)
+-  return FindInBufferVSX(ptr, value, length);
+-#  else
+-  return FindInBufferNaive<uint32_t>(ptr, value, length);
++#  ifdef MOZ_SIMD_PPC64_DISPATCH
++  if (HasISA207VSX()) {
++    return detail::memchr32VSX(ptr, value, length);
++  }
+ #  endif
++  return FindInBufferNaive<uint32_t>(ptr, value, length);
+ }
+ 
+ const uint64_t* SIMD::memchr64(const uint64_t* ptr, uint64_t value,
+                                size_t length) {
+-#  if defined(__GNUC__) && defined(__VSX__) && defined(__POWER8_VECTOR__)
+-  return FindInBufferVSX(ptr, value, length);
+-#  else
+-  return FindInBufferNaive<uint64_t>(ptr, value, length);
++#  ifdef MOZ_SIMD_PPC64_DISPATCH
++  if (HasISA207VSX()) {
++    return detail::memchr64VSX(ptr, value, length);
++  }
+ #  endif
++  return FindInBufferNaive<uint64_t>(ptr, value, length);
+ }
+ 
+ const char* SIMD::memchr2x8(const char* ptr, char v1, char v2, size_t length) {
+   const char* end = ptr + length - 1;
+-#  if defined(__GNUC__) && defined(__VSX__)
++#  ifdef MOZ_SIMD_PPC64_DISPATCH
++  const bool useVSX = HasISA207VSX();
+   // Hopping from one v1 to the next with memchr is the fastest thing to do
+   // as long as v1 is rare, but it degrades badly once it keeps stopping on a
+   // v1 that is not followed by v2. After a few of those in close succession,
+@@ -720,11 +629,11 @@ const char* SIMD::memchr2x8(const char* ptr, char v1, char v2, size_t length) {
+     if (hit[1] == v2) {
+       return hit;
+     }
+-#  if defined(__GNUC__) && defined(__VSX__)
++#  ifdef MOZ_SIMD_PPC64_DISPATCH
+     closeHits = hit - ptr < kCloseHit ? closeHits + 1 : 0;
+     ptr = hit + 1;
+-    if (closeHits == kMaxCloseHits) {
+-      const unsigned char* result = FindTwoInBufferVSX(
++    if (useVSX && closeHits == kMaxCloseHits) {
++      const unsigned char* result = detail::memchr2x8VSX(
+           reinterpret_cast<const unsigned char*>(ptr),
+           static_cast<unsigned char>(v1), static_cast<unsigned char>(v2),
+           static_cast<size_t>(end + 1 - ptr));
+@@ -739,9 +648,11 @@ const char* SIMD::memchr2x8(const char* ptr, char v1, char v2, size_t length) {
+ 
+ const char16_t* SIMD::memchr2x16(const char16_t* ptr, char16_t v1, char16_t v2,
+                                  size_t length) {
+-#  if defined(__GNUC__) && defined(__VSX__)
+-  return FindTwoInBufferVSX(ptr, v1, v2, length);
+-#  else
++#  ifdef MOZ_SIMD_PPC64_DISPATCH
++  if (HasISA207VSX()) {
++    return detail::memchr2x16VSX(ptr, v1, v2, length);
++  }
++#  endif
+   const char16_t* end = ptr + length - 1;
+   while (ptr < end) {
+     ptr = memchr16(ptr, v1, end - ptr);
+@@ -754,7 +665,6 @@ const char16_t* SIMD::memchr2x16(const char16_t* ptr, char16_t v1, char16_t v2,
+     ptr++;
+   }
+   return nullptr;
+-#  endif
+ }
+ 
+ #endif
+diff --git a/mozglue/misc/SIMD_vsx.cpp b/mozglue/misc/SIMD_vsx.cpp
+new file mode 100644
+index 0000000000..c8798c0ea9
+--- /dev/null
++++ b/mozglue/misc/SIMD_vsx.cpp
+@@ -0,0 +1,189 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++// VSX (Power ISA 2.07) kernels for mozglue/misc/SIMD.cpp.
++//
++// This is the only translation unit of mozglue built with -mcpu=power8
++// -mvsx. SIMD.cpp calls into it only after checking AT_HWCAP/AT_HWCAP2 for
++// VSX and ISA 2.07, so the rest of the library stays runnable on CPUs
++// without VSX such as the PowerPC 970.
++//
++// Keep this file free of Mozilla and C++ standard library headers: any
++// inline function or template they instantiate here would be emitted as a
++// COMDAT/weak definition compiled for POWER8, and the linker is free to
++// pick that copy for every caller in the library. Everything below is
++// either static or one of the extern "C++" entry points declared in
++// SIMD.cpp.
++
++#if !defined(__powerpc64__) || !defined(__VSX__) || !defined(__POWER8_VECTOR__)
++#  error "SIMD_vsx.cpp must be compiled with -mcpu=power8 -mvsx"
++#endif
++
++#include <altivec.h>
++#include <stddef.h>
++#include <stdint.h>
++
++namespace mozilla {
++namespace {
++
++// Maps the size of the value types of the memchrX functions below to the
++// matching 16-byte vector type. All lanes are unsigned, which is
++// bit-preserving, so lane-wise equality is exact regardless of the scalar
++// type used at the callsite. The explicit lane type also matters for
++// vec_splats: char16_t would otherwise promote to int and pick the wrong
++// overload, and uint64_t (unsigned long) is ambiguous.
++template <size_t Size>
++struct VSXLaneFor;
++
++template <>
++struct VSXLaneFor<1> {
++  using vector_t = __vector unsigned char;
++  using scalar_t = unsigned char;
++};
++
++template <>
++struct VSXLaneFor<2> {
++  using vector_t = __vector unsigned short;
++  using scalar_t = unsigned short;
++};
++
++template <>
++struct VSXLaneFor<4> {
++  using vector_t = __vector unsigned int;
++  using scalar_t = unsigned int;
++};
++
++template <>
++struct VSXLaneFor<8> {
++  using vector_t = __vector unsigned long long;
++  using scalar_t = unsigned long long;
++};
++
++template <typename TValue>
++static inline typename VSXLaneFor<sizeof(TValue)>::vector_t LoadVSX(
++    uintptr_t addr) {
++  using Lane = typename VSXLaneFor<sizeof(TValue)>::scalar_t;
++  return vec_xl(0, reinterpret_cast<const Lane*>(addr));
++}
++
++template <typename TMask>
++static inline bool AnyLaneSetVSX(TMask mask) {
++  const __vector unsigned char zero = vec_splats(static_cast<unsigned char>(0));
++  return vec_any_ne(reinterpret_cast<__vector unsigned char>(mask), zero);
++}
++
++// PPC64 has no cheap movemask equivalent, so the hot loops only ask "did
++// anything in here match?" and the block that did is rescanned scalar. That
++// also keeps the code endianness-neutral.
++template <typename TValue>
++static const TValue* FindInBufferVSX(const TValue* ptr, TValue value, size_t length) {
++  using V = typename VSXLaneFor<sizeof(TValue)>::vector_t;
++  using Lane = typename VSXLaneFor<sizeof(TValue)>::scalar_t;
++
++  const V needle = vec_splats(static_cast<Lane>(value));
++
++  uintptr_t cur = reinterpret_cast<uintptr_t>(ptr);
++  const uintptr_t end = cur + length * sizeof(TValue);
++
++  // Skip four blocks at a time while none of them match.
++  while (end - cur >= 4 * sizeof(V)) {
++    const V a = LoadVSX<TValue>(cur);
++    const V b = LoadVSX<TValue>(cur + sizeof(V));
++    const V c = LoadVSX<TValue>(cur + 2 * sizeof(V));
++    const V d = LoadVSX<TValue>(cur + 3 * sizeof(V));
++    if (AnyLaneSetVSX(vec_or(
++            vec_or(vec_cmpeq(a, needle), vec_cmpeq(b, needle)),
++            vec_or(vec_cmpeq(c, needle), vec_cmpeq(d, needle))))) {
++      break;
++    }
++    cur += 4 * sizeof(V);
++  }
++
++  while (end - cur >= sizeof(V)) {
++    if (vec_any_eq(LoadVSX<TValue>(cur), needle)) {
++      break;
++    }
++    cur += sizeof(V);
++  }
++
++  // Either the block at cur matched, or less than a block is left.
++  const TValue* p = reinterpret_cast<const TValue*>(cur);
++  const TValue* bufferEnd = reinterpret_cast<const TValue*>(end);
++  while (p < bufferEnd) {
++    if (*p == value) {
++      return p;
++    }
++    p++;
++  }
++  return nullptr;
++}
++
++// Searches for v1 immediately followed by v2. Each iteration loads the block
++// at cur and the block one element further on, so every pair starting in the
++// block is checked with two compares and no state is carried across blocks.
++template <typename TValue>
++static const TValue* FindTwoInBufferVSX(const TValue* ptr, TValue v1, TValue v2,
++                                 size_t length) {
++  using V = typename VSXLaneFor<sizeof(TValue)>::vector_t;
++  using Lane = typename VSXLaneFor<sizeof(TValue)>::scalar_t;
++
++  const V needle1 = vec_splats(static_cast<Lane>(v1));
++  const V needle2 = vec_splats(static_cast<Lane>(v2));
++
++  uintptr_t cur = reinterpret_cast<uintptr_t>(ptr);
++  const uintptr_t end = cur + length * sizeof(TValue);
++
++  while (end - cur >= sizeof(V) + sizeof(TValue)) {
++    const V first = LoadVSX<TValue>(cur);
++    const V second = LoadVSX<TValue>(cur + sizeof(TValue));
++    if (AnyLaneSetVSX(
++            vec_and(vec_cmpeq(first, needle1), vec_cmpeq(second, needle2)))) {
++      break;
++    }
++    cur += sizeof(V);
++  }
++
++  // Either a pair starts in the block at cur, or at most a block is left.
++  const TValue* p = reinterpret_cast<const TValue*>(cur);
++  const TValue* bufferEnd = reinterpret_cast<const TValue*>(end);
++  while (p + 1 < bufferEnd) {
++    if (p[0] == v1 && p[1] == v2) {
++      return p;
++    }
++    p++;
++  }
++  return nullptr;
++}
++
++}  // namespace
++
++namespace detail {
++
++const char16_t* memchr16VSX(const char16_t* ptr, char16_t value,
++                            size_t length) {
++  return FindInBufferVSX(ptr, value, length);
++}
++
++const uint32_t* memchr32VSX(const uint32_t* ptr, uint32_t value,
++                            size_t length) {
++  return FindInBufferVSX(ptr, value, length);
++}
++
++const uint64_t* memchr64VSX(const uint64_t* ptr, uint64_t value,
++                            size_t length) {
++  return FindInBufferVSX(ptr, value, length);
++}
++
++const unsigned char* memchr2x8VSX(const unsigned char* ptr, unsigned char v1,
++                                  unsigned char v2, size_t length) {
++  return FindTwoInBufferVSX(ptr, v1, v2, length);
++}
++
++const char16_t* memchr2x16VSX(const char16_t* ptr, char16_t v1, char16_t v2,
++                              size_t length) {
++  return FindTwoInBufferVSX(ptr, v1, v2, length);
++}
++
++}  // namespace detail
++}  // namespace mozilla
+diff --git a/mozglue/misc/moz.build b/mozglue/misc/moz.build
+index fd16921f3e..9044030719 100644
+--- a/mozglue/misc/moz.build
++++ b/mozglue/misc/moz.build
+@@ -52,6 +52,13 @@ SOURCES += [
+     "StackWalk.cpp",
+ ]
+ 
++if CONFIG["TARGET_CPU"] == "ppc64" and CONFIG["CC_TYPE"] in ("clang", "gcc"):
++    # VSX kernels, entered only after a runtime AT_HWCAP check in SIMD.cpp.
++    SOURCES += [
++        "SIMD_vsx.cpp",
++    ]
++    SOURCES["SIMD_vsx.cpp"].flags += ["-mcpu=power8", "-mvsx"]
++
+ if CONFIG["TARGET_CPU"].startswith("x86"):
+     SOURCES += [
+         "SIMD_avx2.cpp",
+-- 
+2.55.0
+

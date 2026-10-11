@@ -1,0 +1,1284 @@
+From 048d9fd8b1d9c2dad8b1d5b0a0e6bda66435fdc4 Mon Sep 17 00:00:00 2001
+From: daedalao <daedalao@hotmail.com>
+Date: Sat, 10 Oct 2026 12:39:57 -0700
+Subject: [PATCH] PPC64 JIT: POWER4-tier fallbacks for pre-ISA-2.07 CPUs
+
+When HasISA207() is false (PowerPC 970/G5, or MOZ_PPC64_FORCE_POWER4=1)
+the backend must not emit anything newer than the 64-bit ISA 2.01 plus
+VMX 1.0. POWER8 and later keep their current code; every fallback is
+selected at code-generation time.
+
+Assembler-level replacements, so every caller is covered:
+- mfvsrd/mtvsrd/mtvsrwa/mtvsrwz/mtvsrws move the bits through one
+  doubleword at -48(r1), inside the 288-byte protected zone of the
+  64-bit ELF ABIs (doubleword accesses, so endian-neutral). The word
+  forms pre-extend into r0, which is never allocated.
+- isel becomes a conditional branch on the same CR bit around one or
+  two register moves, in a no-pool window, leaving CR untouched.
+- lfiwax becomes lwax r0 + the transfer slot; fcfids becomes
+  fcfid + frsp, exact for every int32/uint32 source.
+- mfocrf is emitted as mfcr.
+
+MacroAssembler-level replacements:
+- floor/ceil/round to int32 truncate with fctidz and step the integer
+  by one when the truncation went the wrong way; nearbyIntDouble does
+  the same in the integer unit for |x| < 2^52 and restores the sign of
+  a zero result with src * +0.0. HasRoundInstruction() is false on the
+  tier, as frim/frip/friz do not exist there.
+- copysign splices the sign bit in a GPR.
+- Double/float32 min/max replace xsmindp/xsmaxdp with a branch on the
+  fcmpu result that is still in CR0.
+- Float32 bit moves use stfs/lwz and stw/lfs; float constants are
+  loaded as their exactly widened doubles; zeroDouble no longer uses
+  xxlxor.
+- popcnt uses the SWAR reduction, ctz uses cntlz((x-1) & ~x).
+- int64/uint64 to float32/double conversions pre-round with a sticky
+  bit so that fcfid + frsp rounds once, and halve/double values with
+  the top bit set, instead of fcfids/fcfidu/fcfidus.
+- 8- and 16-bit atomics (lbarx/lharx/stbcx./sthcx. are ISA 2.06) use
+  lwarx/stwcx. on the containing word with a lane mask, with the lane
+  position computed for either endianness. Lowering allocates the lane
+  shift/mask temps on the tier.
+- Simd128 spills and fills (volatile VRs saved around calls, Simd128
+  move cycles, the inline-string concat fast path) go through an
+  aligned red-zone slot with VMX stvx/lvx and two doubleword copies.
+
+The irregexp skip loop no longer picks its VSX SIMD variant on the
+tier.
+
+Wasm-only emitters (fctiduz, ldbrx/stdbrx, the SIMD128 lowering) are
+left alone; wasm is disabled on the tier by the next patch.
+---
+ .../irregexp/RegExpNativeMacroAssembler.cpp   |   6 +
+ js/src/jit/ppc64/Assembler-ppc64.cpp          | 130 +++++-
+ js/src/jit/ppc64/Assembler-ppc64.h            |  18 +-
+ js/src/jit/ppc64/Lowering-ppc64.cpp           |  22 +-
+ js/src/jit/ppc64/MacroAssembler-ppc64-inl.h   | 200 ++++++++-
+ js/src/jit/ppc64/MacroAssembler-ppc64.cpp     | 396 +++++++++++++++++-
+ js/src/jit/ppc64/MacroAssembler-ppc64.h       |  29 +-
+ 7 files changed, 766 insertions(+), 35 deletions(-)
+
+diff --git a/js/src/irregexp/RegExpNativeMacroAssembler.cpp b/js/src/irregexp/RegExpNativeMacroAssembler.cpp
+index 0d8e6072bb..9d309af354 100644
+--- a/js/src/irregexp/RegExpNativeMacroAssembler.cpp
++++ b/js/src/irregexp/RegExpNativeMacroAssembler.cpp
+@@ -539,6 +539,12 @@ bool SMRegExpMacroAssembler::SkipUntilBitInTableUseSimd(int advance_by) {
+   if (!js::jit::Assembler::HasSSSE3()) {
+     return false;
+   }
++#  elif defined(JS_CODEGEN_PPC64)
++  // The ppc64 SIMD lowering needs VSX (ISA 2.07). The POWER4 tier (PowerPC
++  // 970) uses the scalar loop.
++  if (!js::jit::HasISA207()) {
++    return false;
++  }
+ #  endif
+   // V8 found that using SIMD instead of the scalar version was only
+   // faster when we are advancing by 1 byte per iteration.
+diff --git a/js/src/jit/ppc64/Assembler-ppc64.cpp b/js/src/jit/ppc64/Assembler-ppc64.cpp
+index 1f562ba115..d60a4dbce0 100644
+--- a/js/src/jit/ppc64/Assembler-ppc64.cpp
++++ b/js/src/jit/ppc64/Assembler-ppc64.cpp
+@@ -498,6 +498,13 @@ BufferOffset Assembler::as_mtcrf(uint32_t mask, Register rs) {
+ }
+ 
+ BufferOffset Assembler::as_mfocrf(Register rd, CRegisterID crfs) {
++  if (!HasISA207()) {
++    // POWER4 tier: plain mfcr. It returns every CR field, a superset of the
++    // single field mfocrf defines. (The 970 has the ISA 2.01 mfocrf, but it
++    // is microcoded there and the tier sticks to mfcr/mtcrf.)
++    spew("mfcr\t%3s", rd.name());
++    return writeInst(PPC_mfcr | rd.code() << 21);
++  }
+   spew("mfocrf\t%3s,cr%d", rd.name(), crfs);
+   // FXM is a one-hot 8-bit mask at bits 12-19. Bit (7-crfs) selects the CR.
+   return writeInst(PPC_mfocrf | rd.code() << 21 | (1 << (7 - crfs)) << 12);
+@@ -1153,14 +1160,59 @@ BufferOffset Assembler::as_isel(Register rt, Register ra, Register rb,
+ 
+ BufferOffset Assembler::as_isel0(Register rt, Register ra, Register rb,
+                                  uint16_t bc, CRegisterID cr) {
+-  spew("isel\t%3s,%3s,%3s,cr%d:0x%02x", rt.name(), ra.name(), rb.name(), cr,
+-       bc);
+   MOZ_ASSERT((bc < 0x40) && ((bc & 0x0f) == 0x0c));
+   uint16_t nbc = (bc >> 4) + (cr << 2);
++  if (!HasISA207()) {
++    return iselPOWER4(rt, ra, rb, nbc);
++  }
++  spew("isel\t%3s,%3s,%3s,cr%d:0x%02x", rt.name(), ra.name(), rb.name(), cr,
++       bc);
+   return writeInst(PPC_isel | rt.code() << 21 | ra.code() << 16 |
+                    rb.code() << 11 | nbc << 6);
+ }
+ 
++// POWER4 tier (no isel, ISA 2.03): rt = CR[crbit] ? (ra|0) : rb, as a short
++// branch around one or two moves. The sequence uses fixed displacements, so
++// keep pools and veneer islands out of it. Leaves CR untouched like isel.
++BufferOffset Assembler::iselPOWER4(Register rt, Register ra, Register rb,
++                                   uint16_t crbit) {
++  auto branchOnBit = [&](bool ifSet, int16_t disp) {
++    // bc BO,BI,disp: BO=12 branch if CR bit set, BO=4 branch if clear.
++    spew("b%s\tcrbit %d,.+%d", ifSet ? "t" : "f", crbit, disp);
++    return writeInst(PPC_bc | (ifSet ? 12u : 4u) << 21 | uint32_t(crbit) << 16 |
++                     (uint16_t(disp) & 0xfffc));
++  };
++  auto moveA = [&]() {
++    // The isel RA operand reads as literal 0 when it is r0.
++    if (ra == r0) {
++      xs_li(rt, 0);
++    } else {
++      xs_mr(rt, ra);
++    }
++  };
++  m_buffer.enterNoPool(4);
++  BufferOffset start;
++  if (rt == rb) {
++    if (rt == ra && ra != r0) {
++      start = as_nop();
++    } else {
++      start = branchOnBit(false, 8);
++      moveA();
++    }
++  } else if (rt == ra && ra != r0) {
++    start = branchOnBit(true, 8);
++    xs_mr(rt, rb);
++  } else {
++    start = branchOnBit(true, 12);
++    xs_mr(rt, rb);
++    spew("b\t.+8");
++    writeInst(PPC_b | 8);
++    moveA();
++  }
++  m_buffer.leaveNoPool();
++  return start;
++}
++
+ BufferOffset Assembler::as_setbc(Register rt, uint16_t bc, CRegisterID cr) {
+   spew("setbc\t%3s,cr%d:0x%02x", rt.name(), cr, bc);
+   MOZ_ASSERT((bc < 0x40) && ((bc & 0x0f) == 0x0c));
+@@ -1212,7 +1264,6 @@ DEF_FPUDS(fabs)
+ DEF_FPUDS(fneg)
+ DEF_FPUDS(fmr)
+ DEF_FPUDS(fcfid)
+-DEF_FPUDS(fcfids)
+ DEF_FPUDS(fcfidu)
+ DEF_FPUDS(fcfidus)
+ DEF_FPUDS(fctid)
+@@ -1227,6 +1278,34 @@ DEF_FPUDS(fsqrt)
+ DEF_FPUDS(fsqrts)
+ #undef DEF_FPUDS
+ 
++// fcfids is ISA 2.06. The POWER4 tier converts to double and rounds once
++// more to single. That is exact for every source of at most 53 significant
++// bits (all int32/uint32 callers); the int64 callers pre-round in the
++// MacroAssembler so the second rounding cannot change the result.
++BufferOffset Assembler::as_fcfids(FloatRegister rd, FloatRegister rs) {
++  if (!HasISA207()) {
++    BufferOffset bo = as_fcfid(rd, rs);
++    as_frsp(rd, rd);
++    return bo;
++  }
++  spew("fcfids\t%3s,%3s", rd.name(), rs.name());
++  return writeInst(XForm(PPC_fcfids, rd, f0, rs, false));
++}
++
++// lfiwax is ISA 2.05. The POWER4 tier loads the word sign-extended into r0
++// and moves it over through the transfer slot. The returned offset is the
++// faulting load.
++BufferOffset Assembler::as_lfiwax(FloatRegister rd, Register ra, Register rb) {
++  if (!HasISA207()) {
++    BufferOffset bo = as_lwax(r0, ra, rb);
++    as_std(r0, StackPointer, POWER4TransferSlot);
++    as_lfd(rd, StackPointer, POWER4TransferSlot);
++    return bo;
++  }
++  spew("lfiwax\t%3s,%3s,%3s", rd.name(), ra.name(), rb.name());
++  return writeInst(XForm(PPC_lfiwax, rd, ra, rb, false));
++}
++
+ // --- FP loads/stores (D-form) ---
+ 
+ DEF_DFORM_F(lfd)
+@@ -1238,8 +1317,7 @@ DEF_DFORM_F(stfsu)
+ 
+ // --- FP loads/stores (X-form, indexed) ---
+ 
+-DEF_FMEMx(lfdx) DEF_FMEMx(lfsx) DEF_FMEMx(lfiwax)
+-    DEF_FMEMx(stfdx) DEF_FMEMx(stfsx)
++DEF_FMEMx(lfdx) DEF_FMEMx(lfsx) DEF_FMEMx(stfdx) DEF_FMEMx(stfsx)
+ // Clean up macros.
+ #undef DEF_XFORM
+ #undef DEF_XFORM_RC
+@@ -1282,27 +1360,69 @@ BufferOffset Assembler::as_mcrfs(CRegisterID bf, uint8_t bfa) {
+ 
+ // --- VSX (FPR-only subset) ---
+ 
++// POWER4 tier: there are no direct GPR<->FPR moves before ISA 2.07, so the
++// mfvsr*/mtvsr* emitters bounce the bits through one doubleword of the
++// ABI-protected zone below the stack pointer (POWER4TransferSlot). Full
++// doubleword stores and loads keep this independent of endianness. Only
++// FPR-encoded VSRs (0-31) can take this path; Simd128 registers belong to
++// wasm SIMD, which the tier does not support. Sequences that need a
++// pre-processed GPR value use r0, which is never allocated.
+ BufferOffset Assembler::as_mfvsrd(Register ra, FloatRegister xs) {
++  if (!HasISA207()) {
++    MOZ_RELEASE_ASSERT(xs.encoding() < 32);
++    BufferOffset bo = as_stfd(xs, StackPointer, POWER4TransferSlot);
++    as_ld(ra, StackPointer, POWER4TransferSlot);
++    return bo;
++  }
+   spew("mfvsrd\t%3s,%3s", ra.name(), xs.name());
+   return writeInst(XX1FormMfvsr(PPC_mfvsrd, ra.code(), xs.encoding()));
+ }
+ 
+ BufferOffset Assembler::as_mtvsrd(FloatRegister xt, Register ra) {
++  if (!HasISA207()) {
++    MOZ_RELEASE_ASSERT(xt.encoding() < 32);
++    BufferOffset bo = as_std(ra, StackPointer, POWER4TransferSlot);
++    as_lfd(xt, StackPointer, POWER4TransferSlot);
++    return bo;
++  }
+   spew("mtvsrd\t%3s,%3s", xt.name(), ra.name());
+   return writeInst(XX1Form(PPC_mtvsrd, xt.encoding(), ra.code(), 0));
+ }
+ 
+ BufferOffset Assembler::as_mtvsrwa(FloatRegister xt, Register ra) {
++  if (!HasISA207()) {
++    MOZ_RELEASE_ASSERT(xt.encoding() < 32);
++    BufferOffset bo = as_extsw(r0, ra);
++    as_std(r0, StackPointer, POWER4TransferSlot);
++    as_lfd(xt, StackPointer, POWER4TransferSlot);
++    return bo;
++  }
+   spew("mtvsrwa\t%3s,%3s", xt.name(), ra.name());
+   return writeInst(XX1Form(PPC_mtvsrwa, xt.encoding(), ra.code(), 0));
+ }
+ 
+ BufferOffset Assembler::as_mtvsrws(FloatRegister xt, Register ra) {
++  if (!HasISA207()) {
++    // Word splat: both words of doubleword 0 get the low word of ra.
++    MOZ_RELEASE_ASSERT(xt.encoding() < 32);
++    BufferOffset bo = as_rldicl(r0, ra, 0, 32);
++    as_rldimi(r0, ra, 32, 0);
++    as_std(r0, StackPointer, POWER4TransferSlot);
++    as_lfd(xt, StackPointer, POWER4TransferSlot);
++    return bo;
++  }
+   spew("mtvsrws\t%3s,%3s", xt.name(), ra.name());
+   return writeInst(XX1Form(PPC_mtvsrws, xt.encoding(), ra.code(), 0));
+ }
+ 
+ BufferOffset Assembler::as_mtvsrwz(FloatRegister xt, Register ra) {
++  if (!HasISA207()) {
++    MOZ_RELEASE_ASSERT(xt.encoding() < 32);
++    BufferOffset bo = as_rldicl(r0, ra, 0, 32);
++    as_std(r0, StackPointer, POWER4TransferSlot);
++    as_lfd(xt, StackPointer, POWER4TransferSlot);
++    return bo;
++  }
+   spew("mtvsrwz\t%3s,%3s", xt.name(), ra.name());
+   return writeInst(XX1Form(PPC_mtvsrwz, xt.encoding(), ra.code(), 0));
+ }
+diff --git a/js/src/jit/ppc64/Assembler-ppc64.h b/js/src/jit/ppc64/Assembler-ppc64.h
+index f1ead56ded..6f778e8ed5 100644
+--- a/js/src/jit/ppc64/Assembler-ppc64.h
++++ b/js/src/jit/ppc64/Assembler-ppc64.h
+@@ -106,6 +106,13 @@ static constexpr Register SavedScratchRegister = r16;
+ 
+ static constexpr Register SecondScratchReg = r12;
+ 
++// POWER4 tier (no ISA 2.07 VSX, e.g. PowerPC 970): GPR<->FPR moves go through
++// this doubleword below the stack pointer. It lies inside the 288-byte
++// protected zone that both 64-bit PowerPC ELF ABIs guarantee is not touched
++// by signal delivery, and clear of the other red-zone users in this backend
++// (-8 and -16..-1/-32..-17 for atomics and the wasm SIMD stash).
++static constexpr int16_t POWER4TransferSlot = -48;
++
+ static constexpr FloatRegister ScratchFloat32Reg{FloatRegisters::f0,
+                                                  FloatRegisters::Single};
+ static constexpr FloatRegister ScratchDoubleReg = f0;
+@@ -516,6 +523,7 @@ enum PPCOpcodes {
+   PPC_stdbrx = 0x7C000528,  // XO=660 (POWER7+)
+   PPC_mcrxrx = 0x7C000480,
+   PPC_mcrfs = 0xFC000080,
++  PPC_mfcr = 0x7C000026,
+   PPC_mfocrf = 0x7C100026,
+   PPC_mffs = 0xFC00048E,
+   PPC_mfspr = 0x7C0002A6,
+@@ -1661,6 +1669,9 @@ class Assembler : public AssemblerShared {
+                        CRegisterID cr = cr0);
+   BufferOffset as_isel0(Register rt, Register ra, Register rb, uint16_t rc,
+                         CRegisterID cr = cr0);
++  // POWER4-tier isel replacement (see Assembler-ppc64.cpp).
++  BufferOffset iselPOWER4(Register rt, Register ra, Register rb,
++                          uint16_t crbit);
+ 
+   // FP compare.
+   BufferOffset as_fcmpu(CRegisterID cr, FloatRegister ra, FloatRegister rb);
+@@ -2096,7 +2107,12 @@ class Assembler : public AssemblerShared {
+   static bool HasRoundInstruction(RoundingMode mode) {
+     // PPC64 has friz (trunc), frip (ceil), frim (floor), which are all correct.
+     // frin (round-to-nearest) does NOT implement proper IEEE banker's rounding
+-    // (ties to even), so NearestTiesToEven is not supported.
++    // (ties to even), so NearestTiesToEven is not supported. The fri* forms
++    // are ISA 2.02, so the POWER4 tier (PowerPC 970, ISA 2.01) has none and
++    // Math.floor/ceil/trunc on doubles take the shared non-inline paths.
++    if (!HasISA207()) {
++      return false;
++    }
+     return mode == RoundingMode::TowardsZero || mode == RoundingMode::Up ||
+            mode == RoundingMode::Down;
+   }
+diff --git a/js/src/jit/ppc64/Lowering-ppc64.cpp b/js/src/jit/ppc64/Lowering-ppc64.cpp
+index 278d3e38b1..73c29ea24a 100644
+--- a/js/src/jit/ppc64/Lowering-ppc64.cpp
++++ b/js/src/jit/ppc64/Lowering-ppc64.cpp
+@@ -514,6 +514,12 @@ void LIRGenerator::visitCompareExchangeTypedArrayElement(
+     // for the 32-bit cmpw. offsetTemp/maskTemp are unused (no round-down
+     // + bit-isolate dance), and remain BogusTemp.
+     valueTemp = temp();
++    if (!HasISA207()) {
++      // POWER4 tier: no lbarx/lharx; the lwarx-on-the-containing-word
++      // fallback needs the lane shift and mask registers too.
++      offsetTemp = temp();
++      maskTemp = temp();
++    }
+   }
+ 
+   auto* lir = new (alloc()) LCompareExchangeTypedArrayElement(
+@@ -550,7 +556,13 @@ void LIRGenerator::visitAtomicExchangeTypedArrayElement(
+   // PPC64 sub-word atomic exchange uses lbarx/lharx + stbcx./sthcx. directly
+   // (POWER7+); valueTemp/offsetTemp/maskTemp are never read by the
+   // implementation (see MacroAssembler-ppc64.cpp's AtomicExchange template).
+-  // Leave them as BogusTemp.
++  // Leave them as BogusTemp, except on the POWER4 tier (no lbarx/lharx),
++  // where the masked lwarx fallback needs all three.
++  if (Scalar::byteSize(ins->arrayType()) < 4 && !HasISA207()) {
++    valueTemp = temp();
++    offsetTemp = temp();
++    maskTemp = temp();
++  }
+ 
+   auto* lir = new (alloc()) LAtomicExchangeTypedArrayElement(
+       elements, index, value, valueTemp, offsetTemp, maskTemp);
+@@ -595,7 +607,13 @@ void LIRGenerator::visitAtomicTypedArrayElementBinop(
+   // condition-stored (MacroAssembler-ppc64.cpp's AtomicFetchOp); the
+   // for-effect variant uses an internal scratch and needs no temps at
+   // all. offsetTemp/maskTemp are unused in either path.
+-  if (Scalar::byteSize(ins->arrayType()) < 4 && !ins->isForEffect()) {
++  if (Scalar::byteSize(ins->arrayType()) < 4 && !HasISA207()) {
++    // POWER4 tier (no lbarx/lharx): the masked lwarx fallback needs a lane
++    // temp, the lane shift and the lane mask for both variants.
++    valueTemp = temp();
++    offsetTemp = temp();
++    maskTemp = temp();
++  } else if (Scalar::byteSize(ins->arrayType()) < 4 && !ins->isForEffect()) {
+     valueTemp = temp();
+   }
+ 
+diff --git a/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h b/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
+index 29b53925df..238b4b05e3 100644
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
+@@ -61,6 +61,13 @@ void MacroAssembler::move32To64SignExtend(Register src, Register64 dest) {
+ }
+ 
+ void MacroAssembler::moveFloat32ToGPR(FloatRegister src, Register dest) {
++  if (!HasISA207()) {
++    // POWER4 tier: stfs performs the double-format -> single conversion
++    // (non-signalling, like xscvdpspn) and lwz zero-extends the bits.
++    as_stfs(src, StackPointer, POWER4TransferSlot);
++    as_lwz(dest, StackPointer, POWER4TransferSlot);
++    return;
++  }
+   // FPR holds double-format value (PPC convention). Convert to
+   // single-precision bits in bits 0:31 of the VSR, then extract.
+   as_xscvdpspn(ScratchDoubleReg, src);
+@@ -69,6 +76,13 @@ void MacroAssembler::moveFloat32ToGPR(FloatRegister src, Register dest) {
+ }
+ 
+ void MacroAssembler::moveGPRToFloat32(Register src, FloatRegister dest) {
++  if (!HasISA207()) {
++    // POWER4 tier: a word store plus lfs, which widens the single to the
++    // FPR double format without touching a signalling NaN.
++    as_stw(src, StackPointer, POWER4TransferSlot);
++    as_lfs(dest, StackPointer, POWER4TransferSlot);
++    return;
++  }
+   // Place raw single-precision bits in VSR bits 0:31, then convert
+   // to double-precision format (matching PPC's FPR convention, like lfs).
+   if (HasPOWER9()) {
+@@ -1150,7 +1164,14 @@ void MacroAssembler::minFloat32(FloatRegister other, FloatRegister srcDest,
+   ma_b(Assembler::DoubleEqual, &equal);
+   // Ordered and distinct: the base min/max form is exact on this
+   // domain (NaN and equal/zero cases were branched out above).
+-  as_xsmindp(srcDest, srcDest, other);
++  if (HasISA207()) {
++    as_xsmindp(srcDest, srcDest, other);
++  } else {
++    // POWER4 tier: CR0 still holds fcmpu(srcDest, other), ordered and
++    // unequal here, so a branch around fmr picks the minimum.
++    ma_b(Assembler::DoubleLessThan, &done);
++    as_fmr(srcDest, other);
++  }
+   jump(&done);
+ 
+   bind(&equal);
+@@ -1191,7 +1212,14 @@ void MacroAssembler::minDouble(FloatRegister other, FloatRegister srcDest,
+   ma_b(Assembler::DoubleEqual, &equal);
+   // Ordered and distinct: the base min/max form is exact on this
+   // domain (NaN and equal/zero cases were branched out above).
+-  as_xsmindp(srcDest, srcDest, other);
++  if (HasISA207()) {
++    as_xsmindp(srcDest, srcDest, other);
++  } else {
++    // POWER4 tier: CR0 still holds fcmpu(srcDest, other), ordered and
++    // unequal here, so a branch around fmr picks the minimum.
++    ma_b(Assembler::DoubleLessThan, &done);
++    as_fmr(srcDest, other);
++  }
+   jump(&done);
+ 
+   bind(&equal);
+@@ -1227,7 +1255,14 @@ void MacroAssembler::maxFloat32(FloatRegister other, FloatRegister srcDest,
+   ma_b(Assembler::DoubleEqual, &equal);
+   // Ordered and distinct: the base min/max form is exact on this
+   // domain (NaN and equal/zero cases were branched out above).
+-  as_xsmaxdp(srcDest, srcDest, other);
++  if (HasISA207()) {
++    as_xsmaxdp(srcDest, srcDest, other);
++  } else {
++    // POWER4 tier: CR0 still holds fcmpu(srcDest, other), ordered and
++    // unequal here, so a branch around fmr picks the maximum.
++    ma_b(Assembler::DoubleGreaterThan, &done);
++    as_fmr(srcDest, other);
++  }
+   jump(&done);
+ 
+   bind(&equal);
+@@ -1261,7 +1296,14 @@ void MacroAssembler::maxDouble(FloatRegister other, FloatRegister srcDest,
+   ma_b(Assembler::DoubleEqual, &equal);
+   // Ordered and distinct: the base min/max form is exact on this
+   // domain (NaN and equal/zero cases were branched out above).
+-  as_xsmaxdp(srcDest, srcDest, other);
++  if (HasISA207()) {
++    as_xsmaxdp(srcDest, srcDest, other);
++  } else {
++    // POWER4 tier: CR0 still holds fcmpu(srcDest, other), ordered and
++    // unequal here, so a branch around fmr picks the maximum.
++    ma_b(Assembler::DoubleGreaterThan, &done);
++    as_fmr(srcDest, other);
++  }
+   jump(&done);
+ 
+   bind(&equal);
+@@ -1538,7 +1580,7 @@ void MacroAssembler::clz64(Register64 src, Register64 dest) {
+ void MacroAssembler::ctz64(Register64 src, Register64 dest) {
+   if (HasPOWER9()) {
+     as_cnttzd(dest.reg, src.reg);
+-  } else {
++  } else if (HasISA207()) {
+     UseScratchRegisterScope temps(*this);
+     Register tmp = temps.Acquire();
+     // popcnt((x-1) & ~x) counts the trailing zeros, including x==0 -> 64
+@@ -1546,11 +1588,64 @@ void MacroAssembler::ctz64(Register64 src, Register64 dest) {
+     as_addi(tmp, src.reg, -1);
+     as_andc(tmp, tmp, src.reg);
+     as_popcntd(dest.reg, tmp);
++  } else {
++    UseScratchRegisterScope temps(*this);
++    Register tmp = temps.Acquire();
++    // POWER4 tier (no popcntd): (x-1) & ~x has exactly ctz(x) low ones, so
++    // ctz = 64 - clz of it; x==0 gives all ones and 64 - 0 = 64.
++    as_addi(tmp, src.reg, -1);
++    as_andc(tmp, tmp, src.reg);
++    as_cntlzd(dest.reg, tmp);
++    as_subfic(dest.reg, dest.reg, 64);
++  }
++}
++
++// POWER4 tier popcount (popcntw/popcntd are ISA 2.05/2.06): the classic
++// SWAR reduction. |value| holds the zero-extended input and is consumed;
++// the count ends up in |out| (which may equal |value|). Needs one extra
++// temp for the masks.
++static inline void PopcntSWAR(MacroAssembler& masm, bool is64, Register value,
++                              Register out, Register tmp, Register mask) {
++  auto loadMask = [&](uint64_t m) {
++    masm.movePtr(ImmWord(is64 ? m : (m & 0xffffffff)), mask);
++  };
++  // value = value - ((value >> 1) & 0x55..)
++  masm.x_srdi(tmp, value, 1);
++  loadMask(0x5555555555555555ULL);
++  masm.as_and_(tmp, tmp, mask);
++  masm.as_subf(value, tmp, value);
++  // value = (value & 0x33..) + ((value >> 2) & 0x33..)
++  loadMask(0x3333333333333333ULL);
++  masm.x_srdi(tmp, value, 2);
++  masm.as_and_(tmp, tmp, mask);
++  masm.as_and_(value, value, mask);
++  masm.as_add(value, value, tmp);
++  // value = (value + (value >> 4)) & 0x0f..
++  masm.x_srdi(tmp, value, 4);
++  masm.as_add(value, value, tmp);
++  loadMask(0x0f0f0f0f0f0f0f0fULL);
++  masm.as_and_(value, value, mask);
++  // Sum the byte counts with a multiply and take the top byte.
++  loadMask(0x0101010101010101ULL);
++  masm.as_mulld(value, value, mask);
++  masm.x_srdi(out, value, is64 ? 56 : 24);
++  if (!is64) {
++    masm.as_rldicl(out, out, 0, 56);
+   }
+ }
+ 
+ void MacroAssembler::popcnt64(Register64 input, Register64 output,
+                               Register tmp) {
++  if (!HasISA207()) {
++    UseScratchRegisterScope temps(*this);
++    Register mask = temps.Acquire();
++    MOZ_ASSERT(tmp != InvalidReg && tmp != input.reg && tmp != output.reg);
++    if (output.reg != input.reg) {
++      movePtr(input.reg, output.reg);
++    }
++    PopcntSWAR(*this, true, output.reg, output.reg, tmp, mask);
++    return;
++  }
+   as_popcntd(output.reg, input.reg);
+ }
+ 
+@@ -1561,7 +1656,7 @@ void MacroAssembler::clz32(Register src, Register dest, bool knownNotZero) {
+ void MacroAssembler::ctz32(Register src, Register dest, bool knownNotZero) {
+   if (HasPOWER9()) {
+     as_cnttzw(dest, src);
+-  } else {
++  } else if (HasISA207()) {
+     UseScratchRegisterScope temps(*this);
+     Register tmp = temps.Acquire();
+     // popcnt((x-1) & ~x) of the low word counts the trailing zeros,
+@@ -1571,10 +1666,27 @@ void MacroAssembler::ctz32(Register src, Register dest, bool knownNotZero) {
+     as_andc(tmp, tmp, src);
+     as_popcntw(dest, tmp);
+     as_rldicl(dest, dest, 0, 32);
++  } else {
++    UseScratchRegisterScope temps(*this);
++    Register tmp = temps.Acquire();
++    // POWER4 tier (no popcntw): cntlzw only looks at the low word, where
++    // (x-1) & ~x has exactly ctz(x) low ones (all ones for x==0).
++    as_addi(tmp, src, -1);
++    as_andc(tmp, tmp, src);
++    as_cntlzw(dest, tmp);
++    as_subfic(dest, dest, 32);
+   }
+ }
+ 
+ void MacroAssembler::popcnt32(Register input, Register output, Register tmp) {
++  if (!HasISA207()) {
++    UseScratchRegisterScope temps(*this);
++    Register mask = temps.Acquire();
++    MOZ_ASSERT(tmp != InvalidReg && tmp != input && tmp != output);
++    as_rldicl(output, input, 0, 32);
++    PopcntSWAR(*this, false, output, output, tmp, mask);
++    return;
++  }
+   as_popcntw(output, input);
+   // popcntw gives per-word results; on 64-bit the low word count is in
+   // bits 32:63, so just mask to 32 bits.
+@@ -3395,12 +3507,75 @@ inline void MacroAssembler::cmp32Set(Assembler::Condition cond, Address lhs,
+   ma_cmp_set(dest, c);
+ }
+ 
++// POWER4 tier (no VSX loads/stores): move a 128-bit VR to or from an
++// arbitrary (possibly unaligned) address. VMX lvx/stvx need 16-byte
++// alignment, so the vector goes through an aligned 16-byte slot in the
++// ABI-protected zone below the stack pointer and is copied with two
++// doubleword GPR moves through r0. lvx/stvx and the copy agree on the
++// in-memory image on both endiannesses. The slot, (sp - 64) & ~15, lies in
++// [sp - 79, sp - 49], clear of POWER4TransferSlot and the other red-zone
++// users. Only spill/fill code reaches this (wasm SIMD is unsupported on the
++// tier); |addr| must not be r0 and |offset| and |offset| + 8 must be valid
++// DS-form displacements. Returns the offset of the first access to |addr|.
++static inline BufferOffset Simd128CopyPOWER4(MacroAssembler& masm,
++                                             FloatRegister vr, Register addr,
++                                             int16_t offset, Register slot,
++                                             bool isStore) {
++  MOZ_RELEASE_ASSERT(vr.isSimd128());
++  MOZ_ASSERT(addr != r0 && slot != r0 && addr != slot);
++  MOZ_ASSERT((offset & 3) == 0 && offset <= INT16_MAX - 8);
++  uint8_t vrn = uint8_t(vr.encoding() - 32);
++  masm.as_addi(slot, StackPointer, -64);
++  masm.as_rldicr(slot, slot, 0, 59);
++  BufferOffset first;
++  if (isStore) {
++    masm.as_stvx(vrn, r0, slot);
++    masm.as_ld(r0, slot, 0);
++    first = masm.as_std(r0, addr, offset);
++    masm.as_ld(r0, slot, 8);
++    masm.as_std(r0, addr, offset + 8);
++  } else {
++    first = masm.as_ld(r0, addr, offset);
++    masm.as_std(r0, slot, 0);
++    masm.as_ld(r0, addr, offset + 8);
++    masm.as_std(r0, slot, 8);
++    masm.as_lvx(vrn, r0, slot);
++  }
++  return first;
++}
++
++// Address form. Spill slots and the other non-wasm users have small,
++// 4-byte-aligned offsets and need only one scratch register (the slot
++// pointer); PushRegsInMask and friends may be called with the other
++// scratch register already taken.
++static inline FaultingCodeRange Simd128AddressCopyPOWER4(MacroAssembler& masm,
++                                                         FloatRegister vr,
++                                                         const Address& a,
++                                                         bool isStore) {
++  UseScratchRegisterScope temps(masm);
++  Register slot = temps.Acquire();
++  if ((a.offset & 3) == 0 && is_intN(a.offset, 16) &&
++      is_intN(a.offset + 8, 16)) {
++    return FaultingCodeRange(
++        Simd128CopyPOWER4(masm, vr, a.base, int16_t(a.offset), slot, isStore)
++            .getOffset());
++  }
++  Register tmp = temps.Acquire();
++  masm.movePtr(ImmWord(a.offset), tmp);
++  masm.as_add(tmp, a.base, tmp);
++  return FaultingCodeRange(
++      Simd128CopyPOWER4(masm, vr, tmp, 0, slot, isStore).getOffset());
++}
++
+ //{{{ check_macroassembler_style
+ // ===============================================================
+ // SIMD load/store (128-bit)
+ 
+ FaultingCodeRange MacroAssembler::loadUnalignedSimd128(const Address& src,
+                                                         FloatRegister dest) {
++  if (!HasISA207()) {
++    return Simd128AddressCopyPOWER4(*this, dest, src, /* isStore = */ false);
++  }
+   UseScratchRegisterScope temps(asMasm());
+   if (HasPOWER10() && is_intN((intptr_t)src.offset, 34)) {
+     // POWER10 prefixed load — natural-LE byte order, no GPR scratch.
+@@ -3451,6 +3626,11 @@ FaultingCodeRange MacroAssembler::loadUnalignedSimd128(const BaseIndex& src,
+     // falls back to movePtr+add on P9/P8. Drops the explicit scratch2.
+     addPtr(ImmWord(src.offset), scratch);
+   }
++  if (!HasISA207()) {
++    Register slot = temps.Acquire();
++    return FaultingCodeRange(
++        Simd128CopyPOWER4(*this, dest, scratch, 0, slot, false).getOffset());
++  }
+   if (HasPOWER9()) {
+     return FaultingCodeRange(as_lxvx(dest, r0, scratch).getOffset());
+   }
+@@ -3463,6 +3643,9 @@ FaultingCodeRange MacroAssembler::loadUnalignedSimd128(const BaseIndex& src,
+ 
+ FaultingCodeRange MacroAssembler::storeUnalignedSimd128(FloatRegister src,
+                                                          const Address& dest) {
++  if (!HasISA207()) {
++    return Simd128AddressCopyPOWER4(*this, src, dest, /* isStore = */ true);
++  }
+   UseScratchRegisterScope temps(asMasm());
+   if (HasPOWER10() && is_intN((intptr_t)dest.offset, 34)) {
+     // POWER10 prefixed store — natural-LE byte order, no GPR scratch.
+@@ -3512,6 +3695,11 @@ FaultingCodeRange MacroAssembler::storeUnalignedSimd128(
+   if (dest.offset != 0) {
+     addPtr(ImmWord(dest.offset), scratch);
+   }
++  if (!HasISA207()) {
++    Register slot = temps.Acquire();
++    return FaultingCodeRange(
++        Simd128CopyPOWER4(*this, src, scratch, 0, slot, true).getOffset());
++  }
+   if (HasPOWER9()) {
+     return FaultingCodeRange(as_stxvx(src, r0, scratch).getOffset());
+   }
+diff --git a/js/src/jit/ppc64/MacroAssembler-ppc64.cpp b/js/src/jit/ppc64/MacroAssembler-ppc64.cpp
+index dda3f39319..107f688ce7 100644
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.cpp
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.cpp
+@@ -929,8 +929,56 @@ void MacroAssembler::convertInt64ToDouble(Register64 src, FloatRegister dest) {
+   as_fcfid(dest, dest);
+ }
+ 
++// POWER4 tier (no fri*, no fcpsgn): round to an integral double through the
++// integer unit. Magnitudes >= 2^52, infinities and NaN are already integral
++// and are returned unchanged. Otherwise fctid/fctidz gives the rounded or
++// truncated integer, floor/ceil step it by one when the truncation went the
++// wrong way, and fcfid converts back. A zero result takes src's sign from
++// src * +0.0 (src is finite there), which is what fcpsgn would produce.
++static void NearbyIntDoublePOWER4(MacroAssembler& masm, RoundingMode mode,
++                                  FloatRegister src, FloatRegister dest) {
++  Label done, adjusted;
++  UseScratchRegisterScope temps(masm);
++  Register scratch = temps.Acquire();
++  masm.moveDouble(src, ScratchDoubleReg);
++  if (src != dest) {
++    masm.moveDouble(src, dest);
++  }
++  masm.as_mfvsrd(scratch, ScratchDoubleReg);
++  masm.x_srdi(scratch, scratch, 52);
++  masm.as_andi_rc(scratch, scratch, 0x7FF);
++  masm.ma_cmp(scratch, Imm32(1075), Assembler::GreaterThanOrEqual);
++  masm.ma_b(Assembler::GreaterThanOrEqual, &done);
++  if (mode == RoundingMode::NearestTiesToEven) {
++    masm.as_fctid(dest, ScratchDoubleReg);
++  } else {
++    masm.as_fctidz(dest, ScratchDoubleReg);
++  }
++  masm.as_mfvsrd(scratch, dest);
++  if (mode == RoundingMode::Down || mode == RoundingMode::Up) {
++    bool down = mode == RoundingMode::Down;
++    masm.as_fcfid(dest, dest);
++    masm.as_fcmpu(dest, ScratchDoubleReg);
++    masm.ma_b(down ? Assembler::DoubleLessThanOrEqual
++                   : Assembler::DoubleGreaterThanOrEqual,
++              &adjusted);
++    masm.as_addi(scratch, scratch, down ? -1 : 1);
++    masm.as_mtvsrd(dest, scratch);
++    masm.bind(&adjusted);
++  }
++  masm.as_fcfid(dest, dest);
++  masm.as_cmpdi(scratch, 0);
++  masm.ma_b(Assembler::NotEqual, &done);
++  masm.as_fmul(dest, ScratchDoubleReg, dest);
++  masm.bind(&done);
++}
++
+ void MacroAssembler::nearbyIntDouble(RoundingMode mode, FloatRegister src,
+                                      FloatRegister dest) {
++  if (!HasISA207()) {
++    NearbyIntDoublePOWER4(*this, mode, src, dest);
++    return;
++  }
+   switch (mode) {
+     case RoundingMode::NearestTiesToEven: {
+       // PPC64's frin rounds ties away from zero, NOT to even (ISA v3.1).
+@@ -1351,6 +1399,26 @@ void MacroAssembler::flexibleRemainderPtr(Register lhs, Register rhs,
+ // ===============================================================
+ // Rounding helpers.
+ 
++// POWER4 tier replacement for `fri[mp] t, src; fctidz t, t; mfvsrd dest, t`
++// (frim/frip are ISA 2.02): truncate with fctidz, convert back, and step the
++// integer by one when truncation rounded the wrong way for floor (down) or
++// ceil (up). NaN and out-of-range inputs leave a saturated value that is not
++// an int32, so the callers' int32 range check still rejects them. Clobbers
++// |tmp| and CR0.
++static void TruncateAndStepPOWER4(MacroAssembler& masm, FloatRegister src,
++                                  FloatRegister tmp, Register dest, bool down) {
++  Label adjusted;
++  masm.as_fctidz(tmp, src);
++  masm.as_mfvsrd(dest, tmp);
++  masm.as_fcfid(tmp, tmp);
++  masm.as_fcmpu(tmp, src);
++  masm.ma_b(down ? Assembler::DoubleLessThanOrEqual
++                 : Assembler::DoubleGreaterThanOrEqual,
++            &adjusted);
++  masm.as_addi(dest, dest, down ? -1 : 1);
++  masm.bind(&adjusted);
++}
++
+ void MacroAssembler::floorDoubleToInt32(FloatRegister src, Register dest,
+                                         Label* fail) {
+   ScratchDoubleScope fpscratch(asMasm());
+@@ -1358,9 +1426,13 @@ void MacroAssembler::floorDoubleToInt32(FloatRegister src, Register dest,
+   Register scratch = temps.Acquire();
+ 
+   // Round toward negative infinity, then convert to int64.
+-  as_frim(fpscratch, src);
+-  as_fctidz(fpscratch, fpscratch);
+-  as_mfvsrd(dest, fpscratch);
++  if (HasISA207()) {
++    as_frim(fpscratch, src);
++    as_fctidz(fpscratch, fpscratch);
++    as_mfvsrd(dest, fpscratch);
++  } else {
++    TruncateAndStepPOWER4(*this, src, fpscratch, dest, /* down = */ true);
++  }
+ 
+   // Check if result fits in int32.
+   as_extsw(scratch, dest);
+@@ -1390,9 +1462,13 @@ void MacroAssembler::floorFloat32ToInt32(FloatRegister src, Register dest,
+ 
+   // PPC FP rounding works on doubles. Single-precision FPRs are
+   // already in double-width registers, so frim works fine.
+-  as_frim(fpscratch, src);
+-  as_fctidz(fpscratch, fpscratch);
+-  as_mfvsrd(dest, fpscratch);
++  if (HasISA207()) {
++    as_frim(fpscratch, src);
++    as_fctidz(fpscratch, fpscratch);
++    as_mfvsrd(dest, fpscratch);
++  } else {
++    TruncateAndStepPOWER4(*this, src, fpscratch, dest, /* down = */ true);
++  }
+ 
+   // Check if result fits in int32.
+   as_extsw(scratch, dest);
+@@ -1423,9 +1499,13 @@ void MacroAssembler::ceilDoubleToInt32(FloatRegister src, Register dest,
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+ 
+-  as_frip(fpscratch, src);
+-  as_fctidz(fpscratch, fpscratch);
+-  as_mfvsrd(dest, fpscratch);
++  if (HasISA207()) {
++    as_frip(fpscratch, src);
++    as_fctidz(fpscratch, fpscratch);
++    as_mfvsrd(dest, fpscratch);
++  } else {
++    TruncateAndStepPOWER4(*this, src, fpscratch, dest, /* down = */ false);
++  }
+ 
+   // Check if result fits in int32.
+   as_extsw(scratch, dest);
+@@ -1451,9 +1531,13 @@ void MacroAssembler::ceilFloat32ToInt32(FloatRegister src, Register dest,
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+ 
+-  as_frip(fpscratch, src);
+-  as_fctidz(fpscratch, fpscratch);
+-  as_mfvsrd(dest, fpscratch);
++  if (HasISA207()) {
++    as_frip(fpscratch, src);
++    as_fctidz(fpscratch, fpscratch);
++    as_mfvsrd(dest, fpscratch);
++  } else {
++    TruncateAndStepPOWER4(*this, src, fpscratch, dest, /* down = */ false);
++  }
+ 
+   // Check if result fits in int32.
+   as_extsw(scratch, dest);
+@@ -1548,9 +1632,14 @@ void MacroAssembler::roundDoubleToInt32(FloatRegister src, Register dest,
+   {
+     loadConstantDouble(GetBiggestNumberLessThan(0.5), temp);
+     as_fadd(fpscratch, src, temp);
+-    as_frim(fpscratch, fpscratch);
+-    as_fctidz(fpscratch, fpscratch);
+-    as_mfvsrd(dest, fpscratch);
++    if (HasISA207()) {
++      as_frim(fpscratch, fpscratch);
++      as_fctidz(fpscratch, fpscratch);
++      as_mfvsrd(dest, fpscratch);
++    } else {
++      // temp is free again once the bias has been added.
++      TruncateAndStepPOWER4(*this, fpscratch, temp, dest, /* down = */ true);
++    }
+ 
+     // Check if result fits in int32.
+     as_extsw(scratch, dest);
+@@ -1590,9 +1679,14 @@ void MacroAssembler::roundFloat32ToInt32(FloatRegister src, Register dest,
+   {
+     loadConstantFloat32(float(GetBiggestNumberLessThan(0.5)), temp);
+     as_fadds(fpscratch, src, temp);
+-    as_frim(fpscratch, fpscratch);
+-    as_fctidz(fpscratch, fpscratch);
+-    as_mfvsrd(dest, fpscratch);
++    if (HasISA207()) {
++      as_frim(fpscratch, fpscratch);
++      as_fctidz(fpscratch, fpscratch);
++      as_mfvsrd(dest, fpscratch);
++    } else {
++      // temp is free again once the bias has been added.
++      TruncateAndStepPOWER4(*this, fpscratch, temp, dest, /* down = */ true);
++    }
+ 
+     // Check if result fits in int32.
+     as_extsw(scratch, dest);
+@@ -1619,8 +1713,26 @@ void MacroAssembler::convertIntPtrToDouble(Register src, FloatRegister dest) {
+   convertInt64ToDouble(Register64(src), dest);
+ }
+ 
++// POWER4 tier (fcpsgn is ISA 2.05): splice the sign bit in a GPR. Singles
++// live in double format in the FPRs, so this serves both widths.
++static void CopySignPOWER4(MacroAssembler& masm, FloatRegister lhs,
++                           FloatRegister rhs, FloatRegister output) {
++  UseScratchRegisterScope temps(masm);
++  Register magnitude = temps.Acquire();
++  masm.as_mfvsrd(magnitude, lhs);
++  masm.as_mfvsrd(r0, rhs);
++  masm.as_rldicl(magnitude, magnitude, 0, 1);  // clear the sign
++  masm.as_rldicr(r0, r0, 0, 0);                // keep only the sign
++  masm.as_or_(magnitude, magnitude, r0);
++  masm.as_mtvsrd(output, magnitude);
++}
++
+ void MacroAssembler::copySignDouble(FloatRegister lhs, FloatRegister rhs,
+                                     FloatRegister output) {
++  if (!HasISA207()) {
++    CopySignPOWER4(*this, lhs, rhs, output);
++    return;
++  }
+   // fcpsgn frt, fra, frb: copies sign of fra to magnitude of frb.
+   // lhs = magnitude source, rhs = sign source.
+   as_fcpsgn(output, rhs, lhs);
+@@ -1628,6 +1740,10 @@ void MacroAssembler::copySignDouble(FloatRegister lhs, FloatRegister rhs,
+ 
+ void MacroAssembler::copySignFloat32(FloatRegister lhs, FloatRegister rhs,
+                                      FloatRegister output) {
++  if (!HasISA207()) {
++    CopySignPOWER4(*this, lhs, rhs, output);
++    return;
++  }
+   as_fcpsgn(output, rhs, lhs);
+ }
+ 
+@@ -1778,9 +1894,59 @@ bool MacroAssembler::convertUInt64ToDoubleNeedsTemp() { return false; }
+ 
+ void MacroAssembler::call(ImmWord imm) { call(ImmPtr((void*)imm.value)); }
+ 
++// POWER4 tier helpers for the 64-bit integer conversions (fcfidu, fcfids
++// and fcfidus are ISA 2.06).
++//
++// Halve an unsigned 64-bit value that has its top bit set, keeping a sticky
++// low bit, so that it converts as a positive int64 and can be doubled back
++// exactly after the single rounding: t = (src >> 1) | (src & 1).
++static void HalveUInt64StickyPOWER4(MacroAssembler& masm, Register src,
++                                    Register t) {
++  masm.as_rldicl(t, src, 63, 1);
++  masm.as_andi_rc(r0, src, 1);
++  masm.as_or_(t, t, r0);
++}
++
++// Make fcfid+frsp round an int64 correctly to single precision: when |t|
++// needs more than 53 bits, fold its low 11 bits into a sticky bit 11 and
++// clear them, so the conversion to double is exact and only frsp rounds
++// (LLVM uses the same trick on targets without fcfids). Modifies t.
++static void StickyRoundInt64ForSinglePOWER4(MacroAssembler& masm, Register t) {
++  Label done;
++  masm.as_sradi(r0, t, 53);  // 0 or -1 when |t| < 2^53
++  masm.as_cmpdi(r0, 0);
++  masm.ma_b(Assembler::Equal, &done);
++  masm.as_cmpdi(r0, -1);
++  masm.ma_b(Assembler::Equal, &done);
++  masm.as_andi_rc(r0, t, 2047);
++  masm.as_neg(r0, r0);
++  masm.as_sradi(r0, r0, 63);  // all ones iff any low bit was set
++  masm.as_andi_rc(r0, r0, 2048);
++  masm.as_or_(t, t, r0);
++  masm.as_rldicr(t, t, 0, 52);  // clear the low 11 bits
++  masm.bind(&done);
++}
++
+ void MacroAssembler::convertUInt64ToDouble(Register64 src, FloatRegister dest,
+                                            Register temp) {
+   MOZ_ASSERT(temp == Register::Invalid());
++  if (!HasISA207()) {
++    Label isSigned, done;
++    UseScratchRegisterScope temps(*this);
++    Register t = temps.Acquire();
++    as_cmpdi(src.reg, 0);
++    ma_b(Assembler::GreaterThanOrEqual, &isSigned);
++    HalveUInt64StickyPOWER4(*this, src.reg, t);
++    as_mtvsrd(dest, t);
++    as_fcfid(dest, dest);
++    as_fadd(dest, dest, dest);
++    jump(&done);
++    bind(&isSigned);
++    as_mtvsrd(dest, src.reg);
++    as_fcfid(dest, dest);
++    bind(&done);
++    return;
++  }
+   // POWER7+ has fcfidu (unsigned i64 → f64) as a single instruction; no
+   // sign-split / branch / GPR scratch needed.
+   as_mtvsrd(dest, src.reg);
+@@ -1788,6 +1954,16 @@ void MacroAssembler::convertUInt64ToDouble(Register64 src, FloatRegister dest,
+ }
+ 
+ void MacroAssembler::convertInt64ToFloat32(Register64 src, FloatRegister dest) {
++  if (!HasISA207()) {
++    UseScratchRegisterScope temps(*this);
++    Register t = temps.Acquire();
++    movePtr(src.reg, t);
++    StickyRoundInt64ForSinglePOWER4(*this, t);
++    as_mtvsrd(dest, t);
++    as_fcfid(dest, dest);
++    as_frsp(dest, dest);
++    return;
++  }
+   as_mtvsrd(dest, src.reg);
+   as_fcfids(dest, dest);
+ }
+@@ -1795,6 +1971,28 @@ void MacroAssembler::convertInt64ToFloat32(Register64 src, FloatRegister dest) {
+ void MacroAssembler::convertUInt64ToFloat32(Register64 src, FloatRegister dest,
+                                             Register temp) {
+   MOZ_ASSERT(temp == Register::Invalid());
++  if (!HasISA207()) {
++    Label isSigned, done;
++    UseScratchRegisterScope temps(*this);
++    Register t = temps.Acquire();
++    as_cmpdi(src.reg, 0);
++    ma_b(Assembler::GreaterThanOrEqual, &isSigned);
++    HalveUInt64StickyPOWER4(*this, src.reg, t);
++    StickyRoundInt64ForSinglePOWER4(*this, t);
++    as_mtvsrd(dest, t);
++    as_fcfid(dest, dest);
++    as_frsp(dest, dest);
++    as_fadds(dest, dest, dest);
++    jump(&done);
++    bind(&isSigned);
++    movePtr(src.reg, t);
++    StickyRoundInt64ForSinglePOWER4(*this, t);
++    as_mtvsrd(dest, t);
++    as_fcfid(dest, dest);
++    as_frsp(dest, dest);
++    bind(&done);
++    return;
++  }
+   // POWER7+ has fcfidus (unsigned i64 → f32) as a single instruction.
+   as_mtvsrd(dest, src.reg);
+   as_fcfidus(dest, dest);
+@@ -2293,6 +2491,131 @@ static void ComputeWasmAtomicAddress(MacroAssembler& masm, const BaseIndex& mem,
+   masm.computeEffectiveAddress(mem, dest);
+ }
+ 
++// POWER4 tier sub-word atomics. lbarx/lharx/stbcx./sthcx. are ISA 2.06, so
++// the tier works on the naturally aligned word containing the byte or
++// halfword with lwarx/stwcx. and a lane mask (the scheme the MIPS and ppc32
++// backends use). Only JS typed-array atomics get here: wasm is unsupported on
++// the tier, so values are in native byte order.
++//
++// |addr| holds the byte address on entry and is clobbered. |shift| and
++// |mask| receive the lane position and lane mask; |t1| and |t2| are temps.
++// r0 carries the loaded word. For CompareExchange |value| is the expected
++// value and |newval| the replacement; for FetchOp |output| may be InvalidReg.
++enum class SubwordAtomicPOWER4 { CompareExchange, Exchange, FetchOp };
++
++static void EmitSubwordAtomicPOWER4(MacroAssembler& masm,
++                                    SubwordAtomicPOWER4 kind, unsigned nbytes,
++                                    bool signExtend, Synchronization sync,
++                                    AtomicOp op, Register addr, Register value,
++                                    Register newval, Register shift,
++                                    Register mask, Register t1, Register t2,
++                                    Register output) {
++  MOZ_ASSERT(nbytes == 1 || nbytes == 2);
++  MOZ_ASSERT(shift != InvalidReg && mask != InvalidReg && t1 != InvalidReg &&
++             t2 != InvalidReg);
++  const uint8_t laneMB = nbytes == 1 ? 24 : 16;
++
++  // shift = bit offset of the lane from the low end of the loaded word.
++  if (nbytes == 1) {
++    masm.as_rlwinm(shift, addr, 3, 27, 28);  // (addr & 3) * 8
++  } else {
++    masm.as_rlwinm(shift, addr, 3, 27, 27);  // (addr & 2) * 8
++  }
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++  // The lowest address holds the most significant lane.
++  masm.as_xori(shift, shift, nbytes == 1 ? 24 : 16);
++#endif
++  masm.as_rldicr(addr, addr, 0, 61);  // align down to the word
++  masm.xs_li(mask, 0);
++  masm.as_ori(mask, mask, nbytes == 1 ? 0xff : 0xffff);
++  masm.as_slw(mask, mask, shift);
++
++  auto extractLane = [&](Register dest) {
++    masm.as_srw(dest, r0, shift);
++    if (signExtend) {
++      if (nbytes == 1) {
++        masm.as_extsb(dest, dest);
++      } else {
++        masm.as_extsh(dest, dest);
++      }
++    } else {
++      masm.as_rlwinm(dest, dest, 0, laneMB, 31);
++    }
++  };
++  // t2 = (r0 & ~mask) | ((t1 << shift) & mask), then stwcx. t2.
++  auto mergeAndStore = [&](Register lane, Label* again) {
++    masm.as_slw(t1, lane, shift);
++    masm.as_and_(t1, t1, mask);
++    masm.as_andc(t2, r0, mask);
++    masm.as_or_(t2, t2, t1);
++    masm.as_stwcx(t2, r0, addr);
++    masm.ma_b(Assembler::NotEqual, again);
++  };
++
++  Label again, end;
++  switch (kind) {
++    case SubwordAtomicPOWER4::CompareExchange: {
++      // Compare zero-extended lanes; return the old lane extended per type.
++      masm.as_rlwinm(t2, value, 0, laneMB, 31);
++      masm.memoryBarrierBefore(sync);
++      masm.bind(&again);
++      masm.as_lwarx(r0, r0, addr);
++      masm.as_srw(t1, r0, shift);
++      masm.as_rlwinm(t1, t1, 0, laneMB, 31);
++      masm.as_cmpw(t1, t2);
++      masm.ma_b(Assembler::NotEqual, &end);
++      masm.as_slw(t1, newval, shift);
++      masm.as_and_(t1, t1, mask);
++      masm.as_andc(output, r0, mask);
++      masm.as_or_(t1, t1, output);
++      masm.as_stwcx(t1, r0, addr);
++      masm.ma_b(Assembler::NotEqual, &again);
++      masm.memoryBarrierAfter(sync);
++      masm.bind(&end);
++      extractLane(output);
++      break;
++    }
++    case SubwordAtomicPOWER4::Exchange:
++      masm.memoryBarrierBefore(sync);
++      masm.bind(&again);
++      masm.as_lwarx(r0, r0, addr);
++      mergeAndStore(value, &again);
++      masm.memoryBarrierAfter(sync);
++      extractLane(output);
++      break;
++    case SubwordAtomicPOWER4::FetchOp:
++      masm.memoryBarrierBefore(sync);
++      masm.bind(&again);
++      masm.as_lwarx(r0, r0, addr);
++      masm.as_srw(t1, r0, shift);
++      switch (op) {
++        case AtomicOp::Add:
++          masm.as_add(t1, t1, value);
++          break;
++        case AtomicOp::Sub:
++          masm.as_subf(t1, value, t1);
++          break;
++        case AtomicOp::And:
++          masm.as_and_(t1, t1, value);
++          break;
++        case AtomicOp::Or:
++          masm.as_or_(t1, t1, value);
++          break;
++        case AtomicOp::Xor:
++          masm.as_xor_(t1, t1, value);
++          break;
++        default:
++          MOZ_CRASH();
++      }
++      mergeAndStore(t1, &again);
++      masm.memoryBarrierAfter(sync);
++      if (output != InvalidReg) {
++        extractLane(output);
++      }
++      break;
++  }
++}
++
+ template <typename T>
+ static void CompareExchange(MacroAssembler& masm,
+                             const wasm::MemoryAccessDesc* access,
+@@ -2379,6 +2702,16 @@ static void CompareExchange(MacroAssembler& masm,
+     return;
+   }
+ 
++  if (!HasISA207()) {
++    MOZ_RELEASE_ASSERT(!access);
++    Register t2 = temps.Acquire();
++    EmitSubwordAtomicPOWER4(masm, SubwordAtomicPOWER4::CompareExchange, nbytes,
++                            signExtend, sync, AtomicOp::Add, scratch, oldval,
++                            newval, offsetTemp, maskTemp, valueTemp, t2,
++                            output);
++    return;
++  }
++
+   // Sub-word (1 or 2 byte) compare-exchange via native lbarx/lharx +
+   // stbcx./sthcx. POWER7+ (well below our POWER8 baseline). Replaces the prior
+   // round-down-to-word
+@@ -2600,6 +2933,16 @@ static void AtomicExchange(MacroAssembler& masm,
+     return;
+   }
+ 
++  if (!HasISA207()) {
++    MOZ_RELEASE_ASSERT(!access);
++    Register t2 = temps.Acquire();
++    EmitSubwordAtomicPOWER4(masm, SubwordAtomicPOWER4::Exchange, nbytes,
++                            signExtend, sync, AtomicOp::Add, memTemp, value,
++                            InvalidReg, offsetTemp, maskTemp, valueTemp, t2,
++                            output);
++    return;
++  }
++
+   // Sub-word exchange via native lbarx/lharx + stbcx./sthcx. (POWER7+).
+   // valueTemp / offsetTemp / maskTemp are still allocated by the lowering but
+   // unused here.
+@@ -2808,6 +3151,14 @@ static void AtomicFetchOp(MacroAssembler& masm,
+     return;
+   }
+ 
++  if (!HasISA207()) {
++    MOZ_RELEASE_ASSERT(!access);
++    EmitSubwordAtomicPOWER4(masm, SubwordAtomicPOWER4::FetchOp, nbytes,
++                            signExtend, sync, op, memTemp, value, InvalidReg,
++                            offsetTemp, maskTemp, valueTemp, scratch, output);
++    return;
++  }
++
+   // Sub-word fetch-and-op via native lbarx/lharx + stbcx./sthcx. (POWER7+).
+   // `output` holds the pre-op loaded value (returned to caller); `valueTemp`
+   // is the post-op value we condition-store. stXcx. only stores low 8/16 bits
+@@ -3050,6 +3401,15 @@ static void AtomicEffectOp(MacroAssembler& masm,
+     return;
+   }
+ 
++  if (!HasISA207()) {
++    MOZ_RELEASE_ASSERT(!access);
++    EmitSubwordAtomicPOWER4(masm, SubwordAtomicPOWER4::FetchOp, nbytes,
++                            /* signExtend = */ false, sync, op, scratch, value,
++                            InvalidReg, offsetTemp, maskTemp, valueTemp,
++                            scratch2, InvalidReg);
++    return;
++  }
++
+   // Sub-word effect-only op via native lbarx/lharx + stbcx./sthcx. (POWER7+).
+   // No output to return; scratch2 holds the load+op+store value.
+   // valueTemp / offsetTemp / maskTemp are still allocated by the lowering but
+diff --git a/js/src/jit/ppc64/MacroAssembler-ppc64.h b/js/src/jit/ppc64/MacroAssembler-ppc64.h
+index be36a45026..6c24a850fd 100644
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.h
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.h
+@@ -1766,7 +1766,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+   // `inhibitPools_ == 0`). The POWER8 inline path is unaffected.
+   void loadConstantDouble(double dp, FloatRegister dest) {
+     if (mozilla::IsPositiveZero(dp)) {
+-      as_xxlxor(dest, dest, dest);
++      zeroDouble(dest);
+       return;
+     }
+     if (HasPOWER9()) {
+@@ -1785,7 +1785,22 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+   }
+   void loadConstantFloat32(float f, FloatRegister dest) {
+     if (mozilla::IsPositiveZero(f)) {
+-      as_xxlxor(dest, dest, dest);
++      zeroDouble(dest);
++      return;
++    }
++    if (!HasISA207()) {
++      // POWER4 tier (no xscvspdpn): FPRs hold singles in double format, so
++      // load the exactly widened double. Widen by hand to keep a
++      // signalling NaN signalling, as lfs would.
++      uint32_t fbits = mozilla::BitwiseCast<uint32_t>(f);
++      uint64_t sign = uint64_t(fbits >> 31) << 63;
++      if ((fbits & 0x7f800000) == 0x7f800000 && (fbits & 0x007fffff)) {
++        uint64_t dbits =
++            sign | 0x7ff0000000000000ULL | (uint64_t(fbits & 0x007fffff) << 29);
++        loadConstantDouble(mozilla::BitwiseCast<double>(dbits), dest);
++      } else {
++        loadConstantDouble(double(f), dest);
++      }
+       return;
+     }
+     if (HasPOWER9()) {
+@@ -2172,7 +2187,15 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+ 
+   inline void incrementInt32Value(const Address& addr);
+ 
+-  void zeroDouble(FloatRegister reg) { as_xxlxor(reg, reg, reg); }
++  void zeroDouble(FloatRegister reg) {
++    if (!HasISA207()) {
++      // POWER4 tier: no xxlxor; +0.0 is the all-zero doubleword.
++      xs_li(r0, 0);
++      as_mtvsrd(reg, r0);
++      return;
++    }
++    as_xxlxor(reg, reg, reg);
++  }
+ 
+   void writeCodePointer(CodeLabel* label) {
+     // Keep the two words together and bind patchAt to the first of them, not
+-- 
+2.55.0
+

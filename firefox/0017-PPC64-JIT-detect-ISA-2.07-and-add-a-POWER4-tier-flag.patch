@@ -1,0 +1,126 @@
+From bf5c2c8ef0d78e0b38acafebeb3e9920821dadaf Mon Sep 17 00:00:00 2001
+From: daedalao <daedalao@hotmail.com>
+Date: Sat, 10 Oct 2026 12:05:17 -0700
+Subject: [PATCH] PPC64 JIT: detect ISA 2.07 and add a POWER4 tier flag
+
+The ppc64 JIT backend assumes a POWER8 (ISA 2.07 + VSX) baseline and
+emits VSX moves, isel, popcntd, lbarx/lharx, fri*, fcpsgn and friends
+unconditionally. A big-endian ppc64 distribution build also has to run
+on the PowerPC 970 (G5), which implements only ISA 2.01 64-bit plus
+AltiVec and takes SIGILL on all of those.
+
+Add HasISA207(), true when the kernel reports both
+PPC_FEATURE2_ARCH_2_07 (AT_HWCAP2) and PPC_FEATURE_HAS_VSX (AT_HWCAP).
+When it is false the backend runs in a "POWER4 tier" that only uses
+instructions the 970 implements; the following patches route every
+newer emitter through fallbacks keyed on this predicate.
+
+MOZ_PPC64_FORCE_POWER4=1 forces the tier on any CPU (and under the
+simulator), so the fallbacks can be tested on POWER8+ hardware. It wins
+over MOZ_PPC64_FORCE_POWER8/9/10, and POWER9/10 now imply ISA 2.07.
+
+The wasm code signature gets a PPC64Flag_POWER4 bit. It is a "lacks a
+feature" bit so the signatures of POWER8/9 code do not change.
+---
+ js/src/jit/ppc64/Architecture-ppc64.cpp | 32 +++++++++++++++++++++++++
+ js/src/jit/ppc64/Architecture-ppc64.h   |  9 ++++++-
+ 2 files changed, 40 insertions(+), 1 deletion(-)
+
+diff --git a/js/src/jit/ppc64/Architecture-ppc64.cpp b/js/src/jit/ppc64/Architecture-ppc64.cpp
+index 69f26ecd27..e4e26c81b2 100644
+--- a/js/src/jit/ppc64/Architecture-ppc64.cpp
++++ b/js/src/jit/ppc64/Architecture-ppc64.cpp
+@@ -91,6 +91,9 @@ uint32_t FloatRegister::getRegisterDumpOffsetInBytes() {
+   return (encoding() & 31) * sizeof(FloatRegisters::RegisterContent);
+ }
+ 
++// ISA 2.07 + VSX (POWER8 and later). Defaults to true so the simulator,
++// which models a POWER8, keeps the POWER8 code paths unless asked otherwise.
++static bool sISA207Detected = true;
+ static bool sPOWER9Detected = false;
+ static bool sPOWER10Detected = false;
+ static bool sCPUFlagsComputed = false;
+@@ -107,7 +110,13 @@ void PPC64Flags::Init() {
+     return;
+   }
+ #ifndef JS_SIMULATOR
++  unsigned long hwcap = getauxval(AT_HWCAP);
+   unsigned long hwcap2 = getauxval(AT_HWCAP2);
++  // PPC_FEATURE2_ARCH_2_07 = 0x80000000, PPC_FEATURE_HAS_VSX = 0x00000080.
++  // Everything the POWER8 code paths emit (VSX scalar ops, mtvsrd/mfvsrd,
++  // isel, popcntd, lbarx/lharx, fri*, fcpsgn, ...) is in ISA 2.07 + VSX.
++  // A PowerPC 970 (G5) reports neither bit and gets the POWER4 tier.
++  sISA207Detected = (hwcap2 & 0x80000000) != 0 && (hwcap & 0x00000080) != 0;
+   // PPC_FEATURE2_ARCH_3_00 = 0x00800000 (ISA 3.0 / POWER9)
+   sPOWER9Detected = (hwcap2 & 0x00800000) != 0;
+   // PPC_FEATURE2_ARCH_3_1 = 0x00040000 (ISA 3.1 / POWER10)
+@@ -143,9 +152,29 @@ void PPC64Flags::Init() {
+     sPOWER10Detected = true;
+     sPOWER9Detected = true;
+   }
++  // ISA 3.0/3.1 imply ISA 2.07 (only reachable through the FORCE knobs on
++  // non-matching hardware, or under the simulator).
++  if (sPOWER9Detected) {
++    sISA207Detected = true;
++  }
++  // MOZ_PPC64_FORCE_POWER4=1 selects the pre-ISA-2.07 tier (PowerPC 970
++  // class: 64-bit Book I + AltiVec, no VSX) on any CPU, so the fallbacks can
++  // be exercised on POWER8+ hardware and the simulator can fence off every
++  // newer instruction. It overrides the other FORCE knobs.
++  const char* forceP4 = getenv("MOZ_PPC64_FORCE_POWER4");
++  if (forceP4 && forceP4[0] == '1') {
++    sISA207Detected = false;
++    sPOWER9Detected = false;
++    sPOWER10Detected = false;
++  }
+   sCPUFlagsComputed = true;
+ }
+ 
++bool HasISA207() {
++  MOZ_ASSERT(sCPUFlagsComputed);
++  return sISA207Detected;
++}
++
+ bool HasPOWER9() {
+   MOZ_ASSERT(sCPUFlagsComputed);
+   return sPOWER9Detected;
+@@ -169,6 +198,9 @@ uint32_t GetPPC64Flags() {
+   if (sPOWER9Detected) {
+     flags |= PPC64Flag_POWER9;
+   }
++  if (!sISA207Detected) {
++    flags |= PPC64Flag_POWER4;
++  }
+   return flags;
+ }
+ 
+diff --git a/js/src/jit/ppc64/Architecture-ppc64.h b/js/src/jit/ppc64/Architecture-ppc64.h
+index 8640e2f4a3..a2abea4078 100644
+--- a/js/src/jit/ppc64/Architecture-ppc64.h
++++ b/js/src/jit/ppc64/Architecture-ppc64.h
+@@ -561,7 +561,10 @@ inline bool hasMultiAlias() { return false; }
+ // must keep meaning the same set of features.
+ enum PPC64FeatureFlags : uint32_t {
+   PPC64Flag_POWER9 = 1u << 0,
+-  // Future: PPC64Flag_POWER10 = 1u << 1, PPC64Flag_VSX4 = 1u << 2, ...
++  // Set for the pre-ISA-2.07 tier (no VSX: PowerPC 970 and friends). Kept
++  // as a "lacks" bit so POWER8/9 signatures are unchanged.
++  PPC64Flag_POWER4 = 1u << 1,
++  // Future: PPC64Flag_POWER10 = 1u << 2, PPC64Flag_VSX4 = 1u << 3, ...
+ };
+ 
+ uint32_t GetPPC64Flags();
+@@ -576,6 +579,10 @@ class PPC64Flags final {
+   static void Init();
+ };
+ 
++// True on ISA 2.07 + VSX hardware (POWER8 and later). False selects the
++// POWER4 tier: every emitter then sticks to the instructions a PowerPC 970
++// implements (ISA 2.01 64-bit + VMX), see the fallbacks in the assembler.
++bool HasISA207();
+ bool HasPOWER9();
+ bool HasPOWER10();
+ 
+-- 
+2.55.0
+
