@@ -8,9 +8,9 @@
 
 _target=m68k-unknown-linux-gnu
 pkgname=${_target}-glibc-headers
-pkgver=2.43+r37+gfdf10644d6ee
-_commit=fdf10644d6ee345c7b5277c3fa009c1bedb92d60
-pkgrel=2
+pkgver=2.44+r24+g16be1518495f
+_commit=16be1518495f1fa05481b0182c4e4c24927c62df
+pkgrel=1.1
 pkgdesc="GNU C Library headers (${_target})"
 arch=('any')
 url="http://www.gnu.org/software/libc/"
@@ -18,13 +18,13 @@ license=(GPL-2.0-or-later LGPL-2.1-or-later)
 depends=("${_target}-linux-api-headers>=7.0")
 makedepends=("${_target}-gcc-stage1>=16.1.1" python git)
 options=(!buildflags !strip staticlibs !debug)
-source=(git+https://sourceware.org/git/glibc.git#commit=${_commit}
+source=(glibc::git+https://forge.sourceware.org/glibc/glibc-mirror#commit=${_commit}
         sdt-config.h
         sdt.h
         reenable_DT_HASH.patch)
 validpgpkeys=(7273542B39962DF7B299931416792B4EA25340F8 # Carlos O'Donell
               BC7C7372637EC10C57D7AA6579C43DFBF1CF2187) # Siddhesh Poyarekar
-sha256sums=('035c6197fcc46ba839e47dce262d38d3882a24122bff5a63663a46893509890a'
+sha256sums=('24a1baec0bb4711e15197827adb9e5a3f3d7be3554312320d474b542e088b8d6'
             'cdc234959c6fdb43f000d3bb7d1080b0103f4080f5e67bcfe8ae1aaf477812f0'
             '774061aff612a377714a509918a9e0e0aafce708b87d2d7e06b1bd1f6542fe70'
             'cf9fe494f7ec69752a63d1b0a9ad689aa620888ae9b902b6383a6fbc7c1726a7')
@@ -64,12 +64,6 @@ build() {
       --disable-werror
   )
 
-  case "${CARCH}" in
-    x86_64) _configure_flags+=(--enable-cet --enable-multi-arch) ;;
-    powerpc64) _configure_flags+=(--disable-multi-arch --with-cpu=970); CFLAGS='-O2 -pipe' ;;
-    *)      _configure_flags+=(--disable-multi-arch); CFLAGS='-O2 -pipe' ;;
-  esac
-
   cd glibc-build
 
   echo "slibdir=/usr/lib" >> configparms
@@ -81,8 +75,8 @@ build() {
   CPPFLAGS=${CPPFLAGS/-D_FORTIFY_SOURCE=2/}
 
   export BUILD_CC=gcc
-  export CC=${_target}-gcc
-  export CXX=${_target}-g++
+  export CC="${_target}-gcc -fno-link-libatomic"
+  export CXX="${_target}-g++ -fno-link-libatomic"
   export AR=${_target}-ar
   export RANLIB=${_target}-ranlib
   export OBJCOPY=${_target}-objcopy
@@ -98,10 +92,6 @@ build() {
 
   # make some libs and stubs
   make csu/subdir_lib
-
-  case "${CARCH}" in
-    powerpc64) sed 's@RTLDLIST=.*@RTLDLIST="/usr/lib/ld64.so.2"@g' -i ${pkgdir}/usr/bin/ldd ;;
-  esac
 }
 
 package() {
