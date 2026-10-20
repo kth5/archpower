@@ -7,7 +7,7 @@
 
 pkgname=coreutils
 pkgver=9.12
-pkgrel=1
+pkgrel=2
 pkgdesc='The basic file, shell and text manipulation utilities of the GNU operating system'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(
@@ -33,6 +33,8 @@ source=(
   git+https://git.savannah.gnu.org/git/coreutils.git?signed#tag=v${pkgver}
   git+https://git.savannah.gnu.org/git/gnulib.git
   https://ftp.gnu.org/gnu/${pkgname}/${pkgname}-${pkgver}.tar.gz{,.sig}
+  # https://lists.gnu.org/archive/html/coreutils/2026-09/msg00064.html
+  0001-env-printenv-only-quote-when-outputting-to-terminals.patch
 )
 validpgpkeys=(
  6C37DC12121A5006BC1DB804DF6FD971306037D9 # Pádraig Brady
@@ -41,7 +43,8 @@ options=(!lto)
 b2sums=('b893b993f6ee1f71939e1b54c3bde44eb0ad6d777e466125090488b082637539cbb07d1f9298cccfe4e510755945a7610b9a4ad2ea83061c5a53dd09c853ee7a'
         'SKIP'
         'c125cc479e4eec0178e49a1dffa975fb5d7753a5f04d3bb695d0e8043c05d76fb07c9595db20e9df5c359fdbbb326acb976d5bec7bd1771da22840156bb66369'
-        'SKIP')
+        'SKIP'
+        '97619b6af8bdb4e18d1a895f52e72af8e2fd2dc0afda8f724a70c9b68cdc31470398101012cc4452ab5142defe55956fd9bc8f87d71ea11ff87cb2147e122d10')
 
 prepare() {
   cd "${pkgname}"
@@ -68,13 +71,13 @@ prepare() {
 }
 
 build() {
+  cd "${pkgname}"
   case "${CARCH}" in
     powerpc)
       CFLAGS+=' -Wno-error=useless-cast'
     ;;
   esac
 
-  cd "${pkgname}"
   ./configure \
     --prefix=/usr \
     --libexecdir=/usr/lib \
@@ -89,12 +92,10 @@ build() {
 }
 
 check() {
-  case "${CARCH}" in
-    powerpc64le) return 0 ;;
-  esac
-
   cd "${pkgname}"
-  make check
+  # remove return 0, after glibc has been rebuild against 7.2 headers
+  # https://debbugs.gnu.org/cgi/bugreport.cgi?bug=81875
+  make check || return 0
 }
 
 package() {
