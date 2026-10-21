@@ -3,20 +3,22 @@
 # Contributor: Jason Hall <cakersq@gmail.com>
 
 pkgname=thin-provisioning-tools
-pkgver=1.3.3
+pkgver=1.3.4
 pkgrel=1
 pkgdesc='Suite of tools for manipulating the metadata of the dm-thin device-mapper target'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url='https://github.com/jthornber/thin-provisioning-tools'
-license=('GPL3')
-depends=('gcc-libs' 'systemd-libs')
+license=('GPL-3.0-only')
+depends=('glibc'
+         'libgcc' 'libgcc_s.so'
+         'systemd-libs' 'libudev.so')
 makedepends=('git' 'cargo' 'clang' 'device-mapper')
 source=("git+https://github.com/jthornber/thin-provisioning-tools#tag=v${pkgver}"
         hotfix-no-atomic64.diff)
-sha256sums=('fdd73436d4f70165cdc3753d1082d630845a7a1dbd773a73ac99595b97a5aa93'
+sha256sums=('e5614cfe9065509afb7eb614ccdc5ef3f6a4c0571e3228cffb3d0f1cc664f7d0'
             '6eb1ecd180a3184374ac930b5a69414dc664cde14ba7945b008d5c3357e5784d')
 
-build() {
+prepare() {
   cd "${srcdir}/${pkgname}"
 
   case "${CARCH}" in
@@ -26,7 +28,27 @@ build() {
     ;;
   esac
 
-  cargo build --release
+  cargo fetch --locked --target host-tuple
+}
+
+build() {
+  cd "${srcdir}/${pkgname}"
+
+  # Use LTO
+  export CARGO_PROFILE_RELEASE_LTO=true
+  export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+
+  cargo build --frozen --release
+}
+
+check() {
+  cd "${srcdir}/${pkgname}"
+
+  case "${CARCH}" in
+    powerpc) return 0 ;;
+  esac
+
+  cargo test --frozen --all-features
 }
 
 package() {
@@ -38,4 +60,3 @@ package() {
     DATADIR="${pkgdir}"/usr/share \
     install
 }
-
