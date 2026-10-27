@@ -1,0 +1,61 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Andrew Crerar <crerar@archlinux.org>
+# Maintainer: Justin Kromlinger <hashworks@archlinux.org>
+# Contributor: Hao Long <imlonghao@archlinuxcn.org>
+
+pkgname=trivy
+pkgver=0.76.1
+pkgrel=1
+pkgdesc='A Simple and Comprehensive Vulnerability Scanner for Containers, Suitable for CI'
+arch=(x86_64 powerpc64le)
+url='https://github.com/aquasecurity/trivy'
+license=('Apache-2.0')
+depends=('glibc')
+optdepends=('rpm: RHEL/CentOS based image support')
+makedepends=('go' 'btrfs-progs')
+provides=('trivy')
+conflicts=('trivy')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")
+b2sums=('8bcb8023f86b59eb0aaf9d0d56823d974db7166cefefecbca1c6d36b112e313aa28a6f02a88abdc84a954328ccb4d4ed97e8a3dc6a8590d7afa70e9aa68a1605')
+
+prepare() {
+  cd ${pkgname}-${pkgver}
+
+  find docs -type f -name "*.md" \
+    -exec sed "s|\(../\)*imgs/\(.*\.[a-z]\{3\}\)|${url}/raw/main/docs/imgs/\2|g" -i {} \;
+
+  rm -Rf docs/{build,imgs}
+}
+
+build() {
+  cd ${pkgname}-${pkgver}/cmd/trivy
+
+  export CGO_CPPFLAGS="${CPPFLAGS}"
+  export CGO_CFLAGS="${CFLAGS}"
+  export CGO_CXXFLAGS="${CXXFLAGS}"
+  export CGO_LDFLAGS="${LDFLAGS}"
+  export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
+  export GOEXPERIMENT="jsonv2"
+
+  GO_LDFLAGS="-linkmode=external -s -w -X=github.com/aquasecurity/trivy/pkg/version/app.ver=${pkgver} -buildid=''"
+
+  go build -ldflags "${GO_LDFLAGS}" .
+}
+
+package() {
+  cd ${pkgname}-${pkgver}
+
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm755 "cmd/trivy/${pkgname}" "${pkgdir}/usr/bin/${pkgname}"
+
+  # Report templates
+  mkdir -p "${pkgdir}/usr/share/${pkgname}/templates"
+  install -m644 contrib/*.tpl "${pkgdir}/usr/share/${pkgname}/templates/"
+
+  "$pkgdir/usr/bin/${pkgname}" completion bash | install -Dm644 /dev/stdin "$pkgdir/usr/share/bash-completion/completions/${pkgname}"
+  "$pkgdir/usr/bin/${pkgname}" completion zsh | install -Dm644 /dev/stdin "$pkgdir/usr/share/zsh/site-functions/_${pkgname}"
+  "$pkgdir/usr/bin/${pkgname}" completion fish | install -Dm644 /dev/stdin "$pkgdir/usr/share/fish/vendor_completions.d/${pkgname}.fish"
+
+  mkdir -p "${pkgdir}/usr/share/doc"
+  cp -r docs "${pkgdir}/usr/share/doc/${pkgname}"
+}
