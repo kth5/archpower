@@ -6,9 +6,10 @@
 # Contributor: judd <jvinet@zeroflux.org>
 
 pkgname=readline
-_basever=8.3
-_patchlevel=003
-pkgver=${_basever}.${_patchlevel}
+pkgver=8.3.6
+_patchlevel=${pkgver#*.*.}
+[[ $_patchlevel == "$pkgver" ]] && _patchlevel=0
+_basever=${pkgver%"${_patchlevel:+.$_patchlevel}"}
 pkgrel=1
 pkgdesc='GNU readline library'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
@@ -27,12 +28,10 @@ provides=(
 options=('!emptydirs')
 source=(
   https://ftp.gnu.org/gnu/readline/readline-$_basever.tar.gz{,.sig}
-  https://ftp.gnu.org/gnu/readline/readline-8.3-patches/readline83-001{,.sig}
+  # INFO: point patches are extended automatically into the source array
   inputrc
     )
 b2sums=('45d6fe7e34c56d309102a94aa776a7f5284201e844450e14ff818df9fa84a72154bdca70f11828c94954b080cbbe4666fa0b00ffa8460118ec8f3ea551b73dad'
-        'SKIP'
-        'b0953458a18b8b06b0086567abd3c9ca3efceb5e4c38271e62137e126c106b938945d956394de0e955ecea5d48f8b261a4f2f3db2ee1d2cbc3b4cfdcf213ca46'
         'SKIP'
         '50db43bff430f282175aba4c4259e0b2222bc7e342fbe47b9dcce0172458472e72aebb9852eeafa4d10d4e89f2e1e8bb83b6b5dfc68eeababe699d4b5eae80f7'
         'b0953458a18b8b06b0086567abd3c9ca3efceb5e4c38271e62137e126c106b938945d956394de0e955ecea5d48f8b261a4f2f3db2ee1d2cbc3b4cfdcf213ca46'
@@ -40,10 +39,17 @@ b2sums=('45d6fe7e34c56d309102a94aa776a7f5284201e844450e14ff818df9fa84a72154bdca7
         'bb07c3e1663b36988e59721d8e8054022726f6adc2160cbb1fe30bcb5fe96d70fc38980a84c05a0518b9916975ffa1c4c97542fc9c82845736c6f6d03ca60229'
         'SKIP'
         '39f48eefef1840460aa418a070813dd284893e74dddad5fb44230498a7991148e9681be89b30e98fe805a67b3093360c883a16a26a7f103548f36c899f9359da'
+        'SKIP'
+        '401263120f2b21cae9c71385a73ab49415dcfe44c197cc5af4157e9c228be26da78ef24d31001f11ab78d422425a23f8edc6176e3cf5783b9f9df035aa65b00b'
+        'SKIP'
+        'd21bc0a8e23d0f72569924fd7879f54b132873611823d4ccf93c6449b2beaf64819b1d018df48f90e6b3d977f97fdeb623832615d176c1561935d412dcdcd919'
+        'SKIP'
+        '2ade2b861a51de18e8ec42a218198b50da3da75179cde0aeafa16005d2e5ba73ce97426e373eb72ca046c67bce9346f4ffb75f452290dfbeb9b540de0982d0fd'
         'SKIP')
 validpgpkeys=('7C0135FB088AAF6C66C650B9BB5869F064EA74AB') # Chet Ramey
 
-if [ $_patchlevel -gt 0 ]; then
+# extend patches to source array
+if (( _patchlevel > 0 )); then
     for (( _p=1; _p <= $((10#${_patchlevel})); _p++ )); do
         source=(${source[@]} https://ftp.gnu.org/gnu/readline/readline-$_basever-patches/readline${_basever//.}-$(printf "%03d" $_p){,.sig})
     done
@@ -52,7 +58,7 @@ fi
 prepare() {
   cd $pkgname-$_basever
   for (( _p=1; _p <= $((10#${_patchlevel})); _p++ )); do
-    msg "applying patch readline${_basever//.}-$(printf "%03d" $_p)"
+    msg2 "applying patch readline${_basever//.}-$(printf "%03d" $_p)"
     patch -p0 -i ../readline${_basever//.}-$(printf "%03d" $_p)
   done
 
@@ -64,7 +70,7 @@ build() {
   cd $pkgname-$_basever
 
   # build with -fPIC for x86_64 (FS#15634)
-  [[ $CARCH == "x86_64" ]] && CFLAGS="$CFLAGS -fPIC"
+  [[ $CARCH == x86_64* ]] && CFLAGS="$CFLAGS -fPIC"
 
   ./configure --prefix=/usr
   make SHLIB_LIBS=-lncurses
