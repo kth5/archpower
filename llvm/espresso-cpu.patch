@@ -1,42 +1,74 @@
+diff -ruN a/llvm/include/llvm/TargetParser/PPCTargetParser.def b/llvm/include/llvm/TargetParser/PPCTargetParser.def
+--- a/llvm/include/llvm/TargetParser/PPCTargetParser.def
++++ b/llvm/include/llvm/TargetParser/PPCTargetParser.def
+@@ -109,6 +109,7 @@
+ PPC_CPU("7450",BUILTIN_PPC_UNSUPPORTED,0,BUILTIN_PPC_UNSUPPORTED,0)
+ PPC_CPU("g4+",BUILTIN_PPC_UNSUPPORTED,0,BUILTIN_PPC_UNSUPPORTED,0)
+ PPC_CPU("750",BUILTIN_PPC_UNSUPPORTED,0,BUILTIN_PPC_UNSUPPORTED,0)
++PPC_CPU("espresso",BUILTIN_PPC_UNSUPPORTED,0,BUILTIN_PPC_UNSUPPORTED,0)
+ PPC_CPU("8548",BUILTIN_PPC_UNSUPPORTED,0,BUILTIN_PPC_UNSUPPORTED,0)
+ PPC_CPU("ppc405",SYS_CALL,41,BUILTIN_PPC_FALSE,0)
+ PPC_CPU("ppc464",SYS_CALL,43,BUILTIN_PPC_FALSE,0)
+diff -ruN a/llvm/lib/Target/PowerPC/PPC.td b/llvm/lib/Target/PowerPC/PPC.td
+--- a/llvm/lib/Target/PowerPC/PPC.td
++++ b/llvm/lib/Target/PowerPC/PPC.td
+@@ -188,6 +188,9 @@
+                                   "Enable Hardware Transactional Memory instructions">;
+ def FeatureMFTB   : SubtargetFeature<"", "IsFeatureMFTB", "true",
+                                         "Implement mftb using the mfspr instruction">;
++def FeatureEspressoAtomics : SubtargetFeature<"espresso-atomics",
++                                              "NeedsDcbstBeforeStwcx", "true",
++                                              "Emit dcbst before stwcx. (Espresso erratum)">;
+ def FeatureFusion : SubtargetFeature<"fusion", "HasFusion", "true",
+                                      "Target supports instruction fusion">;
+ def FeatureAddiLoadFusion : SubtargetFeature<"fuse-addi-load",
+@@ -703,6 +706,10 @@
+ def : Processor<"g3", G3Itineraries, [Directive750,
+                                       FeatureFRES, FeatureFRSQRTE,
+                                       FeatureMFTB]>;
++def : Processor<"espresso", G3Itineraries, [Directive750,
++                                            FeatureFRES, FeatureFRSQRTE,
++                                            FeatureMFTB,
++                                            FeatureEspressoAtomics]>;
+ def : Processor<"7400", G4Itineraries, [Directive7400, FeatureAltivec,
+                                         FeatureFRES, FeatureFRSQRTE,
+                                         FeatureMFTB]>;
+diff -ruN a/llvm/lib/Target/PowerPC/PPCISelLowering.cpp b/llvm/lib/Target/PowerPC/PPCISelLowering.cpp
 --- a/llvm/lib/Target/PowerPC/PPCISelLowering.cpp
 +++ b/llvm/lib/Target/PowerPC/PPCISelLowering.cpp
-@@ -13343,6 +13343,9 @@ PPCTargetLowering::EmitAtomicBinary
+@@ -13343,6 +13343,8 @@
      BB->addSuccessor(exitMBB);
      BB = loop2MBB;
    }
-+  BuildMI(BB, dl, TII->get(PPC::DCBST))
-+    .addReg(ptrA)
-+    .addReg(ptrB);
++  if (Subtarget.needsDcbstBeforeStwcx())
++    BuildMI(BB, dl, TII->get(PPC::DCBST)).addReg(ptrA).addReg(ptrB);
    BuildMI(BB, dl, TII->get(StoreMnemonic))
      .addReg(TmpReg).addReg(ptrA).addReg(ptrB);
    BuildMI(BB, dl, TII->get(PPC::BCC))
-@@ -13614,6 +13617,9 @@ PPCTargetLowering::EmitPartwordAtomicBinary
+@@ -13614,6 +13616,8 @@
      BB = loop2MBB;
    }
    BuildMI(BB, dl, TII->get(PPC::OR), Tmp4Reg).addReg(Tmp3Reg).addReg(Tmp2Reg);
-+  BuildMI(BB, dl, TII->get(PPC::DCBST))
-+      .addReg(ZeroReg)
-+      .addReg(PtrReg);
++  if (Subtarget.needsDcbstBeforeStwcx())
++    BuildMI(BB, dl, TII->get(PPC::DCBST)).addReg(ZeroReg).addReg(PtrReg);
    BuildMI(BB, dl, TII->get(PPC::STWCX))
        .addReg(Tmp4Reg)
        .addReg(ZeroReg)
-@@ -14314,6 +14320,9 @@ emitAtomicCmpSwapHardware
+@@ -14314,6 +14318,8 @@
    //   bne- loopMBB
    //   b exitBB
    BB = loop2MBB;
-+  BuildMI(BB, dl, TII->get(PPC::DCBST))
-+      .addReg(ptrA)
-+      .addReg(ptrB);
++  if (Subtarget.needsDcbstBeforeStwcx())
++    BuildMI(BB, dl, TII->get(PPC::DCBST)).addReg(ptrA).addReg(ptrB);
    BuildMI(BB, dl, TII->get(StoreMnemonic))
        .addReg(newval)
        .addReg(ptrA)
-@@ -14498,6 +14507,9 @@ emitAtomicCmpSwapSoftware
+@@ -14498,6 +14504,8 @@
    BuildMI(BB, dl, TII->get(PPC::OR), Tmp4Reg)
        .addReg(Tmp2Reg)
        .addReg(NewVal3Reg);
-+  BuildMI(BB, dl, TII->get(PPC::DCBST))
-+      .addReg(ZeroReg)
-+      .addReg(PtrReg);
++  if (Subtarget.needsDcbstBeforeStwcx())
++    BuildMI(BB, dl, TII->get(PPC::DCBST)).addReg(ZeroReg).addReg(PtrReg);
    BuildMI(BB, dl, TII->get(PPC::STWCX))
        .addReg(Tmp4Reg)
        .addReg(ZeroReg)

@@ -12,7 +12,7 @@ case "${CARCH}" in
   ;;
 esac
 pkgver=23.1.4
-pkgrel=0
+pkgrel=1
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://llvm.org/"
 license=('Apache-2.0 WITH LLVM-exception')
@@ -39,6 +39,7 @@ source=($_source_base/llvm-project-$pkgver.src.tar.xz{,.sig}
         hotfix-abi-powerpc64-elfv2.patch
         clang-ppc64-dynamic-linker-path.patch
         clang-ppc64-elfv2.patch
+        clang-mcpu-espresso.patch
         espresso-cpu.patch
         hotfix-ppc-jit.patch
         hotfix-powerpc-pwr.patch
@@ -53,7 +54,8 @@ sha256sums=('819ecf7351f1a66f76b2d701d8942faaf5faeb324cb90c9d5b090de142434bb2'
             '493d6807f28ad11b36dac60da0a8ae0e4d349c520c84af8e59b996e3c63c6d70'
             '476de7aa76b7d680c21ddccc1d8bab1200337683c82b75707bac60d5e0c37236'
             '67bd72aafc0e34e3616d15ae0e2645db87135de2dc6a1368c544e752156bb8f7'
-            '9684cc0b0c5e18c418526f17b67fb0562b1e146a41f0f76e381be3d125b50523'
+            'ded7c1f26c2efd352e2ef82e2af1756c3fb3f359a92d0dcc7c158ba42836122f'
+            'd05db0cda87330e42fb3f8e27b3c49cf05746bd49be389f4287a3bca0cc62e47'
             '19991580344679da928e6d8438872f3f4650023560a737ce6d408505112f1efc'
             '32738b977de98c620918a94dd01534ccae8f70310bd1c67730631b3dad759a26'
             'fdf9de5464870f78fbaa4ce158d1b7b7f9aa5cb73d6808c51e5c7c81253c9d48')
@@ -188,7 +190,7 @@ _lld_components() {
 _lldb_components() {
   local target
   case "$CARCH}" in
-    powerp64*|x86_64)
+    powerpc64*|x86_64)
       ninja -j8 -C "$srcdir/llvm-project-$pkgver.src/build" -t targets | grep -Po 'install-\K.*(?=-stripped:)' | while read -r target; do
     case $target in
       llvm-libraries|clang-libraries|distribution)
@@ -284,6 +286,9 @@ prepare() {
   patch -Np1 -i ${srcdir}/clang-ppc64-elfv2.patch
   patch -Np1 -i ${srcdir}/clang-ppc64-dynamic-linker-path.patch
 
+  # espresso CPU, its dcbst atomics erratum gated behind -mcpu=espresso
+  patch -Np1 -i ${srcdir}/espresso-cpu.patch
+
   cd llvm/
 
   # other select patches from T2
@@ -292,12 +297,11 @@ prepare() {
   patch -Np1 -i ${srcdir}/hotfix-powerpc-pwr.patch
   patch -Np1 -i ${srcdir}/hotfix-ppc-cell.patch
 
-  # espresso only patch
-  echo ${CFLAGS} | grep "mcpu=espresso" &>/dev/null && patch -Np2 -i "$srcdir/espresso-cpu.patch"
-
   # we use elfv2 on powerpc64
   patch -Np1 -i ${srcdir}/hotfix-abi-powerpc64-elfv2.patch
 
+  cd ../clang
+  patch -Np1 -i ${srcdir}/clang-mcpu-espresso.patch
 }
 
 build() {
@@ -409,7 +413,7 @@ build() {
   python -m build --wheel --no-isolation
   popd
 
-  return 0
+  #return 0
   local _host_bin="$PWD/build/bin"
   local resource_dir="/usr/lib/clang/${pkgver%%.*}"
 
