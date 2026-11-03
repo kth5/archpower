@@ -2,7 +2,7 @@
 # Maintainer: Laurent Carlier <lordheavym@gmail.com>
 
 pkgname=libclc
-pkgver=22.1.8
+pkgver=23.1.4
 pkgrel=1
 pkgdesc="Library requirements of the OpenCL C programming language"
 arch=(any)
@@ -11,7 +11,7 @@ license=('Apache-2.0 WITH LLVM-exception')
 makedepends=('cmake' 'ninja' 'clang' 'llvm' 'python' 'spirv-llvm-translator')
 _source_base=https://github.com/llvm/llvm-project/releases/download/llvmorg-$pkgver
 source=($_source_base/llvm-project-$pkgver.src.tar.xz{,.sig})
-sha256sums=('922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888'
+sha256sums=('819ecf7351f1a66f76b2d701d8942faaf5faeb324cb90c9d5b090de142434bb2'
             'SKIP')
 validpgpkeys=('474E22316ABF4785A88C6E8EA2C794A986419D8A'  # Tom Stellard <tstellar@redhat.com>
               'D574BD5D1D0E98895E3BF90044F2485E45D59042'  # Tobias Hieta <tobias@hieta.se>
@@ -19,31 +19,75 @@ validpgpkeys=('474E22316ABF4785A88C6E8EA2C794A986419D8A'  # Tom Stellard <tstell
               '71046D1E9C6656BDD61171873E83BABF4A4F9E85'  # Cullen Rhodes <cullen.rhodes@arm.com>
 )
 
+# LLVM 23 dropped libclc's old "build every target from one configure"
+# CMakeLists.txt (LIBCLC_TARGETS_TO_BUILD=all) in favour of a new custom CLC
+# language whose target comes from LLVM_DEFAULT_TARGET_TRIPLE, one target per
+# configure.
+#
+# r600, clspv/clspv64 and the nvptx64--nvidiacl variant no longer exist in
+# libclc's source tree at all as well as the old target-specific per-GPU
+# bitcode (gfx900, polaris10, ...), targets now build generic per-architecture
+# bitcode instead.
+#
+# The bare "spirv" arch is gone and replaced with "spirv32"/"spirv64"
+_targets=(
+  spirv32-unknown-unknown
+  spirv64-unknown-unknown
+  amdgcn-amd-amdhsa
+  nvptx64-nvidia-cuda
+)
+
 prepare() {
   cd llvm-project-$pkgver.src/libclc
-  mkdir build
+  local target
+  for target in "${_targets[@]}"; do
+    mkdir "build-$target"
+  done
 }
 
 build() {
-  cd llvm-project-$pkgver.src/libclc/build
+  cd llvm-project-$pkgver.src/libclc
 
-
-  local cmake_args=(
-    -G Ninja
-    -DCMAKE_BUILD_TYPE=Release
-    -DCMAKE_INSTALL_PREFIX=/usr
-  )
-
-  cmake .. "${cmake_args[@]}"
-  ninja
+  local target
+  for target in "${_targets[@]}"; do
+    cmake -S . -B "build-$target" \
+      -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr \
+      -DCMAKE_C_COMPILER=clang \
+      -DCMAKE_CXX_COMPILER=clang++ \
+      -DLLVM_DEFAULT_TARGET_TRIPLE="$target"
+    cmake --build "build-$target"
+  done
 }
 
 package() {
-  cd llvm-project-$pkgver.src/libclc/build
+  cd llvm-project-$pkgver.src/libclc
 
-  DESTDIR="$pkgdir" ninja install
+  local target
+  for target in "${_targets[@]}"; do
+    DESTDIR="$pkgdir" cmake --install "build-$target"
+  done
 
-  install -Dm644 "$srcdir/llvm-project-$pkgver.src/libclc/LICENSE.TXT" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  # Mesa's clover/rusticl look for these two flat, legacy-named files rather
+  # than the new per-triple layout above.
+  ln -s spirv32-unknown-unknown/libclc.spv "$pkgdir/usr/share/clc/spirv-mesa3d-.spv"
+  ln -s spirv64-unknown-unknown/libclc.spv "$pkgdir/usr/share/clc/spirv64-mesa3d-.spv"
+
+  # Mesa also wants a pkg-config file.
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/pkgconfig/libclc.pc" <<END
+prefix=/usr
+datarootdir=/usr/share
+datadir=/usr/share
+pkgdatadir=\${datadir}/clc
+libexecdir=\${pkgdatadir}
+
+Name: libclc
+Description: Library requirements of the OpenCL C programming language
+Version: $pkgver
+END
+
+  install -Dm644 LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
 
 # vim:set ts=2 sw=2 et:
