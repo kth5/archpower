@@ -1,0 +1,495 @@
+Subject: [PATCH] Backport OpenSSL 4 compatibility to Thrift 0.22.0
+
+Upstream:
+https://github.com/apache/thrift/pull/3738
+https://github.com/apache/thrift/pull/3850
+https://github.com/apache/thrift/pull/3851
+
+Based on d586077a37e14446cf385893608ea9e60a59d083,
+edf0020f08599b0c62436678c3f21645201d2560 and
+9a8d6d724646b7bcd665795c018dc7e678f89d22.
+
+Adapt the fixes to the 0.22.0 SSL context and certificate lookup code.
+Retain the existing protocol defaults and backport the protocol-window
+regression tests. TSSLSocketMatchNameTest does not exist in this release.
+Use the corrected OpenSSL 3.0 const-qualification threshold in both bindings.
+
+diff --git a/lib/c_glib/src/thrift/c_glib/transport/thrift_ssl_socket.c b/lib/c_glib/src/thrift/c_glib/transport/thrift_ssl_socket.c
+index 0afcb1b8f..1de97af88 100644
+--- a/lib/c_glib/src/thrift/c_glib/transport/thrift_ssl_socket.c
++++ b/lib/c_glib/src/thrift/c_glib/transport/thrift_ssl_socket.c
+@@ -285,7 +285,12 @@ thrift_ssl_socket_close (ThriftTransport *transport, GError **error)
+       SSL_shutdown(ssl_socket->ssl);
+       SSL_free(ssl_socket->ssl);
+       ssl_socket->ssl = NULL;
++      /* ERR_remove_state() has been an empty stub since OpenSSL 1.1.0 and was
++         removed altogether in 4.0. LibreSSL reports OPENSSL_VERSION_NUMBER as
++         0x20000000L but still implements it, so it keeps the call. */
++#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
+       ERR_remove_state(0);
++#endif
+   }
+   return thrift_socket_close(transport, error);
+ }
+@@ -705,7 +710,10 @@ void thrift_ssl_socket_finalize_openssl(void)
+   ERR_free_strings();
+   EVP_cleanup();
+   CRYPTO_cleanup_all_ex_data();
++  /* See thrift_ssl_socket_close() for why this is version-gated. */
++#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
+   ERR_remove_state(0);
++#endif
+ }
+ 
+ 
+@@ -826,6 +834,54 @@ SSL_CTX*
+ thrift_ssl_socket_context_initialize(ThriftSSLSocketProtocol ssl_protocol, GError **error)
+ {
+   SSL_CTX* context = NULL;
++#if OPENSSL_VERSION_NUMBER >= 0x10100000L && !defined(LIBRESSL_VERSION_NUMBER)
++  /* OpenSSL 4.0 removed the single-version SSLv3_method() / TLSv1_method() /
++     TLSv1_1_method() / TLSv1_2_method() family. The documented replacement is
++     TLS_method() pinned to one version with SSL_CTX_set_min_proto_version()
++     and SSL_CTX_set_max_proto_version(), both available since 1.1.0. This
++     mirrors the C++ binding in lib/cpp/src/thrift/transport/TSSLSocket.cpp. */
++  const SSL_METHOD* method = TLS_method();
++  int version = 0;
++  switch(ssl_protocol){
++    case SSLTLS:
++      /* Version-flexible: the protocol floor is set through
++         SSL_CTX_set_options() below, as it was before. */
++      break;
++#if !defined(OPENSSL_NO_SSL3) && OPENSSL_VERSION_NUMBER < 0x40000000L
++    case SSLv3:
++      /* SSLv3_method() is only gone in 4.0, which removes SSLv3 altogether, so
++         below that it is kept rather than expressed as a TLS_method() window:
++         SSL_CTX_set_min_proto_version() honours the security level and would
++         refuse SSL3_VERSION at the default level, where SSLv3_method() does
++         not. See the C++ binding for the same reasoning. */
++      method = SSLv3_method();
++      break;
++#endif
++    case TLSv1_0:
++      version = TLS1_VERSION;
++      break;
++    case TLSv1_1:
++      version = TLS1_1_VERSION;
++      break;
++    case TLSv1_2:
++      version = TLS1_2_VERSION;
++      break;
++    default:
++      g_set_error (error, THRIFT_TRANSPORT_ERROR,
++		   THRIFT_SSL_SOCKET_ERROR_CIPHER_NOT_AVAILABLE,
++		   "The SSL protocol is unknown for %d", ssl_protocol);
++      return NULL;
++  }
++
++  context = SSL_CTX_new(method);
++  if (context != NULL && version != 0
++      && (SSL_CTX_set_min_proto_version(context, version) != 1
++          || SSL_CTX_set_max_proto_version(context, version) != 1)) {
++      /* The requested version is not available in this build of the library. */
++      SSL_CTX_free(context);
++      context = NULL;
++  }
++#else
+   switch(ssl_protocol){
+     case SSLTLS:
+       context = SSL_CTX_new(SSLv23_method());
+@@ -851,6 +907,7 @@ thrift_ssl_socket_context_initialize(ThriftSSLSocketProtocol ssl_protocol, GErro
+       return NULL;
+       break;
+   }
++#endif
+ 
+   if (context == NULL) {
+       thrift_ssl_socket_get_error((const guchar*)"No cipher overlay", THRIFT_SSL_SOCKET_ERROR_CIPHER_NOT_AVAILABLE, error);
+diff --git a/lib/c_glib/src/thrift/c_glib/transport/thrift_ssl_socket.h b/lib/c_glib/src/thrift/c_glib/transport/thrift_ssl_socket.h
+index 8bbb4a35f..9b7a2507c 100644
+--- a/lib/c_glib/src/thrift/c_glib/transport/thrift_ssl_socket.h
++++ b/lib/c_glib/src/thrift/c_glib/transport/thrift_ssl_socket.h
+@@ -99,9 +99,9 @@ enum _ThriftSSLSocketProtocol {
+   SSLTLS  = 0,  /* Supports SSLv2 and SSLv3 handshake but only negotiates at TLSv1_0 or later. */
+ /*SSLv2   = 1,   HORRIBLY INSECURE! */
+   SSLv3   = 2,  /* Supports SSLv3 only - also horribly insecure! */
+-  TLSv1_0 = 3,  /* Supports TLSv1_0 or later. */
+-  TLSv1_1 = 4,  /* Supports TLSv1_1 or later. */
+-  TLSv1_2 = 5,  /* Supports TLSv1_2 or later. */
++  TLSv1_0 = 3,  /* Supports TLSv1_0 only. */
++  TLSv1_1 = 4,  /* Supports TLSv1_1 only. */
++  TLSv1_2 = 5,  /* Supports TLSv1_2 only. */
+   LATEST  = TLSv1_2
+ };
+ typedef enum _ThriftSSLSocketProtocol ThriftSSLSocketProtocol;
+diff --git a/lib/c_glib/test/testtransportsslsocket.c b/lib/c_glib/test/testtransportsslsocket.c
+index ba9ffdcae..d15d25c4b 100644
+--- a/lib/c_glib/test/testtransportsslsocket.c
++++ b/lib/c_glib/test/testtransportsslsocket.c
+@@ -206,10 +206,19 @@ test_ssl_write_invalid_socket(void)
+ 
+ 
+ 
++/* OpenSSL 4.0 returns const pointers from the X509 name accessors.
++   X509_NAME_get_index_by_NID() accepts const pointers since OpenSSL 3.0.
++   LibreSSL keeps the existing non-const path. */
++#if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(LIBRESSL_VERSION_NUMBER)
++#  define THRIFT_TEST_X509_CONST const
++#else
++#  define THRIFT_TEST_X509_CONST
++#endif
++
+ /**
+  * Print the common name of certificate
+  */
+-unsigned char * get_cn_name(X509_NAME* const name)
++unsigned char * get_cn_name(THRIFT_TEST_X509_CONST X509_NAME* const name)
+ {
+   int idx = -1;
+   unsigned char *utf8 = NULL;
+@@ -221,10 +230,10 @@ unsigned char * get_cn_name(X509_NAME* const name)
+       idx = X509_NAME_get_index_by_NID(name, NID_commonName, -1);
+       if(!(idx > -1))  break; /* failed */
+ 
+-      X509_NAME_ENTRY* entry = X509_NAME_get_entry(name, idx);
++      THRIFT_TEST_X509_CONST X509_NAME_ENTRY* entry = X509_NAME_get_entry(name, idx);
+       if(!entry) break; /* failed */
+ 
+-      ASN1_STRING* data = X509_NAME_ENTRY_get_data(entry);
++      THRIFT_TEST_X509_CONST ASN1_STRING* data = X509_NAME_ENTRY_get_data(entry);
+       if(!data) break; /* failed */
+ 
+       int length = ASN1_STRING_to_UTF8(&utf8, data);
+@@ -359,8 +368,8 @@ gboolean my_access_manager(ThriftTransport * transport, X509 *cert, struct socka
+   THRIFT_UNUSED_VAR (sslSocket);
+ 
+   g_info("Processing access to the server");
+-  X509_NAME* iname = cert ? X509_get_issuer_name(cert) : NULL;
+-  X509_NAME* sname = cert ? X509_get_subject_name(cert) : NULL;
++  THRIFT_TEST_X509_CONST X509_NAME* iname = cert ? X509_get_issuer_name(cert) : NULL;
++  THRIFT_TEST_X509_CONST X509_NAME* sname = cert ? X509_get_subject_name(cert) : NULL;
+ 
+   /* Issuer is the authority we trust that warrants nothing useful */
+   const unsigned char * issuer = get_cn_name(iname);
+@@ -481,6 +490,69 @@ test_ssl_authorization_manager(void)
+ #endif
+ 
+ 
++static void
++test_ssl_context_explicit_protocol_window(void)
++{
++  /* An explicitly requested protocol has to pin the context to exactly that
++     version, the way the per-version TLSv1_x_method() functions it replaces
++     did. Checking the window rather than just "a context came back" is what
++     catches a remapping that silently leaves the floor to the library default.
++
++     SSL_CTX_get_min_proto_version() and SSL_CTX_get_max_proto_version() were
++     added in OpenSSL 1.1.1a. */
++#if OPENSSL_VERSION_NUMBER >= 0x1010101fL && !defined(LIBRESSL_VERSION_NUMBER)
++  static const struct {
++    ThriftSSLSocketProtocol protocol;
++    int version;
++  } expectations[] = {
++    { TLSv1_0, TLS1_VERSION },
++    { TLSv1_1, TLS1_1_VERSION },
++    { TLSv1_2, TLS1_2_VERSION },
++    { LATEST,  TLS1_2_VERSION }
++  };
++  guint i;
++
++  for (i = 0; i < G_N_ELEMENTS (expectations); i++) {
++      GError *error = NULL;
++      SSL_CTX *context = thrift_ssl_socket_context_initialize (expectations[i].protocol,
++                                                               &error);
++      g_assert_no_error (error);
++      g_assert (context != NULL);
++      g_assert_cmpint (SSL_CTX_get_min_proto_version (context), ==,
++                       expectations[i].version);
++      g_assert_cmpint (SSL_CTX_get_max_proto_version (context), ==,
++                       expectations[i].version);
++      SSL_CTX_free (context);
++  }
++#endif
++}
++
++static void
++test_ssl_context_unavailable_protocol(void)
++{
++#if defined(OPENSSL_NO_SSL3) || OPENSSL_VERSION_NUMBER >= 0x40000000L
++  /* SSLv3 is not available in this build of the library. That has to be
++     reported rather than quietly satisfied with some other version. */
++  GError *error = NULL;
++  SSL_CTX *context = thrift_ssl_socket_context_initialize (SSLv3, &error);
++
++  g_assert (context == NULL);
++  g_assert (error != NULL);
++  g_clear_error (&error);
++#endif
++
++  /* An out-of-range value is reported the same way. */
++  {
++    GError *error = NULL;
++    SSL_CTX *context = thrift_ssl_socket_context_initialize ((ThriftSSLSocketProtocol) 42,
++                                                             &error);
++
++    g_assert (context == NULL);
++    g_assert (error != NULL);
++    g_clear_error (&error);
++  }
++}
++
+ static void
+ thrift_socket_server (const int port)
+ {
+@@ -528,6 +600,8 @@ main(int argc, char *argv[])
+ 
+   g_test_add_func ("/testtransportsslsocket/CreateAndDestroy", test_ssl_create_and_destroy);
+   g_test_add_func ("/testtransportsslsocket/CreateAndSetProperties", test_ssl_create_and_set_properties);
++  g_test_add_func ("/testtransportsslsocket/ContextExplicitProtocolWindow", test_ssl_context_explicit_protocol_window);
++  g_test_add_func ("/testtransportsslsocket/ContextUnavailableProtocol", test_ssl_context_unavailable_protocol);
+   g_test_add_func ("/testtransportsslsocket/OpenAndCloseNonSSLServer", test_ssl_open_and_close_non_ssl_server);
+   g_test_add_func ("/testtransportsslsocket/OpenAndWriteInvalidSocket", test_ssl_write_invalid_socket);
+ 
+diff --git a/lib/cpp/src/thrift/transport/TSSLSocket.cpp b/lib/cpp/src/thrift/transport/TSSLSocket.cpp
+index 3dc658558..2de32eae0 100644
+--- a/lib/cpp/src/thrift/transport/TSSLSocket.cpp
++++ b/lib/cpp/src/thrift/transport/TSSLSocket.cpp
+@@ -157,9 +157,14 @@ void cleanupOpenSSL() {
+ #endif
+   EVP_cleanup();
+   CRYPTO_cleanup_all_ex_data();
+-#if OPENSSL_VERSION_NUMBER >= 0x10100000 && !defined(OPENSSL_IS_AWSLC)
++#if OPENSSL_VERSION_NUMBER >= 0x10100000 && !defined(LIBRESSL_VERSION_NUMBER)
++  // LibreSSL reports OPENSSL_VERSION_NUMBER as 0x20000000L but has never shipped
++  // OPENSSL_thread_stop(), so it is routed to ERR_remove_state() below, which it
++  // does implement. Do nothing unless an openssl derivative is detected
++#  if !defined(OPENSSL_IS_BORINGSSL) && !defined(OPENSSL_IS_AWSLC)
+   // https://www.openssl.org/docs/man1.1.1/man3/OPENSSL_thread_stop.html
+   OPENSSL_thread_stop();
++#  endif
+ #else
+   // ERR_remove_state() was deprecated in OpenSSL 1.0.0 and ERR_remove_thread_state()
+   // was deprecated in OpenSSL 1.1.0; these functions and should not be used.
+@@ -177,6 +182,54 @@ static char uppercase(char c);
+ 
+ // SSLContext implementation
+ SSLContext::SSLContext(const SSLProtocol& protocol) {
++#if OPENSSL_VERSION_NUMBER >= 0x10100000L && !defined(LIBRESSL_VERSION_NUMBER)
++  // OpenSSL 4.0 removed the single-version SSLv3_method() / TLSv1_method() /
++  // TLSv1_1_method() / TLSv1_2_method() family. The documented replacement is
++  // TLS_method() pinned to one version with SSL_CTX_set_min_proto_version() and
++  // SSL_CTX_set_max_proto_version(), both available since 1.1.0. Selecting the
++  // replacement from 1.1.0 onwards rather than only on 4.0 keeps a single code
++  // path under test, instead of one that no CI configuration ever compiles.
++  const SSL_METHOD* method = TLS_method();
++  int version = 0;
++  switch (protocol) {
++  case SSLTLS:
++    // Version-flexible: the protocol floor is set through SSL_CTX_set_options()
++    // below, as it was before.
++    break;
++#if !defined(OPENSSL_NO_SSL3) && OPENSSL_VERSION_NUMBER < 0x40000000L
++  case SSLv3:
++    // SSLv3_method() is only gone in 4.0, which removes SSLv3 altogether, so
++    // below that it is kept rather than expressed as a TLS_method() window:
++    // SSL_CTX_set_min_proto_version() honours the security level and would
++    // refuse SSL3_VERSION at the default level, where SSLv3_method() does not.
++    // This is also the one arm no CI configuration compiles, so leaving it
++    // alone keeps it behaving exactly as before.
++    method = SSLv3_method();
++    break;
++#endif
++  case TLSv1_0:
++    version = TLS1_VERSION;
++    break;
++  case TLSv1_1:
++    version = TLS1_1_VERSION;
++    break;
++  case TLSv1_2:
++    version = TLS1_2_VERSION;
++    break;
++  default:
++    /// UNKNOWN PROTOCOL!
++    throw TSSLException("SSL_CTX_new: Unknown protocol");
++  }
++
++  ctx_ = SSL_CTX_new(method);
++  if (ctx_ != nullptr && version != 0
++      && (SSL_CTX_set_min_proto_version(ctx_, version) != 1
++          || SSL_CTX_set_max_proto_version(ctx_, version) != 1)) {
++    // The requested version is not available in this build of the library.
++    SSL_CTX_free(ctx_);
++    ctx_ = nullptr;
++  }
++#else
+   if (protocol == SSLTLS) {
+     ctx_ = SSL_CTX_new(SSLv23_method());
+ #ifndef OPENSSL_NO_SSL3
+@@ -193,6 +246,7 @@ SSLContext::SSLContext(const SSLProtocol& protocol) {
+     /// UNKNOWN PROTOCOL!
+     throw TSSLException("SSL_CTX_new: Unknown protocol");
+   }
++#endif
+ 
+   if (ctx_ == nullptr) {
+     string errors;
+@@ -395,9 +449,13 @@ void TSSLSocket::close() {
+     SSL_free(ssl_);
+     ssl_ = nullptr;
+     handshakeCompleted_ = false;
+-#if OPENSSL_VERSION_NUMBER >= 0x10100000 && !defined(OPENSSL_IS_AWSLC)
++#if OPENSSL_VERSION_NUMBER >= 0x10100000 && !defined(LIBRESSL_VERSION_NUMBER)
++    // LibreSSL has no OPENSSL_thread_stop(); see cleanupOpenSSL() above.
++    // Do nothing unless an openssl derivative is detected
++#  if !defined(OPENSSL_IS_BORINGSSL) && !defined(OPENSSL_IS_AWSLC)
+     // https://www.openssl.org/docs/man1.1.1/man3/OPENSSL_thread_stop.html
+     OPENSSL_thread_stop();
++#  endif
+ #else
+     // ERR_remove_state() was deprecated in OpenSSL 1.0.0 and ERR_remove_thread_state()
+     // was deprecated in OpenSSL 1.1.0; these functions and should not be used.
+@@ -757,7 +815,11 @@ void TSSLSocket::authorize() {
+       if (name == nullptr) {
+         continue;
+       }
++#if OPENSSL_VERSION_NUMBER >= 0x10100000
++      const char* data = (const char*)ASN1_STRING_get0_data(name->d.ia5);
++#else
+       char* data = (char*)ASN1_STRING_data(name->d.ia5);
++#endif
+       int length = ASN1_STRING_length(name->d.ia5);
+       switch (name->type) {
+       case GEN_DNS:
+@@ -783,9 +845,22 @@ void TSSLSocket::authorize() {
+   }
+ 
+   // extract commonName
++  //
++  // OpenSSL 4.0 made X509_get_subject_name(), X509_NAME_get_entry() and
++  // X509_NAME_ENTRY_get_data() return const pointers. The const types are
++  // used from 3.0, where X509_NAME_get_index_by_NID() also became const.
++  // LibreSSL keeps the existing non-const path.
++#if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(LIBRESSL_VERSION_NUMBER)
++  const X509_NAME* name = X509_get_subject_name(cert);
++#else
+   X509_NAME* name = X509_get_subject_name(cert);
++#endif
+   if (name != nullptr) {
++#if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(LIBRESSL_VERSION_NUMBER)
++    const X509_NAME_ENTRY* entry;
++#else
+     X509_NAME_ENTRY* entry;
++#endif
+     unsigned char* utf8;
+     int last = -1;
+     while (decision == AccessManager::SKIP) {
+@@ -795,7 +870,11 @@ void TSSLSocket::authorize() {
+       entry = X509_NAME_get_entry(name, last);
+       if (entry == nullptr)
+         continue;
++#if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(LIBRESSL_VERSION_NUMBER)
++      const ASN1_STRING* common = X509_NAME_ENTRY_get_data(entry);
++#else
+       ASN1_STRING* common = X509_NAME_ENTRY_get_data(entry);
++#endif
+       int size = ASN1_STRING_to_UTF8(&utf8, common);
+       if (host.empty()) {
+         host = (server() ? getPeerHost() : getHost());
+diff --git a/lib/cpp/src/thrift/transport/TSSLSocket.h b/lib/cpp/src/thrift/transport/TSSLSocket.h
+index 80a68ceab..96a7802a4 100644
+--- a/lib/cpp/src/thrift/transport/TSSLSocket.h
++++ b/lib/cpp/src/thrift/transport/TSSLSocket.h
+@@ -38,9 +38,9 @@ enum SSLProtocol {
+   SSLTLS  = 0,  // Supports SSLv2 and SSLv3 handshake but only negotiates at TLSv1_0 or later.
+ //SSLv2   = 1,  // HORRIBLY INSECURE!
+   SSLv3   = 2,  // Supports SSLv3 only - also horribly insecure!
+-  TLSv1_0 = 3,  // Supports TLSv1_0 or later.
+-  TLSv1_1 = 4,  // Supports TLSv1_1 or later.
+-  TLSv1_2 = 5,  // Supports TLSv1_2 or later.
++  TLSv1_0 = 3,  // Supports TLSv1_0 only.
++  TLSv1_1 = 4,  // Supports TLSv1_1 only.
++  TLSv1_2 = 5,  // Supports TLSv1_2 only.
+   LATEST  = TLSv1_2
+ };
+ 
+diff --git a/lib/cpp/test/SecurityFromBufferTest.cpp b/lib/cpp/test/SecurityFromBufferTest.cpp
+index 32f2378d3..6787fa741 100644
+--- a/lib/cpp/test/SecurityFromBufferTest.cpp
++++ b/lib/cpp/test/SecurityFromBufferTest.cpp
+@@ -229,7 +229,7 @@ BOOST_AUTO_TEST_CASE(ssl_security_matrix) {
+           continue;
+         }
+ 
+-#ifdef OPENSSL_NO_SSL3
++#if defined(OPENSSL_NO_SSL3) || OPENSSL_VERSION_NUMBER >= 0x40000000L
+         if (si == 2 || ci == 2) {
+           // Skip all SSLv3 cases - protocol not supported
+           continue;
+diff --git a/lib/cpp/test/SecurityTest.cpp b/lib/cpp/test/SecurityTest.cpp
+index cc71f0479..08077e62f 100644
+--- a/lib/cpp/test/SecurityTest.cpp
++++ b/lib/cpp/test/SecurityTest.cpp
+@@ -226,6 +226,54 @@ struct SecurityFixture
+ 
+ BOOST_FIXTURE_TEST_SUITE(BOOST_TEST_MODULE, SecurityFixture)
+ 
++BOOST_AUTO_TEST_CASE(explicit_protocol_version_window)
++{
++    // An explicitly requested protocol has to pin the context to exactly that
++    // version, the way the per-version TLSv1_x_method() functions it replaces
++    // did. Checking the window rather than just "a context came back" is what
++    // catches a remapping that silently leaves the floor to the library
++    // default, which would make an explicit request laxer than SSLTLS.
++    //
++    // SSL_CTX_get_min_proto_version() and SSL_CTX_get_max_proto_version() were
++    // added in OpenSSL 1.1.1a.
++#if OPENSSL_VERSION_NUMBER >= 0x1010101fL && !defined(LIBRESSL_VERSION_NUMBER)
++    struct Expectation
++    {
++        apache::thrift::transport::SSLProtocol protocol;
++        const char* name;
++        int version;
++    };
++
++    const Expectation expectations[] = {
++        { apache::thrift::transport::TLSv1_0, "TLSv1_0", TLS1_VERSION   },
++        { apache::thrift::transport::TLSv1_1, "TLSv1_1", TLS1_1_VERSION },
++        { apache::thrift::transport::TLSv1_2, "TLSv1_2", TLS1_2_VERSION },
++        { apache::thrift::transport::LATEST,  "LATEST",  TLS1_2_VERSION }
++    };
++
++    for (const auto& expected : expectations)
++    {
++        BOOST_TEST_MESSAGE(boost::format("TEST: protocol = %1%") % expected.name);
++        apache::thrift::transport::SSLContext context(expected.protocol);
++        BOOST_CHECK_EQUAL(expected.version, SSL_CTX_get_min_proto_version(context.get()));
++        BOOST_CHECK_EQUAL(expected.version, SSL_CTX_get_max_proto_version(context.get()));
++    }
++#endif
++
++#if defined(OPENSSL_NO_SSL3) || OPENSSL_VERSION_NUMBER >= 0x40000000L
++    // SSLv3 is not available in this build of the library. That has to be
++    // reported rather than quietly satisfied with some other version.
++    try
++    {
++        apache::thrift::transport::SSLContext context(apache::thrift::transport::SSLv3);
++        BOOST_FAIL("Expected unavailable SSLv3 to throw");
++    }
++    catch (const apache::thrift::transport::TSSLException&)
++    {
++    }
++#endif
++}
++
+ BOOST_AUTO_TEST_CASE(ssl_security_matrix)
+ {
+     try
+@@ -254,7 +302,7 @@ BOOST_AUTO_TEST_CASE(ssl_security_matrix)
+                     continue;
+                 }
+ 
+-#ifdef OPENSSL_NO_SSL3
++#if defined(OPENSSL_NO_SSL3) || OPENSSL_VERSION_NUMBER >= 0x40000000L
+                 if (si == 2 || ci == 2)
+                 {
+                     // Skip all SSLv3 cases - protocol not supported
