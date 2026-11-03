@@ -4,7 +4,7 @@
 
 pkgname=fontconfig
 pkgver=2.18.3
-pkgrel=1
+pkgrel=2
 epoch=2
 pkgdesc="Library for configuring and customizing font access"
 url=https://www.freedesktop.org/wiki/Software/fontconfig/
@@ -34,11 +34,13 @@ source=(
   40-fontconfig-config.hook
   40-fontconfig-config.script
   fontconfig.hook
+  0001-Remove-extra-Segoe-UI-fonts-from-system-ui.patch
 )
 b2sums=('7635f6d32ed8ffb5ad4a8614c5cd87949935c3743635af9749faf93dc82aab57c7e09b46132edf8939a5ce5d38ef7ee12be457aa474d74e61af04fb96fb87f1a'
         'b06b3f2b8c0c38139a9247c26a641e6dc01d50b530478dd14133175a603f60b0af901af16c9fcf1ce73d23786ea14bfdbacd39f1dcfd88f6382965ad22be1411'
         '7fb63e76ab126bc0a7decfd74c53429ad1ce6d13de2f14037259616d8d4150b8fa4601c7f02b75918ccd5995d424816dc9d01a5fe7e39dc3dd1fcc83dfdb0fe8'
-        'dfbf47c069c88da7687511356cef5bb94b7190e558a6f08390d6976fa7065ba7137ccb0a5ca1defdef655091afe74eb8a3d33fb9f3e0633409aa79f753ad276d')
+        'dfbf47c069c88da7687511356cef5bb94b7190e558a6f08390d6976fa7065ba7137ccb0a5ca1defdef655091afe74eb8a3d33fb9f3e0633409aa79f753ad276d'
+        '7c94748ae8c7d548587fab457bfb4134376ba7fe57cba3a57b247f9cf72ee580e9b22ed3bafa31057fcbdade678beb9ae946f06290f39a82fdc283eef3419dd1')
 validpgpkeys=(
   F77A64C4B5B45FF8763A278F65755979B34E1294 # Akira TAGOH <akira@tagoh.org>
   ECFFBC3A6B365E721E5BD79830757AA21971A672 # Akira TAGOH <akira@tagoh.org>
@@ -46,6 +48,9 @@ validpgpkeys=(
 
 prepare() {
   cd fontconfig
+
+  # https://gitlab.freedesktop.org/fontconfig/fontconfig/-/merge_requests/565
+  git apply -3 ../0001-Remove-extra-Segoe-UI-fonts-from-system-ui.patch
 }
 
 build() {
