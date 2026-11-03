@@ -1,0 +1,195 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Jan Alexander Steffens (heftig)" <heftig@archlinux.org>
+Date: Mon, 13 Jan 2025 23:54:13 +0100
+Subject: [PATCH] meson: support explicit GID
+
+On Arch Linux, the polkitd user is not available during packaging, and
+files must be created with a numeric UID and GID.
+
+Remove the unused POLKITD_UID while we're here.
+---
+ data/meson.build             |  9 ++++++++-
+ data/polkit.conf.in-with-gid |  2 ++
+ meson.build                  | 23 ++++++++++++++++++-----
+ meson_options.txt            |  5 +++--
+ meson_post_install.py        | 25 ++++++++++---------------
+ 5 files changed, 41 insertions(+), 23 deletions(-)
+ create mode 100644 data/polkit.conf.in-with-gid
+
+diff --git a/data/meson.build b/data/meson.build
+index 168deef7d32f..9e35b2f97a69 100644
+--- a/data/meson.build
++++ b/data/meson.build
+@@ -2,6 +2,7 @@ service_conf = {
+   'libprivdir': pk_prefix / pk_libprivdir,
+   'polkitd_user': polkitd_user,
+   'polkitd_uid': polkitd_uid,
++  'polkitd_gid': polkitd_gid,
+ }
+ 
+ configure_file(
+@@ -60,8 +61,14 @@ if not get_option('libs-only')
+     install_dir: systemdsystemunitdir,
+   )
+ 
++  if polkitd_gid != '-'
++    sysusers_template = 'polkit.conf.in-with-gid'
++  else
++    sysusers_template = 'polkit.conf.in'
++  endif
++
+   configure_file(
+-    input: 'polkit.conf.in',
++    input: sysusers_template,
+     output: '@BASENAME@',
+     configuration: service_conf,
+     install: true,
+diff --git a/data/polkit.conf.in-with-gid b/data/polkit.conf.in-with-gid
+new file mode 100644
+index 000000000000..8555ee973635
+--- /dev/null
++++ b/data/polkit.conf.in-with-gid
+@@ -0,0 +1,2 @@
++g @polkitd_user@ @polkitd_gid@
++u! @polkitd_user@ @polkitd_uid@:@polkitd_user@ "User for polkitd"
+diff --git a/meson.build b/meson.build
+index 963df6efc68a..86a4196937ec 100644
+--- a/meson.build
++++ b/meson.build
+@@ -236,9 +236,6 @@ endif
+ polkitd_user = get_option('polkitd_user')
+ config_data.set_quoted('POLKITD_USER', polkitd_user)
+ 
+-polkitd_uid = get_option('polkitd_uid')
+-config_data.set('POLKITD_UID', polkitd_uid)
+-
+ # Select which authentication framework to use
+ auth_deps = []
+ 
+@@ -319,6 +316,18 @@ if os_type == ''
+   endif
+ endif
+ 
++# The default UID differs between distributions, set it accordingly if not specified
++polkitd_uid = get_option('polkitd_uid')
++if polkitd_uid == ''
++  polkitd_uid = '-'
++endif
++
++# The default GID differs between distributions, set it accordingly if not specified
++polkitd_gid = get_option('polkitd_gid')
++if polkitd_gid == ''
++  polkitd_gid = '-'
++endif
++
+ # The default privileged group differs between distributions, set it accordingly if not specified
+ privileged_group = get_option('privileged_group')
+ if privileged_group == ''
+@@ -410,33 +419,37 @@ if not libs_only
+     pk_libprivdir,
+     pk_pkgsysconfdir,
+     polkitd_user,
++    polkitd_gid,
+   )
+ endif
+ 
+ output = '\n        ' + meson.project_name() + ' ' + meson.project_version() + '\n'
+ output += '        ============\n\n'
+ output += '        prefix:                   ' + pk_prefix + '\n'
+ output += '        datadir:                  ' + pk_datadir + '\n\n'
+ output += '        includedir:               ' + pk_includedir + '\n'
+ output += '        libdir:                   ' + pk_libdir + '\n'
+ output += '        sysconfdir:               ' + pk_sysconfdir + '\n'
+ output += '        source code location:     ' + source_root + '\n'
+ output += '        compiler:                 ' + cc.get_id() + '\n'
+ output += '        c_flags:                  ' + ' '.join(compiler_c_flags) + '\n\n'
+ if enable_man
+   output += '        xsltproc:                 ' + xsltproc.full_path() + '\n'
+ endif
+ output += '        introspection:            ' + enable_introspection.to_string() + '\n'
+ output += '        Distribution/OS:          ' + os_type + '\n'
+ output += '        Authentication framework: ' + auth_fw + '\n'
+ output += '        Session tracking:         ' + session_tracking + '\n'
+ output += '        system unit directory:    ' + systemdsystemunitdir + '\n'
+ output += '        sysusers.d directory:     ' + sysusers_dir + '\n'
+ output += '        tmpfiles.d directory:     ' + tmpfiles_dir + '\n'
+ 
+-output += '        polkitd user:             ' + polkitd_user + ' \n'
++output += '        polkitd user:             ' + polkitd_user + '\n'
+ if polkitd_uid != '-'
+-  output += '        polkitd UID:              ' + polkitd_uid + ' \n'
++  output += '        polkitd UID:              ' + polkitd_uid + '\n'
++endif
++if polkitd_gid != '-'
++  output += '        polkitd GID:              ' + polkitd_gid + '\n'
+ endif
+ output += '        PAM support:              ' + enable_pam.to_string() + '\n\n'
+ if libs_only
+diff --git a/meson_options.txt b/meson_options.txt
+index 31b7a2b0300d..4295a97938c5 100644
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -2,8 +2,9 @@ option('session_tracking', type: 'combo', choices: ['logind', 'elogind', 'Consol
+ option('systemdsystemunitdir', type: 'string', value: '', description: 'custom directory for systemd system units')
+ 
+ option('libs-only', type: 'boolean', value: false, description: 'Only build libraries (skips building polkitd)')
+-option('polkitd_user', type: 'string', value: 'polkitd', description: 'User for running polkitd (polkitd)')
+-option('polkitd_uid', type: 'string', value: '-', description: 'Fixed UID for user running polkitd (polkitd)')
++option('polkitd_user', type: 'string', value: 'polkitd', description: 'Name of user running polkitd (and name of the primary group)')
++option('polkitd_uid', type: 'string', value: '', description: 'UID for polkitd_user (default: - to allocate)')
++option('polkitd_gid', type: 'string', value: '', description: 'GID for polkitd_user\'s primary group (default: - to allocate)')
+ option('privileged_group', type: 'string', value: '', description: 'Group to use for default privileged access (default: wheel)')
+ 
+ option('authfw', type: 'combo', choices: ['pam', 'shadow', 'bsdauth'], value: 'pam', description: 'Authentication framework (pam/shadow)')
+diff --git a/meson_post_install.py b/meson_post_install.py
+index efb75a1de69b..00592a22210e 100644
+--- a/meson_post_install.py
++++ b/meson_post_install.py
+@@ -20,37 +20,32 @@ bindir = destdir_path(sys.argv[1])
+ pkglibdir = destdir_path(sys.argv[2])
+ pkgsysconfdir = destdir_path(sys.argv[3])
+ polkitd_user = sys.argv[4]
++polkitd_gid = sys.argv[5]
+ 
+-try:
+-    polkitd_gid = pwd.getpwnam(polkitd_user).pw_gid
+-except KeyError:
+-    polkitd_gid = None
++if polkitd_gid == '-':
++    try:
++        polkitd_gid = pwd.getpwnam(polkitd_user).pw_gid
++    except KeyError:
++        polkitd_gid = None
++else:
++    polkitd_gid = int(polkitd_gid)
+ 
+ dst = os.path.join(bindir, 'pkexec')
+ 
+ if os.geteuid() == 0:
+     os.chown(dst, 0, -1)
+     os.chmod(dst, 0o4755)
+ else:
+-    print(
+-        'Owner and mode of {} need to be setuid root (04755) after '
+-        'installation'.format(
+-            dst,
+-        )
+-    )
++    print(f'Owner and mode of {dst} need to be setuid root (04755) after installation')
+ 
+ dst = os.path.join(pkgsysconfdir, 'rules.d')
+ 
+ if not os.path.exists(dst):
+     os.makedirs(dst, mode=0o750)
+     if os.geteuid() == 0 and polkitd_gid is not None:
+         os.chown(dst, 0, polkitd_gid)
+     else:
+-        print(
+-            'Owner of {} needs to be set to root and group to {} after installation'.format(
+-                dst, polkitd_user,
+-            )
+-        )
++        print(f'Owner of {dst} needs to be set to root and group to {polkitd_user} after installation')
+ 
+ # polkit-agent-helper-1 need to be setuid root because it's used to
+ # authenticate not only the invoking user, but possibly also root
