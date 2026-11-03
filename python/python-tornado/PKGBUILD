@@ -3,7 +3,7 @@
 # Contributor: Thomas Dziedzic < gostrc at gmail >
 
 pkgname=python-tornado
-pkgver=6.5.10
+pkgver=6.6.0
 pkgrel=1
 pkgdesc='open source version of the scalable, non-blocking web server and tools'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
@@ -12,10 +12,12 @@ license=('Apache-2.0')
 depends=('glibc' 'python')
 optdepends=('python-pycurl: for tornado.curl_httpclient'
             'python-twisted: for tornado.platform.twisted')
-makedepends=('git' 'python-build' 'python-installer' 'python-setuptools' 'python-wheel')
-checkdepends=('python-pycares' 'python-pycurl' 'python-twisted')
+makedepends=('git' 'python-build' 'python-installer' 'python-setuptools')
+# Deprecated CaresResolver requires pycares 4 and will not support Arch's pycares 5.
+# https://github.com/tornadoweb/tornado/blob/v6.6.0/docs/caresresolver.rst
+checkdepends=('python-hypothesis' 'python-pycurl' 'python-twisted')
 source=("git+https://github.com/tornadoweb/tornado.git#tag=v$pkgver")
-sha512sums=('4463aa53ac1541d60cbe4fdd85b2cbee9e3b92245f60d92fc4994ee888a31530cfdc315a9a7d5c0831b5d9a7744d7b8416806b884186a224d7011c254eff0fcf')
+sha512sums=('c3869ed45aa0c1403edd6f21ea3257438cca23cc836625438d889a6c2fe8e621e0e3980831816419bf860fd381e2bcfc8b4d5d039a2c4021c31f9ca24026402f')
 
 export TORNADO_EXTENSION=1
 
@@ -25,21 +27,14 @@ build() {
 }
 
 check() {
-  # As of 4.5.3, ignoring test failures about resolving "localhost"
-  (
-    cd tornado
-    python -m installer --destdir=tmp_install dist/*.whl
-    local python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-    export PYTHONPATH="$PWD/tmp_install/usr/lib/python${python_version}/site-packages:$PYTHONPATH"
-    cd tmp_install
-    python -m tornado.test.runtests
-    python -m tornado.test.runtests --ioloop=tornado.platform.select.SelectIOLoop
-    python -m tornado.test.runtests --httpclient=tornado.curl_httpclient.CurlAsyncHTTPClient
-    python -m tornado.test.runtests --ioloop_time_monotonic
-    python -m tornado.test.runtests --ioloop=tornado.platform.twisted.TwistedIOLoop
-    python -m tornado.test.runtests --ioloop=tornado.platform.asyncio.AsyncIOLoop
-    python -m tornado.test.runtests --resolver=tornado.netutil.ThreadedResolver
-  ) || echo "Tests failed"
+  cd tornado
+  python -m venv --system-site-packages --without-pip "$srcdir/venv"
+  "$srcdir/venv/bin/python" -m installer dist/*.whl
+  cd "$srcdir"
+  "$srcdir/venv/bin/python" -bb -m tornado.test
+  "$srcdir/venv/bin/python" -O -m tornado.test
+  "$srcdir/venv/bin/python" -m tornado.test --httpclient=tornado.curl_httpclient.CurlAsyncHTTPClient
+  "$srcdir/venv/bin/python" -m tornado.test --resolver=tornado.netutil.ThreadedResolver
 }
 
 package() {
