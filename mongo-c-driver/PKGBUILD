@@ -3,8 +3,8 @@
 # Contributor: Felix Yan <felixonmars@archlinux.org>
 
 pkgname=mongo-c-driver
-pkgver=2.3.2
-pkgrel=1
+pkgver=2.5.5
+pkgrel=2
 pkgdesc="A client library written in C for MongoDB"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://github.com/mongodb/mongo-c-driver"
@@ -31,15 +31,8 @@ replaces=(
   libbson
   libmongoc
 )
-source=("$url/archive/$pkgver/$pkgname-$pkgver.tar.gz"
-         cmake-4.4.patch)
-b2sums=('5238aeef28be1afe2c3407a7cd3ae647b5444989803327667e39a59ea365d67fad77e581e155fc7dea537ca15cf5fb78cd8427437a37fbfd712fdb3e9552c554'
-        'a07ff84c415f33ad70b1df489bad26f55e4b7cd4ab21b527097aa5a68ce059c55fe6d2c04e606e50839da160fbbe2109cd823be10f042a2dd8c04fb81ff8cdec')
-
-prepare() {
-  cd $pkgname-$pkgver
-  patch -p1 -i ../cmake-4.4.patch # Fix build with cmake 4.4
-}
+source=("$url/archive/$pkgver/$pkgname-$pkgver.tar.gz")
+b2sums=('e920052002463c3a3f9ab858ad82e9355768764d6874d13f13aa7bfacfe24d2fd1d18ecbd5d98e54935d7819c4c5356f0f29f7910bdba9f303c3d78dc2b17807')
 
 build() {
   cd $pkgname-$pkgver
@@ -52,6 +45,8 @@ build() {
     -DBUILD_VERSION="$pkgver" \
     -DENABLE_STATIC=BUILD_ONLY \
     -DENABLE_STATIC_LIBBSON_INSTALL=OFF \
+    -DMONGOC_INSTALL_INCLUDEDIR=include \
+    -DBSON_INSTALL_INCLUDEDIR=include \
     -DENABLE_TESTS=ON
   cmake --build build
 }
@@ -74,9 +69,15 @@ check() {
     mongoc/MongoDB/handshake/null_args
     mongoc/azure/imds/http/talk
     mongoc/gcp/http/talk
+    # These HTTP tests skip offline, but CTest starts their fixture first.
+    mongoc/http/get
+    mongoc/http/post
+    mongoc/fixtures/simple-http-server-18000
     mongoc/pkg-config/bson-import-static
     mongoc/pkg-config/mongoc-import-shared
     mongoc/pkg-config/mongoc-import-static
+    # OpenSSL 4.1 no longer matches CN-only certificates by default.
+    mongoc/TLS/commonName
   )
   local skip_tests_pattern="${skip_tests[0]}$(printf '|%s' "${skip_tests[@]:1}")"
   ctest --test-dir build --output-on-failure -E "$skip_tests_pattern"
