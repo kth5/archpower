@@ -6,7 +6,7 @@
 # Contributor: Alexandre Bique <bique.alexandre@gmail.com>
 
 pkgname=re2
-pkgrel=5
+pkgrel=6
 epoch=2
 pkgver=2025.11.05
 pkgdesc="Fast, safe, thread-friendly regular expression engine"
