@@ -1,0 +1,76 @@
+# Maintainer: kpcyrd <kpcyrd[at]archlinux[dot]org>
+# Maintainer: Caleb Maclennan <caleb@alerque.com>
+# Maintainer: Orhun Parmaksız <orhun@archlinux.org>
+
+pkgname=cargo-edit
+pkgver=0.13.14
+pkgrel=1
+pkgdesc='Managing cargo dependencies from the command line'
+url='https://github.com/killercup/cargo-edit/releases'
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+license=('MIT' 'Apache-2.0')
+depends=('cargo' 'libssh2' 'openssl')
+source=(https://github.com/killercup/${pkgname}/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz)
+sha512sums=('115e9fdc889ad2fb4eca4368b77991f158c3b9cd201501a7f29125f66f3375bf99202a9845986ae117146248c34d7041390bce9471356e3ae1bb1b7cd6900991')
+b2sums=('fb6cfdd78de91bf9b37d71c1abbd9af14d748411203867512e0fa6064736432964b6c35d17c0f163a96649c07c168d7dc1445e8227b31a7b84b63be2f6972023')
+
+_srcenv() {
+  cd ${pkgname}-${pkgver}
+  export CARGO_HOME="$srcdir"
+  export CARGO_PROFILE_RELEASE_DEBUG=2
+  export CARGO_PROFILE_RELEASE_STRIP=false
+  export CARGO_PROFILE_RELEASE_LTO=true
+  export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+  export CARGO_PROFILE_RELEASE_OPT_LEVEL=3
+  CFLAGS+=' -ffat-lto-objects'
+  export LIBSSH2_SYS_USE_PKG_CONFIG=1
+}
+
+prepare() {
+  _srcenv
+  cargo fetch --locked --target host-tuple
+}
+
+build() {
+  _srcenv
+  cargo build --frozen --release
+}
+
+check() {
+  case "${CARCH}" in
+    powerpc) return 0 ;;
+  esac
+
+  _srcenv
+  # Note: Rust 1.78 started warning for deprecated config file names, something
+  # being used extensively in tests, build with older rust from the package
+  # archive if you want to run checks, e.g.:
+  # `pkgctl build -I rust-1:1.77.2-2-x86_64.pkg.tar.zst`
+  local skipped=(
+    # Rust changed some error messages
+    'invalid_manifest::case'
+    'invalid_workspace_root_manifest::case'
+    # Rust 1.85 changed manifest versions
+    # as of this pgkver 0.13.0 these tests assume older Rust
+    lockfile::case
+    upgrade_all::case
+    upgrade_workspace::case
+    virtual_manifest::case
+    workspace_inheritance::case
+    workspace_member_cwd::case
+  )
+  cargo test --frozen -- ${skipped[@]/#/--skip }
+}
+
+package() {
+  cd ${pkgname}-${pkgver}
+  install -Dm 755 \
+    target/release/cargo-upgrade \
+    target/release/cargo-set-version \
+    -t "${pkgdir}/usr/bin"
+
+  install -Dm 644 README.md -t "${pkgdir}/usr/share/doc/${pkgname}"
+  install -Dm 644 LICENSE-{APACHE,MIT} -t "${pkgdir}/usr/share/licenses/${pkgname}"
+}
+
+# vim: ts=2 sw=2 et:
