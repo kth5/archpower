@@ -3,7 +3,7 @@
 # Contributor: Eli Schwartz <eschwartz@archlinux.org>
 
 pkgname=hotdoc
-pkgver=0.18.2
+pkgver=0.18.3
 pkgrel=1
 pkgdesc="The tastiest API documentation system"
 arch=(x86_64 powerpc64le powerpc64)
@@ -48,7 +48,7 @@ source=(
   "$pkgname-prism::git+https://github.com/PrismJS/prism"
   "$pkgname-hotdoc_bootstrap_theme::git+https://github.com/hotdoc/hotdoc_bootstrap_theme"
 )
-b2sums=('5806ae4f5db23a1a23e711c06e09253860df689d3c5c3a43fc1199210978ebcbee97e4cba2932fbff3e010922660ffdf335bd6452a44b94a7835020b217c1156'
+b2sums=('71d28da16934a9adaf2e8eda658842e296c75e5728393947ae2f88c18608112323e3e5bd409209b29f7f5944a64a8a2a4bd41eb48ec2ae4959cc4a46f23cd53b'
         'SKIP'
         'SKIP'
         'SKIP')
@@ -61,6 +61,9 @@ prepare() {
   git config submodule.hotdoc/hotdoc_bootstrap_theme.url ../$pkgname-hotdoc_bootstrap_theme
   git -c protocol.file.allow=always submodule update
 
+  # Fix theme CSS dependency tracking with Meson >= 1.12
+  git -C hotdoc/hotdoc_bootstrap_theme cherry-pick -n 551472db5280128c1666d5b862d31f6f76c92d00
+
   # Place submodules in subprojects/ so meson doesn't clone them
   cp -a cmark subprojects/cmark
   cp -a hotdoc/hotdoc_bootstrap_theme subprojects/hotdoc_bootstrap_theme
@@ -68,7 +71,13 @@ prepare() {
 
 build() {
   cd $pkgname
-  python -m build --wheel --no-isolation
+  # npm >= 12 requires opting in to the theme's Git-based bootstrap-toc dependency
+  npm --prefix subprojects/hotdoc_bootstrap_theme install \
+    --allow-git=root \
+    --ignore-scripts \
+    --omit=dev
+  python -m build --wheel --no-isolation \
+    -Csetup-args=-Dhotdoc_bootstrap_theme:offline=true
 }
 
 check() {
