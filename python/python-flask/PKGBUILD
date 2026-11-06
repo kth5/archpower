@@ -8,7 +8,7 @@
 
 pkgname=python-flask
 pkgver=3.1.3
-pkgrel=1
+pkgrel=2
 pkgdesc='Micro webdevelopment framework for Python'
 arch=(any)
 url='https://flask.palletsprojects.com/'
@@ -37,12 +37,26 @@ optdepends=(
   'python-cryptography: using ad-hoc certificates'
   'python-dotenv: loading env vars from files'
 )
-source=("https://github.com/pallets/flask/archive/$pkgver/$pkgname-$pkgver.tar.gz")
-b2sums=('cd0144a13ada95038b231aaf4fd59dd4cfecb6d0df0008aef1e68b7159969a39f9aceafe1e292163b3580a0cf8c84983cd0eaaf8d3e976f1fd45bcc337707796')
+source=(
+  "https://github.com/pallets/flask/archive/$pkgver/$pkgname-$pkgver.tar.gz"
+  "$pkgname-replace-private-monkeypatch-api.patch::https://github.com/pallets/flask/commit/5ce121dd841e2dc2594d0ed3954278f4101d3521.patch"
+  "$pkgname-remove-werkzeug-host-tests.patch::https://github.com/pallets/flask/commit/a31e6b73469cb2bf7eb8f70b5ff21f710fd2e23c.patch"
+)
+b2sums=('cd0144a13ada95038b231aaf4fd59dd4cfecb6d0df0008aef1e68b7159969a39f9aceafe1e292163b3580a0cf8c84983cd0eaaf8d3e976f1fd45bcc337707796'
+        'a2cdd6c65f8441e75a1e2712120fe42404d288b233b3d07ce0add1605c34163b2c5c481a62f514a8bfaf496caee0948299884043306836bff162effcd6b05491'
+        '497862792652cf462287dbbdabdb3bf8855fd4267ffe77e6aded2d54f8de53c21e765e2dc6976aec9e94768d3b58275952c9cb65139490bcfb8470648f170f67')
+
+prepare() {
+  cd ${pkgname#python-}-$pkgver
+  # Tests use private pytest monkeypatch API removed in pytest 9, fixed upstream
+  patch -Np1 < ../$pkgname-replace-private-monkeypatch-api.patch
+  # Tests assert Werkzeug behaviour that has since changed, dropped upstream
+  patch -Np1 < ../$pkgname-remove-werkzeug-host-tests.patch
+}
 
 build() {
   cd ${pkgname#python-}-$pkgver
-  python -m build --wheel --no-isolation
+  python -m build --wheel --no-isolation --skip-dependency-check
 }
 
 check() {
