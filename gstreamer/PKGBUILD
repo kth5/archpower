@@ -17,7 +17,6 @@ pkgname=(
   gst-plugin-qml6
   gst-plugin-qmlgl
   gst-plugin-va
-  gst-plugin-wpe
   gst-plugin-wpe2
   gst-devtools-libs
   gst-devtools
@@ -29,7 +28,7 @@ pkgname=(
 case "${CARCH}" in
   x86_64) pkgname+=(gst-plugin-msdk gst-plugin-qsv gst-plugin-onnx gst-plugin-opencv) ;;
 esac
-pkgver=1.28.5
+pkgver=1.28.8
 pkgrel=2
 pkgdesc="Multimedia graph framework"
 url="https://gstreamer.freedesktop.org/"
@@ -119,7 +118,6 @@ makedepends=(
   libvorbis
   libvpx
   libwebp
-  libwpe
   libx11
   libxcb
   libxdamage
@@ -191,7 +189,6 @@ makedepends=(
   wayland-protocols
   webrtc-audio-processing-1
   wildmidi
-  wpebackend-fdo
   wpewebkit
   x264
   x265
@@ -212,20 +209,39 @@ source=(
   "git+https://gitlab.freedesktop.org/gstreamer/gstreamer.git?signed#tag=$pkgver"
   "https://gstreamer.freedesktop.org/src/gstreamer-docs/gstreamer-docs-$pkgver.tar.xz"{,.asc}
   0001-HACK-meson-Disable-broken-tests.patch
+  # https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12148
+  0002-faac-support-faac-2.0-faac_-API.patch
 )
-b2sums=('af4c921e40f58cd61d62dfc1420dfd4d9c0b678f8c17f9504b5f3b6fdbdbd81139a9e5c4397453795ab9fd57f6212f3eee672fc27ad37a4c2f241560dec5c1cd'
-        'de55d44ba22842aed6c72e293d9835fe78b7c123eaf2cd636328c8e4647a07994dcafc6d58f9bd20c1eba88951c6886d82af94b672d501d59b992e9580787350'
+b2sums=('5d87b91fa47558c9107314113e63e4ffaec1b708e7e1e17bd5b9eee85006a187578441be7cf7634d724fbebbaf9c26f99b9e93efad05e681f864a3974a140556'
+        '0e9b8dde82c36141ad8640540de53c6f5f9b62563e7dcc117a6cfe9b1754923cb6504f93e136550dafd5a49db6c903ce70d6021f2990c2d1d6af86fdd2b06902'
         'SKIP'
-        '048f1d44c5a45f8399ee4b5728c44306bc03f4fd9f545f8cee4ef2a487ac482ea0069458df13250e53e2d02b63ab286058a29a0d9dd49fbfeba1341d8c16368f')
+        '048f1d44c5a45f8399ee4b5728c44306bc03f4fd9f545f8cee4ef2a487ac482ea0069458df13250e53e2d02b63ab286058a29a0d9dd49fbfeba1341d8c16368f'
+        '4e425222d8fd1fc3c49750ad4920433e3b298698e96e714fb9d6f887ac62509f2b187a131fa31da53dcedd2a150ca59d3bd7d7519b7df91a0cff90c65094edbc')
 validpgpkeys=(
   D637032E45B8C6585B9456565D2EEE6F6F349D7C # Tim Müller <tim@gstreamer-foundation.org>
 )
 
+# Use debug
+export CARGO_PROFILE_RELEASE_DEBUG=2 CARGO_PROFILE_RELEASE_STRIP=false
+
+# Use LTO
+export CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+
 prepare() {
   cd gstreamer
 
-  # Disable broken tests
-  git apply -3 ../0001-HACK-meson-Disable-broken-tests.patch
+  local src
+  for src in "${source[@]}"; do
+    src="${src%%::*}"
+    src="${src##*/}"
+    src="${src%.zst}"
+    [[ $src = *.patch ]] || continue
+    echo "Applying patch $src..."
+    git apply -3 < "../$src"
+  done
+
+  cargo fetch --locked --target host-tuple \
+    --manifest-path subprojects/gst-devtools/dots-viewer/Cargo.toml
 }
 
 build() {
@@ -263,6 +279,7 @@ build() {
     -D gst-plugins-bad:voamrwbenc=disabled
     -D gst-plugins-bad:wasapi2=disabled
     -D gst-plugins-bad:wasapi=disabled
+    -D gst-plugins-bad:wpe=disabled
     -D gst-plugins-base:libvisual=disabled
     -D gst-plugins-base:tremor=disabled
     -D gst-plugins-good:rpicamsrc=disabled
@@ -286,13 +303,6 @@ build() {
        ) ;;
   esac
 
-  # https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3197
-  export GI_SCANNER_DISABLE_CACHE=1
-
-  # Cargo sub-build: Use debug and LTO
-  export CARGO_PROFILE_RELEASE_DEBUG=2 CARGO_PROFILE_RELEASE_STRIP=false
-  export CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
-
   arch-meson gstreamer build "${meson_options[@]}"
   meson compile -C build
 }
@@ -310,7 +320,7 @@ check() (
 
   # Flaky due to timeouts
   xvfb-run -s "-nolisten local" \
-    meson test -C build --print-errorlogs -t $CK_TIMEOUT_MULTIPLIER
+    meson test -C build --no-rebuild --print-errorlogs -t $CK_TIMEOUT_MULTIPLIER
 )
 
 _install() {
@@ -336,7 +346,7 @@ package_gstreamer() {
   conflicts=('gstreamer-vaapi<=1.26.10-5')
   install=gstreamer.install
 
-  meson install -C build --destdir "$srcdir/root"
+  meson install -C build --no-rebuild --destdir "$srcdir/root"
 
   cd root; local files=(
     usr/include/gstreamer-1.0/gst/{base,check,controller,net,*.h}
@@ -979,7 +989,7 @@ package_gst-plugin-hip() {
 
   cd root; local files=(
     usr/include/gstreamer-1.0/gst/hip
-    usr/lib/libgsthip.so*
+    usr/lib/libgsthip-1.0.so*
     usr/lib/pkgconfig/gstreamer-hip{,-gl}-1.0.pc
     usr/lib/girepository-1.0/GstHip{,GL}-1.0.typelib
     usr/share/gir-1.0/GstHip{,GL}-1.0.gir
@@ -1119,28 +1129,6 @@ package_gst-plugin-va() {
 
   cd root; local files=(
     usr/lib/gstreamer-1.0/libgstva.so
-  ); _install
-}
-
-package_gst-plugin-wpe() {
-  pkgdesc+=" - wpe plugin"
-  depends=(
-    "gst-plugins-base-libs=$pkgver-$pkgrel"
-    "gstreamer=$pkgver-$pkgrel"
-    glib2
-    glibc
-    libgcc
-    libstdc++
-    libwpe
-    libxkbcommon
-    wayland
-    wpebackend-fdo
-    wpewebkit
-  )
-
-  cd root; local files=(
-    usr/lib/gstreamer-1.0/libgstwpe.so
-    usr/lib/gst-plugins-bad/wpe-extension/libgstwpeextension.so
   ); _install
 }
 
