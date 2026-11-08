@@ -1,0 +1,2285 @@
+From f456414ee155d0e5f1dd533fcbf341ad9c5e371a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Sat, 17 Oct 2026 09:40:45 +1100
+Subject: [PATCH 15/30] Add a VSX backend for PowerPC to jxl_simd
+
+jxl-rs has SIMD backends for x86-64, AArch64 and wasm32 only, so JPEG XL
+decoding on PowerPC runs the scalar path. Carry the VSX backend from the
+jxl-rs vsx-simd branch in the in-tree jxl_simd, which is already path-sourced
+for the macOS x86-64 workaround.
+
+The backend is modelled on Highway's ppc_vsx-inl.h and needs POWER8 VSX at
+compile time, which is the powerpc64le baseline. A big-endian build only gets
+it when Rust targets POWER8 or later (e.g. -C target-cpu=pwr9), so the
+PowerMac G4/G5 keep the scalar path. On little-endian, POWER9 is detected at
+runtime, and the f16 conversions then use the hardware instructions.
+
+It is enabled by a vsx feature that image/rust/jxl turns on for powerpc64.
+The PowerPC intrinsics are still unstable, so jxl_simd joins the crates
+allowed RUSTC_BOOTSTRAP on PowerPC; the feature gates are confined to it.
+
+Decode speed with jxl 0.7.4, one thread, POWER9 (scalar -> VSX):
+  ppc64le: bike 4.2 -> 8.4 MP/s, progressive_ac 7.7 -> 11.7 MP/s
+Output differs from the scalar path by at most one level in under 0.005% of
+bytes, from rounding.
+---
+ Cargo.lock                                    |    1 +
+ Cargo.toml                                    |    6 +-
+ image/rust/jxl/Cargo.toml                     |    3 +
+ js/moz.configure                              |    7 +-
+ supply-chain/config.toml                      |    2 +-
+ .../rust/jxl_simd/.cargo-checksum.json        |    2 +-
+ third_party/rust/jxl_simd/Cargo.toml          |    1 +
+ third_party/rust/jxl_simd/src/lib.rs          |   31 +-
+ .../rust/jxl_simd/src/powerpc64/mod.rs        |  149 ++
+ .../rust/jxl_simd/src/powerpc64/vsx.rs        | 1886 +++++++++++++++++
+ third_party/rust/jxl_simd/src/scalar.rs       |    9 +-
+ 11 files changed, 2085 insertions(+), 12 deletions(-)
+ create mode 100644 third_party/rust/jxl_simd/src/powerpc64/mod.rs
+ create mode 100644 third_party/rust/jxl_simd/src/powerpc64/vsx.rs
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 546a05a39d..6d4cdf3381 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4207,6 +4207,7 @@ name = "jxl_decoder"
+ version = "0.1.0"
+ dependencies = [
+  "jxl",
++ "jxl_simd",
+  "log",
+  "moz_task",
+  "static_prefs",
+diff --git a/Cargo.toml b/Cargo.toml
+index 0dbf0438fa..34d8ba49ae 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -432,9 +432,9 @@ libcrux-traits = { path = "build/rust/libcrux-traits" }
+ # Patch libdbus-sys to avoid vendoring unnecessary massive libdbus source.
+ libdbus-sys = { path = "third_party/rust/libdbus-sys" }
+ 
+-# Redirect jxl_simd to the in-tree vendored copy so we can carry a patch that
+-# works around a rust/LLVM issue on macOS/x86_64 that makes jxl-rs decode ~3x
+-# slower on PGO builds. See bug 2043090.
++# Redirect jxl_simd to the in-tree vendored copy so we can carry patches that
++# add a VSX backend for PowerPC and work around a rust/LLVM issue on
++# macOS/x86_64 that makes jxl-rs decode ~3x slower on PGO builds. See bug 2043090.
+ jxl_simd = { path = "third_party/rust/jxl_simd" }
+ 
+ # gl_generator 0.14.0 + https://github.com/rust-windowing/gl-rs/pull/566
+diff --git a/image/rust/jxl/Cargo.toml b/image/rust/jxl/Cargo.toml
+index fbe7997f02..0e9107f37a 100644
+--- a/image/rust/jxl/Cargo.toml
++++ b/image/rust/jxl/Cargo.toml
+@@ -16,3 +16,6 @@ log = "0.4"
+ moz_task = { path = "../../../xpcom/rust/moz_task" }
+ static_prefs = { path = "../../../modules/libpref/init/static_prefs" }
+ xpcom = { path = "../../../xpcom/rust/xpcom" }
++
++[target.'cfg(target_arch = "powerpc64")'.dependencies]
++jxl_simd = { version = "0.8.0", features = ["vsx"] }
+diff --git a/js/moz.configure b/js/moz.configure
+index f19fddc600..285ab699ac 100644
+--- a/js/moz.configure
++++ b/js/moz.configure
+@@ -655,11 +655,14 @@ set_config("MOZ_RUST_SIMD", rust_simd)
+ set_define("MOZ_RUST_SIMD", rust_simd)
+ 
+ 
+-@depends(rust_simd)
+-def rustc_bootstrap_default(rust_simd):
++@depends(rust_simd, target)
++def rustc_bootstrap_default(rust_simd, target):
+     crates = ["mozglue_static", "qcms"]
+     if rust_simd:
+         crates += ["encoding_rs", "any_all_workaround"]
++    # The jxl_simd VSX backend uses the unstable PowerPC intrinsics.
++    if target.cpu == "ppc64":
++        crates += ["jxl_simd"]
+     return ",".join(crates)
+ 
+ 
+diff --git a/supply-chain/config.toml b/supply-chain/config.toml
+index cc7fe1dae9..7698d55b52 100644
+--- a/supply-chain/config.toml
++++ b/supply-chain/config.toml
+@@ -137,7 +137,7 @@ notes = "Patched version of upstream"
+ 
+ [policy.jxl_simd]
+ audit-as-crates-io = true
+-notes = "Upstream 0.8.0 with a local Mac/x86_64 workaround patched in (see bug 2043090) and path-sourced via a [patch.crates-io] entry in the root Cargo.toml."
++notes = "Upstream 0.8.0 with a local Mac/x86_64 workaround (see bug 2043090) and a PowerPC VSX backend patched in and path-sourced via a [patch.crates-io] entry in the root Cargo.toml."
+ 
+ [policy."khronos_api:3.1.0@git:71c792dbfe0ec5caeb242fc90937e19098386342"]
+ audit-as-crates-io = true
+diff --git a/third_party/rust/jxl_simd/.cargo-checksum.json b/third_party/rust/jxl_simd/.cargo-checksum.json
+index 342c542fd6..6c5f869460 100644
+--- a/third_party/rust/jxl_simd/.cargo-checksum.json
++++ b/third_party/rust/jxl_simd/.cargo-checksum.json
+@@ -1 +1 @@
+-{"files":{".cargo_vcs_info.json":"844a4710a78a8f94a5f0f8809bd74bdfc0d407b08f49f0963c4ef0bfe21ee717","Cargo.lock":"b9767aebb633338e1c0187a3a0aca44eb999fcfe34e8db65c0341921736a6057","Cargo.toml":"8e9b0bed702c3dcda821611928610ffcda1f91744827fa1b877c445d11d4fc7b","Cargo.toml.orig":"f5205bbf192e412ab3ed3a5ade2ff1af21270f5d2a79ef5c41620beda83a07ff","LICENSE":"8405932022a556380c2d8c272eff154a923feb197233f348ce5f7334fb0a5ede","README.md":"dce1fbdf3fc53a21c6ed354c142c7a7361601120fc34960e091b4d978a88b7a7","src/aarch64/mod.rs":"6bc3d80bd3c19fe61a5ea52caa628049a8780254fd95fe049956d7fde1d750a1","src/aarch64/neon.rs":"3f552100012767325f88852e19f3a9b974db29f69b157f9f7897e927c3713636","src/float16.rs":"fc36becf47ed7b8eb5b1b7f24f15ab59fc0ba297113fe2afaebdb31570ff3ce6","src/lib.rs":"c5d718e16930afe32ec00d9ad5c0c3ae19f0b49aee19f05e299c554dd25ceef2","src/scalar.rs":"21c5e3e4176ecb2d4f6f3cad49cc810e34a24ad8c917a9be007d07b0f45008a2","src/wasm32/mod.rs":"4dd514444edb521215f82088de29ef1f29c2f17edb4a2e74b23f4206e3c078aa","src/wasm32/simd128.rs":"06cf2c889ef8719656c8c48b078049556327e0a1c999a3133ba2464e75a8d02b","src/x86_64/avx.rs":"4c102a7419f065277a81acbf13716bb6c02293d65ab61df4b11e3e774972bc43","src/x86_64/avx512.rs":"eac2d845d1b167498ee4406ac433ceb6bb79390d6e8359acfacc9b0585877025","src/x86_64/mod.rs":"3f305c7b923891dea35275b8677ed792724c12177286a75bc66b8b3ca7fa976f","src/x86_64/sse42.rs":"134b714e75e0d1f296c55ff9f506349111b029a645453d5ec67685f9fa9f686f"},"package":"a645451b4d34b4017caf24110a14eb737e275b5d3d121bc754e67727ee65af0e"}
+\ No newline at end of file
++{"files":{".cargo_vcs_info.json":"844a4710a78a8f94a5f0f8809bd74bdfc0d407b08f49f0963c4ef0bfe21ee717","Cargo.lock":"b9767aebb633338e1c0187a3a0aca44eb999fcfe34e8db65c0341921736a6057","Cargo.toml":"2391c7f57bbaa4b9dff9fb892dfd1e9193674adb6da87263679f352d5f15334d","Cargo.toml.orig":"f5205bbf192e412ab3ed3a5ade2ff1af21270f5d2a79ef5c41620beda83a07ff","LICENSE":"8405932022a556380c2d8c272eff154a923feb197233f348ce5f7334fb0a5ede","README.md":"dce1fbdf3fc53a21c6ed354c142c7a7361601120fc34960e091b4d978a88b7a7","src/aarch64/mod.rs":"6bc3d80bd3c19fe61a5ea52caa628049a8780254fd95fe049956d7fde1d750a1","src/aarch64/neon.rs":"3f552100012767325f88852e19f3a9b974db29f69b157f9f7897e927c3713636","src/float16.rs":"fc36becf47ed7b8eb5b1b7f24f15ab59fc0ba297113fe2afaebdb31570ff3ce6","src/lib.rs":"3d6ac65311ce73d80ce1470bb07a3aa42b1b18a432d36eccb313e9e865888dfa","src/powerpc64/mod.rs":"597e0244d115aa8f325b47dd8cb62961ab016986f0595822b7afe99eb8426ed6","src/powerpc64/vsx.rs":"2e83875feccdf041a79e5916c27410e62a0649c4c4a3d82f585e41f1635e85c3","src/scalar.rs":"90049170e2cb982747340a2a1818af19c9fb4fd14515e4407721b7d830b78133","src/wasm32/mod.rs":"4dd514444edb521215f82088de29ef1f29c2f17edb4a2e74b23f4206e3c078aa","src/wasm32/simd128.rs":"06cf2c889ef8719656c8c48b078049556327e0a1c999a3133ba2464e75a8d02b","src/x86_64/avx.rs":"09a0b2b162df979c2f021e5c7818572165e8456a67b78b3e4cf4c5dbfd17b7b1","src/x86_64/avx512.rs":"05d1a67af507c7445c5a57a836d686efb44f1034230bfc71ebb9a1b0bcfb09bd","src/x86_64/mod.rs":"3f305c7b923891dea35275b8677ed792724c12177286a75bc66b8b3ca7fa976f","src/x86_64/sse42.rs":"134b714e75e0d1f296c55ff9f506349111b029a645453d5ec67685f9fa9f686f"},"package":"a645451b4d34b4017caf24110a14eb737e275b5d3d121bc754e67727ee65af0e"}
+\ No newline at end of file
+diff --git a/third_party/rust/jxl_simd/Cargo.toml b/third_party/rust/jxl_simd/Cargo.toml
+index 236ba5c535..67df5963be 100644
+--- a/third_party/rust/jxl_simd/Cargo.toml
++++ b/third_party/rust/jxl_simd/Cargo.toml
+@@ -45,6 +45,7 @@ avx512 = ["avx"]
+ neon = []
+ simd128 = []
+ sse42 = []
++vsx = []
+ 
+ [lib]
+ name = "jxl_simd"
+diff --git a/third_party/rust/jxl_simd/src/lib.rs b/third_party/rust/jxl_simd/src/lib.rs
+index b07a1e5b24..52369e0914 100644
+--- a/third_party/rust/jxl_simd/src/lib.rs
++++ b/third_party/rust/jxl_simd/src/lib.rs
+@@ -4,6 +4,15 @@
+ // license that can be found in the LICENSE file.
+ 
+ #![allow(clippy::too_many_arguments)]
++// The PowerPC intrinsics are not stable yet, so the `vsx` feature requires a nightly compiler.
++#![cfg_attr(
++    all(feature = "vsx", target_arch = "powerpc64"),
++    feature(
++        stdarch_powerpc,
++        stdarch_powerpc_feature_detection,
++        powerpc_target_feature
++    )
++)]
+ 
+ use std::fmt::Debug;
+ use std::ops::{
+@@ -20,12 +29,22 @@ mod aarch64;
+ #[cfg(target_arch = "wasm32")]
+ mod wasm32;
+ 
++#[cfg(target_arch = "powerpc64")]
++mod powerpc64;
++
+ pub mod float16;
+ pub mod scalar;
+ 
+ #[cfg(all(target_arch = "aarch64", feature = "neon"))]
+ pub use aarch64::neon::NeonDescriptor;
+ pub use float16::f16;
++#[cfg(all(
++    target_arch = "powerpc64",
++    feature = "vsx",
++    target_feature = "vsx",
++    target_feature = "power8-vector"
++))]
++pub use powerpc64::vsx::{Power8, Power9, VsxDescriptor, VsxLevel};
+ pub use scalar::ScalarDescriptor;
+ #[cfg(all(target_arch = "wasm32", feature = "simd128"))]
+ pub use wasm32::simd128::Simd128Descriptor;
+@@ -612,7 +631,11 @@ pub trait SimdMask16:
+ 
+ macro_rules! impl_f32_array_interface {
+     () => {
+-        type UnderlyingArray = [f32; Self::LEN];
++        crate::impl_f32_array_interface!(Self::LEN);
++    };
++    // Generic vector types cannot use `Self::LEN` in the array length, so they pass it explicitly.
++    ($len:expr) => {
++        type UnderlyingArray = [f32; $len];
+ 
+         #[inline(always)]
+         fn make_array_slice(slice: &[f32]) -> &[Self::UnderlyingArray] {
+@@ -644,7 +667,11 @@ pub(crate) use impl_f32_array_interface;
+ 
+ macro_rules! impl_i16_array_interface {
+     () => {
+-        type UnderlyingArray = [i16; Self::LEN];
++        crate::impl_i16_array_interface!(Self::LEN);
++    };
++    // Generic vector types cannot use `Self::LEN` in the array length, so they pass it explicitly.
++    ($len:expr) => {
++        type UnderlyingArray = [i16; $len];
+ 
+         #[inline(always)]
+         fn make_array_slice(slice: &[i16]) -> &[Self::UnderlyingArray] {
+diff --git a/third_party/rust/jxl_simd/src/powerpc64/mod.rs b/third_party/rust/jxl_simd/src/powerpc64/mod.rs
+new file mode 100644
+index 0000000000..ab0859bd0f
+--- /dev/null
++++ b/third_party/rust/jxl_simd/src/powerpc64/mod.rs
+@@ -0,0 +1,149 @@
++// Copyright (c) the JPEG XL Project Authors. All rights reserved.
++//
++// Use of this source code is governed by a BSD-style
++// license that can be found in the LICENSE file.
++
++#![allow(unsafe_code)]
++#![allow(clippy::identity_op)]
++
++// The backend requires VSX and the POWER8 vector extensions at compile time: they are the
++// powerpc64le baseline, and on big-endian they can be enabled with e.g. `-C target-cpu=pwr8`.
++// LLVM does not inline the AltiVec intrinsics into functions that only enable VSX through
++// `#[target_feature]`, so detecting POWER8 at runtime would leave every vector operation as a
++// function call. POWER9 is detected at runtime on little-endian (see `Power9::is_available`).
++#[cfg(all(
++    feature = "vsx",
++    target_feature = "vsx",
++    target_feature = "power8-vector"
++))]
++pub(super) mod vsx;
++
++#[macro_export]
++macro_rules! simd_function {
++    (
++        $dname:ident,
++        $descr:ident: $descr_ty:ident,
++        $(#[$($attr:meta)*])*
++        $pub:vis fn $name:ident($($arg:ident: $ty:ty),* $(,)?) $(-> $ret:ty )? $body: block
++    ) => {
++        #[inline(always)]
++        $(#[$($attr)*])*
++        $pub fn $name<$descr_ty: $crate::SimdDescriptor>($descr: $descr_ty, $($arg: $ty),*) $(-> $ret)? $body
++        $(#[$($attr)*])*
++        $pub fn $dname($($arg: $ty),*) $(-> $ret)? {
++            #[allow(unused)]
++            use $crate::SimdDescriptor;
++            $crate::simd_function_body_vsx!($name($($arg: $ty),*) $(-> $ret)?; ($($arg),*));
++            $name($crate::ScalarDescriptor::new().unwrap(), $($arg),*)
++        }
++    };
++}
++
++#[cfg(all(
++    feature = "vsx",
++    target_feature = "vsx",
++    target_feature = "power8-vector"
++))]
++#[doc(hidden)]
++#[macro_export]
++macro_rules! simd_function_body_vsx {
++    ($name:ident($($arg:ident: $ty:ty),* $(,)?) $(-> $ret:ty )?; ($($val:expr),* $(,)?)) => {
++        if let Some(d) = $crate::VsxDescriptor::<$crate::Power9>::new() {
++            return d.call(
++                #[inline(always)]
++                |d| $name(d, $($val),*),
++            );
++        }
++        if let Some(d) = $crate::VsxDescriptor::<$crate::Power8>::new() {
++            return $name(d, $($val),*);
++        }
++    };
++}
++
++#[cfg(not(all(
++    feature = "vsx",
++    target_feature = "vsx",
++    target_feature = "power8-vector"
++)))]
++#[doc(hidden)]
++#[macro_export]
++macro_rules! simd_function_body_vsx {
++    ($($ignore:tt)*) => {};
++}
++
++#[macro_export]
++macro_rules! test_all_instruction_sets {
++    (
++        $name:ident
++    ) => {
++        paste::paste! {
++            #[test]
++            fn [<$name _scalar>]() {
++                use $crate::SimdDescriptor;
++                $name($crate::ScalarDescriptor::new().unwrap())
++            }
++        }
++
++        $crate::test_vsx!($name);
++    };
++}
++
++#[cfg(all(
++    feature = "vsx",
++    target_feature = "vsx",
++    target_feature = "power8-vector"
++))]
++#[doc(hidden)]
++#[macro_export]
++macro_rules! test_vsx {
++    ($name:ident) => {
++        paste::paste! {
++            #[test]
++            fn [<$name _power8>]() {
++                use $crate::SimdDescriptor;
++                let Some(d) = $crate::VsxDescriptor::<$crate::Power8>::new() else { return; };
++                d.call($name)
++            }
++
++            #[test]
++            fn [<$name _power9>]() {
++                use $crate::SimdDescriptor;
++                let Some(d) = $crate::VsxDescriptor::<$crate::Power9>::new() else { return; };
++                d.call($name)
++            }
++        }
++    };
++}
++
++#[cfg(not(all(
++    feature = "vsx",
++    target_feature = "vsx",
++    target_feature = "power8-vector"
++)))]
++#[doc(hidden)]
++#[macro_export]
++macro_rules! test_vsx {
++    ($name:ident) => {};
++}
++
++#[macro_export]
++macro_rules! bench_all_instruction_sets {
++    (
++        $name:ident,
++        $criterion:ident
++    ) => {
++        use $crate::SimdDescriptor;
++        // `simd_function_body_*` does early return; wrap it with an immediately-invoked closure
++        (|| {
++            $crate::simd_function_body_vsx!(
++                $name($criterion: &mut ::criterion::BenchmarkGroup<'_, impl ::criterion::measurement::Measurement>);
++                ($criterion, "vsx")
++            );
++        })();
++        $name(
++            $crate::ScalarDescriptor::new().unwrap(),
++            $criterion,
++            "scalar",
++        );
++    };
++}
+diff --git a/third_party/rust/jxl_simd/src/powerpc64/vsx.rs b/third_party/rust/jxl_simd/src/powerpc64/vsx.rs
+new file mode 100644
+index 0000000000..8e17bd3758
+--- /dev/null
++++ b/third_party/rust/jxl_simd/src/powerpc64/vsx.rs
+@@ -0,0 +1,1886 @@
++// Copyright (c) the JPEG XL Project Authors. All rights reserved.
++//
++// Use of this source code is governed by a BSD-style
++// license that can be found in the LICENSE file.
++
++//! VSX backend for POWER8 and newer, modelled on Highway's `ppc_vsx-inl.h`.
++//!
++//! This module is only compiled when VSX and the POWER8 vector extensions are enabled at compile
++//! time (see `mod.rs`). Every vector type here holds a [`VsxDescriptor`], which is only
++//! constructed when the features of its [`VsxLevel`] are available. That is the safety argument
++//! for the intrinsic calls in the methods of these types. The free helper functions that use
++//! intrinsics are `unsafe` and require VSX to be available.
++//!
++//! The vector types are generic over a [`VsxLevel`]. All levels share the same implementation,
++//! but [`SimdDescriptor::call`] on a higher level enables that level's target features, so the
++//! code inlined into it is compiled for the newer ISA, and a few operations use instructions
++//! that are only available there.
++//!
++//! Lanes are numbered in memory order on both little- and big-endian targets. The stdarch
++//! intrinsics used here are lane-order agnostic or already adjusted for the target endianness;
++//! shuffles go through [`shuffle`], which takes byte indices in memory order. Shuffles that move
++//! parts of lanes build their indices with [`lane_byte`].
++
++// `fn_vsx!` wraps the method bodies it is given in an `unsafe` block, see the module docs.
++#![allow(clippy::macro_metavars_in_unsafe)]
++
++use std::arch::asm;
++use std::arch::powerpc64::*;
++use std::fmt::Debug;
++use std::marker::PhantomData;
++use std::mem::transmute;
++use std::ops::{
++    Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
++    Mul, MulAssign, Neg, Sub, SubAssign,
++};
++
++use super::super::{
++    F32SimdVec, I16SimdVec, I32SimdVec, SimdDescriptor, SimdMask, SimdMask16, U8SimdVec, U16SimdVec,
++};
++use crate::{U32SimdVec, U64SimdVec, impl_i16_array_interface};
++
++mod private {
++    pub trait Sealed {}
++}
++
++/// A POWER ISA level supported by the VSX backend.
++pub trait VsxLevel: private::Sealed + Copy + Debug + Send + Sync + 'static {
++    /// Whether the POWER9 (ISA 3.0) vector instructions are available.
++    const POWER9: bool;
++
++    /// Whether the level is supported by the current CPU.
++    fn is_available() -> bool;
++
++    /// Calls `f` in a context where the target features of this level are enabled.
++    ///
++    /// # Safety
++    /// The level must be available (see [`VsxLevel::is_available`]).
++    unsafe fn call<D, R>(d: D, f: impl FnOnce(D) -> R) -> R;
++}
++
++/// POWER8 (ISA 2.07), the powerpc64le baseline. It must be enabled at compile time.
++#[derive(Clone, Copy, Debug)]
++pub struct Power8;
++
++impl private::Sealed for Power8 {}
++
++impl VsxLevel for Power8 {
++    const POWER9: bool = false;
++
++    fn is_available() -> bool {
++        // The module is only compiled when the POWER8 features are part of the compilation target.
++        true
++    }
++
++    unsafe fn call<D, R>(d: D, f: impl FnOnce(D) -> R) -> R {
++        f(d)
++    }
++}
++
++/// POWER9 (ISA 3.0).
++#[derive(Clone, Copy, Debug)]
++pub struct Power9;
++
++impl private::Sealed for Power9 {}
++
++impl VsxLevel for Power9 {
++    const POWER9: bool = true;
++
++    fn is_available() -> bool {
++        if cfg!(target_feature = "power9-vector") {
++            return true;
++        }
++        // On big-endian, LLVM does not inline the AltiVec intrinsics into functions that enable
++        // more target features than the rest of the crate, so POWER9 must be enabled at compile
++        // time there (e.g. with `-C target-cpu=pwr9`).
++        cfg!(target_endian = "little") && std::arch::is_powerpc64_feature_detected!("power9-vector")
++    }
++
++    unsafe fn call<D, R>(d: D, f: impl FnOnce(D) -> R) -> R {
++        #[target_feature(enable = "power9-altivec,power9-vector")]
++        #[inline(never)]
++        unsafe fn inner<D, R>(d: D, f: impl FnOnce(D) -> R) -> R {
++            f(d)
++        }
++        // SAFETY: the caller guarantees that POWER9 is available.
++        unsafe { inner(d, f) }
++    }
++}
++
++// Safety invariant: this type is only ever constructed if the level `L` is available.
++#[derive(Clone, Copy, Debug)]
++pub struct VsxDescriptor<L: VsxLevel>(PhantomData<L>);
++
++/// Prepared 8-entry BF16 lookup table: 8 BF16 values packed into 16 bytes.
++#[derive(Clone, Copy, Debug)]
++#[repr(transparent)]
++pub struct Bf16Table8Vsx(vector_unsigned_char);
++
++impl<L: VsxLevel> SimdDescriptor for VsxDescriptor<L> {
++    type F32Vec = F32VecVsx<L>;
++
++    type I32Vec = I32VecVsx<L>;
++
++    type I16Vec = I16VecVsx<L>;
++
++    type U64Vec = U64VecVsx<L>;
++
++    type U32Vec = U32VecVsx<L>;
++
++    type U16Vec = U16VecVsx<L>;
++
++    type U8Vec = U8VecVsx<L>;
++
++    type Mask = MaskVsx<L>;
++    type Mask16 = Mask16Vsx<L>;
++    type Bf16Table8 = Bf16Table8Vsx;
++
++    type Descriptor256 = Self;
++    type Descriptor128 = Self;
++
++    fn new() -> Option<Self> {
++        L::is_available().then_some(Self(PhantomData))
++    }
++
++    fn maybe_downgrade_256bit(self) -> Self {
++        self
++    }
++
++    fn maybe_downgrade_128bit(self) -> Self {
++        self
++    }
++
++    fn call<R>(self, f: impl FnOnce(Self) -> R) -> R {
++        // SAFETY: the safety invariant on `self` guarantees that `L` is available.
++        unsafe { L::call(self, f) }
++    }
++}
++
++macro_rules! fn_vsx {
++    {} => {};
++    {$(
++        fn $name:ident $(<$(const $gen:ident: $gen_ty:ty),*>)?
++        ($this:ident: $self_ty:ty $(, $arg:ident: $ty:ty)* $(,)?) $(-> $ret:ty )?
++        $body: block
++    )*} => {$(
++        #[inline(always)]
++        fn $name $(<$(const $gen: $gen_ty),*>)? (self: $self_ty, $($arg: $ty),*) $(-> $ret)? {
++            let $this = self;
++            // SAFETY: the vectors hold a descriptor, whose safety invariant guarantees that VSX,
++            // the POWER8 vector extensions and the features of `L` are available. Functions that
++            // need a higher level are only called when `L` is that level.
++            unsafe { $body }
++        }
++    )*};
++}
++
++/// Reinterprets a 128-bit vector as bytes and back.
++trait Bytes: Copy {
++    fn to_bytes(self) -> vector_unsigned_char;
++    fn from_bytes(v: vector_unsigned_char) -> Self;
++}
++
++macro_rules! impl_bytes {
++    ($($t:ty),*) => {$(
++        impl Bytes for $t {
++            #[inline(always)]
++            fn to_bytes(self) -> vector_unsigned_char {
++                // SAFETY: all 128-bit vector types are plain bags of bits of the same size.
++                unsafe { transmute::<$t, vector_unsigned_char>(self) }
++            }
++            #[inline(always)]
++            fn from_bytes(v: vector_unsigned_char) -> Self {
++                // SAFETY: all 128-bit vector types are plain bags of bits of the same size.
++                unsafe { transmute::<vector_unsigned_char, $t>(v) }
++            }
++        }
++    )*};
++}
++
++impl Bytes for vector_unsigned_char {
++    #[inline(always)]
++    fn to_bytes(self) -> vector_unsigned_char {
++        self
++    }
++    #[inline(always)]
++    fn from_bytes(v: vector_unsigned_char) -> Self {
++        v
++    }
++}
++
++/// Reinterprets the bits of one vector type as another.
++#[inline(always)]
++fn cast<A: Bytes, B: Bytes>(a: A) -> B {
++    B::from_bytes(a.to_bytes())
++}
++
++impl_bytes!(
++    vector_float,
++    vector_signed_int,
++    vector_unsigned_int,
++    vector_bool_int,
++    vector_signed_short,
++    vector_unsigned_short,
++    vector_bool_short,
++    vector_signed_char,
++    vector_unsigned_long
++);
++
++const BIG_ENDIAN: bool = cfg!(target_endian = "big");
++
++/// Memory position of byte `byte` (0 is the least significant) of lane `lane` of a vector with
++/// `es`-byte lanes.
++const fn lane_byte(es: usize, lane: usize, byte: usize) -> u8 {
++    (lane * es + if BIG_ENDIAN { es - 1 - byte } else { byte }) as u8
++}
++
++/// Indices widening the four 16-bit lanes of `a` to 32-bit lanes, placing each at bit `shift`
++/// (0 or 16). The remaining bytes select byte 16 of `a || b`.
++const fn widen16_idx(shift: usize) -> [u8; 16] {
++    let mut res = [16u8; 16];
++    let mut lane = 0;
++    while lane < 4 {
++        res[lane_byte(4, lane, shift / 8) as usize] = lane_byte(2, lane, 0);
++        res[lane_byte(4, lane, shift / 8 + 1) as usize] = lane_byte(2, lane, 1);
++        lane += 1;
++    }
++    res
++}
++
++/// Indices narrowing 32-bit lanes of `a || b` to 16 bits, keeping the half at bit `shift`
++/// (0 or 16).
++const fn narrow32_idx(shift: usize) -> [u8; 16] {
++    let mut res = [0u8; 16];
++    let mut lane = 0;
++    while lane < 8 {
++        res[lane_byte(2, lane, 0) as usize] = lane_byte(4, lane, shift / 8);
++        res[lane_byte(2, lane, 1) as usize] = lane_byte(4, lane, shift / 8 + 1);
++        lane += 1;
++    }
++    res
++}
++
++/// Indices splitting each 64-bit lane into its low and high 32-bit halves, in this order.
++const fn split64_idx() -> [u8; 16] {
++    let mut res = [0u8; 16];
++    let mut lane = 0;
++    while lane < 4 {
++        let mut byte = 0;
++        while byte < 4 {
++            res[lane_byte(4, lane, byte) as usize] = lane_byte(8, lane / 2, 4 * (lane % 2) + byte);
++            byte += 1;
++        }
++        lane += 1;
++    }
++    res
++}
++
++/// Converts element indices into the concatenation of two vectors into byte indices.
++const fn elems_to_bytes(es: usize, elems: [u8; 16]) -> [u8; 16] {
++    let mut res = [0u8; 16];
++    let mut i = 0;
++    while i < 16 {
++        res[i] = elems[i / es] * es as u8 + (i % es) as u8;
++        i += 1;
++    }
++    res
++}
++
++/// Indices for half `half` of the interleaving of two vectors with `es`-byte elements.
++const fn interleave2_idx(es: usize, half: usize) -> [u8; 16] {
++    let n = 16 / es;
++    let mut elems = [0u8; 16];
++    let mut p = 0;
++    while p < n {
++        let g = half * n + p;
++        elems[p] = ((g % 2) * n + g / 2) as u8;
++        p += 1;
++    }
++    elems_to_bytes(es, elems)
++}
++
++/// Indices extracting component `comp` from two vectors of 2-way interleaved elements.
++const fn deinterleave2_idx(es: usize, comp: usize) -> [u8; 16] {
++    let n = 16 / es;
++    let mut elems = [0u8; 16];
++    let mut i = 0;
++    while i < n {
++        elems[i] = (2 * i + comp) as u8;
++        i += 1;
++    }
++    elems_to_bytes(es, elems)
++}
++
++/// Indices producing output vector `v` of the 3-way interleaving of `a`, `b` and `c`: the first
++/// shuffle picks the `a` and `b` elements from `a || b`, the second inserts the `c` elements.
++const fn interleave3_idx(es: usize, v: usize) -> ([u8; 16], [u8; 16]) {
++    let n = 16 / es;
++    let mut first = [0u8; 16];
++    let mut second = [0u8; 16];
++    let mut p = 0;
++    while p < n {
++        let g = v * n + p;
++        let (src, e) = (g % 3, g / 3);
++        if src < 2 {
++            first[p] = (src * n + e) as u8;
++            second[p] = p as u8;
++        } else {
++            second[p] = (n + e) as u8;
++        }
++        p += 1;
++    }
++    (elems_to_bytes(es, first), elems_to_bytes(es, second))
++}
++
++/// Indices extracting component `comp` from three vectors of 3-way interleaved elements: the
++/// first shuffle picks from `v0 || v1`, the second from `v2`.
++const fn deinterleave3_idx(es: usize, comp: usize) -> ([u8; 16], [u8; 16]) {
++    let n = 16 / es;
++    let mut first = [0u8; 16];
++    let mut second = [0u8; 16];
++    let mut i = 0;
++    while i < n {
++        let s = 3 * i + comp;
++        if s < 2 * n {
++            first[i] = s as u8;
++            second[i] = i as u8;
++        } else {
++            second[i] = (n + s - 2 * n) as u8;
++        }
++        i += 1;
++    }
++    (elems_to_bytes(es, first), elems_to_bytes(es, second))
++}
++
++/// Byte shuffle in memory order: byte `i` of the result is byte `idx[i]` of the 32-byte
++/// concatenation `a || b`.
++///
++/// # Safety
++/// VSX must be available.
++#[inline(always)]
++unsafe fn shuffle<T: Bytes>(a: T, b: T, idx: [u8; 16]) -> T {
++    // SAFETY: the caller guarantees VSX; `[u8; 16]` and the vector have the same size.
++    T::from_bytes(unsafe {
++        shuffle_var(
++            a.to_bytes(),
++            b.to_bytes(),
++            transmute::<[u8; 16], vector_unsigned_char>(idx),
++        )
++    })
++}
++
++/// Same as [`shuffle`], with indices that are only known at runtime.
++///
++/// # Safety
++/// VSX must be available.
++#[inline(always)]
++unsafe fn shuffle_var(
++    a: vector_unsigned_char,
++    b: vector_unsigned_char,
++    idx: vector_unsigned_char,
++) -> vector_unsigned_char {
++    // `vperm` numbers bytes in big-endian order, which is memory order on big-endian. On
++    // little-endian, stdarch's `vec_perm` swaps the inputs and complements the indices (like
++    // altivec.h), which also makes the indices refer to memory order.
++    // SAFETY: the caller guarantees VSX.
++    unsafe { vec_perm(a, b, idx) }
++}
++
++// The shuffle helpers take the element size in bytes as a const parameter, so that the index
++// tables are computed at compile time.
++
++/// # Safety
++/// VSX must be available.
++#[inline(always)]
++unsafe fn interleave2<const ES: usize, T: Bytes>(a: T, b: T) -> (T, T) {
++    // SAFETY: the caller guarantees VSX.
++    unsafe {
++        (
++            shuffle(a, b, const { interleave2_idx(ES, 0) }),
++            shuffle(a, b, const { interleave2_idx(ES, 1) }),
++        )
++    }
++}
++
++/// # Safety
++/// VSX must be available.
++#[inline(always)]
++unsafe fn interleave3<const ES: usize, T: Bytes>(a: T, b: T, c: T) -> (T, T, T) {
++    // SAFETY: the caller guarantees VSX.
++    let out = |(first, second)| unsafe { shuffle(shuffle(a, b, first), c, second) };
++    (
++        out(const { interleave3_idx(ES, 0) }),
++        out(const { interleave3_idx(ES, 1) }),
++        out(const { interleave3_idx(ES, 2) }),
++    )
++}
++
++/// Returns `[a0 b0 c0 d0 ...]` spread over four vectors.
++///
++/// # Safety
++/// VSX must be available.
++#[inline(always)]
++unsafe fn interleave4<const ES: usize, T: Bytes>(a: T, b: T, c: T, d: T) -> (T, T, T, T) {
++    let lo = const { interleave2_idx(2 * ES, 0) };
++    let hi = const { interleave2_idx(2 * ES, 1) };
++    // SAFETY: the caller guarantees VSX.
++    unsafe {
++        let (ab0, ab1) = interleave2::<ES, _>(a, b);
++        let (cd0, cd1) = interleave2::<ES, _>(c, d);
++        (
++            shuffle(ab0, cd0, lo),
++            shuffle(ab0, cd0, hi),
++            shuffle(ab1, cd1, lo),
++            shuffle(ab1, cd1, hi),
++        )
++    }
++}
++
++/// # Safety
++/// VSX must be available.
++#[inline(always)]
++unsafe fn deinterleave3<const ES: usize, T: Bytes>(v0: T, v1: T, v2: T) -> (T, T, T) {
++    // SAFETY: the caller guarantees VSX.
++    let out = |(first, second)| unsafe { shuffle(shuffle(v0, v1, first), v2, second) };
++    (
++        out(const { deinterleave3_idx(ES, 0) }),
++        out(const { deinterleave3_idx(ES, 1) }),
++        out(const { deinterleave3_idx(ES, 2) }),
++    )
++}
++
++/// # Safety
++/// `ptr` must be valid for writing 8 bytes.
++#[inline(always)]
++unsafe fn store_lo64<T: Bytes>(v: T, ptr: *mut u8) {
++    // SAFETY: vectors are plain bags of bits, lane 0 is the first 8 bytes in memory.
++    let lanes = unsafe { transmute::<vector_unsigned_char, [u64; 2]>(v.to_bytes()) };
++    // SAFETY: the caller guarantees that `ptr` is valid for 8 bytes.
++    unsafe { ptr.cast::<u64>().write_unaligned(lanes[0]) }
++}
++
++/// # Safety
++/// `ptr` must be valid for writing 4 bytes.
++#[inline(always)]
++unsafe fn store_lo32<T: Bytes>(v: T, ptr: *mut u8) {
++    // SAFETY: vectors are plain bags of bits, lane 0 is the first 4 bytes in memory.
++    let lanes = unsafe { transmute::<vector_unsigned_char, [u32; 4]>(v.to_bytes()) };
++    // SAFETY: the caller guarantees that `ptr` is valid for 4 bytes.
++    unsafe { ptr.cast::<u32>().write_unaligned(lanes[0]) }
++}
++
++/// Loads 8 bytes into the low half of a vector, zeroing the high half.
++///
++/// # Safety
++/// `ptr` must be valid for reading 8 bytes.
++#[inline(always)]
++unsafe fn load_lo64(ptr: *const u8) -> vector_unsigned_char {
++    // SAFETY: the caller guarantees that `ptr` is valid for 8 bytes.
++    let lo = unsafe { ptr.cast::<u64>().read_unaligned() };
++    // SAFETY: `[u64; 2]` and the vector have the same size.
++    unsafe { transmute::<[u64; 2], vector_unsigned_char>([lo, 0u64]) }
++}
++
++// Instructions that stdarch does not expose (yet).
++
++macro_rules! asm_binop {
++    ($name:ident, $insn:literal, $class:ident, $in:ty, $out:ty) => {
++        /// # Safety
++        /// VSX and the POWER8 vector extensions must be available.
++        #[target_feature(enable = "vsx,power8-altivec,power8-vector")]
++        #[inline]
++        unsafe fn $name(a: $in, b: $in) -> $out {
++            let r: $out;
++            // SAFETY: the caller guarantees the target features; the instruction only reads and
++            // writes registers.
++            unsafe {
++                asm!(
++                    concat!($insn, " {r}, {a}, {b}"),
++                    r = lateout($class) r,
++                    a = in($class) a,
++                    b = in($class) b,
++                    options(pure, nomem, nostack),
++                );
++            }
++            r
++        }
++    };
++}
++
++asm_binop!(xvdivsp, "xvdivsp", vsreg, vector_float, vector_float);
++asm_binop!(xvmaxsp, "xvmaxsp", vsreg, vector_float, vector_float);
++asm_binop!(xvminsp, "xvminsp", vsreg, vector_float, vector_float);
++asm_binop!(
++    xvcmpgtsp,
++    "xvcmpgtsp",
++    vsreg,
++    vector_float,
++    vector_unsigned_int
++);
++asm_binop!(
++    vaddudm,
++    "vaddudm",
++    vreg,
++    vector_unsigned_long,
++    vector_unsigned_long
++);
++asm_binop!(
++    vsld,
++    "vsld",
++    vreg,
++    vector_unsigned_long,
++    vector_unsigned_long
++);
++asm_binop!(
++    vsrd,
++    "vsrd",
++    vreg,
++    vector_unsigned_long,
++    vector_unsigned_long
++);
++// Even/odd multiplies use big-endian lane numbering: on big-endian, `vmule*` multiplies lanes
++// 0, 2, ... and `vmulo*` lanes 1, 3, ..., while on little-endian it is the other way around. The
++// products are in increasing lane order.
++asm_binop!(
++    vmulosw,
++    "vmulosw",
++    vreg,
++    vector_signed_int,
++    vector_signed_int
++);
++asm_binop!(
++    vmulesw,
++    "vmulesw",
++    vreg,
++    vector_signed_int,
++    vector_signed_int
++);
++asm_binop!(
++    vmulosh,
++    "vmulosh",
++    vreg,
++    vector_signed_short,
++    vector_signed_short
++);
++asm_binop!(
++    vmulesh,
++    "vmulesh",
++    vreg,
++    vector_signed_short,
++    vector_signed_short
++);
++
++/// # Safety
++/// VSX must be available.
++#[target_feature(enable = "vsx")]
++#[inline]
++unsafe fn xvsqrtsp(a: vector_float) -> vector_float {
++    let r: vector_float;
++    // SAFETY: the caller guarantees VSX; the instruction only reads and writes registers.
++    unsafe {
++        asm!(
++            "xvsqrtsp {r}, {a}",
++            r = lateout(vsreg) r,
++            a = in(vsreg) a,
++            options(pure, nomem, nostack),
++        );
++    }
++    r
++}
++
++/// Converts the f16 in the low half of each lane to f32.
++///
++/// # Safety
++/// POWER9 must be available.
++#[target_feature(enable = "power9-altivec,power9-vector")]
++#[inline]
++unsafe fn xvcvhpsp(a: vector_unsigned_int) -> vector_float {
++    let r: vector_float;
++    // SAFETY: the caller guarantees POWER9; the instruction only reads and writes registers.
++    unsafe {
++        asm!(
++            "xvcvhpsp {r}, {a}",
++            r = lateout(vsreg) r,
++            a = in(vsreg) a,
++            options(pure, nomem, nostack),
++        );
++    }
++    r
++}
++
++/// Converts f32 lanes to f16, stored in the low half of each lane (the high half is zero).
++///
++/// # Safety
++/// POWER9 must be available.
++#[target_feature(enable = "power9-altivec,power9-vector")]
++#[inline]
++unsafe fn xvcvsphp(a: vector_float) -> vector_unsigned_int {
++    let r: vector_unsigned_int;
++    // SAFETY: the caller guarantees POWER9; the instruction only reads and writes registers.
++    unsafe {
++        asm!(
++            "xvcvsphp {r}, {a}",
++            r = lateout(vsreg) r,
++            a = in(vsreg) a,
++            options(pure, nomem, nostack),
++        );
++    }
++    r
++}
++
++/// Indices selecting the high half of each double-width product from the widening multiplies of
++/// lanes 0, 2, ... and lanes 1, 3, ... of `es`-byte lanes.
++const fn mul_high_idx(es: usize) -> [u8; 16] {
++    let n = 16 / es;
++    // Index of the high half within a double-width product.
++    let high = if BIG_ENDIAN { 0 } else { 1 };
++    let mut elems = [0u8; 16];
++    let mut i = 0;
++    while i < n {
++        let src = if i % 2 == 0 { 0 } else { n };
++        elems[i] = (src + (i / 2) * 2 + high) as u8;
++        i += 1;
++    }
++    elems_to_bytes(es, elems)
++}
++
++/// Multiplies signed 32-bit lanes and keeps the high half of each 64-bit product.
++///
++/// # Safety
++/// VSX and the POWER8 vector extensions must be available.
++#[inline(always)]
++unsafe fn mul_high_i32(a: vector_signed_int, b: vector_signed_int) -> vector_signed_int {
++    // SAFETY: the caller guarantees the target features.
++    unsafe {
++        let (even, odd) = if BIG_ENDIAN {
++            (vmulesw(a, b), vmulosw(a, b))
++        } else {
++            (vmulosw(a, b), vmulesw(a, b))
++        };
++        shuffle(even, odd, const { mul_high_idx(4) })
++    }
++}
++
++/// Multiplies signed 16-bit lanes and keeps the high half of each 32-bit product.
++///
++/// # Safety
++/// VSX and the POWER8 vector extensions must be available.
++#[inline(always)]
++unsafe fn mul_high_i16(a: vector_signed_short, b: vector_signed_short) -> vector_signed_short {
++    // SAFETY: the caller guarantees the target features.
++    unsafe {
++        let (even, odd) = if BIG_ENDIAN {
++            (vmulesh(a, b), vmulosh(a, b))
++        } else {
++            (vmulosh(a, b), vmulesh(a, b))
++        };
++        shuffle(even, odd, const { mul_high_idx(2) })
++    }
++}
++
++#[derive(Clone, Copy, Debug)]
++#[repr(transparent)]
++pub struct F32VecVsx<L: VsxLevel>(vector_float, VsxDescriptor<L>);
++
++impl<L: VsxLevel> F32SimdVec for F32VecVsx<L> {
++    type Descriptor = VsxDescriptor<L>;
++
++    const LEN: usize = 4;
++
++    #[inline(always)]
++    fn splat(d: Self::Descriptor, v: f32) -> Self {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        Self(unsafe { vec_splats(v) }, d)
++    }
++
++    #[inline(always)]
++    fn zero(d: Self::Descriptor) -> Self {
++        Self::splat(d, 0.0)
++    }
++
++    #[inline(always)]
++    fn load(d: Self::Descriptor, mem: &[f32]) -> Self {
++        assert!(mem.len() >= Self::LEN);
++        // SAFETY: we just checked that `mem` has enough space, and the load is unaligned.
++        Self(
++            unsafe { mem.as_ptr().cast::<vector_float>().read_unaligned() },
++            d,
++        )
++    }
++
++    #[inline(always)]
++    fn store(&self, mem: &mut [f32]) {
++        assert!(mem.len() >= Self::LEN);
++        // SAFETY: we just checked that `mem` has enough space, and the store is unaligned.
++        unsafe {
++            mem.as_mut_ptr()
++                .cast::<vector_float>()
++                .write_unaligned(self.0)
++        }
++    }
++
++    #[inline(always)]
++    fn store_interleaved_2(a: Self, b: Self, dest: &mut [f32]) {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        let (o0, o1) = unsafe { interleave2::<4, _>(a.0, b.0) };
++        Self(o0, a.1).store(&mut dest[..8]);
++        Self(o1, a.1).store(&mut dest[4..8]);
++    }
++
++    #[inline(always)]
++    fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [f32]) {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        let (o0, o1, o2) = unsafe { interleave3::<4, _>(a.0, b.0, c.0) };
++        Self(o0, a.1).store(&mut dest[..12]);
++        Self(o1, a.1).store(&mut dest[4..12]);
++        Self(o2, a.1).store(&mut dest[8..12]);
++    }
++
++    #[inline(always)]
++    fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [f32]) {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        let (o0, o1, o2, o3) = unsafe { interleave4::<4, _>(a.0, b.0, c.0, d.0) };
++        Self(o0, a.1).store(&mut dest[..16]);
++        Self(o1, a.1).store(&mut dest[4..16]);
++        Self(o2, a.1).store(&mut dest[8..16]);
++        Self(o3, a.1).store(&mut dest[12..16]);
++    }
++
++    #[inline(always)]
++    fn store_interleaved_8(
++        a: Self,
++        b: Self,
++        c: Self,
++        d: Self,
++        e: Self,
++        f: Self,
++        g: Self,
++        h: Self,
++        dest: &mut [f32],
++    ) {
++        let dest = &mut dest[..32];
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        let ((x0, x1, x2, x3), (y0, y1, y2, y3)) = unsafe {
++            (
++                interleave4::<4, _>(a.0, b.0, c.0, d.0),
++                interleave4::<4, _>(e.0, f.0, g.0, h.0),
++            )
++        };
++        for (i, v) in [x0, y0, x1, y1, x2, y2, x3, y3].into_iter().enumerate() {
++            Self(v, a.1).store(&mut dest[4 * i..]);
++        }
++    }
++
++    #[inline(always)]
++    fn load_deinterleaved_2(d: Self::Descriptor, src: &[f32]) -> (Self, Self) {
++        let v0 = Self::load(d, &src[..8]).0;
++        let v1 = Self::load(d, &src[4..8]).0;
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        unsafe {
++            (
++                Self(shuffle(v0, v1, const { deinterleave2_idx(4, 0) }), d),
++                Self(shuffle(v0, v1, const { deinterleave2_idx(4, 1) }), d),
++            )
++        }
++    }
++
++    #[inline(always)]
++    fn load_deinterleaved_3(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self) {
++        let v0 = Self::load(d, &src[..12]).0;
++        let v1 = Self::load(d, &src[4..12]).0;
++        let v2 = Self::load(d, &src[8..12]).0;
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        let (a, b, c) = unsafe { deinterleave3::<4, _>(v0, v1, v2) };
++        (Self(a, d), Self(b, d), Self(c, d))
++    }
++
++    #[inline(always)]
++    fn load_deinterleaved_4(d: Self::Descriptor, src: &[f32]) -> (Self, Self, Self, Self) {
++        let v0 = Self::load(d, &src[..16]).0;
++        let v1 = Self::load(d, &src[4..16]).0;
++        let v2 = Self::load(d, &src[8..16]).0;
++        let v3 = Self::load(d, &src[12..16]).0;
++        // Deinterleaving 4 vectors is a 4x4 transpose.
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        let (a, b, c, e) = unsafe { interleave4::<4, _>(v0, v1, v2, v3) };
++        (Self(a, d), Self(b, d), Self(c, d), Self(e, d))
++    }
++
++    #[inline(always)]
++    fn transpose_square(d: Self::Descriptor, data: &mut [Self::UnderlyingArray], stride: usize) {
++        assert!(data.len() > 3 * stride);
++        let p0 = Self::load_array(d, &data[0]).0;
++        let p1 = Self::load_array(d, &data[stride]).0;
++        let p2 = Self::load_array(d, &data[2 * stride]).0;
++        let p3 = Self::load_array(d, &data[3 * stride]).0;
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        let (o0, o1, o2, o3) = unsafe { interleave4::<4, _>(p0, p1, p2, p3) };
++        Self(o0, d).store_array(&mut data[0]);
++        Self(o1, d).store_array(&mut data[stride]);
++        Self(o2, d).store_array(&mut data[2 * stride]);
++        Self(o3, d).store_array(&mut data[3 * stride]);
++    }
++
++    crate::impl_f32_array_interface!(4);
++
++    #[inline(always)]
++    fn bitcast_to_i32(self) -> I32VecVsx<L> {
++        I32VecVsx(cast(self.0), self.1)
++    }
++
++    fn_vsx! {
++        fn mul_add(this: F32VecVsx<L>, mul: F32VecVsx<L>, add: F32VecVsx<L>) -> F32VecVsx<L> {
++            F32VecVsx(vec_madd(this.0, mul.0, add.0), this.1)
++        }
++
++        fn neg_mul_add(this: F32VecVsx<L>, mul: F32VecVsx<L>, add: F32VecVsx<L>) -> F32VecVsx<L> {
++            F32VecVsx(vec_nmsub(this.0, mul.0, add.0), this.1)
++        }
++
++        fn abs(this: F32VecVsx<L>) -> F32VecVsx<L> {
++            F32VecVsx(vec_abs(this.0), this.1)
++        }
++
++        fn floor(this: F32VecVsx<L>) -> F32VecVsx<L> {
++            F32VecVsx(vec_floor(this.0), this.1)
++        }
++
++        fn neg(this: F32VecVsx<L>) -> F32VecVsx<L> {
++            let bits: vector_unsigned_int = cast(this.0);
++            F32VecVsx(cast(vec_xor(bits, vec_splats(0x8000_0000u32))), this.1)
++        }
++
++        fn copysign(this: F32VecVsx<L>, sign: F32VecVsx<L>) -> F32VecVsx<L> {
++            F32VecVsx(vec_sel(this.0, sign.0, vec_splats(0x8000_0000u32)), this.1)
++        }
++
++        fn as_i32(this: F32VecVsx<L>) -> I32VecVsx<L> {
++            I32VecVsx(vec_cts::<0>(this.0), this.1)
++        }
++
++
++        fn round_store_u8(this: F32VecVsx<L>, dest: &mut [u8]) {
++            assert!(dest.len() >= F32VecVsx::<L>::LEN);
++            let i32s = vec_cts::<0>(vec_round(this.0));
++            let u16s: vector_unsigned_short = vec_packsu(i32s, i32s);
++            let u8s: vector_unsigned_char = vec_packsu(u16s, u16s);
++            // We checked that `dest` has enough space.
++            store_lo32(u8s, dest.as_mut_ptr());
++        }
++
++        fn round_store_u16(this: F32VecVsx<L>, dest: &mut [u16]) {
++            assert!(dest.len() >= F32VecVsx::<L>::LEN);
++            let i32s = vec_cts::<0>(vec_round(this.0));
++            let u16s: vector_unsigned_short = vec_packsu(i32s, i32s);
++            // We checked that `dest` has enough space.
++            store_lo64(u16s, dest.as_mut_ptr().cast());
++        }
++
++        fn store_f16_bits(this: F32VecVsx<L>, dest: &mut [u16]) {
++            assert!(dest.len() >= F32VecVsx::<L>::LEN);
++            const NARROW: [u8; 16] = narrow32_idx(0);
++            if L::POWER9 {
++                // The descriptor invariant guarantees POWER9.
++                let h = xvcvsphp(this.0);
++                // We checked that `dest` has enough space.
++                store_lo64(shuffle(h, h, NARROW), dest.as_mut_ptr().cast());
++                return;
++            }
++            // POWER8 has no f16 conversion instructions, so convert with bit manipulation (same
++            // algorithm as the wasm32 backend).
++            let splat = |v: u32| -> vector_unsigned_int { vec_splats(v) };
++            let bits: vector_unsigned_int = cast(this.0);
++            let abs: vector_unsigned_int = cast(vec_abs(this.0));
++            let sign = vec_and(vec_sr(bits, splat(16)), splat(0x8000));
++
++            // Round to nearest even
++            let abs_shifted = vec_sr(abs, splat(13));
++            let lsb = vec_and(abs_shifted, splat(1));
++            let rounded = vec_add(abs, vec_add(lsb, splat(0x0FFF)));
++
++            // Normal: shift exp+mant into f16 position, rebias, clamp to inf (0x7C00)
++            let normal = vec_min(
++                vec_sub(vec_sr(rounded, splat(13)), splat(112 << 10)),
++                splat(0x7C00),
++            );
++
++            // Subnormal (|x| < 2^-14): magic number trick to denormalize
++            let magic = splat(113 << 23);
++            let abs_f: vector_float = cast(abs);
++            let magic_f: vector_float = cast(magic);
++            let sum: vector_unsigned_int = cast(vec_add(abs_f, magic_f));
++            let subnorm = vec_sr(vec_sub(sum, magic), splat(13));
++
++            // Inf/NaN (exp==255): set f16 exp=31, keep top 10 mantissa bits
++            let infnan = vec_or(splat(0x7C00), vec_and(abs_shifted, splat(0x03FF)));
++
++            let is_subnorm = vec_cmplt(abs, splat(0x38800000));
++            let is_infnan = vec_cmpgt(abs, splat(0x7F7FFFFF));
++            let result = vec_sel(normal, subnorm, is_subnorm);
++            let result = vec_sel(result, infnan, is_infnan);
++            let h = vec_or(sign, result);
++
++            // Narrow u32 -> u16 by keeping the low half of each lane.
++            // We checked that `dest` has enough space.
++            store_lo64(shuffle(h, h, NARROW), dest.as_mut_ptr().cast());
++        }
++    }
++
++    #[inline(always)]
++    fn sqrt(self) -> Self {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        Self(unsafe { xvsqrtsp(self.0) }, self.1)
++    }
++
++    #[inline(always)]
++    fn max(self, other: Self) -> Self {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        Self(unsafe { xvmaxsp(self.0, other.0) }, self.1)
++    }
++
++    #[inline(always)]
++    fn min(self, other: Self) -> Self {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        Self(unsafe { xvminsp(self.0, other.0) }, self.1)
++    }
++
++    #[inline(always)]
++    fn gt(self, other: Self) -> MaskVsx<L> {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        MaskVsx(cast(unsafe { xvcmpgtsp(self.0, other.0) }), self.1)
++    }
++
++    #[inline(always)]
++    fn load_f16_bits(d: Self::Descriptor, mem: &[u16]) -> Self {
++        assert!(mem.len() >= Self::LEN);
++        // SAFETY: we just checked that `mem` has enough space.
++        let lo = unsafe { load_lo64(mem.as_ptr().cast()) };
++        // SAFETY: VSX, and POWER9 if `L::POWER9`, are available by the safety invariant on `d`.
++        unsafe {
++            let splat = |v: u32| -> vector_unsigned_int { vec_splats(v) };
++            let zero = vec_splats(0u8);
++            let wide: vector_unsigned_int = cast(shuffle(lo, zero, const { widen16_idx(0) }));
++            if L::POWER9 {
++                // The descriptor invariant on `d` guarantees POWER9.
++                return Self(xvcvhpsp(wide), d);
++            }
++            let sign = vec_sl(vec_and(wide, splat(0x8000)), splat(16));
++            let mag = vec_and(wide, splat(0x7FFF));
++            let mag_shifted = vec_sl(mag, splat(13));
++
++            // Normal: shift exp+mant into f32 position, rebias exponent (+112)
++            let normal = vec_add(mag_shifted, splat(112 << 23));
++
++            // Subnormal (exp==0): magic number trick to normalize
++            let magic = splat(113 << 23);
++            let magic_f: vector_float = cast(magic);
++            let biased: vector_float = cast(vec_or(magic, mag_shifted));
++            let subnorm: vector_unsigned_int = cast(vec_sub(biased, magic_f));
++
++            // Inf/NaN (exp==31): normal path gives f32 exp=143, need 255; add 112<<23
++            let infnan = vec_add(normal, splat(112 << 23));
++
++            let is_subnorm = vec_cmplt(mag, splat(0x0400));
++            let is_infnan = vec_cmpgt(mag, splat(0x7BFF));
++            let result = vec_sel(normal, subnorm, is_subnorm);
++            let result = vec_sel(result, infnan, is_infnan);
++
++            Self(cast(vec_or(sign, result)), d)
++        }
++    }
++
++    #[inline(always)]
++    fn prepare_table_bf16_8(_d: VsxDescriptor<L>, table: &[f32; 8]) -> Bf16Table8Vsx {
++        // SAFETY: `table` has 8 elements, so both loads are in bounds.
++        let (lo, hi) = unsafe {
++            (
++                table
++                    .as_ptr()
++                    .cast::<vector_unsigned_char>()
++                    .read_unaligned(),
++                table
++                    .as_ptr()
++                    .add(4)
++                    .cast::<vector_unsigned_char>()
++                    .read_unaligned(),
++            )
++        };
++        // BF16 is the high 16 bits of f32.
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        Bf16Table8Vsx(unsafe { shuffle(lo, hi, const { narrow32_idx(16) }) })
++    }
++
++    #[inline(always)]
++    fn table_lookup_bf16_8(
++        d: VsxDescriptor<L>,
++        table: Bf16Table8Vsx,
++        indices: I32VecVsx<L>,
++    ) -> Self {
++        // For each index i (0-7), select bytes [2*i, 2*i+1] of the table into the high 16 bits
++        // of the lane and zero the low 16 bits by selecting from a zero vector (byte index 16).
++        // As a 32-bit value, the bytes of a lane are 16, 16, 2*i and 2*i+1 from least to most
++        // significant on little-endian, which is (i << 17) | (i << 25) | 0x01001010. On
++        // big-endian, the bytes of the table entry are swapped: (i << 17) | (i << 25) | 0x00011010.
++        const BASE: u32 = if BIG_ENDIAN { 0x0001_1010 } else { 0x0100_1010 };
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        unsafe {
++            let idx: vector_unsigned_int = cast(indices.0);
++            let mask = vec_or(
++                vec_or(
++                    vec_sl(idx, vec_splats(17u32)),
++                    vec_sl(idx, vec_splats(25u32)),
++                ),
++                vec_splats(BASE),
++            );
++            let res = shuffle_var(table.0, vec_splats(0u8), cast(mask));
++            Self(cast(res), d)
++        }
++    }
++}
++
++impl<L: VsxLevel> Add<F32VecVsx<L>> for F32VecVsx<L> {
++    type Output = Self;
++    fn_vsx! {
++        fn add(this: F32VecVsx<L>, rhs: F32VecVsx<L>) -> F32VecVsx<L> {
++            F32VecVsx(vec_add(this.0, rhs.0), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> Sub<F32VecVsx<L>> for F32VecVsx<L> {
++    type Output = Self;
++    fn_vsx! {
++        fn sub(this: F32VecVsx<L>, rhs: F32VecVsx<L>) -> F32VecVsx<L> {
++            F32VecVsx(vec_sub(this.0, rhs.0), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> Mul<F32VecVsx<L>> for F32VecVsx<L> {
++    type Output = Self;
++    fn_vsx! {
++        fn mul(this: F32VecVsx<L>, rhs: F32VecVsx<L>) -> F32VecVsx<L> {
++            F32VecVsx(vec_mul(this.0, rhs.0), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> Div<F32VecVsx<L>> for F32VecVsx<L> {
++    type Output = Self;
++    #[inline(always)]
++    fn div(self, rhs: F32VecVsx<L>) -> F32VecVsx<L> {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        F32VecVsx(unsafe { xvdivsp(self.0, rhs.0) }, self.1)
++    }
++}
++
++impl<L: VsxLevel> AddAssign<F32VecVsx<L>> for F32VecVsx<L> {
++    #[inline(always)]
++    fn add_assign(&mut self, rhs: F32VecVsx<L>) {
++        *self = *self + rhs;
++    }
++}
++
++impl<L: VsxLevel> SubAssign<F32VecVsx<L>> for F32VecVsx<L> {
++    #[inline(always)]
++    fn sub_assign(&mut self, rhs: F32VecVsx<L>) {
++        *self = *self - rhs;
++    }
++}
++
++impl<L: VsxLevel> MulAssign<F32VecVsx<L>> for F32VecVsx<L> {
++    #[inline(always)]
++    fn mul_assign(&mut self, rhs: F32VecVsx<L>) {
++        *self = *self * rhs;
++    }
++}
++
++impl<L: VsxLevel> DivAssign<F32VecVsx<L>> for F32VecVsx<L> {
++    #[inline(always)]
++    fn div_assign(&mut self, rhs: F32VecVsx<L>) {
++        *self = *self / rhs;
++    }
++}
++
++#[derive(Clone, Copy, Debug)]
++#[repr(transparent)]
++pub struct I32VecVsx<L: VsxLevel>(vector_signed_int, VsxDescriptor<L>);
++
++impl<L: VsxLevel> I32SimdVec for I32VecVsx<L> {
++    type Descriptor = VsxDescriptor<L>;
++
++    const LEN: usize = 4;
++
++    #[inline(always)]
++    fn splat(d: Self::Descriptor, v: i32) -> Self {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        Self(unsafe { vec_splats(v) }, d)
++    }
++
++    #[inline(always)]
++    fn load(d: Self::Descriptor, mem: &[i32]) -> Self {
++        assert!(mem.len() >= Self::LEN);
++        // SAFETY: we just checked that `mem` has enough space, and the load is unaligned.
++        Self(
++            unsafe { mem.as_ptr().cast::<vector_signed_int>().read_unaligned() },
++            d,
++        )
++    }
++
++    #[inline(always)]
++    fn load_from_i16(d: Self::Descriptor, mem: &[i16]) -> Self {
++        assert!(mem.len() >= Self::LEN);
++        // SAFETY: we just checked that `mem` has enough space.
++        let lo = unsafe { load_lo64(mem.as_ptr().cast()) };
++        // Move each i16 into the high half of its lane, then sign-extend with a shift.
++        // SAFETY: VSX is available by the safety invariant on `d`.
++        unsafe {
++            let hi: vector_signed_int = cast(shuffle(lo, lo, const { widen16_idx(16) }));
++            Self(vec_sra(hi, vec_splats(16u32)), d)
++        }
++    }
++
++    #[inline(always)]
++    fn load_from_u16(d: Self::Descriptor, mem: &[u16]) -> Self {
++        assert!(mem.len() >= Self::LEN);
++        // SAFETY: we just checked that `mem` has enough space.
++        let lo = unsafe { load_lo64(mem.as_ptr().cast()) };
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        let zero = unsafe { vec_splats(0u8) };
++        Self(
++            // SAFETY: VSX is available by the safety invariant on `d`.
++            cast(unsafe { shuffle(lo, zero, const { widen16_idx(0) }) }),
++            d,
++        )
++    }
++
++    #[inline(always)]
++    fn store(&self, mem: &mut [i32]) {
++        assert!(mem.len() >= Self::LEN);
++        // SAFETY: we just checked that `mem` has enough space, and the store is unaligned.
++        unsafe {
++            mem.as_mut_ptr()
++                .cast::<vector_signed_int>()
++                .write_unaligned(self.0)
++        }
++    }
++
++    #[inline(always)]
++    fn bitcast_to_f32(self) -> F32VecVsx<L> {
++        F32VecVsx(cast(self.0), self.1)
++    }
++
++    #[inline(always)]
++    fn bitcast_to_u32(self) -> U32VecVsx<L> {
++        U32VecVsx(cast(self.0), self.1)
++    }
++
++    fn_vsx! {
++        fn abs(this: I32VecVsx<L>) -> I32VecVsx<L> {
++            I32VecVsx(vec_abs(this.0), this.1)
++        }
++
++        fn as_f32(this: I32VecVsx<L>) -> F32VecVsx<L> {
++            F32VecVsx(vec_ctf::<0, _>(this.0), this.1)
++        }
++
++
++
++        fn gt(this: I32VecVsx<L>, other: I32VecVsx<L>) -> MaskVsx<L> {
++            MaskVsx(vec_cmpgt(this.0, other.0), this.1)
++        }
++
++        fn lt_zero(this: I32VecVsx<L>) -> MaskVsx<L> {
++            MaskVsx(vec_cmplt(this.0, vec_splats(0i32)), this.1)
++        }
++
++        fn eq(this: I32VecVsx<L>, other: I32VecVsx<L>) -> MaskVsx<L> {
++            MaskVsx(vec_cmpeq(this.0, other.0), this.1)
++        }
++
++        fn eq_zero(this: I32VecVsx<L>) -> MaskVsx<L> {
++            MaskVsx(vec_cmpeq(this.0, vec_splats(0i32)), this.1)
++        }
++
++        fn shl<const AMOUNT_U: u32, const AMOUNT_I: i32>(this: I32VecVsx<L>) -> I32VecVsx<L> {
++            I32VecVsx(vec_sl(this.0, vec_splats(AMOUNT_U)), this.1)
++        }
++
++        fn shr<const AMOUNT_U: u32, const AMOUNT_I: i32>(this: I32VecVsx<L>) -> I32VecVsx<L> {
++            I32VecVsx(vec_sra(this.0, vec_splats(AMOUNT_U)), this.1)
++        }
++
++        fn store_u16(this: I32VecVsx<L>, dest: &mut [u16]) {
++            assert!(dest.len() >= I32VecVsx::<L>::LEN);
++            let narrowed: vector_signed_short = vec_pack(this.0, this.0);
++            // We checked that `dest` has enough space.
++            store_lo64(narrowed, dest.as_mut_ptr().cast());
++        }
++
++        fn store_u8(this: I32VecVsx<L>, dest: &mut [u8]) {
++            assert!(dest.len() >= I32VecVsx::<L>::LEN);
++            let narrowed: vector_signed_short = vec_pack(this.0, this.0);
++            let narrowed: vector_signed_char = vec_pack(narrowed, narrowed);
++            // We checked that `dest` has enough space.
++            store_lo32(cast::<_, vector_unsigned_char>(narrowed), dest.as_mut_ptr());
++        }
++    }
++
++    #[inline(always)]
++    fn mul_wide_take_high(self, rhs: Self) -> Self {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        Self(unsafe { mul_high_i32(self.0, rhs.0) }, self.1)
++    }
++}
++
++impl<L: VsxLevel> Add<I32VecVsx<L>> for I32VecVsx<L> {
++    type Output = I32VecVsx<L>;
++    fn_vsx! {
++        fn add(this: I32VecVsx<L>, rhs: I32VecVsx<L>) -> I32VecVsx<L> {
++            I32VecVsx(vec_add(this.0, rhs.0), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> Sub<I32VecVsx<L>> for I32VecVsx<L> {
++    type Output = I32VecVsx<L>;
++    fn_vsx! {
++        fn sub(this: I32VecVsx<L>, rhs: I32VecVsx<L>) -> I32VecVsx<L> {
++            I32VecVsx(vec_sub(this.0, rhs.0), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> Mul<I32VecVsx<L>> for I32VecVsx<L> {
++    type Output = I32VecVsx<L>;
++    fn_vsx! {
++        fn mul(this: I32VecVsx<L>, rhs: I32VecVsx<L>) -> I32VecVsx<L> {
++            I32VecVsx(vec_mul(this.0, rhs.0), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> Neg for I32VecVsx<L> {
++    type Output = I32VecVsx<L>;
++    fn_vsx! {
++        fn neg(this: I32VecVsx<L>) -> I32VecVsx<L> {
++            I32VecVsx(vec_sub(vec_splats(0i32), this.0), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> BitAnd<I32VecVsx<L>> for I32VecVsx<L> {
++    type Output = I32VecVsx<L>;
++    fn_vsx! {
++        fn bitand(this: I32VecVsx<L>, rhs: I32VecVsx<L>) -> I32VecVsx<L> {
++            I32VecVsx(vec_and(this.0, rhs.0), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> BitOr<I32VecVsx<L>> for I32VecVsx<L> {
++    type Output = I32VecVsx<L>;
++    fn_vsx! {
++        fn bitor(this: I32VecVsx<L>, rhs: I32VecVsx<L>) -> I32VecVsx<L> {
++            I32VecVsx(vec_or(this.0, rhs.0), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> BitXor<I32VecVsx<L>> for I32VecVsx<L> {
++    type Output = I32VecVsx<L>;
++    fn_vsx! {
++        fn bitxor(this: I32VecVsx<L>, rhs: I32VecVsx<L>) -> I32VecVsx<L> {
++            I32VecVsx(vec_xor(this.0, rhs.0), this.1)
++        }
++    }
++}
++
++macro_rules! impl_assign_ops {
++    ($ty:ident: $($trait:ident $fn:ident $op:tt),*) => {$(
++        impl<L: VsxLevel> $trait<$ty<L>> for $ty<L> {
++            #[inline(always)]
++            fn $fn(&mut self, rhs: $ty<L>) {
++                *self = *self $op rhs;
++            }
++        }
++    )*};
++}
++
++impl_assign_ops!(I32VecVsx: AddAssign add_assign +, SubAssign sub_assign -, MulAssign mul_assign *,
++    BitAndAssign bitand_assign &, BitOrAssign bitor_assign |, BitXorAssign bitxor_assign ^);
++
++#[derive(Clone, Copy, Debug)]
++#[repr(transparent)]
++pub struct I16VecVsx<L: VsxLevel>(vector_signed_short, VsxDescriptor<L>);
++
++impl<L: VsxLevel> I16SimdVec for I16VecVsx<L> {
++    type Descriptor = VsxDescriptor<L>;
++
++    const LEN: usize = 8;
++
++    #[inline(always)]
++    fn load(d: Self::Descriptor, mem: &[i16]) -> Self {
++        assert!(mem.len() >= Self::LEN);
++        // SAFETY: we just checked that `mem` has enough space, and the load is unaligned.
++        Self(
++            unsafe { mem.as_ptr().cast::<vector_signed_short>().read_unaligned() },
++            d,
++        )
++    }
++
++    #[inline(always)]
++    fn store(&self, mem: &mut [i16]) {
++        assert!(mem.len() >= Self::LEN);
++        // SAFETY: we just checked that `mem` has enough space, and the store is unaligned.
++        unsafe {
++            mem.as_mut_ptr()
++                .cast::<vector_signed_short>()
++                .write_unaligned(self.0)
++        }
++    }
++
++    #[inline(always)]
++    fn splat(d: Self::Descriptor, v: i16) -> Self {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        Self(unsafe { vec_splats(v) }, d)
++    }
++
++    #[inline(always)]
++    fn zero(d: Self::Descriptor) -> Self {
++        Self::splat(d, 0)
++    }
++
++    #[inline(always)]
++    fn bitcast_u16(self) -> U16VecVsx<L> {
++        U16VecVsx(cast(self.0), self.1)
++    }
++
++    fn_vsx! {
++        fn abs(this: I16VecVsx<L>) -> I16VecVsx<L> {
++            I16VecVsx(vec_abs(this.0), this.1)
++        }
++
++        fn gt(this: I16VecVsx<L>, other: I16VecVsx<L>) -> Mask16Vsx<L> {
++            Mask16Vsx(vec_cmpgt(this.0, other.0), this.1)
++        }
++
++        fn lt_zero(this: I16VecVsx<L>) -> Mask16Vsx<L> {
++            Mask16Vsx(vec_cmplt(this.0, vec_splats(0i16)), this.1)
++        }
++
++        fn eq(this: I16VecVsx<L>, other: I16VecVsx<L>) -> Mask16Vsx<L> {
++            Mask16Vsx(vec_cmpeq(this.0, other.0), this.1)
++        }
++
++        fn eq_zero(this: I16VecVsx<L>) -> Mask16Vsx<L> {
++            Mask16Vsx(vec_cmpeq(this.0, vec_splats(0i16)), this.1)
++        }
++
++        fn shl<const AMOUNT_U: u32, const AMOUNT_I: i32>(this: I16VecVsx<L>) -> I16VecVsx<L> {
++            I16VecVsx(vec_sl(this.0, vec_splats(AMOUNT_U as u16)), this.1)
++        }
++
++        fn shr<const AMOUNT_U: u32, const AMOUNT_I: i32>(this: I16VecVsx<L>) -> I16VecVsx<L> {
++            I16VecVsx(vec_sra(this.0, vec_splats(AMOUNT_U as u16)), this.1)
++        }
++
++
++        fn store_u8(this: I16VecVsx<L>, dest: &mut [u8]) {
++            assert!(dest.len() >= I16VecVsx::<L>::LEN);
++            let narrowed: vector_signed_char = vec_pack(this.0, this.0);
++            // We checked that `dest` has enough space.
++            store_lo64(cast::<_, vector_unsigned_char>(narrowed), dest.as_mut_ptr());
++        }
++    }
++
++    #[inline(always)]
++    fn mul_wide_take_high(self, rhs: Self) -> Self {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        Self(unsafe { mul_high_i16(self.0, rhs.0) }, self.1)
++    }
++
++    impl_i16_array_interface!(8);
++
++    #[inline(always)]
++    fn transpose_square(d: Self::Descriptor, data: &mut [Self::UnderlyingArray], stride: usize) {
++        assert!(data.len() > 7 * stride);
++        let r = |i: usize| Self::load_array(d, &data[i * stride]).0;
++        let (r0, r1, r2, r3, r4, r5, r6, r7) = (r(0), r(1), r(2), r(3), r(4), r(5), r(6), r(7));
++
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        let [o0, o1, o2, o3, o4, o5, o6, o7] = unsafe {
++            // Stage 1: 16-bit zip
++            let (t0, t1) = interleave2::<2, _>(r0, r1);
++            let (t2, t3) = interleave2::<2, _>(r2, r3);
++            let (t4, t5) = interleave2::<2, _>(r4, r5);
++            let (t6, t7) = interleave2::<2, _>(r6, r7);
++
++            // Stage 2: 32-bit zip
++            let (u0, u1) = interleave2::<4, _>(t0, t2);
++            let (u2, u3) = interleave2::<4, _>(t1, t3);
++            let (u4, u5) = interleave2::<4, _>(t4, t6);
++            let (u6, u7) = interleave2::<4, _>(t5, t7);
++
++            // Stage 3: 64-bit zip
++            let (o0, o1) = interleave2::<8, _>(u0, u4);
++            let (o2, o3) = interleave2::<8, _>(u1, u5);
++            let (o4, o5) = interleave2::<8, _>(u2, u6);
++            let (o6, o7) = interleave2::<8, _>(u3, u7);
++
++            [o0, o1, o2, o3, o4, o5, o6, o7]
++        };
++
++        for (i, o) in [o0, o1, o2, o3, o4, o5, o6, o7].into_iter().enumerate() {
++            Self(o, d).store_array(&mut data[i * stride]);
++        }
++    }
++}
++
++impl<L: VsxLevel> Add<I16VecVsx<L>> for I16VecVsx<L> {
++    type Output = I16VecVsx<L>;
++    fn_vsx! {
++        fn add(this: I16VecVsx<L>, rhs: I16VecVsx<L>) -> I16VecVsx<L> {
++            I16VecVsx(vec_add(this.0, rhs.0), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> Sub<I16VecVsx<L>> for I16VecVsx<L> {
++    type Output = I16VecVsx<L>;
++    fn_vsx! {
++        fn sub(this: I16VecVsx<L>, rhs: I16VecVsx<L>) -> I16VecVsx<L> {
++            I16VecVsx(vec_sub(this.0, rhs.0), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> Mul<I16VecVsx<L>> for I16VecVsx<L> {
++    type Output = I16VecVsx<L>;
++    fn_vsx! {
++        fn mul(this: I16VecVsx<L>, rhs: I16VecVsx<L>) -> I16VecVsx<L> {
++            I16VecVsx(vec_mladd(this.0, rhs.0, vec_splats(0i16)), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> Neg for I16VecVsx<L> {
++    type Output = I16VecVsx<L>;
++    fn_vsx! {
++        fn neg(this: I16VecVsx<L>) -> I16VecVsx<L> {
++            I16VecVsx(vec_sub(vec_splats(0i16), this.0), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> BitAnd<I16VecVsx<L>> for I16VecVsx<L> {
++    type Output = I16VecVsx<L>;
++    fn_vsx! {
++        fn bitand(this: I16VecVsx<L>, rhs: I16VecVsx<L>) -> I16VecVsx<L> {
++            I16VecVsx(vec_and(this.0, rhs.0), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> BitOr<I16VecVsx<L>> for I16VecVsx<L> {
++    type Output = I16VecVsx<L>;
++    fn_vsx! {
++        fn bitor(this: I16VecVsx<L>, rhs: I16VecVsx<L>) -> I16VecVsx<L> {
++            I16VecVsx(vec_or(this.0, rhs.0), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> BitXor<I16VecVsx<L>> for I16VecVsx<L> {
++    type Output = I16VecVsx<L>;
++    fn_vsx! {
++        fn bitxor(this: I16VecVsx<L>, rhs: I16VecVsx<L>) -> I16VecVsx<L> {
++            I16VecVsx(vec_xor(this.0, rhs.0), this.1)
++        }
++    }
++}
++
++impl_assign_ops!(I16VecVsx: AddAssign add_assign +, SubAssign sub_assign -, MulAssign mul_assign *,
++    BitAndAssign bitand_assign &, BitOrAssign bitor_assign |, BitXorAssign bitxor_assign ^);
++
++#[derive(Clone, Copy, Debug)]
++#[repr(transparent)]
++pub struct U32VecVsx<L: VsxLevel>(vector_unsigned_int, VsxDescriptor<L>);
++
++impl<L: VsxLevel> U32SimdVec for U32VecVsx<L> {
++    type Descriptor = VsxDescriptor<L>;
++
++    const LEN: usize = 4;
++
++    #[inline(always)]
++    fn bitcast_to_i32(self) -> I32VecVsx<L> {
++        I32VecVsx(cast(self.0), self.1)
++    }
++
++    fn_vsx! {
++        fn shr<const AMOUNT_U: u32, const AMOUNT_I: i32>(this: U32VecVsx<L>) -> U32VecVsx<L> {
++            U32VecVsx(vec_sr(this.0, vec_splats(AMOUNT_U)), this.1)
++        }
++    }
++}
++
++#[derive(Clone, Copy, Debug)]
++#[repr(transparent)]
++pub struct U64VecVsx<L: VsxLevel>(vector_unsigned_long, VsxDescriptor<L>);
++
++impl<L: VsxLevel> U64VecVsx<L> {
++    /// Applies a 32-bit lane bitwise operation to the 64-bit lanes.
++    #[inline(always)]
++    fn bitwise(
++        self,
++        rhs: Self,
++        op: impl FnOnce(vector_unsigned_int, vector_unsigned_int) -> vector_unsigned_int,
++    ) -> Self {
++        Self(cast(op(cast(self.0), cast(rhs.0))), self.1)
++    }
++
++    #[inline(always)]
++    fn shift_amount<const AMOUNT: u32>() -> vector_unsigned_long {
++        // SAFETY: `[u64; 2]` and the vector have the same size.
++        unsafe { transmute::<[u64; 2], vector_unsigned_long>([AMOUNT as u64; 2]) }
++    }
++}
++
++impl<L: VsxLevel> U64SimdVec for U64VecVsx<L> {
++    type Descriptor = VsxDescriptor<L>;
++
++    const LEN: usize = 2;
++
++    #[inline(always)]
++    fn splat(d: Self::Descriptor, v: u64) -> Self {
++        // SAFETY: `[u64; 2]` and the vector have the same size.
++        Self(
++            unsafe { transmute::<[u64; 2], vector_unsigned_long>([v; 2]) },
++            d,
++        )
++    }
++
++    #[inline(always)]
++    fn load(d: Self::Descriptor, mem: &[u64]) -> Self {
++        assert!(mem.len() >= Self::LEN);
++        // SAFETY: we just checked that `mem` has enough space, and the load is unaligned.
++        Self(
++            unsafe { mem.as_ptr().cast::<vector_unsigned_long>().read_unaligned() },
++            d,
++        )
++    }
++
++    #[inline(always)]
++    fn store(&self, mem: &mut [u64]) {
++        assert!(mem.len() >= Self::LEN);
++        // SAFETY: we just checked that `mem` has enough space, and the store is unaligned.
++        unsafe {
++            mem.as_mut_ptr()
++                .cast::<vector_unsigned_long>()
++                .write_unaligned(self.0)
++        }
++    }
++
++    #[inline(always)]
++    fn shl<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        Self(
++            unsafe { vsld(self.0, Self::shift_amount::<AMOUNT_U>()) },
++            self.1,
++        )
++    }
++
++    #[inline(always)]
++    fn shr<const AMOUNT_U: u32, const AMOUNT_I: i32>(self) -> Self {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        Self(
++            unsafe { vsrd(self.0, Self::shift_amount::<AMOUNT_U>()) },
++            self.1,
++        )
++    }
++
++    #[inline(always)]
++    fn bitcast_to_u32(self) -> U32VecVsx<L> {
++        // Callers expect the low half of each 64-bit lane in the first 32-bit lane, as in the
++        // little-endian memory layout, so swap the halves on big-endian.
++        if BIG_ENDIAN {
++            let v: vector_unsigned_int = cast(self.0);
++            // SAFETY: VSX is available by the safety invariant on the descriptor.
++            U32VecVsx(unsafe { shuffle(v, v, const { split64_idx() }) }, self.1)
++        } else {
++            U32VecVsx(cast(self.0), self.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> Add<U64VecVsx<L>> for U64VecVsx<L> {
++    type Output = U64VecVsx<L>;
++    #[inline(always)]
++    fn add(self, rhs: U64VecVsx<L>) -> U64VecVsx<L> {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        U64VecVsx(unsafe { vaddudm(self.0, rhs.0) }, self.1)
++    }
++}
++
++impl<L: VsxLevel> BitAnd<U64VecVsx<L>> for U64VecVsx<L> {
++    type Output = U64VecVsx<L>;
++    #[inline(always)]
++    fn bitand(self, rhs: U64VecVsx<L>) -> U64VecVsx<L> {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        self.bitwise(rhs, |a, b| unsafe { vec_and(a, b) })
++    }
++}
++
++impl<L: VsxLevel> BitOr<U64VecVsx<L>> for U64VecVsx<L> {
++    type Output = U64VecVsx<L>;
++    #[inline(always)]
++    fn bitor(self, rhs: U64VecVsx<L>) -> U64VecVsx<L> {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        self.bitwise(rhs, |a, b| unsafe { vec_or(a, b) })
++    }
++}
++
++impl<L: VsxLevel> BitXor<U64VecVsx<L>> for U64VecVsx<L> {
++    type Output = U64VecVsx<L>;
++    #[inline(always)]
++    fn bitxor(self, rhs: U64VecVsx<L>) -> U64VecVsx<L> {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        self.bitwise(rhs, |a, b| unsafe { vec_xor(a, b) })
++    }
++}
++
++impl_assign_ops!(U64VecVsx: AddAssign add_assign +, BitAndAssign bitand_assign &,
++    BitOrAssign bitor_assign |, BitXorAssign bitxor_assign ^);
++
++#[derive(Clone, Copy, Debug)]
++#[repr(transparent)]
++pub struct U8VecVsx<L: VsxLevel>(vector_unsigned_char, VsxDescriptor<L>);
++
++impl<L: VsxLevel> U8SimdVec for U8VecVsx<L> {
++    type Descriptor = VsxDescriptor<L>;
++    const LEN: usize = 16;
++
++    #[inline(always)]
++    fn load(d: Self::Descriptor, mem: &[u8]) -> Self {
++        assert!(mem.len() >= Self::LEN);
++        // SAFETY: we just checked that `mem` has enough space, and the load is unaligned.
++        Self(
++            unsafe { mem.as_ptr().cast::<vector_unsigned_char>().read_unaligned() },
++            d,
++        )
++    }
++
++    #[inline(always)]
++    fn splat(d: Self::Descriptor, v: u8) -> Self {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        Self(unsafe { vec_splats(v) }, d)
++    }
++
++    #[inline(always)]
++    fn store(&self, mem: &mut [u8]) {
++        assert!(mem.len() >= Self::LEN);
++        // SAFETY: we just checked that `mem` has enough space, and the store is unaligned.
++        unsafe {
++            mem.as_mut_ptr()
++                .cast::<vector_unsigned_char>()
++                .write_unaligned(self.0)
++        }
++    }
++
++    #[inline(always)]
++    fn store_interleaved_2(a: Self, b: Self, dest: &mut [u8]) {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        let (o0, o1) = unsafe { interleave2::<1, _>(a.0, b.0) };
++        Self(o0, a.1).store(&mut dest[..32]);
++        Self(o1, a.1).store(&mut dest[16..32]);
++    }
++
++    #[inline(always)]
++    fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u8]) {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        let (o0, o1, o2) = unsafe { interleave3::<1, _>(a.0, b.0, c.0) };
++        Self(o0, a.1).store(&mut dest[..48]);
++        Self(o1, a.1).store(&mut dest[16..48]);
++        Self(o2, a.1).store(&mut dest[32..48]);
++    }
++
++    #[inline(always)]
++    fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u8]) {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        let (o0, o1, o2, o3) = unsafe { interleave4::<1, _>(a.0, b.0, c.0, d.0) };
++        Self(o0, a.1).store(&mut dest[..64]);
++        Self(o1, a.1).store(&mut dest[16..64]);
++        Self(o2, a.1).store(&mut dest[32..64]);
++        Self(o3, a.1).store(&mut dest[48..64]);
++    }
++}
++
++#[derive(Clone, Copy, Debug)]
++#[repr(transparent)]
++pub struct U16VecVsx<L: VsxLevel>(vector_unsigned_short, VsxDescriptor<L>);
++
++impl<L: VsxLevel> U16SimdVec for U16VecVsx<L> {
++    type Descriptor = VsxDescriptor<L>;
++    const LEN: usize = 8;
++
++    #[inline(always)]
++    fn load(d: Self::Descriptor, mem: &[u16]) -> Self {
++        assert!(mem.len() >= Self::LEN);
++        // SAFETY: we just checked that `mem` has enough space, and the load is unaligned.
++        Self(
++            unsafe {
++                mem.as_ptr()
++                    .cast::<vector_unsigned_short>()
++                    .read_unaligned()
++            },
++            d,
++        )
++    }
++
++    #[inline(always)]
++    fn splat(d: Self::Descriptor, v: u16) -> Self {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        Self(unsafe { vec_splats(v) }, d)
++    }
++
++    #[inline(always)]
++    fn store(&self, mem: &mut [u16]) {
++        assert!(mem.len() >= Self::LEN);
++        // SAFETY: we just checked that `mem` has enough space, and the store is unaligned.
++        unsafe {
++            mem.as_mut_ptr()
++                .cast::<vector_unsigned_short>()
++                .write_unaligned(self.0)
++        }
++    }
++
++    #[inline(always)]
++    fn store_interleaved_2(a: Self, b: Self, dest: &mut [u16]) {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        let (o0, o1) = unsafe { interleave2::<2, _>(a.0, b.0) };
++        Self(o0, a.1).store(&mut dest[..16]);
++        Self(o1, a.1).store(&mut dest[8..16]);
++    }
++
++    #[inline(always)]
++    fn store_interleaved_3(a: Self, b: Self, c: Self, dest: &mut [u16]) {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        let (o0, o1, o2) = unsafe { interleave3::<2, _>(a.0, b.0, c.0) };
++        Self(o0, a.1).store(&mut dest[..24]);
++        Self(o1, a.1).store(&mut dest[8..24]);
++        Self(o2, a.1).store(&mut dest[16..24]);
++    }
++
++    #[inline(always)]
++    fn store_interleaved_4(a: Self, b: Self, c: Self, d: Self, dest: &mut [u16]) {
++        // SAFETY: VSX is available by the safety invariant on the descriptor.
++        let (o0, o1, o2, o3) = unsafe { interleave4::<2, _>(a.0, b.0, c.0, d.0) };
++        Self(o0, a.1).store(&mut dest[..32]);
++        Self(o1, a.1).store(&mut dest[8..32]);
++        Self(o2, a.1).store(&mut dest[16..32]);
++        Self(o3, a.1).store(&mut dest[24..32]);
++    }
++
++    #[inline(always)]
++    fn bitcast_i16(self) -> I16VecVsx<L> {
++        I16VecVsx(cast(self.0), self.1)
++    }
++}
++
++#[derive(Clone, Copy, Debug)]
++#[repr(transparent)]
++pub struct MaskVsx<L: VsxLevel>(vector_bool_int, VsxDescriptor<L>);
++
++impl<L: VsxLevel> SimdMask for MaskVsx<L> {
++    type Descriptor = VsxDescriptor<L>;
++
++    fn_vsx! {
++        fn if_then_else_f32(this: MaskVsx<L>, if_true: F32VecVsx<L>, if_false: F32VecVsx<L>) -> F32VecVsx<L> {
++            F32VecVsx(vec_sel(if_false.0, if_true.0, this.0), this.1)
++        }
++
++        fn if_then_else_i32(this: MaskVsx<L>, if_true: I32VecVsx<L>, if_false: I32VecVsx<L>) -> I32VecVsx<L> {
++            I32VecVsx(vec_sel(if_false.0, if_true.0, this.0), this.1)
++        }
++
++        fn maskz_i32(this: MaskVsx<L>, v: I32VecVsx<L>) -> I32VecVsx<L> {
++            I32VecVsx(vec_andc(v.0, cast::<_, vector_signed_int>(this.0)), this.1)
++        }
++
++        fn andnot(this: MaskVsx<L>, rhs: MaskVsx<L>) -> MaskVsx<L> {
++            MaskVsx(vec_andc(rhs.0, this.0), this.1)
++        }
++
++        fn all(this: MaskVsx<L>) -> bool {
++            let lanes = transmute::<vector_unsigned_long, [u64; 2]>(cast(this.0));
++            lanes[0] & lanes[1] == u64::MAX
++        }
++    }
++}
++
++impl<L: VsxLevel> BitAnd<MaskVsx<L>> for MaskVsx<L> {
++    type Output = MaskVsx<L>;
++    fn_vsx! {
++        fn bitand(this: MaskVsx<L>, rhs: MaskVsx<L>) -> MaskVsx<L> {
++            let (a, b): (vector_unsigned_int, vector_unsigned_int) = (cast(this.0), cast(rhs.0));
++            MaskVsx(cast(vec_and(a, b)), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> BitOr<MaskVsx<L>> for MaskVsx<L> {
++    type Output = MaskVsx<L>;
++    fn_vsx! {
++        fn bitor(this: MaskVsx<L>, rhs: MaskVsx<L>) -> MaskVsx<L> {
++            let (a, b): (vector_unsigned_int, vector_unsigned_int) = (cast(this.0), cast(rhs.0));
++            MaskVsx(cast(vec_or(a, b)), this.1)
++        }
++    }
++}
++
++#[derive(Clone, Copy, Debug)]
++#[repr(transparent)]
++pub struct Mask16Vsx<L: VsxLevel>(vector_bool_short, VsxDescriptor<L>);
++
++impl<L: VsxLevel> SimdMask16 for Mask16Vsx<L> {
++    type Descriptor = VsxDescriptor<L>;
++
++    fn_vsx! {
++        fn if_then_else_i16(this: Mask16Vsx<L>, if_true: I16VecVsx<L>, if_false: I16VecVsx<L>) -> I16VecVsx<L> {
++            I16VecVsx(vec_sel(if_false.0, if_true.0, this.0), this.1)
++        }
++
++        fn maskz_i16(this: Mask16Vsx<L>, v: I16VecVsx<L>) -> I16VecVsx<L> {
++            I16VecVsx(vec_andc(v.0, cast::<_, vector_signed_short>(this.0)), this.1)
++        }
++
++        fn andnot(this: Mask16Vsx<L>, rhs: Mask16Vsx<L>) -> Mask16Vsx<L> {
++            Mask16Vsx(vec_andc(rhs.0, this.0), this.1)
++        }
++
++        fn all(this: Mask16Vsx<L>) -> bool {
++            let lanes = transmute::<vector_unsigned_long, [u64; 2]>(cast(this.0));
++            lanes[0] & lanes[1] == u64::MAX
++        }
++    }
++}
++
++impl<L: VsxLevel> BitAnd<Mask16Vsx<L>> for Mask16Vsx<L> {
++    type Output = Mask16Vsx<L>;
++    fn_vsx! {
++        fn bitand(this: Mask16Vsx<L>, rhs: Mask16Vsx<L>) -> Mask16Vsx<L> {
++            let (a, b): (vector_unsigned_short, vector_unsigned_short) = (cast(this.0), cast(rhs.0));
++            Mask16Vsx(cast(vec_and(a, b)), this.1)
++        }
++    }
++}
++
++impl<L: VsxLevel> BitOr<Mask16Vsx<L>> for Mask16Vsx<L> {
++    type Output = Mask16Vsx<L>;
++    fn_vsx! {
++        fn bitor(this: Mask16Vsx<L>, rhs: Mask16Vsx<L>) -> Mask16Vsx<L> {
++            let (a, b): (vector_unsigned_short, vector_unsigned_short) = (cast(this.0), cast(rhs.0));
++            Mask16Vsx(cast(vec_or(a, b)), this.1)
++        }
++    }
++}
+diff --git a/third_party/rust/jxl_simd/src/scalar.rs b/third_party/rust/jxl_simd/src/scalar.rs
+index a0295299ab..65c70879f1 100644
+--- a/third_party/rust/jxl_simd/src/scalar.rs
++++ b/third_party/rust/jxl_simd/src/scalar.rs
+@@ -605,7 +605,8 @@ impl SimdMask16 for bool {
+ #[cfg(not(any(
+     target_arch = "x86_64",
+     target_arch = "aarch64",
+-    target_arch = "wasm32"
++    target_arch = "wasm32",
++    target_arch = "powerpc64"
+ )))]
+ #[macro_export]
+ macro_rules! simd_function {
+@@ -628,7 +629,8 @@ macro_rules! simd_function {
+ #[cfg(not(any(
+     target_arch = "x86_64",
+     target_arch = "aarch64",
+-    target_arch = "wasm32"
++    target_arch = "wasm32",
++    target_arch = "powerpc64"
+ )))]
+ #[macro_export]
+ macro_rules! test_all_instruction_sets {
+@@ -648,7 +650,8 @@ macro_rules! test_all_instruction_sets {
+ #[cfg(not(any(
+     target_arch = "x86_64",
+     target_arch = "aarch64",
+-    target_arch = "wasm32"
++    target_arch = "wasm32",
++    target_arch = "powerpc64"
+ )))]
+ #[macro_export]
+ macro_rules! bench_all_instruction_sets {
