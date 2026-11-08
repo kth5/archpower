@@ -3,8 +3,8 @@
 # Maintainer: Jakub Klinkovský <lahwaacz at archlinux dot org>
 
 pkgname=sz
-pkgver=3.3.2
-pkgrel=2
+pkgver=3.4.0
+pkgrel=1
 pkgdesc="Modular parametrizable lossy compressor framework for scientific data"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://szcompressor.org/"
@@ -23,17 +23,17 @@ makedepends=(
   gtest
   ninja
 )
-source=($pkgname-$pkgver.tar.gz::https://github.com/szcompressor/SZ3/archive/refs/tags/v$pkgver.tar.gz
-        sz3-unordered-map-wasm32.patch)
-b2sums=('c5234f58d196682ae02834df2738476740446e8ca6beea9435aafabf0d6fedd5799599e9f83ef4c0c769fca6b44ce5cdb941ec85113239c7e80467ab26edfcb7'
-        '236f8ae3c6f104d3e6fc76257b7b1cd0c3496ffa9fd5830d60950b051922c7b2a8c7f4127f859c2b6421cf19fc1aee12c6ddee36cafc369254db76f235bdd1ce')
-
-prepare() {
-  cd ${srcdir}/SZ3-${pkgver}
-  patch -Np1 -i ${srcdir}/sz3-unordered-map-wasm32.patch
-}
+source=($pkgname-$pkgver.tar.gz::https://github.com/szcompressor/SZ3/archive/refs/tags/v$pkgver.tar.gz)
+b2sums=('5fb8c16c30f48b99c85e78e17e44f32046d0fc4aa1edd269e322a4e26cd33de2c2824e05b47e51f9347b2e9052242b778d650f112efc37ce53091a62349993e8')
 
 build() {
+  case "${CARCH}" in
+    powerpc)
+      export CXXFLAGS+=' -Wno-narrowing'
+      #cmake_options+=(-DBUILD_OPENMP=OFF)
+    ;;
+  esac
+
   local cmake_options=(
     -B build
     -S SZ3-$pkgver
@@ -45,21 +45,15 @@ build() {
     -DBUILD_H5Z_FILTER=ON
     -DBUILD_MDZ=ON
   )
-  case "${CARCH}" in
-    powerpc)
-      export CXXFLAGS+=' -Wno-narrowing'
-      #cmake_options+=(-DBUILD_OPENMP=OFF)
-    ;;
-  esac
-
   cmake "${cmake_options[@]}"
   cmake --build build
 }
 
 check() {
   case "${CARCH}" in
-    powerpc) return 0 ;;
+    powerpc|powerpc64) return 0 ;;
   esac
+
   ctest --test-dir build --output-on-failure
 }
 
