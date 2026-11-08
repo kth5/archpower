@@ -1,0 +1,79 @@
+# POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
+# Maintainer: Jakub Klinkovský <lahwaacz at archlinux dot org>
+
+_name=conduit
+pkgname=$_name-llnl
+pkgver=0.9.10
+pkgrel=1
+pkgdesc="Simplified data exchange library for HPC simulations"
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+url="https://github.com/LLNL/conduit"
+license=(BSD-3-Clause)
+depends=(
+  glibc
+  libgcc
+  libgfortran
+  libstdc++
+  openmpi
+  python
+)
+makedepends=(
+  cmake
+  gcc-fortran
+  ninja
+  python-numpy
+  python-build
+  python-installer
+  python-setuptools
+)
+source=(
+  # NOTE: the -src-with-blt tarball is used as it contains sources of git
+  # submodules which are not included in the auto-generated source archives
+  $_name-$pkgver-src-with-blt.tar.gz::$url/releases/download/v$pkgver/$_name-v$pkgver-src-with-blt.tar.gz
+  no-pip-python-modules.patch
+)
+b2sums=('4adba372b48c6a7ce46138bcf83e70372c11da479e8993491c6025f244defe646fcb7dac2f69020479fe0b8a02d78d5a62f066f0888906b8cb78b7c59ffc5998'
+        '509e91528034cb08bd429ee4259d909785213531112072c076f16895a0074e62275aee85ed2c998af51c4ce575501c14c4e8597b2adc14dcb4f4ea0d148673e4')
+
+prepare() {
+  # do not use pip for staging the python modules
+  patch -p1 -d $_name-v$pkgver -i ../no-pip-python-modules.patch
+}
+
+build() {
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  local cmake_options=(
+    -B build
+    -S $_name-v$pkgver/src
+    -G Ninja
+    -W no-author
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D PYTHON_MODULE_INSTALL_PREFIX="$site_packages"
+    -D ENABLE_TESTS=OFF
+    -D ENABLE_EXAMPLES=OFF
+    -D ENABLE_DOCS=OFF
+    -D ENABLE_RELAY_WEBSERVER=OFF
+    -D ENABLE_MPI=ON
+    -D ENABLE_PYTHON=ON
+    -D ENABLE_FORTRAN=ON
+  )
+  cmake "${cmake_options[@]}"
+  cmake --build build
+
+  # build the python metadata (dist-info) into the package
+  # (cmake excludes it due to the no-pip patch)
+  python -m build --wheel --no-isolation --outdir build $_name-v$pkgver/src/libs/$_name/python
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  install -vDm 644 $_name-v$pkgver/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
+  install -vDm 644 $_name-v$pkgver/COPYRIGHT -t "$pkgdir"/usr/share/licenses/$pkgname/
+
+  # drop example sources (not guarded by ENABLE_EXAMPLES=OFF)
+  rm -rf "$pkgdir"/usr/examples/
+
+  # cmake installs .so and .py files, wheel contains metadata, .py and .pyc (no .so)
+  python -m installer --destdir="$pkgdir" --overwrite-existing build/*.whl
+}

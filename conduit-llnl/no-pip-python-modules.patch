@@ -1,0 +1,58 @@
+diff --git a/src/libs/conduit/python/CMakeLists.txt b/src/libs/conduit/python/CMakeLists.txt
+index 55f35a1..9b9cbf5 100644
+--- a/src/libs/conduit/python/CMakeLists.txt
++++ b/src/libs/conduit/python/CMakeLists.txt
+@@ -38,15 +38,44 @@ SET(conduit_py_cpp_sources     conduit_python.cpp)
+ # Make sure we have access to numpy
+ include_directories(${NUMPY_INCLUDE_DIRS})
+ 
+-# add conduit + conduit_python modules
+-PYTHON_ADD_HYBRID_MODULE(NAME          conduit_python
+-                         DEST_DIR      python-modules
+-                         PY_MODULE_DIR conduit
+-                         PY_SETUP_FILE pyproject.toml
+-                         PY_SOURCES    ${conduit_py_python_sources}
+-                         SOURCES       ${conduit_py_headers}
+-                                       ${conduit_py_cpp_sources}
+-                         FOLDER        libs/python)
++# Do not use BLT's PYTHON_ADD_HYBRID_MODULE which invokes pip to stage the
++# pure python sources (Arch Python package guidelines). Instead, stage the
++# pure python sources directly with CMake and create an equivalent
++# conduit_python_py_setup target that the compiled modules depend on.
++set(conduit_python_py_setup_stamp
++    "${CMAKE_CURRENT_BINARY_DIR}/conduit_python_py_setup.stamp")
++
++add_custom_command(OUTPUT ${conduit_python_py_setup_stamp}
++                   COMMAND ${CMAKE_COMMAND} -E make_directory
++                           "${PROJECT_BINARY_DIR}/python-modules/conduit"
++                   COMMAND ${CMAKE_COMMAND} -E copy_directory
++                           "${CMAKE_CURRENT_SOURCE_DIR}/py_src"
++                           "${PROJECT_BINARY_DIR}/python-modules/conduit"
++                   COMMAND ${CMAKE_COMMAND} -E touch
++                           ${conduit_python_py_setup_stamp}
++                   DEPENDS ${conduit_py_python_sources}
++                   VERBATIM)
++
++add_library(conduit_python_py_setup INTERFACE ${conduit_python_py_setup_stamp})
++set_property(TARGET conduit_python_py_setup APPEND PROPERTY
++             INTERFACE_LINK_DEPENDS ${conduit_python_py_setup_stamp})
++
++# install the staged pure python sources
++if(PYTHON_MODULE_INSTALL_PREFIX)
++    install(DIRECTORY "${PROJECT_BINARY_DIR}/python-modules/conduit"
++            DESTINATION "${PYTHON_MODULE_INSTALL_PREFIX}")
++else()
++    install(DIRECTORY "${PROJECT_BINARY_DIR}/python-modules/conduit"
++            DESTINATION python-modules)
++endif()
++
++# add the compiled conduit_python module
++PYTHON_ADD_COMPILED_MODULE(NAME          conduit_python
++                           DEST_DIR      python-modules
++                           PY_MODULE_DIR conduit
++                           SOURCES       ${conduit_py_headers}
++                                         ${conduit_py_cpp_sources}
++                           FOLDER        libs/python)
+ 
+ # link with the proper libs (beyond python)
+ target_link_libraries(conduit_python PRIVATE conduit)
