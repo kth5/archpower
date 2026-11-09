@@ -1,0 +1,186 @@
+From 2d69f615d781f4ce69c92ca22052444f7d05b5a8 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Sat, 31 Oct 2026 23:58:49 +1100
+Subject: [PATCH 25/25] Generalise the SIMD string search helpers to AltiVec
+ for the PowerPC 970
+
+The VSX path of SIMD::memchr* needs unaligned vector loads and, for
+Array.prototype.indexOf, 64-bit lanes; plain AltiVec has neither. Let
+the section build with any AltiVec baseline: without VSX the drivers
+walk the unaligned head and tail of a buffer with scalar code and
+vectorize only the aligned middle with lvx, the first match is located
+by storing the compare result and scanning it with cntlzd, and the
+64-bit search stays scalar. The two-character search carries a trailing
+first-character match across block boundaries as before and covers the
+pairs that straddle the seams between the scalar and vector parts.
+---
+ mozglue/misc/SIMD.cpp | 94 +++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 90 insertions(+), 4 deletions(-)
+
+diff --git a/mozglue/misc/SIMD.cpp b/mozglue/misc/SIMD.cpp
+index d8afdbcf56..4f77af157c 100644
+--- a/mozglue/misc/SIMD.cpp
++++ b/mozglue/misc/SIMD.cpp
+@@ -5,6 +5,7 @@
+ #include "mozilla/SIMD.h"
+ 
+ #include <bit>
++#include <algorithm>
+ #include <cstring>
+ #include <stdint.h>
+ #include <type_traits>
+@@ -14,7 +15,7 @@
+ 
+ #ifdef MOZILLA_PRESUME_SSE2
+ #  include <immintrin.h>
+-#elif defined(__VSX__)
++#elif defined(__ALTIVEC__)
+ #  include <altivec.h>
+ #  undef vector
+ #  undef pixel
+@@ -512,20 +513,26 @@ const char16_t* SIMD::memchr2x16(const char16_t* ptr, char16_t v1, char16_t v2,
+   return FindTwoInBuffer<char16_t>(ptr, v1, v2, length);
+ }
+ 
+-#elif defined(__VSX__)
++#elif defined(__ALTIVEC__)
+ 
+ // Power ISA. The structure follows the SSE2 path. Which instructions back it
+ // is decided by the compile-time baseline:
+ //  - POWER9 and POWER10 (_ARCH_PWR9): vclzlsbb gives the index of the first
+ //    matching element in one instruction.
+-//  - POWER8 (__POWER8_VECTOR__): vbpermq gathers the compare result into a
+-//    GPR mask; 64-bit lanes are available.
++//  - POWER8 (__POWER8_VECTOR__): the compare result is moved to GPRs with
++//    mfvsrd and scanned with cnttzd/cntlzd; 64-bit lanes are available.
++//  - VMX only (PPC970/G5, big-endian): no unaligned vector loads, so the
++//    unaligned head and tail of a buffer are handled with scalar code and only
++//    the aligned middle is vectorized; no 64-bit lanes.
+ // Lane 0 of a vector holds the lowest address on both endiannesses, but the
+ // lowest address is the least significant byte of a 64-bit lane on LE and the
+ // most significant on BE, and vec_sld moves bytes in opposite directions.
+ 
+ typedef __vector unsigned char VecU8;
+ 
++#  if defined(__VSX__)
++#    define MOZ_PPC_UNALIGNED_LOADS 1
++#  endif
+ #  if defined(__POWER8_VECTOR__)
+ #    define MOZ_PPC_VEC64 1
+ #  endif
+@@ -570,8 +577,14 @@ VecU8 CmpEq128(VecU8 a, VecU8 b) {
+   }
+ }
+ 
++// On VMX-only targets every caller passes a 16-byte aligned address.
+ VecU8 LoadVec(uintptr_t ptr) {
++#  ifdef MOZ_PPC_UNALIGNED_LOADS
+   return vec_xl(0, reinterpret_cast<const unsigned char*>(ptr));
++#  else
++  MOZ_ASSERT((ptr & 0xf) == 0);
++  return vec_ld(0, reinterpret_cast<const unsigned char*>(ptr));
++#  endif
+ }
+ 
+ bool AnyMatch(VecU8 cmp) {
+@@ -808,6 +821,7 @@ const TValue* FindInBuffer(const TValue* ptr, TValue value, size_t length) {
+ 
+   VecU8 needle = SplatNeedle<TValue>(value);
+ 
++#  ifdef MOZ_PPC_UNALIGNED_LOADS
+   if (numBytes < 64) {
+     // See the SSE2 path for an explanation of the bit-fiddling.
+     uintptr_t a = cur;
+@@ -836,6 +850,40 @@ const TValue* FindInBuffer(const TValue* ptr, TValue value, size_t length) {
+ 
+   return Check4x16Bytes<TValue>(needle, tailStartPtr, tailStartPtr + 16,
+                                 tailStartPtr + 32, tailEndPtr);
++#  else
++  uintptr_t alignedStart = AlignUp16(cur);
++  while (cur < alignedStart) {
++    if (GetAs<TValue>(cur) == value) {
++      return reinterpret_cast<const TValue*>(cur);
++    }
++    cur += sizeof(TValue);
++  }
++
++  uintptr_t alignedEnd = AlignDown16(end);
++  while (cur + 64 <= alignedEnd) {
++    const TValue* result =
++        Check4x16Bytes<TValue>(needle, cur, cur + 16, cur + 32, cur + 48);
++    if (result) {
++      return result;
++    }
++    cur += 64;
++  }
++  while (cur + 16 <= alignedEnd) {
++    const TValue* result = Check16Bytes<TValue>(needle, cur);
++    if (result) {
++      return result;
++    }
++    cur += 16;
++  }
++
++  while (cur < end) {
++    if (GetAs<TValue>(cur) == value) {
++      return reinterpret_cast<const TValue*>(cur);
++    }
++    cur += sizeof(TValue);
++  }
++  return nullptr;
++#  endif
+ }
+ 
+ template <typename TValue>
+@@ -856,6 +904,7 @@ const TValue* FindTwoInBuffer(const TValue* ptr, TValue v1, TValue v2,
+   VecU8 needle2 = SplatNeedle<TValue>(v2);
+   VecU8 zero = vec_splats(static_cast<unsigned char>(0));
+ 
++#  ifdef MOZ_PPC_UNALIGNED_LOADS
+   VecU8 haystack = LoadVec(cur);
+   VecU8 cmp1 = CmpEq128<TValue>(needle1, haystack);
+   VecU8 cmp2 = CmpEq128<TValue>(needle2, haystack);
+@@ -887,6 +936,43 @@ const TValue* FindTwoInBuffer(const TValue* ptr, TValue v1, TValue v2,
+   return Check2x2x16Bytes<TValue>(needle1, needle2, tailStartPtr, tailEndPtr,
+                                   &carry, nullptr,
+                                   HaystackOverlap::Overlapping);
++#  else
++  // Pairs starting before the first aligned block, including the one that
++  // straddles its start.
++  uintptr_t alignedStart = AlignUp16(cur);
++  const TValue* result = TwoElementLoop<TValue>(
++      cur, std::min(alignedStart + sizeof(TValue), end), v1, v2);
++  if (result) {
++    return result;
++  }
++
++  cur = alignedStart;
++  uintptr_t alignedEnd = AlignDown16(end);
++  VecU8 carry = zero;
++  while (cur + 32 <= alignedEnd) {
++    result = Check2x2x16Bytes<TValue>(needle1, needle2, cur, cur + 16, &carry,
++                                      &carry, HaystackOverlap::Sequential);
++    if (result) {
++      return result;
++    }
++    cur += 32;
++  }
++  if (cur + 16 <= alignedEnd) {
++    VecU8 haystack = LoadVec(cur);
++    VecU8 cmp1 = CmpEq128<TValue>(needle1, haystack);
++    VecU8 cmp2 = CmpEq128<TValue>(needle2, haystack);
++    VecU8 cmp = vec_and(vec_or(BSlliN<sizeof(TValue)>(cmp1), carry), cmp2);
++    if (AnyMatch(cmp)) {
++      return reinterpret_cast<const TValue*>(cur + FirstMatchIndex(cmp) -
++                                             sizeof(TValue));
++    }
++    cur += 16;
++  }
++
++  // Pairs from the one straddling the last block's end onward.
++  uintptr_t tailStart = cur > alignedStart ? cur - sizeof(TValue) : cur;
++  return TwoElementLoop<TValue>(tailStart, end, v1, v2);
++#  endif
+ }
+ 
+ // glibc's hand-written memchr for POWER8 pulls ahead of FindInBuffer on long

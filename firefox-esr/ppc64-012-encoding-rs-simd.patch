@@ -1,0 +1,38 @@
+From 221a1afbb3f67b02939e56fcad87869428aa5e25 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Sat, 31 Oct 2026 00:40:36 +1100
+Subject: [PATCH 20/25] Enable encoding_rs SIMD on little-endian PowerPC
+
+MOZ_RUST_SIMD, which turns on encoding_rs's simd-accel feature, was limited
+to aarch64, armv7, x86 and x86_64 by a 2019 allowlist. encoding_rs 0.8.40
+implements the feature with core::simd and takes the portable arm on every
+other architecture, which LLVM lowers to VSX on ppc64le, and its own cfgs
+restrict the SIMD paths to little-endian targets. Allow it for little-endian
+ppc64: UTF-8/UTF-16 conversion, the Latin1 and ASCII checks behind
+mozilla/Latin1.h and TextUtils.h, and TextDecoder/TextEncoder move from
+scalar to vector code. The RUSTC_BOOTSTRAP list already covers encoding_rs
+and any_all_workaround when the feature is on.
+
+(cherry picked from commit 8e73eeb08dc44d132d7939579af756e40c15ab60)
+---
+ js/moz.configure | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/js/moz.configure b/js/moz.configure
+index d081215fd3..5dec37355d 100644
+--- a/js/moz.configure
++++ b/js/moz.configure
+@@ -649,8 +649,13 @@ option(
+ def rust_simd(value, target):
+     # As of 2019-09-17, the simd-accel feature of encoding_rs has not
+     # been properly set up outside aarch64, armv7, x86 and x86_64.
++    # encoding_rs 0.8.40 implements it with core::simd for every other
++    # architecture, so little-endian PowerPC (VSX baseline) gets it too;
++    # the crate only selects the SIMD paths on little-endian targets.
+     if target.cpu in ("aarch64", "arm", "x86", "x86_64") and value:
+         return True
++    if target.cpu == "ppc64" and target.endianness == "little" and value:
++        return True
+ 
+ 
+ set_config("MOZ_RUST_SIMD", rust_simd)

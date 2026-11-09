@@ -1,0 +1,188 @@
+From d2c99093f261169486e4c81d479ab0202c058225 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Sat, 31 Oct 2026 02:28:51 +1100
+Subject: [PATCH 17/25] Add a VSX path for the sRGB luminance mask on PowerPC
+
+DrawTarget::IntoLuminanceSource converts a B8G8R8A8 surface to an A8
+luminance mask; it had a NEON kernel and otherwise ran the scalar loop.
+LuminanceVSX.cpp computes the weighted sum of the three colour bytes of
+each pixel with one vec_msum against a per-byte factor vector, shifts,
+zeroes transparent pixels with a compare on the alpha byte and packs 16
+pixels per store. The pixel byte order is the same on both endiannesses,
+so only the alpha mask word depends on endianness.
+---
+ gfx/2d/DrawTarget.cpp   | 13 ++++++
+ gfx/2d/LuminanceVSX.cpp | 89 +++++++++++++++++++++++++++++++++++++++++
+ gfx/2d/LuminanceVSX.h   | 16 ++++++++
+ gfx/2d/moz.build        |  5 +++
+ 4 files changed, 123 insertions(+)
+ create mode 100644 gfx/2d/LuminanceVSX.cpp
+ create mode 100644 gfx/2d/LuminanceVSX.h
+
+diff --git a/gfx/2d/DrawTarget.cpp b/gfx/2d/DrawTarget.cpp
+index ae68f07163..113c3ad955 100644
+--- a/gfx/2d/DrawTarget.cpp
++++ b/gfx/2d/DrawTarget.cpp
+@@ -19,6 +19,11 @@
+ #  include "LuminanceNEON.h"
+ #endif
+ 
++#ifdef USE_VSX
++#  include "LuminanceVSX.h"
++#  include "mozilla/ppc.h"
++#endif
++
+ namespace mozilla {
+ namespace gfx {
+ 
+@@ -64,6 +69,14 @@ static void ComputesRGBLuminanceMask(const uint8_t* aSourceData,
+   }
+ #endif
+ 
++#ifdef USE_VSX
++  if (mozilla::supports_vsx()) {
++    ComputesRGBLuminanceMask_VSX(aSourceData, aSourceStride, aDestData,
++                                 aDestStride, aSize, aOpacity);
++    return;
++  }
++#endif
++
+   int32_t redFactor = 55 * aOpacity;     // 255 * 0.2125 * opacity
+   int32_t greenFactor = 183 * aOpacity;  // 255 * 0.7154 * opacity
+   int32_t blueFactor = 18 * aOpacity;    // 255 * 0.0721
+diff --git a/gfx/2d/LuminanceVSX.cpp b/gfx/2d/LuminanceVSX.cpp
+new file mode 100644
+index 0000000000..02c74bdcf3
+--- /dev/null
++++ b/gfx/2d/LuminanceVSX.cpp
+@@ -0,0 +1,89 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "LuminanceVSX.h"
++
++#include <altivec.h>
++
++#include <bit>
++
++using namespace mozilla::gfx;
++
++// Pixels are B8G8R8A8 in memory on both endiannesses.
++#define GFX_ARGB32_OFFSET_A 3
++#define GFX_ARGB32_OFFSET_R 2
++#define GFX_ARGB32_OFFSET_G 1
++#define GFX_ARGB32_OFFSET_B 0
++
++void ComputesRGBLuminanceMask_VSX(const uint8_t* aSourceData,
++                                  int32_t aSourceStride, uint8_t* aDestData,
++                                  int32_t aDestStride, const IntSize& aSize,
++                                  float aOpacity) {
++  typedef __vector unsigned char u8x16;
++  typedef __vector unsigned short u16x8;
++  typedef __vector unsigned int u32x4;
++
++  int32_t redFactor = 55 * aOpacity;     // 255 * 0.2125 * opacity
++  int32_t greenFactor = 183 * aOpacity;  // 255 * 0.7154 * opacity
++  int32_t blueFactor = 18 * aOpacity;    // 255 * 0.0721
++  int32_t sourceOffset = aSourceStride - 4 * aSize.width;
++  const uint8_t* sourcePixel = aSourceData;
++  int32_t destOffset = aDestStride - aSize.width;
++  uint8_t* destPixel = aDestData;
++
++  // One factor per channel byte; vec_msum then sums the four byte products
++  // of each pixel into its 32-bit lane.
++  u8x16 factors = vec_splats((unsigned char)0);
++  factors = vec_insert((unsigned char)blueFactor, factors, GFX_ARGB32_OFFSET_B);
++  factors =
++      vec_insert((unsigned char)greenFactor, factors, GFX_ARGB32_OFFSET_G);
++  factors = vec_insert((unsigned char)redFactor, factors, GFX_ARGB32_OFFSET_R);
++  factors = (u8x16)vec_splat((u32x4)factors, 0);
++  const u32x4 zero = vec_splats(0u);
++  const u32x4 alphaMask = vec_splats(
++      std::endian::native == std::endian::little ? 0xFF000000u : 0x000000FFu);
++  const u32x4 eight = vec_splats(8u);
++
++  auto grayOf = [&](const uint8_t* aPx) {
++    u8x16 px = vec_xl(0, aPx);
++    u32x4 gray = vec_sr(vec_msum(px, factors, zero), eight);
++    // Transparent pixels get a zero mask value.
++    __vector __bool int transparent =
++        vec_cmpeq(vec_and((u32x4)px, alphaMask), zero);
++    return vec_andc(gray, (u32x4)transparent);
++  };
++
++  int32_t remainderWidth = aSize.width % 16;
++  int32_t roundedWidth = aSize.width - remainderWidth;
++
++  for (int32_t y = 0; y < aSize.height; y++) {
++    for (int32_t x = 0; x < roundedWidth; x += 16) {
++      u32x4 g0 = grayOf(sourcePixel);
++      u32x4 g1 = grayOf(sourcePixel + 16);
++      u32x4 g2 = grayOf(sourcePixel + 32);
++      u32x4 g3 = grayOf(sourcePixel + 48);
++      u16x8 g01 = vec_pack(g0, g1);
++      u16x8 g23 = vec_pack(g2, g3);
++      vec_xst(vec_pack(g01, g23), 0, destPixel);
++      sourcePixel += 16 * 4;
++      destPixel += 16;
++    }
++
++    for (int32_t x = 0; x < remainderWidth; x++) {
++      if (sourcePixel[GFX_ARGB32_OFFSET_A] > 0) {
++        *destPixel = (redFactor * sourcePixel[GFX_ARGB32_OFFSET_R] +
++                      greenFactor * sourcePixel[GFX_ARGB32_OFFSET_G] +
++                      blueFactor * sourcePixel[GFX_ARGB32_OFFSET_B]) >>
++                     8;
++      } else {
++        *destPixel = 0;
++      }
++      sourcePixel += 4;
++      destPixel++;
++    }
++
++    sourcePixel += sourceOffset;
++    destPixel += destOffset;
++  }
++}
+diff --git a/gfx/2d/LuminanceVSX.h b/gfx/2d/LuminanceVSX.h
+new file mode 100644
+index 0000000000..26b904ad01
+--- /dev/null
++++ b/gfx/2d/LuminanceVSX.h
+@@ -0,0 +1,16 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef LUMINANCEVSX_H_
++#define LUMINANCEVSX_H_
++
++#include "mozilla/gfx/Point.h"
++
++void ComputesRGBLuminanceMask_VSX(const uint8_t* aSourceData,
++                                  int32_t aSourceStride, uint8_t* aDestData,
++                                  int32_t aDestStride,
++                                  const mozilla::gfx::IntSize& aSize,
++                                  float aOpacity);
++
++#endif /* LUMINANCEVSX_H_ */
+diff --git a/gfx/2d/moz.build b/gfx/2d/moz.build
+index 777be101c3..6ffe706d29 100644
+--- a/gfx/2d/moz.build
++++ b/gfx/2d/moz.build
+@@ -198,9 +198,14 @@ if CONFIG["TARGET_CPU"].startswith("ppc") and CONFIG["PPC_TARGET_HAS_VSX"]:
+     SOURCES += [
+         "ConvolutionFilterVSX.cpp",
+         "FilterProcessingVSX.cpp",
++        "LuminanceVSX.cpp",
+     ]
+     DEFINES["USE_VSX"] = True
+ 
++    SOURCE_HEADERS += [
++        "LuminanceVSX.h",
++    ]
++
+ include("/ipc/chromium/chromium-config.mozbuild")
+ 
+ FINAL_LIBRARY = "xul"
