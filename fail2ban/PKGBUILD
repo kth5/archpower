@@ -7,8 +7,8 @@
 # Contributor: nbags <neilbags@gmail.com>
 
 pkgname=fail2ban
-pkgver=1.1.0
-pkgrel=8
+pkgver=1.1.1
+pkgrel=1
 pkgdesc='Bans IPs after too many failed authentication attempts'
 arch=(any)
 url='https://www.fail2ban.org/'
@@ -39,26 +39,15 @@ backup=(
 )
 source=(
   "git+https://github.com/$pkgname/$pkgname.git#tag=$pkgver?signed"
-  'extend-tmpfiles.patch'
 )
-b2sums=('c2859a151abd906ceadc8549a4d337b01b037793e7d9285d44f08405695bdcb1b7dc88998cb7eed0321cacdce1d3fca29e55c63f5f60dadbb15f217f6cbe92d3'
-        '74a3385159cdcc525c0704a46406e63d3a96fbea045c6a4f56f861c3fbaeefdcf96e11b9da7f84634316c78b5a4410b956644ffba1337f91d28350d443dd69a9')
+b2sums=('96ed91a7e78ad97a333bc8de199cefad32d02bcd8df3c4bc4bb22b357514d47829a757e40f0660b85987864594326a56154e6be21863db8e30abfab486cda370')
 validpgpkeys=('E6C3F631FBDA716B070C6ED94141C485A81A88CB') # Sergey G. Brester (sebres) <serg.brester@sebres.de>
 
 prepare() {
   cd $pkgname
-  # distutils removal
-  git cherry-pick -n -m 1 ac62658c10f492911f8a0037a0bcf97c8521cd78
-
-  # openssh 9.8 compatibility
-  git cherry-pick -n 2fed408c05ac5206b490368d94599869bd6a056d
-
-  # fix tests
-  git cherry-pick -n 5b6c13f0aae79a23d94570bacd1b5796e57f088d
-
-  # restore directories no longer installed after switch to PEP 517
-  patch --forward --strip=1 --input=../extend-tmpfiles.patch
-
+  # Restore Arch banaction defaults pending upstream fix:
+  # https://github.com/fail2ban/fail2ban/pull/4224
+  sed -i '/^\[DEFAULT\]$/a banaction = iptables-multiport\nbanaction_allports = iptables-allports\n' config/paths-arch.conf
   sed -i 's|self.install_dir|"/usr/bin"|' setup.py
   sed -i 's/^before = paths-debian.conf/before = paths-arch.conf/' config/jail.conf
 }
@@ -68,10 +57,13 @@ build() {
   python -m build --wheel --skip-dependency-check --no-isolation
 }
 
-# ignore test that imports smtpd module (removed in Python 3.12)
 check() {
+  case "${CARCH}" in
+    powerpc*) return 0 ;;
+  esac
+
   cd $pkgname
-  ./bin/fail2ban-testcases --ignore unittest.loader._FailedTest.test_smtp
+  ./bin/fail2ban-testcases
 }
 
 package() {
@@ -80,8 +72,8 @@ package() {
 
   install -Dm644 build/fail2ban.service \
     "$pkgdir"/usr/lib/systemd/system/$pkgname.service
-  install -Dm644 files/fail2ban-tmpfiles.conf \
-    "$pkgdir"/usr/lib/tmpfiles.d/$pkgname.conf
+  install -Dm644 build/fail2ban.socket \
+    "$pkgdir"/usr/lib/systemd/system/$pkgname.socket
   install -Dm644 files/fail2ban-logrotate \
     "$pkgdir"/etc/logrotate.d/fail2ban
   install -Dm644 files/bash-completion \
@@ -94,6 +86,9 @@ package() {
   local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
   cp -rl ./"$site_packages"/{etc,usr} .
   rm -r ./"$site_packages"/{etc,usr}
+
+  # PEP 517 wheels omit empty data directories from setup.py.
+  install -dm755 etc/fail2ban/{fail2ban,jail}.d var/lib/fail2ban
 
   # fix sendmail location
   sed -i 's/sbin/bin/g' etc/fail2ban/action.d/sendmail*.conf
