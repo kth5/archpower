@@ -3,49 +3,90 @@
 # Contributor: Alexander Baldeck <alexander@archlinux.org>
 # Contributor: tobias <tobias@archlinux.org>
 
-pkgname=ftgl
+pkgbase=ftgl
+pkgname=(
+  ftgl
+  ftgl-docs
+)
 pkgver=2.4.0
-pkgrel=3.1
+pkgrel=4
 pkgdesc="OpenGL library to use arbitrary fonts"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
 url="https://github.com/frankheckenbach/ftgl"
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(MIT)
-depends=(freetype2 glu)
-makedepends=(doxygen mesa graphviz git)
-_commit=483639219095ad080538e07ceb5996de901d4e74  # tags/v2.4.0
-source=("git+https://github.com/frankheckenbach/ftgl#commit=$_commit"
-        "${pkgname}-${pkgver}-gcc14.patch::https://patch-diff.githubusercontent.com/raw/frankheckenbach/ftgl/pull/20.patch")
-sha256sums=('ecc5e2a5709aa1170cdbced5eac2661ed0757c6d912499b0f7d87a8261be7946'
-            'd01a333f621fad8bef95d92358ce2f21b958d6baef0c631683b0d43471ac33c2')
-
-pkgver() {
-  cd $pkgname
-  git describe --tags | sed 's/^v//;s/-/+/g'
-}
+depends=(
+  freetype2
+  glibc
+  glu
+  libgcc
+  libglvnd
+  libstdc++
+)
+makedepends=(
+  doxygen
+  git
+  graphviz
+  mesa
+)
+source=(
+  "git+https://github.com/frankheckenbach/ftgl#tag=v$pkgver"
+  0001-src-FTFont-FTBufferFont.cpp-src-FTFont-FTTextureFont.patch
+  0002-Fix-type-mismatch-with-latest-FreeType.patch
+)
+b2sums=('bb2514e34268b845955da930d9bbe8493838e024153cdd61d7f0f08ac4de2a71e79983741ec060e187584d025524ba2d1cea56afb85276dbb5da72fee9d87adc'
+        'ed5c1e2122a04bd1e2d36d20ef77a71f378ba616c8cd844298a0a2f7aea0bd965bb75d7cf9dfb9a1a99632ae3ddfc6a43c9de046cc3294edb9cbb812bd891c6e'
+        '680fcbc8eea03b8b467f71ecef3562bd0be2bc26da854d0e0bec326f0105f315fc78ff765519d625350b1a0b658ceac8a499006c60998f0b183948a7a04fe899')
 
 prepare() {
-  cd $pkgname
-  patch -Np1 -i ${srcdir}/${pkgname}-${pkgver}-gcc14.patch
+  mkdir -p build
+  cd ftgl
+
+  # https://github.com/frankheckenbach/ftgl/issues/3
+  git apply -3 ../0001-src-FTFont-FTBufferFont.cpp-src-FTFont-FTTextureFont.patch
+
+  # https://github.com/frankheckenbach/ftgl/pull/19
+  git apply -3 ../0002-Fix-type-mismatch-with-latest-FreeType.patch
 
   printf '%s\n' >>docs/doxygen.cfg.in \
     HAVE_DOT=yes DOT_IMAGE_FORMAT=svg INTERACTIVE_SVG=yes
+
   ./autogen.sh
 }
 
 build() {
-  cd $pkgname
-  ./configure --prefix=/usr --with-pic --disable-static
+  local configure_options=(
+    --prefix=/usr
+    --with-pic
+    --disable-static
+  )
+
+  cd build
+  ../ftgl/configure "${configure_options[@]}"
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
 }
 
-package() {
-  cd $pkgname
-  make DESTDIR="$pkgdir" install
+package_ftgl() {
+  provides=(libftgl.so)
+
+  make -C build install DESTDIR="$pkgdir"
 
   # FS#23283: install missing headers for OpenCascade
-  install -Dt "$pkgdir/usr/include/FTGL" -m644 src/FT{Face,Size}.h
+  install -Dm644 ftgl/src/FT{Face,Size}.h -t "$pkgdir/usr/include/FTGL"
 
-  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 COPYING
+  mkdir -p doc/usr/share
+  mv {"$pkgdir",doc}/usr/share/doc
+
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 ftgl/COPYING
+}
+
+package_ftgl-docs() {
+  pkgdesc+=" (documentation)"
+  depends=()
+
+  mv doc/* "$pkgdir"
+
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 ftgl/COPYING
 }
 
 # vim:set sw=2 et:
