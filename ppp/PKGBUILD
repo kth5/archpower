@@ -3,14 +3,15 @@
 # Contributor: Thomas Baechler <thomas@archlinux.org>
 
 pkgname=ppp
-pkgver=2.5.3
-pkgrel=1
+pkgver=2.5.4
+pkgrel=3
 pkgdesc="A daemon which implements the Point-to-Point Protocol for dial-up networking"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://www.samba.org/ppp/"
-license=('GPL' 'BSD')
+license=('GPL-2.0-or-later' 'BSD-3-Clause')
 depends=('glibc' 'libpcap' 'libxcrypt' 'openssl')
 makedepends=('git')
+checkdepends=('iproute2' 'iputils' 'kmod' 'procps-ng' 'python' 'util-linux')
 backup=(etc/ppp/{chap-secrets,ip-down,ip-down.d/00-dns.sh,ip-up,ip-up.d/00-dns.sh,ipv6-down,ipv6-up,ipv6-up.d/00-iface-config.sh,options,pap-secrets})
 source=(git+https://github.com/ppp-project/ppp.git?signed#tag=v$pkgver
         options
@@ -22,7 +23,7 @@ source=(git+https://github.com/ppp-project/ppp.git?signed#tag=v$pkgver
         ipv6-down
         ipv6-up.d.iface-config.sh
         ppp.systemd)
-sha512sums=('080b61a597a4f26e4b7d74b8c3dcf84cd4e254c95f937f713c84d109ab9407cb545fbcedeb6cb13b1b1681bf08ee4eab82a974c1dc6a1400ee579f2293d05a19'
+sha512sums=('1f11e86524935cdbffd363e49ed00f7417883aabe64f9bd42fc45feb59380709ea9ccfad11b2ef7d8ac5d654832cc40d1237f1c324e7698b04efdc061684e545'
             '4324a9abe79b20735b87de2158bb73b6449415a4760f06a06b648dfb53517f8d9907b094a88d1b492b24c8720cfd9b17d491fbe236fbd51ba9042af60483b231'
             'bdaaac792dd448ff31da6da2749d8c2f9c4e0311b1d4639de7c68038fcaa333cc28e25f5a6308de0ecb24b60b2e7284a811482df990da5f54d5581a746964f3c'
             '92f3a5e383f2c888938e891ba831042e7f8c026b0ddf5ce8c3523d06ac32fa81742e638a4c665975cbc79868b98806d92574ee2ee8e034e33b065a90ee3ab28b'
@@ -39,6 +40,13 @@ validpgpkeys=('631E179E370CD727A7F2A33A9E4295D605F66CE9'  # Paul Mackerras (Sign
 prepare() {
   cd $pkgname
 
+  # Fix forked script crashes, EAP-TLS logging and PPP_SCRIPT_INSTANCE names.
+  # https://github.com/ppp-project/ppp/pull/638
+  git cherry-pick -n bafd1f300006993800f3e6a5661bae8380fdf0c7
+  git cherry-pick -n 553145c70923917b64b19c96037d422b42063433
+  git cherry-pick -n 26093eeea8c251625b6c674c849268e87f933500
+  git cherry-pick -n 0f97ddf885fc83a5552bca9510bc7c779987f790
+
   autoreconf -i
 }
 
@@ -47,6 +55,12 @@ build() {
   ./configure --prefix=/usr --sbindir=/usr/bin --sysconfdir=/etc --runstatedir=/run \
               --enable-systemd --enable-cbcp --enable-multilink
   make
+}
+
+check() {
+  cd ppp
+  make check
+  make check-integration
 }
 
 package() {
