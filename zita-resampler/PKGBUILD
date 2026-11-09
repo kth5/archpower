@@ -9,30 +9,32 @@ pkgname=(
   zita-resampler-docs
 )
 pkgver=1.11.2
-pkgrel=2.1
+pkgrel=3
 pkgdesc="A C++ library for resampling audio signals"
-arch=(x86_64 powerpc64le powerpc64 powerpc riscv64)
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://kokkinizita.linuxaudio.org/linuxaudio"
 license=(GPL-3.0-or-later)
 makedepends=(
-  gcc-libs
   glibc
+  libgcc
   libsndfile
+  libstdc++
 )
-source=($url/downloads/$pkgname-$pkgver.tar.xz
-        zita-resampler-1.11.2-makefile.patch)
-sha512sums=('1598c9ead4bf858d3a11677c9512932077e1d0b83588682eba402820936fa1cfc5fe1112abbecd945469b4ae2f7a6f59938a5fbb0fdd79de3b0a3a73703b03dd'
-            'e59081959ce76c93c919d2b25f5d7f078f2cd6469559886b35cb448785fe5e481b54d339450c9bc6fb34d6fd83ef03b431998296c15c31511867cf7988c84a4b')
-b2sums=('627b309b38b238902b1cad2cb0963d0182f8f4cc4bc72efcd2b9ecc9810f019968c141e31ffb94110e8c4ca781e1c57b7d3393a3d4699b3f90873958b34ce47c'
-        '8a94d3c5962b27e8fa11a7cdf8a719b600474540ecbd7b35462315f44d33caa6e419428cb76d5deb2913286a459495be558fcc7155630944a9fbca239fd61902')
+source=($url/downloads/$pkgname-$pkgver.tar.xz)
+sha512sums=('1598c9ead4bf858d3a11677c9512932077e1d0b83588682eba402820936fa1cfc5fe1112abbecd945469b4ae2f7a6f59938a5fbb0fdd79de3b0a3a73703b03dd')
+b2sums=('627b309b38b238902b1cad2cb0963d0182f8f4cc4bc72efcd2b9ecc9810f019968c141e31ffb94110e8c4ca781e1c57b7d3393a3d4699b3f90873958b34ce47c')
 
 prepare() {
   cd $pkgname-$pkgver
-
-  patch -Np1 -i ${srcdir}/zita-resampler-1.11.2-makefile.patch
-
   # remove march=native
   sed -e '/native/d' -i {source,apps}/Makefile
+
+  # upstream sets x86 SSE2 in Makefile and instructs
+  # modifying the Makefile to enable NEON for aarch64
+  case "$CARCH" in
+    aarch64) sed -i 's/-DENABLE_SSE2/-DENABLE_NEON/g' source/Makefile ;;
+    powerpc*) sed -i 's/-DENABLE_SSE2//g' source/Makefile ;;
+  esac
 }
 
 build() {
@@ -48,7 +50,11 @@ build() {
 }
 
 package_zita-resampler() {
-  depends=(gcc-libs glibc)
+  depends=(
+    glibc
+    libgcc
+    libstdc++
+  )
   optdepends=(
     'libsndfile: for zresample and zretune'
     'zita-resampler-docs: for documentation'
