@@ -1,0 +1,103 @@
+Description: Allow building the bundled Skia on big endian targets
+ WebKit 2.54 removed the Cairo fallback and configures Skia with
+ SK_R32_SHIFT=24 on big endian, but the Skia headers only accept the
+ little endian shift values. Mirror the shifts so the in-memory byte
+ order stays RGBA/BGRA, relax the alpha position assert in Sk4px and
+ include SkEndian.h where it is needed.
+
+--- a/Source/ThirdParty/skia/include/core/SkTypes.h
++++ b/Source/ThirdParty/skia/include/core/SkTypes.h
+@@ -35,6 +35,33 @@
+ 
+ // If SK_R32_SHIFT is set, we'll use that to choose RGBA or BGRA.
+ // If not, we'll default to RGBA everywhere except BGRA on Windows.
++#if defined(SK_CPU_BENDIAN)
++    // Big endian: the shifts are mirrored so that the in-memory byte order
++    // is still RGBA or BGRA.
++    #if defined(SK_R32_SHIFT)
++        static_assert(SK_R32_SHIFT == 24 || SK_R32_SHIFT == 8, "");
++    #else
++        #define SK_R32_SHIFT 24
++    #endif
++
++    #if defined(SK_B32_SHIFT)
++        static_assert(SK_B32_SHIFT == (32-SK_R32_SHIFT), "");
++    #else
++        #define SK_B32_SHIFT (32-SK_R32_SHIFT)
++    #endif
++
++    #if defined(SK_G32_SHIFT)
++        static_assert(SK_G32_SHIFT == 16, "");
++    #else
++        #define SK_G32_SHIFT 16
++    #endif
++
++    #if defined(SK_A32_SHIFT)
++        static_assert(SK_A32_SHIFT == 0, "");
++    #else
++        #define SK_A32_SHIFT 0
++    #endif
++#else
+ #if defined(SK_R32_SHIFT)
+     static_assert(SK_R32_SHIFT == 0 || SK_R32_SHIFT == 16, "");
+ #elif defined(SK_BUILD_FOR_WIN)
+@@ -51,6 +78,7 @@
+ 
+ #define SK_G32_SHIFT 8
+ #define SK_A32_SHIFT 24
++#endif
+ 
+ /**
+  * SK_PMCOLOR_BYTE_ORDER can be used to query the byte order of SkPMColor at compile time.
+--- a/Source/ThirdParty/skia/src/core/SkColorPriv.h
++++ b/Source/ThirdParty/skia/src/core/SkColorPriv.h
+@@ -64,6 +64,17 @@
+  *  Here we enforce this constraint.
+  */
+ 
++#if defined(SK_CPU_BENDIAN)
++#define SK_RGBA_R32_SHIFT   24
++#define SK_RGBA_G32_SHIFT   16
++#define SK_RGBA_B32_SHIFT   8
++#define SK_RGBA_A32_SHIFT   0
++
++#define SK_BGRA_B32_SHIFT   24
++#define SK_BGRA_G32_SHIFT   16
++#define SK_BGRA_R32_SHIFT   8
++#define SK_BGRA_A32_SHIFT   0
++#else
+ #define SK_RGBA_R32_SHIFT   0
+ #define SK_RGBA_G32_SHIFT   8
+ #define SK_RGBA_B32_SHIFT   16
+@@ -73,6 +84,7 @@
+ #define SK_BGRA_G32_SHIFT   8
+ #define SK_BGRA_R32_SHIFT   16
+ #define SK_BGRA_A32_SHIFT   24
++#endif
+ 
+ #if defined(SK_PMCOLOR_IS_RGBA) || defined(SK_PMCOLOR_IS_BGRA)
+     #error "Configure PMCOLOR by setting SK_R32_SHIFT."
+--- a/Source/ThirdParty/skia/src/core/Sk4px.h
++++ b/Source/ThirdParty/skia/src/core/Sk4px.h
+@@ -27,7 +27,11 @@
+ 
+     // RGBA rgba XYZW xyzw -> AAAA aaaa WWWW wwww
+     Sk4px alphas() const {
++#if defined(SK_CPU_BENDIAN)
++        static_assert(SK_A32_SHIFT == 0, "This method assumes alpha is the last byte in memory.");
++#else
+         static_assert(SK_A32_SHIFT == 24, "This method assumes little-endian.");
++#endif
+         return Sk4px(skvx::shuffle<3,3,3,3, 7,7,7,7, 11,11,11,11, 15,15,15,15>(fV));
+     }
+     Sk4px inv() const { return Sk4px(skvx::byte16(255) - fV); }
+--- a/Source/ThirdParty/skia/src/codec/SkCodecPriv.h
++++ b/Source/ThirdParty/skia/src/codec/SkCodecPriv.h
+@@ -16,6 +16,7 @@
+ #include "modules/skcms/skcms.h"
+ #include "src/codec/SkColorPalette.h"
+ #include "src/core/SkColorData.h"
++#include "src/core/SkEndian.h"
+ 
+ #include <memory>
+ #include <string_view>
