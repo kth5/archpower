@@ -1,0 +1,370 @@
+From 66934fccab0d1ed6bcf81a7f7d836dbda759cd41 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Sat, 31 Oct 2026 01:56:35 +1100
+Subject: [PATCH 20/30] Make the xsimd swizzle templates work on big-endian
+ targets
+
+The generic premultiply, unpremultiply and CMYK templates in
+SwizzleGeneric.h treated every pixel as a little-endian 32-bit lane: the
+alpha was taken from the top byte, the R/B channels were the low byte of
+each 16-bit lane and the G/A channels the high byte. On a big-endian
+target a B8G8R8A8 pixel is 0xBBGGRRAA, so the alpha is the low byte and
+the two 16-bit halves swap roles, and every xsimd instantiation produced
+wrong pixels there (the scalar fallbacks already handle both byte orders).
+
+Add SplitEvenOdd_SIMD and CombineEvenOdd_SIMD, which isolate the channels
+at even (R/B, C/Y) and odd (G/A, M/K) byte positions into the low byte of
+a 16-bit lane on either endianness, and endian-selected constants for the
+alpha and green masks. The byte-level operations (R/B swap, RGB24 expand)
+were already endian-neutral. The VSX helpers get the same treatment for
+their partial loads, unpremultiply reverse step and RGB24 alpha, and the
+VSX swizzle path is now built on big-endian PowerPC as well.
+---
+ gfx/2d/SwizzleGeneric.h      | 100 +++++++++++++++++++++++------------
+ gfx/2d/SwizzleGenericDecls.h |  12 +++++
+ gfx/2d/SwizzleVSX.h          |  53 +++++++++++--------
+ gfx/2d/moz.build             |   6 +--
+ gfx/tests/gtest/moz.build    |   6 +--
+ 5 files changed, 111 insertions(+), 66 deletions(-)
+
+diff --git a/gfx/2d/SwizzleGeneric.h b/gfx/2d/SwizzleGeneric.h
+index 39240e5297..8eec240cc0 100644
+--- a/gfx/2d/SwizzleGeneric.h
++++ b/gfx/2d/SwizzleGeneric.h
+@@ -9,6 +9,36 @@
+ 
+ namespace mozilla::gfx {
+ 
++// SplitEvenOdd_SIMD and CombineEvenOdd_SIMD keep each channel in the low byte
++// of its 16-bit lane on both endiannesses (see kSwizzleLE).
++// Splits pixels into their even-byte (R/B or C/Y) and odd-byte (G/A or M/K)
++// channels, each in the low byte of a 16-bit lane.
++template <class Arch>
++static MOZ_ALWAYS_INLINE void SplitEvenOdd_SIMD(
++    const xsimd::batch<uint8_t, Arch>& aPx, xsimd::batch<uint16_t, Arch>& aEven,
++    xsimd::batch<uint16_t, Arch>& aOdd) {
++  auto px16 = xsimd::bitwise_cast<uint16_t>(aPx);
++  const xsimd::batch<uint16_t, Arch> lowByte(0x00FF);
++  if constexpr (kSwizzleLE) {
++    aEven = px16 & lowByte;
++    aOdd = px16 >> 8;
++  } else {
++    aEven = px16 >> 8;
++    aOdd = px16 & lowByte;
++  }
++}
++
++template <class Arch>
++static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> CombineEvenOdd_SIMD(
++    const xsimd::batch<uint16_t, Arch>& aEven,
++    const xsimd::batch<uint16_t, Arch>& aOdd) {
++  if constexpr (kSwizzleLE) {
++    return xsimd::bitwise_cast<uint8_t>(aEven | (aOdd << 8));
++  } else {
++    return xsimd::bitwise_cast<uint8_t>((aEven << 8) | aOdd);
++  }
++}
++
+ // We should generally prefer to specialize LoadRemainder_SIMD and
+ // StoreRemainder_SIMD to avoid the memcpy call which doesn't get optimized out.
+ // The implementations below should provide an acceptable baseline though.
+@@ -40,7 +70,13 @@ template <class Arch>
+ static MOZ_ALWAYS_INLINE xsimd::batch<uint16_t, Arch> ExtractAlpha_SIMD(
+     const xsimd::batch<uint8_t, Arch>& aSrc,
+     const xsimd::batch<uint16_t, Arch>& aGreenAlpha) {
+-  auto a32 = xsimd::bitwise_cast<uint32_t>(aSrc) >> 24;
++  auto px32 = xsimd::bitwise_cast<uint32_t>(aSrc);
++  xsimd::batch<uint32_t, Arch> a32;
++  if constexpr (kSwizzleLE) {
++    a32 = px32 >> 24;
++  } else {
++    a32 = px32 & xsimd::batch<uint32_t, Arch>(0x000000FF);
++  }
+   return xsimd::bitwise_cast<uint16_t>(a32 | (a32 << 16));
+ }
+ 
+@@ -159,8 +195,9 @@ static MOZ_ALWAYS_INLINE xsimd::batch<uint16_t, Arch> SwapRB16_SIMD(
+ template <class Arch>
+ static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> OpaqueAlpha_SIMD(
+     const xsimd::batch<uint8_t, Arch>& aPx) {
+-  return xsimd::bitwise_cast<uint8_t>(xsimd::bitwise_cast<uint32_t>(aPx) |
+-                                      xsimd::batch<uint32_t, Arch>(0xFF000000));
++  return xsimd::bitwise_cast<uint8_t>(
++      xsimd::bitwise_cast<uint32_t>(aPx) |
++      xsimd::batch<uint32_t, Arch>(kAlphaMask32));
+ }
+ 
+ // Swizzle a vector of pixels, swapping and making opaque as desired.
+@@ -203,12 +240,9 @@ static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> SwizzleCmykVector_SIMD(
+   } else {
+     src = aSrc;
+   }
+-  // Isolate iC and iY with mask.
+-  auto px16 = xsimd::bitwise_cast<uint16_t>(src);
+-  const xsimd::batch<uint16_t, Arch> lowByte(0x00FF);
+-  auto icy = px16 & lowByte;
+-  // Isolate iM and iK by shifting down to bottom of word.
+-  auto imk = px16 >> 8;
++  // Isolate iC/iY and iM/iK into their own 16-bit lanes.
++  xsimd::batch<uint16_t, Arch> icy, imk;
++  SplitEvenOdd_SIMD<Arch>(src, icy, imk);
+   auto ik16 = ExtractAlpha_SIMD<Arch>(src, imk);
+   // Multiply each channel by the iK, add 1, divide by 255, all in place. This
+   // is equivalent to iC * iK / 255.
+@@ -221,7 +255,7 @@ static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> SwizzleCmykVector_SIMD(
+     icy = SwapRB16_SIMD<Arch>(icy);
+   }
+   // Combine back to final pixel.
+-  return OpaqueAlpha_SIMD<Arch>(xsimd::bitwise_cast<uint8_t>(icy | (imk << 8)));
++  return OpaqueAlpha_SIMD<Arch>(CombineEvenOdd_SIMD<Arch>(icy, imk));
+ }
+ 
+ template <class Arch, bool aSwapRB, bool aInverted>
+@@ -235,18 +269,15 @@ void MOZ_ALWAYS_INLINE SwizzleCmykRow_SIMD(const uint8_t* aSrc, uint8_t* aDst,
+ template <class Arch, bool aSwapRB, bool aOpaqueAlpha>
+ static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> PremultiplyVector_SIMD(
+     const xsimd::batch<uint8_t, Arch>& aSrc) {
+-  // Isolate R and B with mask.
+-  auto px16 = xsimd::bitwise_cast<uint16_t>(aSrc);
+-  const xsimd::batch<uint16_t, Arch> lowByte(0x00FF);
+-  auto rb = px16 & lowByte;
+-  // Isolate G and A by shifting down to bottom of word.
+-  auto ga = px16 >> 8;
++  // Isolate R/B and G/A into their own 16-bit lanes.
++  xsimd::batch<uint16_t, Arch> rb, ga;
++  SplitEvenOdd_SIMD<Arch>(aSrc, rb, ga);
+   auto a16 = ExtractAlpha_SIMD<Arch>(aSrc, ga);
+   // If format is not opaque, force A to 255 so that A*alpha/255 = alpha.
+   if constexpr (!aOpaqueAlpha) {
+-    ga =
+-        xsimd::bitwise_cast<uint16_t>(xsimd::bitwise_cast<uint32_t>(ga) |
+-                                      xsimd::batch<uint32_t, Arch>(0x00FF0000));
++    ga = xsimd::bitwise_cast<uint16_t>(
++        xsimd::bitwise_cast<uint32_t>(ga) |
++        xsimd::batch<uint32_t, Arch>(kOddAlphaMask32));
+   }
+   // Multiply each channel by the alpha, rounding to nearest when dividing by
+   // 255.
+@@ -259,7 +290,7 @@ static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> PremultiplyVector_SIMD(
+     rb = SwapRB16_SIMD<Arch>(rb);
+   }
+   // Combine back to final pixel.
+-  auto px = xsimd::bitwise_cast<uint8_t>(rb | (ga << 8));
++  auto px = CombineEvenOdd_SIMD<Arch>(rb, ga);
+   if constexpr (aOpaqueAlpha) {
+     px = OpaqueAlpha_SIMD<Arch>(px);
+   }
+@@ -286,7 +317,13 @@ template <class Arch>
+ static MOZ_ALWAYS_INLINE xsimd::batch<uint32_t, Arch> UnpremultiplyLookup_SIMD(
+     const xsimd::batch<uint8_t, Arch>& aSrc,
+     const xsimd::batch<uint16_t, Arch>& aGa) {
+-  auto alpha = xsimd::bitwise_cast<uint32_t>(aSrc) >> 24;
++  auto px32 = xsimd::bitwise_cast<uint32_t>(aSrc);
++  xsimd::batch<uint32_t, Arch> alpha;
++  if constexpr (kSwizzleLE) {
++    alpha = px32 >> 24;
++  } else {
++    alpha = px32 & xsimd::batch<uint32_t, Arch>(0x000000FF);
++  }
+   return xsimd::batch<uint32_t, Arch>::gather(sUnpremultiplyTable, alpha);
+ }
+ 
+@@ -306,9 +343,9 @@ static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> UnpremultiplyReverse_SIMD(
+   auto qLo16 = xsimd::bitwise_cast<uint16_t>(qLo);
+   auto qHi16 = xsimd::bitwise_cast<uint16_t>(qHi);
+   // Isolate G now so that we don't accidentally unpremultiply A.
+-  auto ga =
+-      xsimd::bitwise_cast<uint16_t>(xsimd::bitwise_cast<uint32_t>(aGa) &
+-                                    xsimd::batch<uint32_t, Arch>(0x000000FF));
++  auto ga = xsimd::bitwise_cast<uint16_t>(
++      xsimd::bitwise_cast<uint32_t>(aGa) &
++      xsimd::batch<uint32_t, Arch>(kOddGreenMask32));
+   // Rounded (channel * reciprocal) >> 16 in 16-bit lanes. Since
+   //   channel*Q = channel*qHi*0x10000 + channel*qLo,
+   //   (channel*Q) >> 16 = channel*qHi + ((channel*qLo) >> 16)
+@@ -324,26 +361,23 @@ static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> UnpremultiplyReverse_SIMD(
+   // Combine back to final pixel with rb | (ga << 8) | (aSrc & 0xFF000000),
+   // which will add back on the original alpha value unchanged.
+   auto alpha =
+-      xsimd::bitwise_cast<uint16_t>(xsimd::bitwise_cast<uint32_t>(aSrc) &
+-                                    xsimd::batch<uint32_t, Arch>(0xFF000000));
+-  return xsimd::bitwise_cast<uint8_t>(rb | (ga << 8) | alpha);
++      xsimd::bitwise_cast<uint8_t>(xsimd::bitwise_cast<uint32_t>(aSrc) &
++                                   xsimd::batch<uint32_t, Arch>(kAlphaMask32));
++  return CombineEvenOdd_SIMD<Arch>(rb, ga) | alpha;
+ }
+ 
+ // Unpremultiply a vector of pixels, swapping and making opaque as desired.
+ template <class Arch, bool aSwapRB>
+ static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> UnpremultiplyVector_SIMD(
+     const xsimd::batch<uint8_t, Arch>& aSrc) {
+-  // Isolate R and B with mask.
+-  const xsimd::batch<uint16_t, Arch> lowByte(0x00FF);
+-  auto px16 = xsimd::bitwise_cast<uint16_t>(aSrc);
+-  auto rb = px16 & lowByte;
++  // Isolate R/B and G/A into their own 16-bit lanes.
++  xsimd::batch<uint16_t, Arch> rb, ga;
++  SplitEvenOdd_SIMD<Arch>(aSrc, rb, ga);
+   // Swap R and B if necessary.
+   if constexpr (aSwapRB) {
+     rb = SwapRB16_SIMD<Arch>(rb);
+   }
+ 
+-  // Isolate G and A by shifting down to bottom of word.
+-  auto ga = px16 >> 8;
+   // Extract the reciprocals from the lookup table.
+   auto recip = UnpremultiplyLookup_SIMD<Arch>(aSrc, ga);
+   // Perform the unpremultiply.
+diff --git a/gfx/2d/SwizzleGenericDecls.h b/gfx/2d/SwizzleGenericDecls.h
+index 2ecde28692..586a46e6fc 100644
+--- a/gfx/2d/SwizzleGenericDecls.h
++++ b/gfx/2d/SwizzleGenericDecls.h
+@@ -5,6 +5,7 @@
+ #ifndef MOZILLA_GFX_SWIZZLE_GENERIC_DECLS_H_
+ #define MOZILLA_GFX_SWIZZLE_GENERIC_DECLS_H_
+ 
++#include <bit>
+ #include <xsimd/xsimd.hpp>
+ 
+ #include "Swizzle.h"
+@@ -13,6 +14,17 @@ namespace mozilla::gfx {
+ 
+ extern const uint32_t sUnpremultiplyTable[256];
+ 
++// Pixels are processed as native 32-bit lanes, so which byte holds the alpha
++// and which 16-bit half of a lane holds the even (R/B) or odd (G/A) channels
++// depends on endianness.
++static constexpr bool kSwizzleLE = std::endian::native == std::endian::little;
++static constexpr uint32_t kAlphaMask32 = kSwizzleLE ? 0xFF000000 : 0x000000FF;
++// The alpha and green bytes within the odd (G/A) 16-bit lane pair of a pixel.
++static constexpr uint32_t kOddAlphaMask32 =
++    kSwizzleLE ? 0x00FF0000 : 0x000000FF;
++static constexpr uint32_t kOddGreenMask32 =
++    kSwizzleLE ? 0x000000FF : 0x00FF0000;
++
+ // The following template declarations are for templates our architecture
+ // specific headers may choose to overload.
+ 
+diff --git a/gfx/2d/SwizzleVSX.h b/gfx/2d/SwizzleVSX.h
+index 710d03d222..d0f1a84428 100644
+--- a/gfx/2d/SwizzleVSX.h
++++ b/gfx/2d/SwizzleVSX.h
+@@ -18,28 +18,23 @@
+ 
+ namespace mozilla::gfx {
+ 
+-// The generic templates treat each pixel as a little-endian 32-bit lane with
+-// the alpha in the top byte, so these specializations are only built for
+-// little-endian targets (see moz.build).
+-
+ template <class Arch>
+   requires std::same_as<Arch, xsimd::vsx>
+ static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> LoadRemainder_SIMD(
+     const uint8_t* aSrc, size_t aLength) {
+-  uint64_t lo;
+-  uint32_t hi = 0;
+-  if (aLength >= 2) {
+-    memcpy(&lo, aSrc, 8);
+-    if (aLength >= 3) {
+-      memcpy(&hi, aSrc + 8, 4);
+-    }
+-  } else {
+-    uint32_t px;
+-    memcpy(&px, aSrc, 4);
+-    lo = px;
++  alignas(16) uint8_t buffer[16] = {};
++  switch (aLength) {
++    case 3:
++      memcpy(buffer, aSrc, 12);
++      break;
++    case 2:
++      memcpy(buffer, aSrc, 8);
++      break;
++    default:
++      memcpy(buffer, aSrc, 4);
++      break;
+   }
+-  __vector unsigned long long v = {lo, hi};
+-  return (__vector unsigned char)v;
++  return xsimd::batch<uint8_t, Arch>::load_aligned(buffer);
+ }
+ 
+ template <class Arch>
+@@ -138,17 +133,29 @@ static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> UnpremultiplyReverse_SIMD(
+   // with a 32-bit multiply and rounded, (channel * Q + 0x8000) >> 16, instead
+   // of the 16-bit high/low split the generic version has to use. Masking to a
+   // byte makes out-of-range (channel > alpha) input wrap like the scalar path.
++  // c0/c2 are the channels at bytes 0 and 2 of the pixel, g the one at byte 1.
+   const xsimd::batch<uint32_t, Arch> low16(0x0000FFFF);
+   const xsimd::batch<uint32_t, Arch> lowByte(0x000000FF);
+   const xsimd::batch<uint32_t, Arch> half(0x8000);
+   auto rb = xsimd::bitwise_cast<uint32_t>(aRb);
+   auto ga = xsimd::bitwise_cast<uint32_t>(aGa);
+-  auto r = (((rb & low16) * aRecip + half) >> 16) & lowByte;
+-  auto b = (((rb >> 16) * aRecip + half) >> 16) & lowByte;
+-  auto g = (((ga & low16) * aRecip + half) >> 16) & lowByte;
++  auto lane0 = [&](const xsimd::batch<uint32_t, Arch>& v) {
++    return kSwizzleLE ? v & low16 : v >> 16;
++  };
++  auto lane1 = [&](const xsimd::batch<uint32_t, Arch>& v) {
++    return kSwizzleLE ? v >> 16 : v & low16;
++  };
++  auto c0 = ((lane0(rb) * aRecip + half) >> 16) & lowByte;
++  auto c2 = ((lane1(rb) * aRecip + half) >> 16) & lowByte;
++  auto g = ((lane0(ga) * aRecip + half) >> 16) & lowByte;
+   auto alpha = xsimd::bitwise_cast<uint32_t>(aSrc) &
+-               xsimd::batch<uint32_t, Arch>(0xFF000000);
+-  return xsimd::bitwise_cast<uint8_t>(r | (g << 8) | (b << 16) | alpha);
++               xsimd::batch<uint32_t, Arch>(kAlphaMask32);
++  if constexpr (kSwizzleLE) {
++    return xsimd::bitwise_cast<uint8_t>(c0 | (g << 8) | (c2 << 16) | alpha);
++  } else {
++    return xsimd::bitwise_cast<uint8_t>((c0 << 24) | (g << 16) | (c2 << 8) |
++                                        alpha);
++  }
+ }
+ 
+ // xsimd has no byte swizzle for VSX, so expand with vec_perm directly.
+@@ -163,7 +170,7 @@ static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> UnpackBatchRGB24_SIMD(
+                                          6, 7, 8, 0, 9, 10, 11, 0};
+   __vector unsigned int px =
+       (__vector unsigned int)vec_perm(aSrc.data, aSrc.data, expandMask);
+-  return (__vector unsigned char)vec_or(px, vec_splats(0xFF000000u));
++  return (__vector unsigned char)vec_or(px, vec_splats(kAlphaMask32));
+ }
+ 
+ }  // namespace mozilla::gfx
+diff --git a/gfx/2d/moz.build b/gfx/2d/moz.build
+index 46c5bf7081..abbcb9df70 100644
+--- a/gfx/2d/moz.build
++++ b/gfx/2d/moz.build
+@@ -217,11 +217,7 @@ if CONFIG["TARGET_CPU"] == "aarch64" or CONFIG["BUILD_ARM_NEON"]:
+         "SwizzleNEON.h",
+     ]
+ 
+-if (
+-    CONFIG["TARGET_CPU"].startswith("ppc")
+-    and CONFIG["PPC_TARGET_HAS_VSX"]
+-    and CONFIG["TARGET_ENDIANNESS"] == "little"
+-):
++if CONFIG["TARGET_CPU"].startswith("ppc") and CONFIG["PPC_TARGET_HAS_VSX"]:
+     SOURCES += [
+         "SwizzleVSX.cpp",
+     ]
+diff --git a/gfx/tests/gtest/moz.build b/gfx/tests/gtest/moz.build
+index 7a17848252..7e9b67e782 100644
+--- a/gfx/tests/gtest/moz.build
++++ b/gfx/tests/gtest/moz.build
+@@ -38,11 +38,7 @@ SOURCES += [
+     "SwizzleGeneric.cpp",
+ ]
+ 
+-if (
+-    CONFIG["TARGET_CPU"].startswith("ppc")
+-    and CONFIG["PPC_TARGET_HAS_VSX"]
+-    and CONFIG["TARGET_ENDIANNESS"] == "little"
+-):
++if CONFIG["TARGET_CPU"].startswith("ppc") and CONFIG["PPC_TARGET_HAS_VSX"]:
+     DEFINES["USE_VSX"] = True
+ 
+ if CONFIG["OS_TARGET"] != "Android":
