@@ -1,0 +1,275 @@
+From 61b71c447fb893ad854e5434fa44618f6d43c015 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Sat, 31 Oct 2026 02:38:57 +1100
+Subject: [PATCH 14/25] Add AltiVec and VSX arms to the hand-tuned SWGL helpers
+
+Software WebRender's hand-tuned SIMD helpers were only specialised for
+SSE2 and NEON, and only under clang, so every PowerPC build ran the
+generic vector-extension fallbacks for pixel packing, bilinear filtering,
+saturating adds, min/max, the reciprocal estimates and the boolean mask
+tests. This adds USE_ALTIVEC arms, enabled for both GCC and clang when the
+target has AltiVec, so the 970 tier benefits as well; vec_sqrt needs VSX
+and is gated separately with USE_VSX.
+
+The saturating packs map to vec_packsu, the bilinear interpolation steps
+to vec_mradds (the same rounding multiply-high as NEON's vqrdmulhq_s16),
+the saturating adds to vec_adds, the 16-bit and float min/max to
+vec_min/vec_max, recip and inversesqrt to vec_re and vec_rsqrte, and
+test_all/test_any/test_none to the AltiVec all/any compares. altivec.h's
+vector, pixel and bool macros are undefined after inclusion so the rest of
+SWGL (std::vector, bool) is unaffected.
+---
+ gfx/wr/swgl/src/blend.h       | 12 ++++++++++++
+ gfx/wr/swgl/src/composite.h   |  3 +++
+ gfx/wr/swgl/src/glsl.h        | 20 ++++++++++++++++++++
+ gfx/wr/swgl/src/texture.h     | 33 +++++++++++++++++++++++++++++++++
+ gfx/wr/swgl/src/vector_type.h | 19 +++++++++++++++++++
+ 5 files changed, 87 insertions(+)
+
+diff --git a/gfx/wr/swgl/src/blend.h b/gfx/wr/swgl/src/blend.h
+index af29fb4c09..1399a7eaba 100644
+--- a/gfx/wr/swgl/src/blend.h
++++ b/gfx/wr/swgl/src/blend.h
+@@ -7,6 +7,9 @@ static ALWAYS_INLINE HalfRGBA8 packRGBA8(I32 a, I32 b) {
+   return _mm_packs_epi32(a, b);
+ #elif USE_NEON
+   return vcombine_u16(vqmovun_s32(a), vqmovun_s32(b));
++#elif USE_ALTIVEC
++  return bit_cast<HalfRGBA8>(
++      vec_packsu(bit_cast<av_i32x4>(a), bit_cast<av_i32x4>(b)));
+ #else
+   return CONVERT(combine(a, b), HalfRGBA8);
+ #endif
+@@ -59,6 +62,9 @@ static ALWAYS_INLINE WideR8 packR8(I32 a) {
+   return lowHalf(bit_cast<V8<uint16_t>>(_mm_packs_epi32(a, a)));
+ #elif USE_NEON
+   return vqmovun_s32(a);
++#elif USE_ALTIVEC
++  auto m = bit_cast<av_i32x4>(a);
++  return lowHalf(bit_cast<V8<uint16_t>>(vec_packsu(m, m)));
+ #else
+   return CONVERT(a, WideR8);
+ #endif
+@@ -237,6 +243,9 @@ static ALWAYS_INLINE HalfRGBA8 min(HalfRGBA8 x, HalfRGBA8 y) {
+       _mm_min_epi16(bit_cast<V8<int16_t>>(x), bit_cast<V8<int16_t>>(y)));
+ #elif USE_NEON
+   return vminq_u16(x, y);
++#elif USE_ALTIVEC
++  return bit_cast<HalfRGBA8>(
++      vec_min(bit_cast<av_u16x8>(x), bit_cast<av_u16x8>(y)));
+ #else
+   return if_then_else(x < y, x, y);
+ #endif
+@@ -254,6 +263,9 @@ static ALWAYS_INLINE HalfRGBA8 max(HalfRGBA8 x, HalfRGBA8 y) {
+       _mm_max_epi16(bit_cast<V8<int16_t>>(x), bit_cast<V8<int16_t>>(y)));
+ #elif USE_NEON
+   return vmaxq_u16(x, y);
++#elif USE_ALTIVEC
++  return bit_cast<HalfRGBA8>(
++      vec_max(bit_cast<av_u16x8>(x), bit_cast<av_u16x8>(y)));
+ #else
+   return if_then_else(x > y, x, y);
+ #endif
+diff --git a/gfx/wr/swgl/src/composite.h b/gfx/wr/swgl/src/composite.h
+index aff43fb4c7..c7d6a5b7c1 100644
+--- a/gfx/wr/swgl/src/composite.h
++++ b/gfx/wr/swgl/src/composite.h
+@@ -605,6 +605,9 @@ static inline V8<int16_t> addsat(V8<int16_t> x, V8<int16_t> y) {
+   return _mm_adds_epi16(x, y);
+ #elif USE_NEON
+   return vqaddq_s16(x, y);
++#elif USE_ALTIVEC
++  return bit_cast<V8<int16_t>>(
++      vec_adds(bit_cast<av_i16x8>(x), bit_cast<av_i16x8>(y)));
+ #else
+   auto r = x + y;
+   // An overflow occurred if the signs of both inputs x and y did not differ
+diff --git a/gfx/wr/swgl/src/glsl.h b/gfx/wr/swgl/src/glsl.h
+index 981c43de42..05bb6af626 100644
+--- a/gfx/wr/swgl/src/glsl.h
++++ b/gfx/wr/swgl/src/glsl.h
+@@ -45,6 +45,16 @@ typedef sampler2DRect_impl* sampler2DRect;
+ SI bool test_all(Bool cond) { return _mm_movemask_ps(cond) == 0xF; }
+ SI bool test_any(Bool cond) { return _mm_movemask_ps(cond) != 0; }
+ SI bool test_none(Bool cond) { return _mm_movemask_ps(cond) == 0; }
++#elif USE_ALTIVEC
++SI bool test_all(Bool cond) {
++  return vec_all_ne(bit_cast<av_i32x4>(cond), av_i32x4{});
++}
++SI bool test_any(Bool cond) {
++  return vec_any_ne(bit_cast<av_i32x4>(cond), av_i32x4{});
++}
++SI bool test_none(Bool cond) {
++  return vec_all_eq(bit_cast<av_i32x4>(cond), av_i32x4{});
++}
+ #else
+ SI bool test_all(Bool cond) {
+   return bit_cast<uint32_t>(CONVERT(cond, U8)) == 0xFFFFFFFFU;
+@@ -171,6 +181,8 @@ SI Float min(Float a, Float b) {
+   return _mm_min_ps(a, b);
+ #elif USE_NEON
+   return vminq_f32(a, b);
++#elif USE_ALTIVEC
++  return bit_cast<Float>(vec_min(bit_cast<av_f32x4>(a), bit_cast<av_f32x4>(b)));
+ #else
+   return if_then_else(a < b, a, b);
+ #endif
+@@ -181,6 +193,8 @@ SI Float max(Float a, Float b) {
+   return _mm_max_ps(a, b);
+ #elif USE_NEON
+   return vmaxq_f32(a, b);
++#elif USE_ALTIVEC
++  return bit_cast<Float>(vec_max(bit_cast<av_f32x4>(a), bit_cast<av_f32x4>(b)));
+ #else
+   return if_then_else(a > b, a, b);
+ #endif
+@@ -202,6 +216,8 @@ SI Float sqrt(Float v) {
+   e *= vrsqrtsq_f32(v, e * e);
+   e *= vrsqrtsq_f32(v, e * e);
+   return if_then(v != Float(0.0f), v * e);
++#elif USE_VSX
++  return bit_cast<Float>(vec_sqrt(bit_cast<av_f32x4>(v)));
+ #else
+   return (Float){sqrtf(v.x), sqrtf(v.y), sqrtf(v.z), sqrtf(v.w)};
+ #endif
+@@ -226,6 +242,8 @@ SI Float recip(Float v) {
+ #elif USE_NEON
+   Float e = vrecpeq_f32(v);
+   return vrecpsq_f32(v, e) * e;
++#elif USE_ALTIVEC
++  return bit_cast<Float>(vec_re(bit_cast<av_f32x4>(v)));
+ #else
+   return 1.0f / v;
+ #endif
+@@ -245,6 +263,8 @@ SI Float inversesqrt(Float v) {
+ #elif USE_NEON
+   Float e = vrsqrteq_f32(v);
+   return vrsqrtsq_f32(v, e * e) * e;
++#elif USE_ALTIVEC
++  return bit_cast<Float>(vec_rsqrte(bit_cast<av_f32x4>(v)));
+ #else
+   return 1.0f / sqrt(v);
+ #endif
+diff --git a/gfx/wr/swgl/src/texture.h b/gfx/wr/swgl/src/texture.h
+index 2f0a2ab55b..908856650a 100644
+--- a/gfx/wr/swgl/src/texture.h
++++ b/gfx/wr/swgl/src/texture.h
+@@ -26,6 +26,9 @@ SI PackedRGBA8 pack(WideRGBA8 p) {
+ #elif USE_NEON
+   return vcombine_u8(vqmovun_s16(bit_cast<V8<int16_t>>(lowHalf(p))),
+                      vqmovun_s16(bit_cast<V8<int16_t>>(highHalf(p))));
++#elif USE_ALTIVEC
++  return bit_cast<PackedRGBA8>(vec_packsu(bit_cast<av_i16x8>(lowHalf(p)),
++                                          bit_cast<av_i16x8>(highHalf(p))));
+ #else
+   return genericPackWide(p);
+ #endif
+@@ -44,6 +47,10 @@ SI PackedR8 pack(WideR8 p) {
+ #elif USE_NEON
+   return lowHalf(
+       bit_cast<V8<uint8_t>>(vqmovun_s16(bit_cast<V8<int16_t>>(expand(p)))));
++#elif USE_ALTIVEC
++  auto m = bit_cast<av_i16x8>(expand(p));
++  auto r = bit_cast<V16<uint8_t>>(vec_packsu(m, m));
++  return SHUFFLE(r, r, 0, 1, 2, 3);
+ #else
+   return genericPackWide(p);
+ #endif
+@@ -57,6 +64,9 @@ SI PackedRG8 pack(WideRG8 p) {
+   return lowHalf(bit_cast<V16<uint8_t>>(_mm_packus_epi16(p, p)));
+ #elif USE_NEON
+   return bit_cast<V8<uint8_t>>(vqmovun_s16(bit_cast<V8<int16_t>>(p)));
++#elif USE_ALTIVEC
++  auto m = bit_cast<av_i16x8>(p);
++  return lowHalf(bit_cast<V16<uint8_t>>(vec_packsu(m, m)));
+ #else
+   return genericPackWide(p);
+ #endif
+@@ -693,6 +703,11 @@ static inline I16 textureLinearUnpackedR16(S sampler, ivec2 i) {
+   // NEON has a convenient instruction that does both the multiply and the
+   // doubling, so doesn't need an extra shift.
+   abcd0 += bit_cast<V8<int16_t>>(vqrdmulhq_s16(abcd1 - abcd0, fracy.xxyyzzww));
++#elif USE_ALTIVEC
++  // vec_mradds is the same rounding multiply-high as vqrdmulhq_s16.
++  abcd0 += bit_cast<V8<int16_t>>(vec_mradds(bit_cast<av_i16x8>(abcd1 - abcd0),
++                                            bit_cast<av_i16x8>(fracy.xxyyzzww),
++                                            av_i16x8{}));
+ #else
+   abcd0 += CONVERT((CONVERT(abcd1 - abcd0, V8<int32_t>) *
+                     CONVERT(fracy.xxyyzzww, V8<int32_t>)) >>
+@@ -710,6 +725,10 @@ static inline I16 textureLinearUnpackedR16(S sampler, ivec2 i) {
+            << 1;
+ #elif USE_NEON
+   abcdl += bit_cast<V4<int16_t>>(vqrdmulh_s16(abcdh - abcdl, fracx));
++#elif USE_ALTIVEC
++  abcdl += lowHalf(bit_cast<V8<int16_t>>(
++      vec_mradds(bit_cast<av_i16x8>(expand(abcdh - abcdl)),
++                 bit_cast<av_i16x8>(expand(fracx)), av_i16x8{})));
+ #else
+   abcdl += CONVERT((CONVERT(abcdh - abcdl, V4<int32_t>) *
+                     CONVERT(fracx, V4<int32_t>)) >>
+@@ -777,6 +796,13 @@ static inline V8<int16_t> textureLinearUnpackedRG16(S sampler, ivec2 i) {
+   // doubling, so doesn't need an extra shift.
+   ab0 += bit_cast<V8<int16_t>>(vqrdmulhq_s16(ab1 - ab0, fracy.xxxxyyyy));
+   cd0 += bit_cast<V8<int16_t>>(vqrdmulhq_s16(cd1 - cd0, fracy.zzzzwwww));
++#elif USE_ALTIVEC
++  ab0 += bit_cast<V8<int16_t>>(vec_mradds(bit_cast<av_i16x8>(ab1 - ab0),
++                                          bit_cast<av_i16x8>(fracy.xxxxyyyy),
++                                          av_i16x8{}));
++  cd0 += bit_cast<V8<int16_t>>(vec_mradds(bit_cast<av_i16x8>(cd1 - cd0),
++                                          bit_cast<av_i16x8>(fracy.zzzzwwww),
++                                          av_i16x8{}));
+ #else
+   ab0 += CONVERT((CONVERT(ab1 - ab0, V8<int32_t>) *
+                   CONVERT(fracy.xxxxyyyy, V8<int32_t>)) >>
+@@ -806,6 +832,10 @@ static inline V8<int16_t> textureLinearUnpackedRG16(S sampler, ivec2 i) {
+            << 1;
+ #elif USE_NEON
+   abcdl += bit_cast<V8<int16_t>>(vqrdmulhq_s16(abcdh - abcdl, fracx.xxyyzzww));
++#elif USE_ALTIVEC
++  abcdl += bit_cast<V8<int16_t>>(vec_mradds(bit_cast<av_i16x8>(abcdh - abcdl),
++                                            bit_cast<av_i16x8>(fracx.xxyyzzww),
++                                            av_i16x8{}));
+ #else
+   abcdl += CONVERT((CONVERT(abcdh - abcdl, V8<int32_t>) *
+                     CONVERT(fracx.xxyyzzww, V8<int32_t>)) >>
+@@ -1157,6 +1187,9 @@ static inline V8<uint16_t> addsat(V8<uint16_t> x, V8<uint16_t> y) {
+   return _mm_adds_epu16(x, y);
+ #elif USE_NEON
+   return vqaddq_u16(x, y);
++#elif USE_ALTIVEC
++  return bit_cast<V8<uint16_t>>(
++      vec_adds(bit_cast<av_u16x8>(x), bit_cast<av_u16x8>(y)));
+ #else
+   auto r = x + y;
+   return r | (r < x);
+diff --git a/gfx/wr/swgl/src/vector_type.h b/gfx/wr/swgl/src/vector_type.h
+index 36226aa00f..cacf355d8b 100644
+--- a/gfx/wr/swgl/src/vector_type.h
++++ b/gfx/wr/swgl/src/vector_type.h
+@@ -13,6 +13,25 @@
+ #  endif
+ #endif
+ 
++// AltiVec intrinsics work the same under GCC and clang. The VMX subset is
++// enough for the integer packing and blending helpers; VSX adds vec_sqrt.
++#ifdef __ALTIVEC__
++#  include <altivec.h>
++#  undef vector
++#  undef pixel
++#  undef bool
++#  define USE_ALTIVEC 1
++#  ifdef __VSX__
++#    define USE_VSX 1
++#  endif
++typedef __vector unsigned char av_u8x16;
++typedef __vector signed short av_i16x8;
++typedef __vector unsigned short av_u16x8;
++typedef __vector signed int av_i32x4;
++typedef __vector unsigned int av_u32x4;
++typedef __vector float av_f32x4;
++#endif
++
+ namespace glsl {
+ 
+ #ifdef __clang__
