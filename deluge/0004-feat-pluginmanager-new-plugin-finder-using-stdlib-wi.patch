@@ -1,0 +1,927 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Calum Lind <calumlind+deluge@gmail.com>
+Date: Fri, 6 Mar 2026 11:02:02 +0000
+Subject: [PATCH] feat(pluginmanager): new plugin finder using stdlib without
+ pkg_resources
+
+Replicate the functionality of pkg_resources with stdlib
+
+- ensure plugin manager picks latest version
+- prefer source dir over eggs
+- extract zip eggs to real paths to ensure usable resources files
+- activate plugins using sys.meta_path instead sys.path to avoid global
+  namespace probems and compatibility with pyinstaller.
+---
+ deluge/pluginmanagerbase.py                   | 377 ++++++++++++++----
+ deluge/plugins/pluginbase.py                  |  27 +-
+ deluge/tests/plugins/conftest.py              |  21 +
+ deluge/tests/plugins/test_plugin_resources.py |  52 +++
+ .../tests/plugins/test_pluginmanagerbase.py   | 125 +++++-
+ 5 files changed, 514 insertions(+), 88 deletions(-)
+ create mode 100644 deluge/tests/plugins/test_plugin_resources.py
+
+diff --git a/deluge/pluginmanagerbase.py b/deluge/pluginmanagerbase.py
+index 6e199cb78aec..01384bc89c5c 100644
+--- a/deluge/pluginmanagerbase.py
++++ b/deluge/pluginmanagerbase.py
+@@ -10,70 +10,272 @@
+ """PluginManagerBase"""
+ 
+ import email
++import importlib.abc
++import importlib.machinery
+ import logging
+-import os.path
++import sys
++import unicodedata
++import zipfile
++from functools import cached_property
++from importlib.metadata import EntryPoints
++from importlib.resources import files
++from pathlib import Path
+ 
+-import pkg_resources
+ from twisted.internet import defer
+ from twisted.python.failure import Failure
+ 
+-import deluge.common
+ import deluge.component as component
+ import deluge.configmanager
++from deluge.common import VersionSplit
+ 
+ log = logging.getLogger(__name__)
+ 
+ METADATA_KEYS = [
+     'Name',
+     'License',
+     'Author',
+     'Home-page',
+     'Summary',
+     'Platform',
+     'Version',
+     'Author-email',
+     'Description',
+ ]
+ 
+ DEPRECATION_WARNING = """
+ The plugin %s is not using the "deluge_" namespace.
+ In order to avoid package name clashes between regular python packages and
+ deluge plugins, the way deluge plugins should be created has changed.
+ If you're seeing this message and you're not the developer of the plugin which
+ triggered this warning, please report to it's author.
+ If you're the developer, please take a look at the plugins hosted on deluge's
+ git repository to have an idea of what needs to be changed.
+ """
+ 
+ 
++def _extract_egg(egg_path: Path, dest: Path) -> None:
++    """Extract a .egg zip to dest, skipping EGG-INFO metadata."""
++    dest.mkdir(parents=True, exist_ok=True)
++    with zipfile.ZipFile(egg_path) as zf:
++        for member in zf.namelist():
++            if not member.startswith('EGG-INFO/'):
++                zf.extract(member, dest)
++
++
++def _read_egg_info(egg_info: 'Path | zipfile.Path') -> tuple[str, str]:
++    """Read PKG-INFO and entry_points.txt from an egg-info directory.
++
++    Accepts a filesystem Path or zipfile.Path pointing directly at the
++    egg-info directory (e.g. EGG-INFO/ or PluginName.egg-info/).
++    """
++    pkg_info = (egg_info / 'PKG-INFO').read_text()
++    ep_path = egg_info / 'entry_points.txt'
++    ep_txt = ep_path.read_text() if ep_path.is_file() else ''
++    return pkg_info, ep_txt
++
++
++def _ep_module_root(entry_points: 'EntryPoints') -> str | None:
++    """Return the top-level package name from the first entry point."""
++    if ep := next(iter(entry_points), None):
++        return ep.value.split(':')[0].split('.')[0]
++    return None
++
++
++def plugin_name_to_id(name: str) -> str:
++    """Convert a plugin display name to its canonical id (lowercase kebab-case).
++
++    Applies NFKD unicode normalization and ASCII encoding to handle non-ASCII names.
++    Matches Python distribution name convention (PEP 503).
++    """
++    ascii_name = unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode()
++    return ascii_name.lower().replace(' ', '-').replace('_', '-')
++
++
++def _load_plugin_metadata(
++    item_path: Path,
++) -> tuple[Path, str, str] | None:
++    """Detect plugin type and read (location, pkg_info, ep_txt), or None."""
++    match item_path.suffix:
++        case '.egg' if item_path.is_file():
++            location = item_path
++            pkg_info, ep_txt = _read_egg_info(zipfile.Path(location, 'EGG-INFO'))
++        case '.egg' if item_path.is_dir():
++            location = item_path
++            pkg_info, ep_txt = _read_egg_info(location / 'EGG-INFO')
++        case '.egg-info' if item_path.is_dir():
++            location = item_path.parent
++            pkg_info, ep_txt = _read_egg_info(item_path)
++        case '.egg-link' if item_path.is_file():
++            location = Path(item_path.read_text().splitlines()[0].strip())
++            pkg_info, ep_txt = _read_egg_info(next(location.glob('*.egg-info')))
++        case _:
++            return None
++    return location, pkg_info, ep_txt
++
++
++def _parse_pkg_info(pkg_info: str) -> dict:
++    """Parse a PKG-INFO string and return a dict of metadata fields."""
++    metadata_msg = email.message_from_string(pkg_info)
++    metadata_ver = metadata_msg.get('Metadata-Version')
++
++    info = {key: metadata_msg.get(key, '') for key in METADATA_KEYS}
++
++    # Optional Description field in body (Metadata spec >=2.1)
++    if not info['Description'] and (metadata_ver or '').startswith('2'):
++        info['Description'] = metadata_msg.get_payload().strip()
++
++    return info
++
++
++class _PluginDirFinder(importlib.abc.MetaPathFinder):
++    """MetaPathFinder that loads top-level packages from a single directory.
++
++    Used for both directory plugins and extracted zip egg plugins. Registered
++    on sys.meta_path so it can be cleanly removed on plugin deactivation,
++    without sys.path pollution or module cache issues.
++    """
++
++    def __init__(self, directory: Path):
++        self._finder = importlib.machinery.FileFinder(
++            str(directory),
++            (importlib.machinery.SourceFileLoader, ['.py']),
++            (importlib.machinery.SourcelessFileLoader, ['.pyc']),
++        )
++
++    def find_spec(self, fullname, _path, target=None):
++        """Find a module spec for a top-level plugin package.
++
++        Only handles top-level imports (e.g. deluge_foo), not namespace
++        subpackage imports (e.g. deluge.plugins.foo).
++        """
++        if '.' in fullname:
++            return None
++        return self._finder.find_spec(fullname, target)
++
++    def invalidate_caches(self):
++        self._finder.invalidate_caches()
++
++
++class _PluginDist:
++    """Discovered plugin distribution.
++
++    Attributes:
++        name: Display name from PKG-INFO (e.g. "Foo Bar").
++        id: Normalised distribution id (e.g. "foo-bar"), PEP 503.
++        module_root: Top-level package from entry point (e.g. "deluge_foobar").
++    """
++
++    def __init__(
++        self,
++        name: str,
++        version: str,
++        location: Path,
++        entry_points: EntryPoints,
++        pkg_info: str,
++    ):
++        self.name = name
++        self.id = plugin_name_to_id(name)
++        self.version = version
++        self.location = location
++        self._entry_points = entry_points
++        self._pkg_info = pkg_info
++        self._finder: _PluginDirFinder | None = None
++        self._active: bool = False
++        self.module_root: str = _ep_module_root(entry_points) or self.id.replace(
++            '-', '_'
++        )
++
++    @property
++    def is_active(self) -> bool:
++        """Returns True if the plugin is loaded and active, False if not."""
++        return self._active
++
++    @cached_property
++    def info(self) -> dict:
++        """Return a dict of plugin metadata fields."""
++        return _parse_pkg_info(self._pkg_info)
++
++    @property
++    def entry_points(self) -> EntryPoints:
++        """Return all the plugin's entry points."""
++        return self._entry_points
++
++    @cached_property
++    def _egg_cache_dir(self) -> Path:
++        cache_base = Path(deluge.configmanager.get_config_dir()) / 'plugin_cache'
++        return cache_base / f'{self.id}-{self.version}'
++
++    @classmethod
++    def from_metadata(cls, location: Path, pkg_info: str, ep_txt: str) -> '_PluginDist':
++        meta = email.message_from_string(pkg_info)
++        entry_points = EntryPoints._from_text_for(ep_txt, None)
++        return cls(
++            name=meta.get('Name', ''),
++            version=meta.get('Version', ''),
++            location=location,
++            entry_points=entry_points,
++            pkg_info=pkg_info,
++        )
++
++    def activate(self):
++        if self.is_active:
++            return
++
++        is_plugin_egg = self.location.is_file()
++
++        if is_plugin_egg:
++            plugin_dir = self._egg_cache_dir
++            # Extract if new plugin egg or egg has changed
++            if not plugin_dir.exists() or (
++                self.location.stat().st_mtime_ns > plugin_dir.stat().st_mtime_ns
++            ):
++                _extract_egg(self.location, plugin_dir)
++        else:
++            plugin_dir = self.location
++
++        self._finder = _PluginDirFinder(plugin_dir)
++        sys.meta_path.insert(0, self._finder)
++        self._active = True
++
++    def deactivate(self):
++        if self._finder:
++            try:
++                sys.meta_path.remove(self._finder)
++            except ValueError:
++                pass
++            self._finder = None
++        # Evict cached modules so a subsequent activate() re-imports cleanly.
++        for key in list(sys.modules):
++            if key == self.module_root or key.startswith(self.module_root + '.'):
++                del sys.modules[key]
++        self._active = False
++
++
+ class PluginManagerBase:
+     """PluginManagerBase is a base class for PluginManagers to inherit"""
+ 
+     def __init__(
+         self,
+         config_file: str,
+         entry_name: str,
+-        plugin_dirs: list[str | os.PathLike] | None = None,
++        plugin_dirs: list[str | Path] | None = None,
+     ) -> None:
+         """Initialise the plugin manager.
+ 
+         Args:
+             config_file: Name of the config file (e.g. 'core.conf').
+             entry_name: The setuptools entry-point group to load plugins from
+                 (e.g. 'deluge.plugin.core').
+             plugin_dirs: Directories to scan for plugins. Defaults to None,
+                 which uses the standard base and user plugin directories.
+                 Primarily intended for testing.
+         """
+         log.debug('Plugin manager init..')
+ 
+         self.config = deluge.configmanager.ConfigManager(config_file)
+ 
+         # Create the plugins folder if it doesn't exist
+-        if not os.path.exists(
+-            os.path.join(deluge.configmanager.get_config_dir(), 'plugins')
+-        ):
+-            os.mkdir(os.path.join(deluge.configmanager.get_config_dir(), 'plugins'))
++        (Path(deluge.configmanager.get_config_dir()) / 'plugins').mkdir(exist_ok=True)
+ 
+         # This is the entry we want to load..
+         self.entry_name = entry_name
+@@ -110,115 +312,155 @@ def get_enabled_plugins(self):
+         return list(self.plugins)
+ 
+     @staticmethod
+-    def default_plugin_dirs() -> list[str]:
++    def default_plugin_dirs() -> list[Path]:
+         """Returns the default directories to scan for plugins."""
+-        base_dir = deluge.common.resource_filename('deluge', 'plugins')
+-        user_dir = os.path.join(deluge.configmanager.get_config_dir(), 'plugins')
+-        base_subdir = [
+-            os.path.join(base_dir, f)
+-            for f in os.listdir(base_dir)
+-            if os.path.isdir(os.path.join(base_dir, f))
+-        ]
+-        plugin_dirs = [base_dir, user_dir] + base_subdir
+-        return plugin_dirs
++        base_dir = Path(str(files('deluge') / 'plugins'))
++        user_dir = Path(deluge.configmanager.get_config_dir()) / 'plugins'
++        base_subdir = [item for item in base_dir.iterdir() if item.is_dir()]
++        return [base_dir, user_dir] + base_subdir
+ 
+     def scan_for_plugins(self) -> None:
+         """Scan plugin_dirs for available plugins."""
+-        str_dirs = [str(d) for d in self.plugin_dirs]
+-        for dirname in str_dirs:
+-            pkg_resources.working_set.add_entry(dirname)
+-        self.pkg_env = pkg_resources.Environment(str_dirs, platform=None, python=None)
+-
++        self._plugin_dist = {}
+         self.available_plugins = []
+-        for name in self.pkg_env:
+-            log.debug(
+-                'Found plugin: %s %s at %s',
+-                self.pkg_env[name][0].project_name,
+-                self.pkg_env[name][0].version,
+-                self.pkg_env[name][0].location,
++
++        for scan_dir in self.plugin_dirs:
++            scan_path = Path(scan_dir)
++            if not scan_path.is_dir():
++                continue
++            for item in scan_path.iterdir():
++                self.register_plugin(item)
++
++    def register_plugin(self, plugin_path: Path) -> None:
++        try:
++            plugin_metadata = _load_plugin_metadata(plugin_path)
++            plugin_dist = (
++                _PluginDist.from_metadata(*plugin_metadata) if plugin_metadata else None
+             )
+-            self.available_plugins.append(self.pkg_env[name][0].project_name)
++        except Exception:
++            log.warning(
++                'Skipping %s: could not read plugin metadata',
++                plugin_path,
++                exc_info=True,
++            )
++            return
++
++        if plugin_dist is None or not plugin_dist.name:
++            return
++
++        log.debug(
++            'Found plugin: %s %s at %s',
++            plugin_dist.name,
++            plugin_dist.version,
++            plugin_dist.location,
++        )
++        key = plugin_dist.id
++        existing = self._plugin_dist.get(key)
++        if existing:
++            new_ver = VersionSplit(plugin_dist.version)
++            old_ver = VersionSplit(existing.version)
++            # Prefer newer version, or a source directory over a plugin of equal version.
++            prefer_new = new_ver > old_ver or (
++                new_ver == old_ver
++                and existing.location.is_file()
++                and plugin_dist.location.is_dir()
++            )
++            if not prefer_new:
++                log.debug('Skipping duplicate plugin: %s at %s', key, plugin_path)
++                return
++            log.debug(
++                'Replacing plugin %s %s at %s with %s at %s',
++                key,
++                existing.version,
++                existing.location,
++                plugin_dist.version,
++                plugin_dist.location,
++            )
++            self.available_plugins.remove(existing.name)
++        self._plugin_dist[key] = plugin_dist
++        self.available_plugins.append(plugin_dist.name)
+ 
+     def enable_plugin(self, plugin_name):
+         """Enable a plugin.
+ 
+         Args:
+             plugin_name (str): The plugin name.
+ 
+         Returns:
+             Deferred: A deferred with callback value True or False indicating
+                 whether the plugin is enabled or not.
+ 
+         """
+         if plugin_name not in self.available_plugins:
+             log.warning('Cannot enable non-existent plugin %s', plugin_name)
+             return defer.succeed(False)
+ 
+         if plugin_name in self.plugins:
+             log.warning('Cannot enable already enabled plugin %s', plugin_name)
+             return defer.succeed(True)
+ 
+-        plugin_name = plugin_name.replace(' ', '-')
+-        egg = self.pkg_env[plugin_name][0]
+-        # Activate is required by non-namespace plugins.
+-        egg.activate()
++        plugin_key = plugin_name_to_id(plugin_name)
++        plugin_dist = self._plugin_dist[plugin_key]
++        plugin_dist.activate()
+         return_d = defer.succeed(True)
+ 
+-        for name in egg.get_entry_map(self.entry_name):
++        for ep in plugin_dist.entry_points.select(group=self.entry_name):
+             try:
+-                cls = egg.load_entry_point(self.entry_name, name)
+-                instance = cls(plugin_name.replace('-', '_'))
++                cls = ep.load()
++                instance = cls(plugin_dist.id)
+             except component.ComponentAlreadyRegistered as ex:
+                 log.error(ex)
+                 return defer.succeed(False)
+             except Exception as ex:
+                 log.error(
+-                    'Unable to instantiate plugin %r from %r!', name, egg.location
++                    'Unable to instantiate plugin %r from %r!',
++                    ep.name,
++                    plugin_dist.location,
+                 )
+                 log.exception(ex)
+                 continue
+             try:
+                 return_d = defer.maybeDeferred(instance.enable)
+             except Exception as ex:
+-                log.error('Unable to enable plugin: %s', name)
++                log.error('Unable to enable plugin: %s', ep.name)
+                 log.exception(ex)
+                 return_d = defer.fail(False)
+ 
+             if not instance.__module__.startswith('deluge_'):
+                 import warnings
+ 
+                 warnings.warn_explicit(
+-                    DEPRECATION_WARNING % name,
++                    DEPRECATION_WARNING % ep.name,
+                     DeprecationWarning,
+                     instance.__module__,
+                     0,
+                 )
+             if self._component_state == 'Started':
+ 
+                 def on_enabled(result, instance):
+                     return component.start([instance.plugin._component_name])
+ 
+                 return_d.addCallback(on_enabled, instance)
+ 
+             def on_started(result, instance):
+-                plugin_name_space = plugin_name.replace('-', ' ')
+-                self.plugins[plugin_name_space] = instance
+-                if plugin_name_space not in self.config['enabled_plugins']:
++                display_name = plugin_dist.name
++                self.plugins[display_name] = instance
++                if display_name not in self.config['enabled_plugins']:
+                     log.debug(
+-                        'Adding %s to enabled_plugins list in config', plugin_name_space
++                        'Adding %s to enabled_plugins list in config', display_name
+                     )
+-                    self.config['enabled_plugins'].append(plugin_name_space)
+-                log.info('Plugin %s enabled...', plugin_name_space)
++                    self.config['enabled_plugins'].append(display_name)
++                log.info('Plugin %s enabled...', display_name)
+                 return True
+ 
+             def on_started_error(result, instance):
+                 log.error(
+                     'Failed to start plugin: %s\n%s',
+-                    plugin_name,
++                    plugin_dist.name,
+                     result.getTraceback(elideFrameworkCode=1, detail='brief'),
+                 )
+-                self.plugins[plugin_name.replace('-', ' ')] = instance
+-                self.disable_plugin(plugin_name)
++                self.plugins[plugin_dist.name] = instance
++                self.disable_plugin(plugin_dist.name)
+                 return False
+ 
+             return_d.addCallbacks(
+@@ -249,53 +491,48 @@ def disable_plugin(self, name):
+         try:
+             d = defer.maybeDeferred(self.plugins[name].disable)
+         except Exception as ex:
+-            log.error('Error when disabling plugin: %s', self.plugin._component_name)
++            log.error(
++                'Error when disabling plugin: %s',
++                self.plugins[name].plugin._component_name,
++            )
+             log.debug(ex)
+             d = defer.succeed(False)
+ 
+         def on_disabled(result):
+             ret = True
+             if isinstance(result, Failure):
+                 log.debug(
+                     'Error when disabling plugin %s: %s', name, result.getTraceback()
+                 )
+                 ret = False
+             try:
+                 component.deregister(self.plugins[name].plugin)
+                 del self.plugins[name]
+                 self.config['enabled_plugins'].remove(name)
++                plugin_dist = self._plugin_dist.get(plugin_name_to_id(name))
++                if plugin_dist:
++                    plugin_dist.deactivate()
+             except Exception as ex:
+                 log.warning('Problems occurred disabling plugin: %s', name)
+                 log.debug(ex)
+                 ret = False
+             else:
+                 log.info('Plugin %s disabled...', name)
+             return ret
+ 
+         d.addBoth(on_disabled)
+         return d
+ 
+     def get_plugin_info(self, name):
+         """Returns a dictionary of plugin info from the metadata"""
+-
+-        if not self.pkg_env[name]:
++        plugin_dist = self._plugin_dist.get(plugin_name_to_id(name))
++        if not plugin_dist:
+             log.warning('Failed to retrieve info for plugin: %s', name)
+-            info = {}.fromkeys(METADATA_KEYS, '')
+-            info['Name'] = info['Version'] = 'not available'
+-            return info
++            return {
++                **dict.fromkeys(METADATA_KEYS, ''),
++                'Name': 'not available',
++                'Version': 'not available',
++                'Location': '',
++            }
+ 
+-        pkg_info = self.pkg_env[name][0].get_metadata('PKG-INFO')
+-        return self.parse_pkg_info(pkg_info)
+-
+-    @staticmethod
+-    def parse_pkg_info(pkg_info):
+-        metadata_msg = email.message_from_string(pkg_info)
+-        metadata_ver = metadata_msg.get('Metadata-Version')
+-
+-        info = {key: metadata_msg.get(key, '') for key in METADATA_KEYS}
+-
+-        # Optional Description field in body (Metadata spec >=2.1)
+-        if not info['Description'] and metadata_ver.startswith('2'):
+-            info['Description'] = metadata_msg.get_payload().strip()
+-
+-        return info
++        return {**plugin_dist.info, 'Location': str(plugin_dist.location)}
+diff --git a/deluge/plugins/pluginbase.py b/deluge/plugins/pluginbase.py
+index 8d55156900b8..c7b51dc7329b 100644
+--- a/deluge/plugins/pluginbase.py
++++ b/deluge/plugins/pluginbase.py
+@@ -13,64 +13,69 @@
+ log = logging.getLogger(__name__)
+ 
+ 
++def _plugin_rpc_name(plugin_name: str) -> str:
++    """Return the RPC namespace for a plugin name (lowercase snake_case)."""
++    return plugin_name.lower().replace('-', '_').replace(' ', '_')
++
++
+ class PluginBase(component.Component):
+     update_interval = 1
+ 
+     def __init__(self, name):
+         super().__init__(name, self.update_interval)
+ 
+     def enable(self):
+         raise NotImplementedError('Need to define an enable method!')
+ 
+     def disable(self):
+         raise NotImplementedError('Need to define a disable method!')
+ 
+ 
+ class CorePluginBase(PluginBase):
+     def __init__(self, plugin_name):
+-        super().__init__('CorePlugin.' + plugin_name)
+-        # Register RPC methods
+-        component.get('RPCServer').register_object(self, plugin_name.lower())
+-        log.debug('CorePlugin initialized..')
++        name = _plugin_rpc_name(plugin_name)
++        super().__init__('CorePlugin.' + name)
++        component.get('RPCServer').register_object(self, name)
++        log.debug('CorePlugin.%s initialized..', name)
+ 
+     def __del__(self):
+         try:
+             component.get('RPCServer').deregister_object(self)
+         except KeyError:
+             log.debug('RPCServer already deregistered')
+ 
+     def enable(self):
+         super().enable()
+ 
+     def disable(self):
+         super().disable()
+ 
+ 
+ class Gtk3PluginBase(PluginBase):
+     def __init__(self, plugin_name):
+-        super().__init__('Gtk3Plugin.' + plugin_name)
+-        log.debug('Gtk3Plugin initialized..')
++        name = _plugin_rpc_name(plugin_name)
++        super().__init__('Gtk3Plugin.' + name)
++        log.debug('Gtk3Plugin.%s initialized..', name)
+ 
+     def enable(self):
+         super().enable()
+ 
+     def disable(self):
+         super().disable()
+ 
+ 
+ class WebPluginBase(PluginBase):
+     scripts = []
+     debug_scripts = []
+ 
+     stylesheets = []
+     debug_stylesheets = []
+ 
+     def __init__(self, plugin_name):
+-        super().__init__('WebPlugin.' + plugin_name)
+-
+-        # Register JSON rpc methods
+-        component.get('JSON').register_object(self, plugin_name.lower())
+-        log.debug('WebPlugin initialized..')
++        name = _plugin_rpc_name(plugin_name)
++        super().__init__('WebPlugin.' + name)
++        component.get('JSON').register_object(self, name)
++        log.debug('WebPlugin.%s initialized..', name)
+ 
+     def __del__(self):
+         component.get('JSON').deregister_object(self)
+diff --git a/deluge/tests/plugins/conftest.py b/deluge/tests/plugins/conftest.py
+index 8509278a767c..9768554f9ec3 100644
+--- a/deluge/tests/plugins/conftest.py
++++ b/deluge/tests/plugins/conftest.py
+@@ -8,6 +8,7 @@
+ import pytest
+ 
+ import deluge.common
++from deluge.pluginmanagerbase import _extract_egg, _PluginDirFinder
+ 
+ 
+ @pytest.fixture(scope='session')
+@@ -56,5 +57,25 @@ def fake_egg(tmp_path):
+         zf.writestr('EGG-INFO/entry_points.txt', ep_txt)
+         zf.writestr('fake_plugin/__init__.py', '')
+         zf.writestr('fake_plugin/config.ui', '<ui/>')
++        zf.writestr('fake_plugin/data/script.js', 'console.log("test");')
+ 
+     return plugins_dir, egg_path
++
++
++@pytest.fixture()
++def installed_fake_plugin(fake_egg, tmp_path):
++    """Extract fake_egg and register it via _PluginDirFinder on sys.meta_path.
++
++    Yields with fake_plugin importable via importlib.resources, then cleans up.
++    """
++    _, egg_path = fake_egg
++    dest = tmp_path / 'extracted'
++    _extract_egg(egg_path, dest)
++
++    finder = _PluginDirFinder(dest)
++    sys.meta_path.insert(0, finder)
++    # Evict any cached module so the import goes through our finder
++    sys.modules.pop('fake_plugin', None)
++    yield
++    sys.meta_path.remove(finder)
++    sys.modules.pop('fake_plugin', None)
+diff --git a/deluge/tests/plugins/test_plugin_resources.py b/deluge/tests/plugins/test_plugin_resources.py
+new file mode 100644
+index 000000000000..c2d268d952ba
+--- /dev/null
++++ b/deluge/tests/plugins/test_plugin_resources.py
+@@ -0,0 +1,52 @@
++# SPDX-License-Identifier: GPL-3.0-or-later WITH GPL-3.0-linking-exception
++from importlib import resources
++from pathlib import Path
++
++from deluge.pluginmanagerbase import _extract_egg
++
++
++def test_extract_egg_creates_real_files(fake_egg, tmp_path):
++    """Verify extraction produces real files on disk.
++
++    Zip eggs serve resources from inside the archive, so non-Python assets
++    (JS, UI files, etc.) must be extracted to disk to be accessible as real
++    filesystem paths.
++    """
++    _, egg_path = fake_egg
++    dest = tmp_path / 'extracted'
++    _extract_egg(egg_path, dest)
++
++    assert (dest / 'fake_plugin' / '__init__.py').exists()
++    assert (dest / 'fake_plugin' / 'data' / 'script.js').exists()
++    assert (
++        dest / 'fake_plugin' / 'data' / 'script.js'
++    ).read_text() == 'console.log("test");'
++
++
++def test_extract_egg_skips_egg_info(fake_egg, tmp_path):
++    """Test that EGG-INFO (setuptools package metadata) is excluded from extraction.
++
++    Only importable code belongs in the cache dir, a top-level EGG-INFO directory
++    could interfere with namespace package discovery by importlib.
++    """
++    _, egg_path = fake_egg
++    dest = tmp_path / 'extracted'
++    _extract_egg(egg_path, dest)
++
++    assert not (dest / 'EGG-INFO').exists()
++
++
++def test_plugin_dir_finder_resources_are_real_paths(installed_fake_plugin):
++    """After activation via _PluginDirFinder, files() returns a real pathlib.Path."""
++    resource = resources.files('fake_plugin') / 'data' / 'script.js'
++
++    assert isinstance(resource, Path), f'Expected pathlib.Path, got {type(resource)}'
++    assert resource.exists()
++    assert resource.read_text() == 'console.log("test");'
++
++
++def test_str_get_resource_gives_real_path(installed_fake_plugin):
++    """Casting a resource path to str yields a real, resolvable filesystem path."""
++    path_str = str(resources.files('fake_plugin') / 'data' / 'script.js')
++
++    assert Path(path_str).exists(), f'Path does not exist: {path_str}'
+diff --git a/deluge/tests/plugins/test_pluginmanagerbase.py b/deluge/tests/plugins/test_pluginmanagerbase.py
+index 7c681d31003a..299213b175df 100644
+--- a/deluge/tests/plugins/test_pluginmanagerbase.py
++++ b/deluge/tests/plugins/test_pluginmanagerbase.py
+@@ -1,32 +1,41 @@
+ # SPDX-License-Identifier: GPL-3.0-or-later WITH GPL-3.0-linking-exception
+ import sys
++import zipfile
++from importlib.metadata import EntryPoints
++from pathlib import Path
+ 
+ import pytest
+ 
+-from deluge.pluginmanagerbase import PluginManagerBase
++from deluge.pluginmanagerbase import (
++    PluginManagerBase,
++    _load_plugin_metadata,
++    _parse_pkg_info,
++    _PluginDist,
++    plugin_name_to_id,
++)
+ 
+ 
+ def test_parse_pkg_info_metadata_1_x_no_description():
+     """Metadata 1.x has no body fallback; Description must be empty string."""
+     pkg_info = 'Metadata-Version: 1.0\nName: Foo\nVersion: 0.1\n'
+-    info = PluginManagerBase.parse_pkg_info(pkg_info)
++    info = _parse_pkg_info(pkg_info)
+     assert info['Description'] == ''
+ 
+ 
+ def test_parse_pkg_info_metadata_2_1():
+     pkg_info = """Metadata-Version: 2.1
+ Name: AutoAdd
+ Version: 1.8
+ Summary: Monitors folders for .torrent files.
+ Home-page: http://dev.deluge-torrent.org/wiki/Plugins/AutoAdd
+ Author: Chase Sterling, Pedro Algarvio
+ Author-email: chase.sterling@gmail.com, pedro@algarvio.me
+ License: GPLv3
+ Platform: UNKNOWN
+ 
+ Monitors folders for .torrent files.
+     """
+-    plugin_info = PluginManagerBase.parse_pkg_info(pkg_info)
++    plugin_info = _parse_pkg_info(pkg_info)
+     for value in plugin_info.values():
+         assert value != ''
+     result = 'Monitors folders for .torrent files.'
+@@ -101,12 +110,9 @@ def test_scan_egg_link(tmp_path):
+     pm = PluginManagerBase('core.conf', 'deluge.plugin.core', plugin_dirs=[plugins_dir])
+     assert 'MyPlugin' in pm.available_plugins
+     assert pm.get_plugin_info('MyPlugin')['Version'] == '0.1'
++    assert pm._plugin_dist['myplugin'].entry_points.select(group='deluge.plugin.core')
+ 
+ 
+-@pytest.mark.skipif(
+-    sys.platform == 'win32',
+-    reason='pkg_resources normalizes project_name to lowercase on Windows for directory eggs',
+-)
+ def test_scan_unpacked_egg_dir(tmp_path):
+     """An unpacked .egg directory (Ubuntu-style) with EGG-INFO/ must be discovered."""
+     plugins_dir = tmp_path / 'plugins'
+@@ -144,3 +150,108 @@ def test_no_duplicate_plugins(fake_egg):
+     )
+     names = [n for n in pm.available_plugins if n == 'FakePlugin']
+     assert len(names) == 1
++
++
++def test_higher_version_wins(tmp_path):
++    """When two eggs for the same plugin are found, the higher version must be kept."""
++
++    def make_egg(directory, version):
++        pkg_info = f'Metadata-Version: 1.0\nName: FakePlugin\nVersion: {version}\n'
++        egg_path = directory / f'FakePlugin-{version}-py3.egg'
++        with zipfile.ZipFile(egg_path, 'w') as zf:
++            zf.writestr('EGG-INFO/PKG-INFO', pkg_info)
++            zf.writestr('EGG-INFO/entry_points.txt', '')
++        return egg_path
++
++    old_dir = tmp_path / 'old'
++    new_dir = tmp_path / 'new'
++    old_dir.mkdir()
++    new_dir.mkdir()
++    make_egg(old_dir, '0.1')
++    make_egg(new_dir, '0.2')
++
++    pm = PluginManagerBase(
++        'core.conf', 'deluge.plugin.core', plugin_dirs=[old_dir, new_dir]
++    )
++    assert pm.get_plugin_info('FakePlugin')['Version'] == '0.2'
++
++
++@pytest.mark.parametrize(
++    'name, expected',
++    [
++        ('AutoAdd', 'autoadd'),
++        ('Auto Add', 'auto-add'),
++        ('my-plugin', 'my-plugin'),
++        ('my_plugin', 'my-plugin'),
++        ('My Plugin', 'my-plugin'),
++        ('Caf\u00e9', 'cafe'),  # NFKD strips combining accent
++    ],
++)
++def test_plugin_name_to_id(name, expected):
++    """plugin_name_to_id must return lowercase kebab-case ASCII."""
++    assert plugin_name_to_id(name) == expected
++
++
++def test_plugin_info_has_location(fake_egg):
++    """get_plugin_info must include a non-empty Location string."""
++    plugins_dir, _ = fake_egg
++    pm = PluginManagerBase('core.conf', 'deluge.plugin.core', plugin_dirs=[plugins_dir])
++    info = pm.get_plugin_info('FakePlugin')
++    assert 'Location' in info
++    assert info['Location']  # non-empty
++    assert Path(info['Location']).exists()
++
++
++def test_load_plugin_metadata_ignores_unknown_files(tmp_path):
++    """_load_plugin_metadata must return None for files it doesn't recognise."""
++    junk = tmp_path / 'something.txt'
++    junk.write_text('irrelevant')
++    assert _load_plugin_metadata(junk) is None
++
++
++def test_deactivate_clears_module_cache(tmp_path):
++    """deactivate() must evict the plugin package and its submodules from sys.modules."""
++    dist = _PluginDist(
++        name='FakePlugin',
++        version='0.1',
++        location=tmp_path,
++        entry_points=EntryPoints(),
++        pkg_info='',
++    )
++    dist._active = True
++
++    # Simulate modules loaded when the plugin was active
++    sys.modules['fakeplugin'] = object()
++    sys.modules['fakeplugin.core'] = object()
++
++    dist.deactivate()
++
++    assert 'fakeplugin' not in sys.modules
++    assert 'fakeplugin.core' not in sys.modules
++
++
++def test_deactivate_evicts_entry_point_module(tmp_path):
++    """deactivate() must use the entry point module name, not the dist id.
++
++    For deluge plugins the top-level package (e.g. deluge_fakeplugin) differs
++    from the distribution id (e.g. fakeplugin). The eviction must target the
++    actual imported package, derived from the entry point value.
++    """
++    ep_txt = '[deluge.plugin.core]\nFakePlugin = deluge_fakeplugin:CorePlugin\n'
++    eps = EntryPoints._from_text_for(ep_txt, None)
++    dist = _PluginDist(
++        name='FakePlugin',
++        version='0.1',
++        location=tmp_path,
++        entry_points=eps,
++        pkg_info='',
++    )
++    dist._active = True
++
++    sys.modules['deluge_fakeplugin'] = object()
++    sys.modules['deluge_fakeplugin.core'] = object()
++
++    dist.deactivate()
++
++    assert 'deluge_fakeplugin' not in sys.modules
++    assert 'deluge_fakeplugin.core' not in sys.modules

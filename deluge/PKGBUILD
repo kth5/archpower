@@ -9,17 +9,21 @@ pkgname=(
   deluge-gtk
 )
 pkgver=2.2.0
-pkgrel=4
+pkgrel=8
 epoch=1
 pkgdesc="BitTorrent client with multiple user interfaces in a client/server model"
 url="https://deluge-torrent.org/"
-arch=(any)
-license=("GPL-3.0-only WITH cryptsetup-OpenSSL-exception")
+arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
+license=("GPL-3.0-or-later WITH GPL-3.0-linking-exception")
 depends=(
-  libtorrent-rasterbar
+  boost-libs
+  glibc
+  libgcc
+  libstdc++
   openssl
   python
   python-chardet
+  python-cryptography
   python-dbus
   python-distro
   python-geoip
@@ -50,10 +54,13 @@ _gtk_depends=(
 )
 makedepends=(
   "${_gtk_depends[@]}"
+  boost
+  cmake
   git
   intltool
   libappindicator-gtk3
   libnotify
+  ninja
   python-build
   python-installer
   python-pygame
@@ -62,40 +69,88 @@ makedepends=(
 )
 source=(
   "git+https://github.com/deluge-torrent/deluge?signed#tag=deluge-$pkgver"
+  "libtorrent-rasterbar::git+https://github.com/arvidn/libtorrent.git#tag=v2.0.14"
+  git+https://github.com/arvidn/libsimulator.git
+  git+https://github.com/arvidn/try_signal.git
+  git+https://github.com/paullouisageneau/boost-asio-gnutls.git
+  010-libtorrent-rasterbar-fix-for-fortify-source-3.patch
   0001-Fix-data-installation-when-building-wheel.patch
+  0002-tests-plugins-new-tests-for-plugin-discovery-and-loa.patch
+  0003-feat-ui-use-importlib-in-entrypoint-instead-of-pkg_r.patch
+  0004-feat-pluginmanager-new-plugin-finder-using-stdlib-wi.patch
+  0005-feat-plugins-replace-common.py-pkg_resources-with-im.patch
+  0006-replace-deprecated-calls-in-certificate-generation.patch
 )
 b2sums=('2dad4c8e05e1b0d7f3b1ece0ea2d184a8d584b1bae377d3aee8a19003829f204516125cc5d17acf6f1c33b099190ff606ee2f352374897214498e6311815a854'
-        '01fd93dd75ec5d7317f03fb8fcbcc46ac39737c8e751560b51476b038879dde3de4194393c556dea2ec74c443c0d1a8d67a12e2121b8cc4bb581e3a16495999d')
+        '0065780556d8925d41b1b7dc794293944e9746758eb56931cb7f5a3a9ce1e820982f644afc0ee29415adada5f83f0f9bd199bab99512bfecb0406c0ff244236a'
+        'SKIP'
+        'SKIP'
+        'SKIP'
+        'cc2fb23db916df86fb692c743718ebabcb35172f4868e8b9d2819b3323ee538d75f122f60ffcf1064dd147ca299cdd208924bde97e46eda8e1ea3c3480c43071'
+        '01fd93dd75ec5d7317f03fb8fcbcc46ac39737c8e751560b51476b038879dde3de4194393c556dea2ec74c443c0d1a8d67a12e2121b8cc4bb581e3a16495999d'
+        'e6ff2a91a299e77759a5d0a68bcb1d871e396f756007642efb425925a5e5e26ca75de408ad2aca72390119653e485e9c61b9d0d3ec9fd3b52a5bea61f7d7faf5'
+        'd473dd3987bf4a29606c5e91b68fa87ee68688414616c209faf0a9be5e05d3a38b945c48c37dad50537e2b06b0b211a51088437b02249c2410d2c874c0d2e38a'
+        'c67b97dc2d9fb2de2f33bb2ba8425be4d8777e1c31b188ace8705d5c3fe76c804b65011e2c290e29c6e18e844b246a8da2ca41010dbfff3f833e61a8fec9c16c'
+        'f3f30a2b95afda85e538b5fba4a9e0f60f8f62842c53dbb90b215f919a547a6ded945cbce2b9d2416713198314d176810060c6ca2cfd32655752090f7080462d'
+        '20c600df11374175c1770688a05bd7ef9b61e8f178633e724a77af47eee51227b6c49f35af4a8044f6a574dde12311ea8307f747a6f21c7f17509d188848a02b')
 validpgpkeys=(
   EA01185D0E8AA00D6323A30890597A687B836BA3 # Calum Lind <calumlind@gmail.com>
 )
 
-_backports=(
-  # tests(plugins): new tests for plugin discovery and loading
-  '319eaf53995afd729dd9001a04811c669a540871'
-  # feat(ui): use importlib in entrypoint instead of pkg_resources
-  '1a031d00094d4613667bcaadae57b548b7e1413b'
-  # feat(pluginmanager): new plugin finder using stdlib without pkg_resources
-  'dab761f3b857327ca87c18e56f723849bd8baeef'
-  # feat(plugins): replace common.py pkg_resources with importlib
-  '959d5b83e37ce8ef497685634984909367702fe9'
-)
-
-
 prepare() {
   cd deluge
 
-  local _c
-  for _c in "${_backports[@]}"; do
-    git log --oneline --max-count=1 "${_c}"
-    git cherry-pick --no-commit "${_c}"
-  done
-
   # Installation fixes
   git apply -3 ../0001-Fix-data-installation-when-building-wheel.patch
+
+  # pkg_resources deprecation
+  git apply -3 ../0002-tests-plugins-new-tests-for-plugin-discovery-and-loa.patch
+  # https://github.com/deluge-torrent/deluge/pull/501
+  git apply -3 ../0003-feat-ui-use-importlib-in-entrypoint-instead-of-pkg_r.patch
+  git apply -3 ../0004-feat-pluginmanager-new-plugin-finder-using-stdlib-wi.patch
+  git apply -3 ../0005-feat-plugins-replace-common.py-pkg_resources-with-im.patch
+
+  # cryptography API break
+  # https://gitlab.archlinux.org/archlinux/packaging/packages/deluge/-/work_items/8
+  # https://github.com/deluge-torrent/deluge/pull/514
+  git apply -3 ../0006-replace-deprecated-calls-in-certificate-generation.patch
+
+  cd ../libtorrent-rasterbar
+
+  # https://github.com/arvidn/libtorrent/issues/7519
+  git apply -3 ../010-libtorrent-rasterbar-fix-for-fortify-source-3.patch
+
+  git submodule init
+  git submodule set-url simulation/libsimulator "$srcdir/libsimulator"
+  git submodule set-url deps/try_signal "$srcdir/try_signal"
+  git submodule set-url deps/asio-gnutls "$srcdir/boost-asio-gnutls"
+  git -c protocol.file.allow=always -c protocol.allow=never submodule update
 }
 
 build() {
+  CFLAGS+=' -DNDEBUG'
+  CXXFLAGS+=' -DNDEBUG'
+
+  local cmake_options=(
+    -S libtorrent-rasterbar
+    -B libtorrent-build
+    -G Ninja
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_INSTALL_LIBDIR=lib/deluge
+    -D CMAKE_INSTALL_RPATH=/usr/lib/deluge
+    -D boost-python-module-name=python
+    -D python-bindings=ON
+    -W no-dev
+  )
+
+  cmake "${cmake_options[@]}"
+  cmake --build libtorrent-build
+  DESTDIR="$srcdir/libtorrent-install" cmake --install libtorrent-build
+
+  local sitedir="$(python -c 'import sysconfig; print(sysconfig.get_path("platlib"))')"
+  export PYTHONPATH="$srcdir/libtorrent-build$sitedir"
+
   cd deluge
   python -m build --wheel --no-isolation
 }
@@ -123,7 +178,7 @@ package_deluge() {
   install -Dt "$pkgdir/usr/lib/systemd/system/deluge-web.service.d" \
     -m644 packaging/systemd/user.conf
 
-  echo 'u deluge - "Deluge BitTorrent daemon" /srv/deluge' |
+  echo 'u! deluge - "Deluge BitTorrent daemon" /srv/deluge' |
     install -Dm644 /dev/stdin "$pkgdir/usr/lib/sysusers.d/$pkgname.conf"
   echo 'd /srv/deluge 0770 deluge deluge' |
     install -Dm644 /dev/stdin "$pkgdir/usr/lib/tmpfiles.d/$pkgname.conf"
@@ -132,8 +187,12 @@ package_deluge() {
   _pick gtk "$pkgdir"/usr/share/man/man1/deluge-gtk.1
   _pick gtk "$pkgdir"/usr/share/{applications,icons,metainfo,pixmaps}
 
-  local sitedir="$(python -c 'import site; print(site.getsitepackages()[0])')"
+  local sitedir="$(python -c 'import sysconfig; print(sysconfig.get_path("platlib"))')"
   _pick gtk "$pkgdir$sitedir"/deluge/ui/gtk3
+
+  mkdir -p "$pkgdir/usr/lib/deluge"
+  cp -a -t "$pkgdir/usr/lib/deluge" ../libtorrent-install/usr/lib/deluge/*.so.*
+  cp -a -t "$pkgdir$sitedir/deluge" ../libtorrent-install$sitedir/*.so
 
   install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 LICENSE
 }

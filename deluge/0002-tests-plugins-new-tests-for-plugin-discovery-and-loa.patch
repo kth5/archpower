@@ -1,0 +1,387 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Calum Lind <calumlind+deluge@gmail.com>
+Date: Sun, 1 Mar 2026 21:20:43 +0000
+Subject: [PATCH] tests(plugins): new tests for plugin discovery and loading
+
+Improve test coverage for finding and loading egg plugins before we
+replace pkg_resources with importlib
+---
+ deluge/pluginmanagerbase.py                   |  35 ++++-
+ deluge/{core => tests/plugins}/__init__.py    |   0
+ deluge/tests/plugins/conftest.py              |  60 +++++++
+ .../tests/plugins/test_pluginmanagerbase.py   | 146 ++++++++++++++++++
+ deluge/tests/test_plugin_metadata.py          |  43 ------
+ 5 files changed, 234 insertions(+), 50 deletions(-)
+ copy deluge/{core => tests/plugins}/__init__.py (100%)
+ create mode 100644 deluge/tests/plugins/conftest.py
+ create mode 100644 deluge/tests/plugins/test_pluginmanagerbase.py
+ delete mode 100644 deluge/tests/test_plugin_metadata.py
+
+diff --git a/deluge/pluginmanagerbase.py b/deluge/pluginmanagerbase.py
+index 52dae615bc5d..6e199cb78aec 100644
+--- a/deluge/pluginmanagerbase.py
++++ b/deluge/pluginmanagerbase.py
+@@ -49,64 +49,85 @@
+ class PluginManagerBase:
+     """PluginManagerBase is a base class for PluginManagers to inherit"""
+ 
+-    def __init__(self, config_file, entry_name):
++    def __init__(
++        self,
++        config_file: str,
++        entry_name: str,
++        plugin_dirs: list[str | os.PathLike] | None = None,
++    ) -> None:
++        """Initialise the plugin manager.
++
++        Args:
++            config_file: Name of the config file (e.g. 'core.conf').
++            entry_name: The setuptools entry-point group to load plugins from
++                (e.g. 'deluge.plugin.core').
++            plugin_dirs: Directories to scan for plugins. Defaults to None,
++                which uses the standard base and user plugin directories.
++                Primarily intended for testing.
++        """
+         log.debug('Plugin manager init..')
+ 
+         self.config = deluge.configmanager.ConfigManager(config_file)
+ 
+         # Create the plugins folder if it doesn't exist
+         if not os.path.exists(
+             os.path.join(deluge.configmanager.get_config_dir(), 'plugins')
+         ):
+             os.mkdir(os.path.join(deluge.configmanager.get_config_dir(), 'plugins'))
+ 
+         # This is the entry we want to load..
+         self.entry_name = entry_name
+ 
+         # Loaded plugins
+         self.plugins = {}
+ 
++        # Directories scanned for plugins
++        self.plugin_dirs = plugin_dirs if plugin_dirs else self.default_plugin_dirs()
++
+         # Scan the plugin folders for plugins
+         self.scan_for_plugins()
+ 
+     def enable_plugins(self):
+         # Load plugins that are enabled in the config.
+         for name in self.config['enabled_plugins']:
+             self.enable_plugin(name)
+ 
+     def disable_plugins(self):
+         """Disable all plugins that are enabled"""
+         # Dict will be modified so iterate over generated list
+         for key in list(self.plugins):
+             self.disable_plugin(key)
+ 
+     def __getitem__(self, key):
+         return self.plugins[key]
+ 
+     def get_available_plugins(self):
+         """Returns a list of the available plugins name"""
+         return self.available_plugins
+ 
+     def get_enabled_plugins(self):
+         """Returns a list of enabled plugins"""
+         return list(self.plugins)
+ 
+-    def scan_for_plugins(self):
+-        """Scans for available plugins"""
++    @staticmethod
++    def default_plugin_dirs() -> list[str]:
++        """Returns the default directories to scan for plugins."""
+         base_dir = deluge.common.resource_filename('deluge', 'plugins')
+         user_dir = os.path.join(deluge.configmanager.get_config_dir(), 'plugins')
+         base_subdir = [
+             os.path.join(base_dir, f)
+             for f in os.listdir(base_dir)
+             if os.path.isdir(os.path.join(base_dir, f))
+         ]
+         plugin_dirs = [base_dir, user_dir] + base_subdir
++        return plugin_dirs
+ 
+-        for dirname in plugin_dirs:
++    def scan_for_plugins(self) -> None:
++        """Scan plugin_dirs for available plugins."""
++        str_dirs = [str(d) for d in self.plugin_dirs]
++        for dirname in str_dirs:
+             pkg_resources.working_set.add_entry(dirname)
+-        self.pkg_env = pkg_resources.Environment(
+-            plugin_dirs, platform=None, python=None
+-        )
++        self.pkg_env = pkg_resources.Environment(str_dirs, platform=None, python=None)
+ 
+         self.available_plugins = []
+         for name in self.pkg_env:
+diff --git a/deluge/core/__init__.py b/deluge/tests/plugins/__init__.py
+similarity index 100%
+copy from deluge/core/__init__.py
+copy to deluge/tests/plugins/__init__.py
+diff --git a/deluge/tests/plugins/conftest.py b/deluge/tests/plugins/conftest.py
+new file mode 100644
+index 000000000000..8509278a767c
+--- /dev/null
++++ b/deluge/tests/plugins/conftest.py
+@@ -0,0 +1,60 @@
++# SPDX-License-Identifier: GPL-3.0-or-later WITH GPL-3.0-linking-exception
++
++import subprocess
++import sys
++import zipfile
++from pathlib import Path
++
++import pytest
++
++import deluge.common
++
++
++@pytest.fixture(scope='session')
++def builtin_egg_info_dir(tmp_path_factory):
++    """Session-scoped: generate egg-info for all built-in plugins into a tmp dir.
++
++    Runs ``setup.py egg_info --egg-base <tmp/plugins>`` for each built-in plugin
++    so the plugin scanner can discover them without polluting the source tree.
++
++    Returns the plugins/ Path containing all generated .egg-info directories.
++    """
++    plugins_dir = tmp_path_factory.mktemp('builtin_plugins')
++
++    plugin_src_root = Path(deluge.common.resource_filename('deluge', 'plugins'))
++    for plugin_dir in sorted(plugin_src_root.iterdir()):
++        if not (plugin_dir / 'setup.py').is_file():
++            continue
++
++        subprocess.run(
++            [sys.executable, 'setup.py', 'egg_info', '--egg-base', str(plugins_dir)],
++            cwd=str(plugin_dir),
++            check=True,
++            capture_output=True,
++        )
++    return plugins_dir
++
++
++@pytest.fixture()
++def fake_egg(tmp_path):
++    """Create a minimal bdist_egg zip in a plugins directory.
++
++    Includes a Python module (fake_plugin) with a resource file (config.ui)
++    and entry points, so it can be used for both discovery and resource tests.
++
++    Returns:
++        plugins_dir, egg_path
++    """
++    pkg_info = 'Metadata-Version: 1.0\nName: FakePlugin\nVersion: 0.1\n'
++    ep_txt = '[deluge.plugin.core]\nFakePlugin = fake_plugin:CorePlugin\n'
++    plugins_dir = tmp_path / 'plugins'
++    plugins_dir.mkdir()
++    egg_path = plugins_dir / 'FakePlugin-0.1-py3.egg'
++
++    with zipfile.ZipFile(egg_path, 'w') as zf:
++        zf.writestr('EGG-INFO/PKG-INFO', pkg_info)
++        zf.writestr('EGG-INFO/entry_points.txt', ep_txt)
++        zf.writestr('fake_plugin/__init__.py', '')
++        zf.writestr('fake_plugin/config.ui', '<ui/>')
++
++    return plugins_dir, egg_path
+diff --git a/deluge/tests/plugins/test_pluginmanagerbase.py b/deluge/tests/plugins/test_pluginmanagerbase.py
+new file mode 100644
+index 000000000000..7c681d31003a
+--- /dev/null
++++ b/deluge/tests/plugins/test_pluginmanagerbase.py
+@@ -0,0 +1,146 @@
++# SPDX-License-Identifier: GPL-3.0-or-later WITH GPL-3.0-linking-exception
++import sys
++
++import pytest
++
++from deluge.pluginmanagerbase import PluginManagerBase
++
++
++def test_parse_pkg_info_metadata_1_x_no_description():
++    """Metadata 1.x has no body fallback; Description must be empty string."""
++    pkg_info = 'Metadata-Version: 1.0\nName: Foo\nVersion: 0.1\n'
++    info = PluginManagerBase.parse_pkg_info(pkg_info)
++    assert info['Description'] == ''
++
++
++def test_parse_pkg_info_metadata_2_1():
++    pkg_info = """Metadata-Version: 2.1
++Name: AutoAdd
++Version: 1.8
++Summary: Monitors folders for .torrent files.
++Home-page: http://dev.deluge-torrent.org/wiki/Plugins/AutoAdd
++Author: Chase Sterling, Pedro Algarvio
++Author-email: chase.sterling@gmail.com, pedro@algarvio.me
++License: GPLv3
++Platform: UNKNOWN
++
++Monitors folders for .torrent files.
++    """
++    plugin_info = PluginManagerBase.parse_pkg_info(pkg_info)
++    for value in plugin_info.values():
++        assert value != ''
++    result = 'Monitors folders for .torrent files.'
++    assert plugin_info['Description'] == result
++
++
++def test_scan_finds_specific_builtin_plugins(builtin_egg_info_dir):
++    """Well-known built-in plugins must all be present."""
++    expected = [
++        'AutoAdd',
++        'Blocklist',
++        'Execute',
++        'Extractor',
++        'Label',
++        'Notifications',
++        'Scheduler',
++        'Stats',
++        'Toggle',
++        'WebUi',
++    ]
++    pm = PluginManagerBase(
++        'core.conf', 'deluge.plugin.core', plugin_dirs=[builtin_egg_info_dir]
++    )
++    assert sorted(pm.available_plugins) == expected
++
++
++def test_plugin_info_all_values_are_strings(builtin_egg_info_dir):
++    """All values from get_plugin_info must be strings, with Name and Version always set."""
++    pm = PluginManagerBase(
++        'core.conf', 'deluge.plugin.core', plugin_dirs=[builtin_egg_info_dir]
++    )
++    for plugin in pm.available_plugins:
++        info = pm.get_plugin_info(plugin)
++        for key, value in info.items():
++            assert isinstance(key, str), f'{plugin}: key {key!r} is not str'
++            assert isinstance(value, str), f'{plugin}: value for {key!r} is not str'
++        assert info['Name'], f'{plugin}: Name is empty'
++        assert info['Version'], f'{plugin}: Version is empty'
++
++
++def test_plugin_info_invalid_name():
++    """get_plugin_info for unknown plugin returns sentinel values."""
++    pm = PluginManagerBase('core.conf', 'deluge.plugin.core', plugin_dirs=[])
++    info = pm.get_plugin_info('NonExistentPlugin')
++    assert info['Name'] == 'not available'
++    assert info['Version'] == 'not available'
++
++
++def test_scan_egg_zip(fake_egg):
++    """A minimal .egg zip dropped in the plugins dir must be discovered."""
++    plugins_dir, _ = fake_egg
++    pm = PluginManagerBase('core.conf', 'deluge.plugin.core', plugin_dirs=[plugins_dir])
++    assert 'FakePlugin' in pm.available_plugins
++
++
++def test_scan_egg_link(tmp_path):
++    """A .egg-link file pointing at a source dir must be discovered."""
++    source_dir = tmp_path / 'MyPlugin'
++    egg_info_dir = source_dir / 'MyPlugin.egg-info'
++    egg_info_dir.mkdir(parents=True)
++    (egg_info_dir / 'PKG-INFO').write_text(
++        'Metadata-Version: 1.0\nName: MyPlugin\nVersion: 0.1\n'
++    )
++    (egg_info_dir / 'entry_points.txt').write_text(
++        '[deluge.plugin.core]\nMyPlugin = my_plugin:CorePlugin\n'
++    )
++
++    plugins_dir = tmp_path / 'plugins'
++    plugins_dir.mkdir()
++    (plugins_dir / 'MyPlugin.egg-link').write_text(str(source_dir) + '\n.\n')
++
++    pm = PluginManagerBase('core.conf', 'deluge.plugin.core', plugin_dirs=[plugins_dir])
++    assert 'MyPlugin' in pm.available_plugins
++    assert pm.get_plugin_info('MyPlugin')['Version'] == '0.1'
++
++
++@pytest.mark.skipif(
++    sys.platform == 'win32',
++    reason='pkg_resources normalizes project_name to lowercase on Windows for directory eggs',
++)
++def test_scan_unpacked_egg_dir(tmp_path):
++    """An unpacked .egg directory (Ubuntu-style) with EGG-INFO/ must be discovered."""
++    plugins_dir = tmp_path / 'plugins'
++    plugins_dir.mkdir()
++    egg_dir = plugins_dir / 'FakePlugin-0.1-py3.egg'
++    egg_info = egg_dir / 'EGG-INFO'
++    egg_info.mkdir(parents=True)
++    (egg_info / 'PKG-INFO').write_text(
++        'Metadata-Version: 1.0\nName: FakePlugin\nVersion: 0.1\n'
++    )
++    (egg_info / 'entry_points.txt').write_text(
++        '[deluge.plugin.core]\nFakePlugin = fake_plugin:CorePlugin\n'
++    )
++
++    pm = PluginManagerBase('core.conf', 'deluge.plugin.core', plugin_dirs=[plugins_dir])
++    assert 'FakePlugin' in pm.available_plugins
++    assert pm.get_plugin_info('FakePlugin')['Version'] == '0.1'
++
++
++def test_scan_egg_zip_plugin_info(fake_egg):
++    """get_plugin_info returns correct metadata read from EGG-INFO/PKG-INFO inside a zip egg."""
++    plugins_dir, _ = fake_egg
++    pm = PluginManagerBase('core.conf', 'deluge.plugin.core', plugin_dirs=[plugins_dir])
++    info = pm.get_plugin_info('FakePlugin')
++    assert info['Name'] == 'FakePlugin'
++    assert info['Version'] == '0.1'
++
++
++def test_no_duplicate_plugins(fake_egg):
++    """The same plugin discovered in multiple scan dirs must appear only once."""
++    plugins_dir, _ = fake_egg
++    # Pass the same dir twice to simulate the plugin appearing in multiple scan paths
++    pm = PluginManagerBase(
++        'core.conf', 'deluge.plugin.core', plugin_dirs=[plugins_dir, plugins_dir]
++    )
++    names = [n for n in pm.available_plugins if n == 'FakePlugin']
++    assert len(names) == 1
+diff --git a/deluge/tests/test_plugin_metadata.py b/deluge/tests/test_plugin_metadata.py
+deleted file mode 100644
+index adf115d1bdf1..000000000000
+--- a/deluge/tests/test_plugin_metadata.py
++++ /dev/null
+@@ -1,43 +0,0 @@
+-#
+-# Copyright (C) 2015 Calum Lind <calumlind@gmail.com>
+-#
+-# This file is part of Deluge and is licensed under GNU General Public License 3.0, or later, with
+-# the additional special exception to link portions of this program with the OpenSSL library.
+-# See LICENSE for more details.
+-#
+-
+-from deluge.pluginmanagerbase import PluginManagerBase
+-
+-
+-class TestPluginManagerBase:
+-    def test_get_plugin_info(self):
+-        pm = PluginManagerBase('core.conf', 'deluge.plugin.core')
+-        for p in pm.get_available_plugins():
+-            for key, value in pm.get_plugin_info(p).items():
+-                assert isinstance(key, str)
+-                assert isinstance(value, str)
+-
+-    def test_get_plugin_info_invalid_name(self):
+-        pm = PluginManagerBase('core.conf', 'deluge.plugin.core')
+-        for key, value in pm.get_plugin_info('random').items():
+-            result = 'not available' if key in ('Name', 'Version') else ''
+-            assert value == result
+-
+-    def test_parse_pkg_info_metadata_2_1(self):
+-        pkg_info = """Metadata-Version: 2.1
+-Name: AutoAdd
+-Version: 1.8
+-Summary: Monitors folders for .torrent files.
+-Home-page: http://dev.deluge-torrent.org/wiki/Plugins/AutoAdd
+-Author: Chase Sterling, Pedro Algarvio
+-Author-email: chase.sterling@gmail.com, pedro@algarvio.me
+-License: GPLv3
+-Platform: UNKNOWN
+-
+-Monitors folders for .torrent files.
+-        """
+-        plugin_info = PluginManagerBase.parse_pkg_info(pkg_info)
+-        for value in plugin_info.values():
+-            assert value != ''
+-        result = 'Monitors folders for .torrent files.'
+-        assert plugin_info['Description'] == result

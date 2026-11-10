@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Calum Lind <calumlind+deluge@gmail.com>
+Date: Sun, 1 Mar 2026 21:24:21 +0000
+Subject: [PATCH] feat(ui): use importlib in entrypoint instead of
+ pkg_resources
+
+- also remove unneeded fallback pkg_resources in common
+---
+ deluge/common.py      | 7 +------
+ deluge/ui/ui_entry.py | 6 +++---
+ 2 files changed, 4 insertions(+), 9 deletions(-)
+
+diff --git a/deluge/common.py b/deluge/common.py
+index 7b76d245c25c..28119d38b4ef 100644
+--- a/deluge/common.py
++++ b/deluge/common.py
+@@ -25,20 +25,15 @@
+ from contextlib import closing
+ from datetime import datetime
+ from importlib import resources
++from importlib.metadata import distribution
+ from io import BytesIO
+ from pathlib import Path
+ from urllib.parse import unquote_plus, urljoin
+ from urllib.request import pathname2url
+ 
+ from deluge.decorators import deprecated
+ from deluge.error import InvalidPathError
+ 
+-try:
+-    from importlib.metadata import distribution
+-except ImportError:
+-    from pkg_resources import get_distribution as distribution
+-
+-
+ try:
+     import chardet
+ except ImportError:
+diff --git a/deluge/ui/ui_entry.py b/deluge/ui/ui_entry.py
+index f0a983106904..c25e89b2c3af 100644
+--- a/deluge/ui/ui_entry.py
++++ b/deluge/ui/ui_entry.py
+@@ -16,26 +16,26 @@
+ import logging
+ import os
+ import sys
+-
+-import pkg_resources
++from importlib.metadata import entry_points
+ 
+ import deluge.common
+ import deluge.configmanager
+ from deluge.argparserbase import ArgParserBase
+ from deluge.i18n import setup_translation
+ 
+ DEFAULT_PREFS = {'default_ui': 'gtk'}
+ 
+ AMBIGUOUS_CMD_ARGS = ('-h', '--help', '-v', '-V', '--version')
+ 
+ 
+ def start_ui():
+     """Entry point for ui script"""
+     setup_translation()
+ 
+     # Get the registered UI entry points
+     ui_entrypoints = {}
+-    for entrypoint in pkg_resources.iter_entry_points('deluge.ui'):
++    eps = entry_points(group='deluge.ui')
++    for entrypoint in eps.select():
+         try:
+             ui_entrypoints[entrypoint.name] = entrypoint.load()
+         except ImportError:
