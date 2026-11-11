@@ -1,22 +1,33 @@
 # --- T2-COPYRIGHT-BEGIN ---
 # t2/package/*/llvm/hotfix-ppc-jit.patch
-# Copyright (C) 2025 The T2 SDE Project
+# Copyright (C) 2025 - 2026 The T2 SDE Project
 # SPDX-License-Identifier: GPL-2.0 or patched project license
 # --- T2-COPYRIGHT-END ---
 
+MCJIT / RuntimeDyld has no PowerPC 32-bit ELF support, so llvmpipe aborts as
+soon as it JITs a module containing a call:
+
 root@g4:~# glxgears
-LLVM ERROR: Relocation type 0xa not implemented yet!
+LLVM ERROR: Relocation type not implemented yet!
 Aborted                    (core dumped) glxgears
 
-root@g5:~# glxgears
-LLVM ERROR: Relocation type 0x1a not implemented yet!
-Aborted                    (core dumped) glxgears
+The failing relocation is type 10, R_PPC_REL24. Add the missing 32-bit pieces:
 
-Signed-off-by: Rene Rebe <rene@t2linux.com>
+ - processRelocationRef(): a ppc/ppcle branch handling R_PPC_REL24. Unlike
+   ELFv1 ppc64 there are no function descriptors and no TOC, so neither the
+   .opd lookup nor the r2 restore after the branch apply. Section load
+   addresses are not final at this point, so every branch goes via a stub.
+ - createStubFunction(): the ppc32 stub itself - lis/ori into r12, mtctr,
+   bctr - relocated by R_PPC_ADDR16_HI/_LO on the two low halfwords.
+ - getMaxStubSize(): 16 bytes of stub space, which was 0 for ppc before, so
+   no stub was ever emitted.
+ - resolvePPC32Relocation(): R_PPC_REL24 and R_PPC_REL32 cases.
 
---- llvm-20.1.8.src/lib/ExecutionEngine/RuntimeDyld/RuntimeDyldELF.cpp.orig	2025-07-29 16:55:20.031535540 +0200
-+++ llvm-20.1.8.src/lib/ExecutionEngine/RuntimeDyld/RuntimeDyldELF.cpp	2025-07-29 17:29:41.227966195 +0200
-@@ -1029,6 +1029,20 @@
+Signed-off-by: Rene Rebe <rene@exactco.de>
+
+--- llvm-22.1.8.src.orig/lib/ExecutionEngine/RuntimeDyld/RuntimeDyldELF.cpp	2026-08-06 12:35:51.377997615 +0200
++++ llvm-22.1.8.src/lib/ExecutionEngine/RuntimeDyld/RuntimeDyldELF.cpp	2026-08-06 12:35:51.378472521 +0200
+@@ -1082,6 +1082,19 @@ void RuntimeDyldELF::resolvePPC32Relocat
    case ELF::R_PPC_ADDR16_HA:
      writeInt16BE(LocalAddress, applyPPCha(Value + Addend));
      break;
@@ -24,8 +35,7 @@ Signed-off-by: Rene Rebe <rene@t2linux.com>
 +    uint32_t FinalAddress = Section.getLoadAddressWithOffset(Offset);
 +    int32_t delta = static_cast<int32_t>(Value - FinalAddress + Addend);
 +    if (SignExtend32<26>(delta) != delta)
-+      llvm_unreachable("Relocation R_PPC_REL24 overflow");
-+    // We preserve bits other than LI field, i.e. PO and AA/LK fields.
++      report_fatal_error("Relocation R_PPC_REL24 overflow");
 +    uint32_t Inst = readBytesUnaligned(LocalAddress, 4);
 +    writeInt32BE(LocalAddress, (Inst & 0xFC000003) | (delta & 0x03FFFFFC));
 +  } break;
@@ -37,3 +47,88 @@ Signed-off-by: Rene Rebe <rene@t2linux.com>
    }
  }
  
+@@ -1983,6 +1997,56 @@ RuntimeDyldELF::processRelocationRef(
+       processSimpleRelocation(SectionID, Offset, RelType, Value);
+     }
+ 
++  } else if (Arch == Triple::ppc || Arch == Triple::ppcle) {
++    if (RelType == ELF::R_PPC_REL24) {
++      SectionEntry &Section = Sections[SectionID];
++      auto [It, Inserted] = Stubs.try_emplace(Value);
++      if (!Inserted) {
++        // Symbol function stub already created, just relocate to it
++        resolveRelocation(Section, Offset,
++                          Section.getLoadAddressWithOffset(It->second),
++                          RelType, 0);
++        LLVM_DEBUG(dbgs() << " Stub function found\n");
++      } else {
++        // Create a new stub function.
++        LLVM_DEBUG(dbgs() << " Create a new stub function\n");
++        It->second = Section.getStubOffset();
++        uint8_t *StubTargetAddr = createStubFunction(
++            Section.getAddressWithOffset(Section.getStubOffset()));
++
++        // The stub materializes the address with lis/ori, so the relocations
++        // apply to the low halves of the first two instructions.
++        uint64_t StubRelocOffset = StubTargetAddr - Section.getAddress();
++        if (!IsTargetLittleEndian)
++          StubRelocOffset += 2;
++
++        RelocationEntry REh(SectionID, StubRelocOffset + 0,
++                            ELF::R_PPC_ADDR16_HI, Value.Addend);
++        RelocationEntry REl(SectionID, StubRelocOffset + 4,
++                            ELF::R_PPC_ADDR16_LO, Value.Addend);
++
++        if (Value.SymbolName) {
++          addRelocationForSymbol(REh, Value.SymbolName);
++          addRelocationForSymbol(REl, Value.SymbolName);
++        } else {
++          addRelocationForSection(REh, Value.SectionID);
++          addRelocationForSection(REl, Value.SectionID);
++        }
++
++        resolveRelocation(
++            Section, Offset,
++            Section.getLoadAddressWithOffset(Section.getStubOffset()),
++            RelType, 0);
++        Section.advanceStubOffset(getMaxStubSize());
++      }
++    } else {
++      RelocationEntry RE(SectionID, Offset, RelType, Value.Addend);
++
++      if (Value.SymbolName)
++        addRelocationForSymbol(RE, Value.SymbolName);
++      else
++        addRelocationForSection(RE, Value.SectionID);
++    }
+   } else if (Arch == Triple::ppc64 || Arch == Triple::ppc64le) {
+     if (RelType == ELF::R_PPC64_REL24) {
+       // Determine ABI variant in use for this object.
+--- llvm-22.1.8.src.orig/lib/ExecutionEngine/RuntimeDyld/RuntimeDyldELF.h	2026-08-06 12:35:51.379075132 +0200
++++ llvm-22.1.8.src/lib/ExecutionEngine/RuntimeDyld/RuntimeDyldELF.h	2026-08-06 12:35:51.379579389 +0200
+@@ -85,6 +85,8 @@ class RuntimeDyldELF : public RuntimeDyl
+       return 32;
+     if (Arch == Triple::loongarch64)
+       return 20; // lu12i.w; ori; lu32i.d; lu52i.d; jr
++    else if (Arch == Triple::ppc || Arch == Triple::ppcle)
++      return 16; // lis; ori; mtctr; bctr
+     else if (Arch == Triple::ppc64 || Arch == Triple::ppc64le)
+       return 44;
+     else if (Arch == Triple::x86_64)
+--- llvm-22.1.8.src.orig/lib/ExecutionEngine/RuntimeDyld/RuntimeDyld.cpp	2026-08-06 12:35:51.379943638 +0200
++++ llvm-22.1.8.src/lib/ExecutionEngine/RuntimeDyld/RuntimeDyld.cpp	2026-08-06 12:35:51.380582820 +0200
+@@ -1044,6 +1044,14 @@ uint8_t *RuntimeDyldImpl::createStubFunc
+     writeBytesUnaligned(JrATInstr, Addr + 24, 4);
+     writeBytesUnaligned(NopInstr, Addr + 28, 4);
+     return Addr;
++  } else if (Arch == Triple::ppc || Arch == Triple::ppcle) {
++    // PowerPC 32-bit has no function descriptors nor a TOC, so the stub just
++    // materializes the target address in r12 and branches to it.
++    writeInt32BE(Addr,      0x3D800000); // lis   r12, h(addr)
++    writeInt32BE(Addr + 4,  0x618C0000); // ori   r12, r12, l(addr)
++    writeInt32BE(Addr + 8,  0x7D8903A6); // mtctr r12
++    writeInt32BE(Addr + 12, 0x4E800420); // bctr
++    return Addr;
+   } else if (Arch == Triple::ppc64 || Arch == Triple::ppc64le) {
+     // Depending on which version of the ELF ABI is in use, we need to
+     // generate one of two variants of the stub.  They both start with

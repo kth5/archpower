@@ -11,7 +11,7 @@ case "${CARCH}" in
     pkgname+=('lldb' 'offload' 'openmp' 'polly')
   ;;
 esac
-pkgver=23.1.4
+pkgver=23.1.5
 pkgrel=1
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 url="https://llvm.org/"
@@ -21,7 +21,7 @@ makedepends=('cmake' 'ninja' 'zlib' 'zstd' 'curl' 'libffi' 'libedit' 'libxml2' '
              'python-setuptools' 'python-psutil' 'python-sphinx'
              'python-myst-parser' 'python-build' 'python-installer' 'python-wheel'
              'spirv-llvm-translator' 'wasi-libc' 'wasm-component-ld')
-makedepends_powerpc=('distcc')
+makedepends_powerpc=('ccache' 'distcc')
 # Build 32-bit compiler-rt libraries on x86_64 (FS#41911)
 makedepends_x86_64=('lib32-gcc-libs')
 checkdepends=('llvm-libs')
@@ -44,7 +44,7 @@ source=($_source_base/llvm-project-$pkgver.src.tar.xz{,.sig}
         hotfix-ppc-jit.patch
         hotfix-powerpc-pwr.patch
         hotfix-ppc-cell.patch)
-sha256sums=('819ecf7351f1a66f76b2d701d8942faaf5faeb324cb90c9d5b090de142434bb2'
+sha256sums=('fb50b1eac93ddeb3aa8dab4cfe324dff74f4a9c2bdee6160c9e36188f8d06a6e'
             'SKIP'
             '94baa1ca8b7f68c2c22b4d4c429d4560f81f882c00299f6b5398ffe6dc3a3913'
             '89e36fcc53383bbfa51da820c96d4ae136e060ac55ee53c914888a37e52be06c'
@@ -56,7 +56,7 @@ sha256sums=('819ecf7351f1a66f76b2d701d8942faaf5faeb324cb90c9d5b090de142434bb2'
             '67bd72aafc0e34e3616d15ae0e2645db87135de2dc6a1368c544e752156bb8f7'
             'ded7c1f26c2efd352e2ef82e2af1756c3fb3f359a92d0dcc7c158ba42836122f'
             'd05db0cda87330e42fb3f8e27b3c49cf05746bd49be389f4287a3bca0cc62e47'
-            '19991580344679da928e6d8438872f3f4650023560a737ce6d408505112f1efc'
+            '7649bcfb12a561724fd2308170d75ffd0562533ccedc1ee0410d3e02c4cd4ced'
             '32738b977de98c620918a94dd01534ccae8f70310bd1c67730631b3dad759a26'
             'fdf9de5464870f78fbaa4ce158d1b7b7f9aa5cb73d6808c51e5c7c81253c9d48')
 validpgpkeys=('474E22316ABF4785A88C6E8EA2C794A986419D8A'  # Tom Stellard <tstellar@redhat.com>
@@ -65,11 +65,13 @@ validpgpkeys=('474E22316ABF4785A88C6E8EA2C794A986419D8A'  # Tom Stellard <tstell
               '71046D1E9C6656BDD61171873E83BABF4A4F9E85'  # Cullen Rhodes <cullen.rhodes@arm.com>
 )
 
+export DISTCC_MAX_CORES=${MAKEFLAGS/-j/}
+
 # Utilizing LLVM_DISTRIBUTION_COMPONENTS to avoid
 # installing static libraries; inspired by Gentoo
 _llvm_components() {
   local target
-  ninja -j8 -C "$srcdir/llvm-project-$pkgver.src/build" -t targets | grep -Po 'install-\K.*(?=-stripped:)' | while read -r target; do
+  ninja ${MAKEFLAGS} -C "$srcdir/llvm-project-$pkgver.src/build" -t targets | grep -Po 'install-\K.*(?=-stripped:)' | while read -r target; do
     case $target in
       llvm-libraries|clang-libraries|distribution)
         continue
@@ -138,7 +140,7 @@ _llvm_components() {
 
 _clang_components() {
   local target
-  ninja -j8 -C "$srcdir/llvm-project-$pkgver.src/build" -t targets | grep -Po 'install-\K.*(?=-stripped:)' | while read -r target; do
+  ninja ${MAKEFLAGS} -C "$srcdir/llvm-project-$pkgver.src/build" -t targets | grep -Po 'install-\K.*(?=-stripped:)' | while read -r target; do
     case $target in
       llvm-libraries|clang-libraries|distribution)
         continue
@@ -168,7 +170,7 @@ _clang_components() {
 
 _lld_components() {
   local target
-  ninja -j8 -C "$srcdir/llvm-project-$pkgver.src/build" -t targets | grep -Po 'install-\K.*(?=-stripped:)' | while read -r target; do
+  ninja ${MAKEFLAGS} -C "$srcdir/llvm-project-$pkgver.src/build" -t targets | grep -Po 'install-\K.*(?=-stripped:)' | while read -r target; do
     case $target in
       llvm-libraries|clang-libraries|distribution)
         continue
@@ -191,7 +193,7 @@ _lldb_components() {
   local target
   case "$CARCH}" in
     powerpc64*|x86_64)
-      ninja -j8 -C "$srcdir/llvm-project-$pkgver.src/build" -t targets | grep -Po 'install-\K.*(?=-stripped:)' | while read -r target; do
+      ninja ${MAKEFLAGS} -C "$srcdir/llvm-project-$pkgver.src/build" -t targets | grep -Po 'install-\K.*(?=-stripped:)' | while read -r target; do
     case $target in
       llvm-libraries|clang-libraries|distribution)
         continue
@@ -214,7 +216,7 @@ _polly_components() {
     powerpc) return 0 ;;
   esac
 
-  ninja -j8 -C "$srcdir/llvm-project-$pkgver.src/build" -t targets | grep -Po 'install-\K.*(?=-stripped:)' | while read -r target; do
+  ninja ${MAKEFLAGS} -C "$srcdir/llvm-project-$pkgver.src/build" -t targets | grep -Po 'install-\K.*(?=-stripped:)' | while read -r target; do
     case $target in
       llvm-libraries|clang-libraries|distribution)
         continue
@@ -234,7 +236,7 @@ _polly_components() {
 
 _bolt_components() {
   local target
-  ninja -j8 -C "$srcdir/llvm-project-$pkgver.src/build" -t targets | grep -Po 'install-\K.*(?=-stripped:)' | while read -r target; do
+  ninja ${MAKEFLAGS} -C "$srcdir/llvm-project-$pkgver.src/build" -t targets | grep -Po 'install-\K.*(?=-stripped:)' | while read -r target; do
     case $target in
       bolt*|llvm-bolt*|perf2bolt|merge-fdata)
         ;;
@@ -384,7 +386,7 @@ build() {
   local distribution_components=$(cd build && _get_distribution_components | paste -sd\;)
   test -n "$distribution_components"
   cmake -S llvm -B build "${cmake_args[@]}" -DLLVM_DISTRIBUTION_COMPONENTS="$distribution_components"
-  ninja -j8 -C build
+  ninja ${MAKEFLAGS} -C build
 
   case "${CARCH}" in
     powerpc64*|x86_64)
@@ -403,7 +405,7 @@ build() {
           -DCMAKE_C_FLAGS= \
           -DCMAKE_CXX_FLAGS= \
           -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld
-        ninja -j8 -C "build-device-$_target"
+        ninja ${MAKEFLAGS} -C "build-device-$_target"
       done
     ;;
   esac
@@ -477,10 +479,10 @@ build() {
   )
   cmake -S compiler-rt -B compiler-rt/build-wasi "${_wasi_rt_args[@]}" \
     -DCMAKE_{ASM,CXX,C}_COMPILER_TARGET=wasm32-wasip1
-  ninja -j8 -C compiler-rt/build-wasi
+  ninja ${MAKEFLAGS} -C compiler-rt/build-wasi
   cmake -S compiler-rt -B compiler-rt/build-wasi-threads "${_wasi_rt_args[@]}" \
     -DCMAKE_{ASM,CXX,C}_COMPILER_TARGET=wasm32-wasip1-threads
-  ninja -j8 -C compiler-rt/build-wasi-threads
+  ninja ${MAKEFLAGS} -C compiler-rt/build-wasi-threads
 
   local _rt_libdir="$PWD/build/lib/clang/${pkgver%%.*}/lib"
   install -d "$_rt_libdir"
@@ -553,7 +555,7 @@ build() {
       -DLIBCXX_INCLUDE_TESTS=OFF \
       -DLIBCXX_INCLUDE_BENCHMARKS=OFF \
       -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi"
-    PATH="$_host_bin:$PATH" ninja -j8 -C "build-wasi-$_target"
+    PATH="$_host_bin:$PATH" ninja ${MAKEFLAGS} -C "build-wasi-$_target"
   done
 }
 
@@ -571,7 +573,7 @@ package_llvm() {
 
   local t
   for t in $(_llvm_components); do
-    DESTDIR="$pkgdir" ninja -j8 -C build install-$t
+    DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C build install-$t
   done
 
   # lldb's public API headers get staged via a shared custom target not
@@ -671,7 +673,7 @@ package_clang() {
 
   local t
   for t in $(_clang_components); do
-    DESTDIR="$pkgdir" ninja -j8 -C build install-$t
+    DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C build install-$t
   done
 
   install -Dm644 clang/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
@@ -733,11 +735,11 @@ package_compiler-rt() {
 
   cd llvm-project-$pkgver.src
 
-  DESTDIR="$pkgdir" ninja -j8 -C build install-compiler-rt
+  DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C build install-compiler-rt
   # builtins (libclang_rt.builtins.a, crtbegin/crtend.o) is its own
   # bootstrap-order CMake external-project step, separate from
   # install-compiler-rt; needed for --rtlib=compiler-rt linking.
-  DESTDIR="$pkgdir" ninja -j8 -C build install-builtins
+  DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C build install-builtins
   install -d "$pkgdir/usr/lib/clang/${pkgver%%.*}/include"
   cp -a compiler-rt/include/{sanitizer,xray,fuzzer,profile} "$pkgdir/usr/lib/clang/${pkgver%%.*}/include/"
   cp -a compiler-rt/include/orc_rt "$pkgdir/usr/lib/clang/${pkgver%%.*}/include/orc"
@@ -772,7 +774,7 @@ package_openmp() {
 
   cd llvm-project-$pkgver.src
 
-  DESTDIR="$pkgdir" ninja -j8 -C build install-openmp
+  DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C build install-openmp
   install -Dm644 openmp/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm755 "$(find build -name libompd.so -print -quit)" "$pkgdir/usr/lib/$CHOST/libompd.so"
   rm -f "$pkgdir/usr/lib/$CHOST/libarcher_static.a"
@@ -801,12 +803,12 @@ package_offload() {
 
   cd llvm-project-$pkgver.src
 
-  DESTDIR="$pkgdir" ninja -j8 -C build install-offload
+  DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C build install-offload
 
   # Device runtime bitcode (libomptarget-{amdgpu,nvptx}.bc, libompdevice.a)
   local _target
   for _target in amdgcn-amd-amdhsa nvptx64-nvidia-cuda; do
-    DESTDIR="$pkgdir" ninja -j8 -C "build-device-$_target" install-openmp
+    DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C "build-device-$_target" install-openmp
   done
 
   install -Dm644 llvm/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
@@ -822,7 +824,7 @@ package_lld() {
 
   local t
   for t in $(_lld_components); do
-    DESTDIR="$pkgdir" ninja -j8 -C build install-$t
+    DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C build install-$t
   done
 
   rm -rf "$pkgdir"/usr/include/lldb
@@ -843,7 +845,7 @@ package_lldb() {
 
   local t
   for t in $(_lldb_components); do
-    DESTDIR="$pkgdir" ninja -j8 -C build install-$t
+    DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C build install-$t
   done
 
   install -Dm644 lldb/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
@@ -864,7 +866,7 @@ package_polly() {
 
   local t
   for t in $(_polly_components); do
-    DESTDIR="$pkgdir" ninja -j8 -C build install-$t
+    DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C build install-$t
   done
 
   # polly's headers/CMake package-config files install via COMPONENT-less
@@ -899,7 +901,7 @@ package_llvm-bolt() {
   cd llvm-project-$pkgver.src
 
   # everything (tools, symlinks, runtime) installs as the "bolt" component
-  DESTDIR="$pkgdir" ninja -j8 -C build install-bolt
+  DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C build install-bolt
 
   install -Dm644 bolt/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
@@ -910,7 +912,7 @@ package_libc++ () {
 
   cd llvm-project-$pkgver.src
 
-  DESTDIR="$pkgdir" ninja -j8 -C build install-cxx
+  DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C build install-cxx
 
   # __config_site lives in the per-target include dir; keep it reachable
   # from the old path for non-clang users of /usr/include/c++/v1
@@ -928,7 +930,7 @@ package_libc++abi() {
 
   cd llvm-project-$pkgver.src
 
-  DESTDIR="$pkgdir" ninja -j8 -C build install-cxxabi
+  DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C build install-cxxabi
 
   install -Dm644 libcxxabi/CREDITS.TXT "$pkgdir/usr/share/licenses/$pkgname/CREDITS"
   install -Dm644 libcxxabi/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
@@ -979,8 +981,8 @@ package_wasi-compiler-rt() {
 
   cd llvm-project-$pkgver.src/compiler-rt
 
-  DESTDIR="$pkgdir" ninja -j8 -C build-wasi install
-  DESTDIR="$pkgdir" ninja -j8 -C build-wasi-threads install
+  DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C build-wasi install
+  DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C build-wasi-threads install
 
   local resource_dir="$pkgdir/usr/lib/clang/${pkgver%%.*}/lib"
   cd "$resource_dir"
@@ -1002,7 +1004,7 @@ package_wasi-libc++ () {
   mkdir -p "$pkgdir/usr/share/wasi-sysroot/include/c++/v1"
 
   for _target in "${_wasi_cxx_targets[@]}"; do
-    DESTDIR="$pkgdir" ninja -j8 -C "build-wasi-$_target" install-cxx
+    DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C "build-wasi-$_target" install-cxx
   done
 
   # reduce duplication
@@ -1022,7 +1024,7 @@ package_wasi-libc++abi() {
   local _wasi_cxx_targets=(wasm32-wasi wasm32-wasip1 wasm32-wasip1-threads wasm32-wasip2)
 
   for _target in "${_wasi_cxx_targets[@]}"; do
-    DESTDIR="$pkgdir" ninja -j8 -C "build-wasi-$_target" install-cxxabi
+    DESTDIR="$pkgdir" ninja ${MAKEFLAGS} -C "build-wasi-$_target" install-cxxabi
   done
 
   # reduce duplication
