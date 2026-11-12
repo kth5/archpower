@@ -6,19 +6,22 @@
 
 pkgname=spamassassin
 pkgver=4.0.2
-pkgrel=1
+pkgrel=4
 pkgdesc='A mail filter to identify spam'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=(Apache-2.0)
 url='https://spamassassin.apache.org'
-depends=(openssl
+depends=(gcc  # required for sa-compile
+         glibc
+         make  # required for sa-compile
+         openssl
+         perl
          perl-http-message
          perl-io-socket-inet6
          perl-io-socket-ssl
          perl-libwww
          perl-mail-dkim
          perl-mail-spf
-         perl-net-ip
          perl-net-dns
          perl-net-http
          re2c
@@ -26,9 +29,7 @@ depends=(openssl
 makedepends=(perl-dbi
              razor)
 checkdepends=(perl-text-diff)
-optdepends=('razor: to identify collaborately-flagged spam'
-            'make: to use sa-compile'
-            'gcc: to use sa-compile')
+optdepends=('razor: to identify collaborately-flagged spam')
 backup=(etc/mail/spamassassin/local.cf
         etc/mail/spamassassin/init.pre
         etc/mail/spamassassin/v310.pre
@@ -42,17 +43,22 @@ backup=(etc/mail/spamassassin/local.cf
         etc/mail/spamassassin/v400.pre
         etc/mail/spamassassin/v401.pre
         etc/mail/spamassassin/v402.pre)
-install="$pkgname.install"
 _archive="Mail-SpamAssassin-$pkgver"
 source=("https://ftp.fau.de/apache/$pkgname/source/$_archive.tar.gz"
         "https://www.apache.org/dist/$pkgname/source/$_archive.tar.gz.asc"
-        spamassassin.tmpfiles.d
-        spamassassin.service)
+        spamassassin.sysusers
+        spamassassin.tmpfiles
+        spamassassin.service
+        spamassassin-update.service
+        spamassassin-update.timer)
 validpgpkeys=(D8099BC79E17D7E49BC21E31FDE52F40F7D39814)
 sha256sums=('c521be978cef3d49b1e139477ca60a0bd498345fc98274796e44161fae49a17f'
             'SKIP'
-            'a4abb06b42d29e76ab90b1b40a7e761fae320586b6be8a491f648cd1def77d6b'
-            'ce195f6c678f28242eee80ded0de85285b7a992af82b80f88a756eb4473706cc')
+            '219ffc09a3373a026f82073075de386dd4dc0b88449f93e41db353485f5be5f6'
+            '5b3137c7ccbe481bdad6f3cac585f728a5977378112f7f5191fe03ba745ab3e0'
+            'ce195f6c678f28242eee80ded0de85285b7a992af82b80f88a756eb4473706cc'
+            '34f70aea1607f549d9b65fbcc05fcdb3f0542bba3e1e5609ae8256cc98c3eb41'
+            'c3363fddeb26285366fec7070c4d1a8c3f0f4e9edcd1de34891d65278a874777')
 
 prepare() {
 	cd "$_archive"
@@ -75,19 +81,19 @@ build() {
 
 check() {
 	cd "$_archive"
-	# parallel tests cause lots of failures; disable for now
-	#export HARNESS_OPTIONS="j$(echo $MAKEFLAGS | sed 's/.*-j\([0-9][0-9]*\).*/\1/')"
 	make test
 }
 
 package() {
 	cd "$_archive"
 	make DESTDIR="$pkgdir" install
-	install -D -m644 -t "$pkgdir/usr/lib/systemd/system/" ../spamassassin.service
-	install -d -o 182 -g 182 -m 755 "$pkgdir/var/lib/spamassassin"
-	echo 'u spamd 182 - /var/lib/spamassassin' |
-		install -Dm644 /dev/stdin "$pkgdir/usr/lib/sysusers.d/$pkgname.conf"
-	install -Dm644 ../spamassassin.tmpfiles.d "$pkgdir/usr/lib/tmpfiles.d/$pkgname.conf"
+
+	# NOTE: Set ownership explicitly so that stripping happens automatically.
+	chmod 755 "$pkgdir/usr/bin/vendor_perl/spamc"
+
+	install -vDm 644 ../*.{service,timer} -t "$pkgdir/usr/lib/systemd/system/"
+	install -vDm 644 ../$pkgname.sysusers "$pkgdir/usr/lib/sysusers.d/$pkgname.conf"
+	install -vDm 644 ../$pkgname.tmpfiles "$pkgdir/usr/lib/tmpfiles.d/$pkgname.conf"
 	backup_incomplete=0
 	for file in "$pkgdir/etc/mail/spamassassin/"*.pre; do
 		clean_file="${file#"$pkgdir/"}"
