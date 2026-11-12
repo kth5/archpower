@@ -1,55 +1,101 @@
 # POWER Maintainer: Alexander Baldeck <alex.bldck@gmail.com>
-# Mainainer: Sébastien "Seblu" Luttringer <seblu@archlinux.org>
+# Maintainer: Sébastien "Seblu" Luttringer <seblu@archlinux.org>
+# Maintainer: Lukas Fleischer <lfleischer@archlinux.org>
 # Contributor: Allan McRae <allan@archlinux.org>
 # Contributor: Andreas Radke <andyrtr@archlinux.org>
 
-pkgname=tar
+pkgbase=tar
+pkgname=(tar tar-scripts)
 pkgver=1.35
-pkgrel=2.3
+pkgrel=5
 pkgdesc='Utility used to store, backup, and transport files'
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso riscv64)
 url='https://www.gnu.org/software/tar/'
 license=('GPL-3.0-or-later')
-depends=('glibc' 'acl')
+makedepends=('git')
 checkdepends=('attr')
 options=('!emptydirs')
-validpgpkeys=('325F650C4C2B6AD58807327A3602B07F55D0C732') # Sergey Poznyakoff
-source=("https://ftp.gnu.org/gnu/$pkgname/$pkgname-$pkgver.tar.xz"{,.sig})
-sha256sums=('4d62ff37342ec7aed748535323930c7cf94acf71c3591882b26a7ea50f3edc16'
-            'SKIP')
+install=tar.install
+validpgpkeys=('325F650C4C2B6AD58807327A3602B07F55D0C732') # Sergey Poznyakoff <gray@gnu.org>
+source=("git+https://git.savannah.gnu.org/git/tar.git#tag=v${pkgver}?signed"
+        "git+https://git.savannah.gnu.org/git/gnulib.git"
+        "git+https://git.savannah.gnu.org/git/paxutils.git"
+        "https://ftp.gnu.org/gnu/tar/tar-${pkgver}.tar.gz"{,.sig}
+        "fix-libacl-conflicts.patch")
+sha256sums=('8476308a482ba89b7ba806dc2f77aea268e88828b3f4527d85484c813e025332'
+            'SKIP'
+            'SKIP'
+            '14d55e32063ea9526e057fbf35fcabd53378e769787eff7919c3755b02d2b57e'
+            'SKIP'
+            '07c20fc924001f15e93e779588de8113a2ce683ce5b18431e797f7c242eaa33a')
 
 prepare() {
-  cd $pkgname-$pkgver
-  # apply patch from the source array (should be a pacman feature)
-  local src
-  for src in "${source[@]}"; do
-    src="${src%%::*}"
-    src="${src##*/}"
-    [[ $src = *.patch ]] || continue
-    msg2 "Applying patch $src..."
-    patch -Np1 < "../$src"
-  done
-  :
+  cd "${pkgname}"
+
+  git submodule init
+  git config submodule.gnulib.url "${srcdir}/gnulib"
+  git config submodule.paxutils.url "${srcdir}/paxutils"
+  git -c protocol.file.allow=always submodule update
+
+  # upstream commit doesn't cherry-pick cleanly to stable
+  # 08c3fc2e9337094aff01a511170fd35fdb8f1ee3 Avoid acl_ prefix for functions
+  patch -Np1 -i ../fix-libacl-conflicts.patch
+
+  # Don't pull unstable translations from web
+  ./bootstrap --skip-po
 }
 
 build() {
-  cd $pkgname-$pkgver
-  ./configure \
-    --prefix=/usr \
-    --sbindir=/usr/bin \
-    --libexecdir=/usr/lib/tar \
-    --enable-backup-scripts
-  make
+  cd "${pkgname}"
+
+  ./configure --prefix=/usr --sbindir=/usr/bin --libexecdir=/usr/lib/tar --enable-backup-scripts
+  make WERROR_CFLAGS="" # -Werror is enabled by default and causes build failures
+
+  # Generate tar mo files from dist tarball
+  # See: https://archlinux.org/todo/unstable-gnu-translations/
+  cd "${srcdir}/${pkgname}-${pkgver}/po"
+  for po in *.po; do
+    msgfmt "${po}" -o "${po%.po}.mo"
+  done
 }
 
 check() {
-  cd $pkgname-$pkgver
+  cd "${pkgname}"
   make check
 }
 
-package() {
-  cd $pkgname-$pkgver
-  make DESTDIR="$pkgdir" install
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_tar() {
+  depends=('glibc' 'acl')
+
+  cd "${pkgname}"
+
+  make DESTDIR="${pkgdir}" install
+
+  # Install tar mo files from dist tarball
+  # See: https://archlinux.org/todo/unstable-gnu-translations/
+  cd "${srcdir}/${pkgname}-${pkgver}/po"
+  for mo in *.mo; do
+    install -Dm 644 "${mo}" "${pkgdir}/usr/share/locale/${mo%.mo}/LC_MESSAGES/${pkgname}.mo"
+  done
+
+  # Pick backup and restore scripts for tar-scripts package
+  ( cd "$pkgdir" && _pick tar-scripts usr/bin/{backup,restore} usr/lib/tar/{backup.sh,dump-remind})
+}
+
+package_tar-scripts() {
+  pkgdesc+=' (scripts)'
+  depends=('sh' 'tar')
+  mv -v $pkgname/* "$pkgdir"
 }
 
 # vim:set ts=2 sw=2 et:
