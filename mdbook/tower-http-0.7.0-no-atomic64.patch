@@ -1,0 +1,28 @@
+--- a/src/macros.rs
++++ b/src/macros.rs
+@@ -113,19 +113,21 @@
+ #[allow(unused_macros)]
+ macro_rules! rate_limited {
+     ($interval:expr, $call:expr) => {{
+-        use std::sync::atomic::{AtomicU64, Ordering};
++        // 32-bit powerpc has no AtomicU64. Seconds since the epoch fit in u32
++        // until 2106, which is enough for this per-call-site rate limiter.
++        use std::sync::atomic::{AtomicU32, Ordering};
+         use std::time::{Duration, SystemTime, UNIX_EPOCH};
+ 
+-        static NEXT_CALL: AtomicU64 = AtomicU64::new(0);
++        static NEXT_CALL: AtomicU32 = AtomicU32::new(0);
+ 
+         let interval: Duration = $interval;
+         let now = SystemTime::now()
+             .duration_since(UNIX_EPOCH)
+             .unwrap_or(Duration::ZERO)
+-            .as_secs();
++            .as_secs() as u32;
+         let next = NEXT_CALL.load(Ordering::Relaxed);
+         if now >= next {
+-            let new_next = now.saturating_add(interval.as_secs());
++            let new_next = now.saturating_add(interval.as_secs() as u32);
+             if NEXT_CALL
+                 .compare_exchange(next, new_next, Ordering::Relaxed, Ordering::Relaxed)
+                 .is_ok()

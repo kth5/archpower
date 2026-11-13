@@ -6,22 +6,41 @@
 # Contributor: Moritz Schönherr <moritz.schoenherr@gmail.com>
 
 pkgname=mdbook
-pkgver=0.5.3
+pkgver=0.5.4
 pkgrel=1
 pkgdesc="Create book from markdown files, like Gitbook but implemented in Rust"
 url="https://github.com/rust-lang/mdBook"
 arch=(x86_64 powerpc64le powerpc64 powerpc espresso)
 license=('MPL2')
-depends=('gcc-libs')
+depends=(
+  'libgcc'
+)
 makedepends=('cargo')
-source=("${pkgname}-${pkgver}.tar.gz::https://github.com/rust-lang/mdBook/archive/v${pkgver}.tar.gz")
-sha256sums=('7c3e2907c0482fc9721a46ac42d7954600d795ce2152bed418553999ec1ee8f1')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/rust-lang/mdBook/archive/v${pkgver}.tar.gz"
+        tower-http-0.7.0-no-atomic64.patch)
+sha256sums=('107614330c35c77d53b6f6ce7826c50eed087650efe5646a4d0a16ca6bf5544b'
+            '6087dbca7455e7b781d809ae7d8e4d989153fbeeb182be07556a4df3b42b5887')
 # https://github.com/rust-lang/mdBook/blob/master/CHANGELOG.md
 
 prepare() {
   cd "mdBook-${pkgver}"
   mkdir -p completions
-  cargo fetch --locked --target "$(rustc --print host-tuple)"
+  cargo fetch --locked --target host-tuple
+
+  case "${CARCH}" in
+    powerpc|espresso)
+      # tower-http 0.7.0's rate_limited!() uses AtomicU64, which Rust does not
+      # provide on 32-bit powerpc.
+      local cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+      local crate
+      crate=$(find "$cargo_home/registry/src" -type d -name 'tower-http-0.7.0' -print -quit)
+      if [[ -z "$crate" ]]; then
+        echo "error: tower-http 0.7.0 sources not found under $cargo_home" >&2
+        return 1
+      fi
+      patch -d "$crate" -p1 -i "${srcdir}/tower-http-0.7.0-no-atomic64.patch"
+    ;;
+  esac
 }
 
 build() {
