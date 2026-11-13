@@ -3,7 +3,7 @@
 # Contributor: Daniel Löbl <dloebl.2000@gmail.com>
 
 pkgname=libcgif
-pkgver=0.5.3
+pkgver=0.5.4
 pkgrel=1
 pkgdesc="A fast and lightweight GIF encoding library"
 url="https://github.com/dloebl/cgif"
@@ -12,7 +12,7 @@ license=('MIT')
 depends=('glibc')
 makedepends=('meson')
 source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")
-sha256sums=('dcc7731e974ee77db75df26c99aca4d95f11ca2d267d870d42bce1e0d1e1e75f')
+sha256sums=('83a70a15bc2da41f081a44ebc58ee48e2e1d524a6d3fdb4a24064afa08d5ad4d')
 
 build() {
 	meson build "cgif-${pkgver}" --prefix=/usr
