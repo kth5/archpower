@@ -77,14 +77,26 @@ source=(
   epmd.conf
   epmd.service
   epmd.socket
+  # runlevel5's PPC64 JIT (BeamAsm) backend, POWER8 or newer
+  "https://github.com/runlevel5/erlang-otp-ppc64/releases/download/OTP-$pkgver-PPC64/otp-$pkgver-ppc64-jit.patch"
 )
 b2sums=('68815f63ffe2a0929ae549a3b5fe05aa93297cadcafb4ffe765414852dda1e9f8bb931d06cdae9a3c25a1bce387c90799bb51cb7a471b67ad2a49e72517222b0'
         '1675ac9bf948ab19e8b63077d870ccf356fcdbce14de2777f00b3488aa1ce34a5e0a5cdc0428707f744dee5940b12653a44e0ded0554de95ebb31bce4676ff87'
         '1f765318bcd322ce697a48c064ccdb1bd107b4a84e164a87f62678391cb82a9ab17a397d679cf266e037a5a2d91772b85f7a97f9cc5478c0f18118743b30045f'
-        'c37706f5f6e2d49100104fb442ebf15edd6ee0a1e8038d0364794cf34fd3f02a61b9ad2706228b3327b85b0cadcd11aac6087e7c98408eae2d307a09191b6553')
+        'c37706f5f6e2d49100104fb442ebf15edd6ee0a1e8038d0364794cf34fd3f02a61b9ad2706228b3327b85b0cadcd11aac6087e7c98408eae2d307a09191b6553'
+        '4fcb650e2296871f1d4919d7d8490edfa16c38250501e1fcad119f92e5826d33e74255f80e8f4e4db18263e4d7e3cd011085a19600db16b988d9fac9b2ca875b')
 
 prepare() {
   cd otp
+
+  case "${CARCH}" in
+    powerpc64|powerpc64le)
+      # The JIT needs POWER8 or newer and exits on older processors.
+      # powerpc64 also ships the interpreter, see build().
+      patch -Np1 -i "$srcdir/otp-$pkgver-ppc64-jit.patch"
+    ;;
+  esac
+
   sed -i 's/^LDFLAGS = /LDFLAGS += /g' \
     lib/megaco/src/flex/Makefile.in \
     lib/odbc/c_src/Makefile.in
@@ -105,6 +117,13 @@ build() {
     --prefix=/usr
 
   make all
+  case "${CARCH}" in
+    powerpc64)
+      # Also build the interpreter so PowerPC 970 machines can run
+      # erl -emu_flavor emu (e.g. ERL_FLAGS="-emu_flavor emu").
+      make emulator FLAVOR=emu
+    ;;
+  esac
   make DOC_TARGETS="chunks man" docs
 }
 
@@ -214,6 +233,12 @@ package_erlang-core() {
     RELSYS_MANDIR="$pkgdir/usr/share/man"
   install -vDm644 -t "$pkgdir/usr/share/doc/$pkgbase" \
     AUTHORS CONTRIBUTING.md README.md
+  case "${CARCH}" in
+    powerpc64)
+      install -vDm755 -t "$(echo "$pkgdir"/usr/lib/erlang/erts-*/bin)" \
+        bin/*/beam.emu.smp
+    ;;
+  esac
 
   # Remove unwanted files
   rm -v \
