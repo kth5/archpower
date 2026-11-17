@@ -1,0 +1,169 @@
+diff --git a/lrzip.c b/lrzip.c
+index d573d2f..b013bc1 100644
+--- a/lrzip.c
++++ b/lrzip.c
+@@ -781,7 +781,8 @@ void close_tmpoutbuf(rzip_control *control)
+ {
+ 	control->flags &= ~FLAG_TMP_OUTBUF;
+ 	dealloc(control->tmp_outbuf);
+-	control->usable_ram = control->maxram += control->ramsize / 18;
++	if (!BITS32)
++		control->usable_ram = control->maxram += control->ramsize / 18;
+ }
+ 
+ static bool open_tmpinbuf(rzip_control *control)
+@@ -822,7 +823,8 @@ void close_tmpinbuf(rzip_control *control)
+ {
+ 	control->flags &= ~FLAG_TMP_INBUF;
+ 	dealloc(control->tmp_inbuf);
+-	control->usable_ram = control->maxram += control->ramsize / 18;
++	if (!BITS32)
++		control->usable_ram = control->maxram += control->ramsize / 18;
+ }
+ 
+ static int get_pass(rzip_control *control, char *s)
+diff --git a/lrzip_private.h b/lrzip_private.h
+index d524b89..4abea03 100644
+--- a/lrzip_private.h
++++ b/lrzip_private.h
+@@ -33,14 +33,9 @@
+ #include <semaphore.h>
+ #include <stdatomic.h>
+ 
+-/* lrzip requires a 64-bit platform (large windows, no 32-bit path left). */
+-#if defined(__SIZEOF_POINTER__) && (__SIZEOF_POINTER__ < 8)
+-# error "lrzip requires a 64-bit architecture"
+-#elif defined(UINTPTR_MAX) && (UINTPTR_MAX < 0xffffffffffffffffULL)
+-# error "lrzip requires a 64-bit architecture"
+-#endif
+-_Static_assert(sizeof(void *) >= 8, "lrzip requires a 64-bit architecture");
+-_Static_assert(sizeof(long) >= 8, "lrzip requires a 64-bit architecture");
++/* ILP32 is supported. Lengths are i64 and single read/write calls are
++ * capped by MAX_RW_COUNT. BITS32 keeps compression windows inside the
++ * 32-bit address space (see setup_ram). */
+ 
+ #ifdef HAVE_PTHREAD_H
+ # include <pthread.h>
+@@ -269,6 +264,8 @@ typedef sem_t cksem_t;
+ 
+ #define NO_MD5		(!(HASH_CHECK) && !(HAS_MD5))
+ 
++#define BITS32		(sizeof(void *) < 8)
++
+ #define CTYPE_NONE 3
+ #define CTYPE_BZIP2 4
+ #define CTYPE_LZO 5
+@@ -291,6 +288,10 @@ typedef sem_t cksem_t;
+ #define SALT_LEN 8
+ #define CBC_LEN 16
+ 
++/* ~1GB. Historical 32-bit chunk cap: signed sizes and the
++ * kernel/user split cannot hold a multi-gigabyte window. */
++#define one_g		((i64)1000 * 1024 * 1024)
++
+ #ifndef PAGE_SIZE
+ # ifdef _SC_PAGE_SIZE
+ #  define PAGE_SIZE (sysconf(_SC_PAGE_SIZE))
+diff --git a/stream.c b/stream.c
+index d2be2af..5ab265f 100644
+--- a/stream.c
++++ b/stream.c
+@@ -528,7 +528,7 @@ static int zpaq_decompress_buf(rzip_control *control __UNUSED__, struct uncomp_t
+ 	c_buf = ucthread->s_buf;
+ 	ucthread->s_buf = malloc(round_up_page(control, dlen));
+ 	if (unlikely(!ucthread->s_buf)) {
+-		print_err("Failed to allocate %ld bytes for decompression\n", dlen);
++		print_err("Failed to allocate %"PRId64" bytes for decompression\n", dlen);
+ 		ret = -1;
+ 		goto out;
+ 	}
+@@ -544,7 +544,7 @@ static int zpaq_decompress_buf(rzip_control *control __UNUSED__, struct uncomp_t
+ 		goto out;
+ 	}
+ 	if (unlikely(dlen != ucthread->u_len)) {
+-		print_err("Inconsistent length after decompression. Got %ld bytes, expected %"PRId64"\n", dlen, ucthread->u_len);
++		print_err("Inconsistent length after decompression. Got %"PRId64" bytes, expected %"PRId64"\n", dlen, ucthread->u_len);
+ 		ret = -1;
+ 	} else
+ 		dealloc(c_buf);
+@@ -1230,6 +1230,11 @@ void *open_stream_out(rzip_control *control, int f, unsigned int n, i64 chunk_li
+ 		print_output("Minimising number of threads to %d to limit memory usage\n",
+ 			     control->threads);
+ 	}
++	/* Cap the stream buffer. Do not subtract encoder overhead from
++	 * this cap: on ILP32 that overhead can exceed it and the result
++	 * is a negative limit, which the malloc probe then rejects. */
++	if (BITS32)
++		limit = MIN(limit, one_g);
+ 	/* Use a nominal minimum size should we fail all previous shrinking */
+ 	if (limit < STREAM_BUFSIZE) {
+ 		limit = MAX(limit, STREAM_BUFSIZE);
+@@ -2559,10 +2564,10 @@ static int lz4_compresses(rzip_control *control, uchar *s_buf, i64 s_len)
+ 	} while (test_len <= dlen);
+ 
+ 	if (!ret)
+-		print_maxverbose("lz4 testing FAILED for chunk %ld. %d Passes (applied to all blocks)\n",
++		print_maxverbose("lz4 testing FAILED for chunk %"PRId64". %d Passes (applied to all blocks)\n",
+ 				 s_len, workcounter);
+ 	else {
+-		print_maxverbose("lz4 testing OK for chunk %ld. Compressed size = %5.2F%% of chunk, %d Passes (applied to all blocks)\n",
++		print_maxverbose("lz4 testing OK for chunk %"PRId64". Compressed size = %5.2F%% of chunk, %d Passes (applied to all blocks)\n",
+ 				s_len, 100 * ((double) best_dlen / (double) test_len), workcounter);
+ 	}
+ 
+diff --git a/util.c b/util.c
+index 60679ae..197fb24 100644
+--- a/util.c
++++ b/util.c
+@@ -143,6 +143,33 @@ void setup_overhead(rzip_control *control)
+ 		if (dictsize > dictcap)
+ 			dictsize = dictcap;
+ 
++		if (BITS32) {
++			/* ILP32 LZMA rejects dictionaries above 128MB. The
++			 * encoder also needs ~11.5x that dictionary, and
++			 * open_stream_out probes the whole reservation with
++			 * one malloc, so keep it inside a 1GB budget. */
++			i64 threads = control->threads > 0 ? control->threads : 1;
++			i64 fixed = ((i64)6 << 20) + 16384;
++			i64 per = one_g / threads;
++			i64 max_dict = (i64)1 << 20;
++
++			if (per > fixed) {
++				max_dict = (per - fixed) * 2 / 23;
++				if (max_dict > ((i64)1 << 27))
++					max_dict = (i64)1 << 27;
++				if (max_dict >= ((i64)1 << 20)) {
++					i64 pow = (i64)1 << 20;
++
++					while ((pow << 1) <= max_dict)
++						pow <<= 1;
++					max_dict = pow;
++				} else
++					max_dict = (i64)1 << 20;
++			}
++			if (dictsize > max_dict)
++				dictsize = max_dict;
++		}
++
+ 		control->lzma_dictsize = dictsize;
+ 		print_maxverbose("Using lzma dictionary size %"PRId64" for single block ultra\n",
+ 				 dictsize);
+@@ -169,7 +196,16 @@ void setup_ram(rzip_control *control)
+ 		control->maxram = control->ramsize / 6;
+ 	else
+ 		control->maxram = control->ramsize / 3;
+-	control->usable_ram = control->maxram;
++	if (BITS32) {
++		/* 32-bit userspace: the kernel/user split leaves at most
++		 * about 3GB, and the rzip window has to share that with
++		 * the backend buffers. Keep the heuristic under 1GB.
++		 */
++		control->usable_ram = MAX(control->ramsize - 900000000ll, 900000000ll);
++		control->maxram = MIN(control->maxram, control->usable_ram);
++		control->maxram = MIN(control->maxram, one_g * 2 / 3);
++	} else
++		control->usable_ram = control->maxram;
+ 	round_to_page(&control->maxram);
+ }
+ 
