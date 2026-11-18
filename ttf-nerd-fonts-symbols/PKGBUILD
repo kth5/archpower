@@ -8,7 +8,7 @@ pkgname=(
   ttf-nerd-fonts-symbols-common
 )
 pkgbase=ttf-nerd-fonts-symbols
-pkgver=3.4.0
+pkgver=3.5.1
 pkgrel=1
 pkgdesc="High number of extra glyphs from popular 'iconic fonts'"
 arch=(any)
@@ -21,9 +21,9 @@ source=(
   "10-nerd-font-symbols-$pkgver.conf::https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v$pkgver/10-nerd-font-symbols.conf"
   "Nerd_Fonts-$pkgver-LICENSE::https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v$pkgver/LICENSE"
 )
-b2sums=('27927e0a46ef9721326da92de475be8e8258010ea1dd425b98aed8b8560df062baab7510fc68ea62c1dca46948c909ba2b1a1ff80ce5743434071c9f9b567394'
-        '87d527cb71f2318b9b2f71a1ebdc441ade5586ddb8b5ecf4136d03eddc025af08e5dc2c3c1a610370298db3b04f90de007f3377a51f4be787a38cdae6b04561a'
-        'dc3100a8c1336ebc8b325e33be579e1f921fd9a80acfa44835846711052a344503eb9cba0177061f282b0ea92b7164d01b88d71da21809aef58c12a4dfd09462'
+b2sums=('4ca0e1b9bc39a6d7cf008a450de77d93a4a61c024b04300c67bb46251208f7f42c382912d7e1ac4b679b87c6bc46807873ce93f8e69d65432bad0240ee9e2656'
+        'd3ccc4accbac0196e7d1c6d0ec5e44cd3aa1709cb9ffd4466412522a73d38cbbc5396bd022693c4e113533809a6ce3b4ec522fea7c9f521190cbea388aadc2a8'
+        'af5f2d24dffc30aadd589d639ad1ef3879185c0bb46cd41eeeae6d47e676329d62d39a2673caf256bbb8cddf6537d40dbce9f8ef1ece95a92738c331a5f764da'
         'cf89e6d30dfd223c0b67941c1641d3290f0ff9bdb49b618a5938079c885ff74e61c555119fc5e0d9111bd37dbb21401f9cd6dc8a29bf3d6f97fc3a4827b6c1e3')
 
 _package() {
