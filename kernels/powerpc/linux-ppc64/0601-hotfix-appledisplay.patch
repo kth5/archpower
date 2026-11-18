@@ -1,0 +1,48 @@
+# --- T2-COPYRIGHT-BEGIN ---
+# t2/package/*/linux/hotfix-appledisplay.patch
+# Copyright (C) 2024 - 2026 The T2 SDE Project
+# SPDX-License-Identifier: GPL-2.0 or patched project license
+# --- T2-COPYRIGHT-END ---
+
+Fixed hid-core to ignore Apple Cinema Display IDs, likewise - so the
+superiour appledisplay driver can bind to it.
+
+Make sure appledisplay probe logs an error in all error cases.
+
+Signed-off-by: René Rebe <rene@exactcode.com>
+
+--- linux-6.8/drivers/usb/misc/appledisplay.c.vanilla	2024-05-15 20:09:54.318090453 +0200
++++ linux-6.8/drivers/usb/misc/appledisplay.c	2024-05-15 21:03:24.610444439 +0200
+@@ -250,7 +250,6 @@
+ 		GFP_KERNEL, &pdata->urb->transfer_dma);
+ 	if (!pdata->urbdata) {
+ 		retval = -ENOMEM;
+-		dev_err(&iface->dev, "Allocating URB buffer failed\n");
+ 		goto error;
+ 	}
+ 
+@@ -262,7 +261,6 @@
+ 	pdata->urb->transfer_flags = URB_NO_TRANSFER_DMA_MAP;
+ 	if (usb_submit_urb(pdata->urb, GFP_KERNEL)) {
+ 		retval = -EIO;
+-		dev_err(&iface->dev, "Submitting URB failed\n");
+ 		goto error;
+ 	}
+ 
+@@ -285,8 +283,6 @@
+ 
+ 	if (brightness < 0) {
+ 		retval = brightness;
+-		dev_err(&iface->dev,
+-			"Error while getting initial brightness: %d\n", retval);
+ 		goto error;
+ 	}
+ 
+@@ -301,6 +297,7 @@
+ 	return 0;
+ 
+ error:
++	dev_err(&iface->dev, "Failed during probe: %d\n", retval);
+ 	if (pdata) {
+ 		if (pdata->urb) {
+ 			usb_kill_urb(pdata->urb);
