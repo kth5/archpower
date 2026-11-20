@@ -1,0 +1,832 @@
+From 04770974e7d1cc0810b8c23d8256dd2ea85ef93a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Sat, 31 Oct 2026 17:21:37 +1100
+Subject: [PATCH 23/25] Keep BytecodeEmitter::emitTree a thin dispatcher under
+ LTO and PGO
+
+emitTree is the recursion point of the bytecode emitter and is written to
+use little stack itself, dispatching to one helper per node kind. With
+ThinLTO and PGO, clang inlines most of those helpers into it, so its frame
+grows from 160 to about 1200 bytes on ppc64le and deeply nested code hits
+the native stack limit at less than half the nesting depth a GCC build
+handles (environments/bug1966196.js fails in the shell). Mark the large
+helpers that emitTree still calls directly MOZ_NEVER_INLINE, as emitSwitch,
+emitTry and emitLexicalScope already are for llvm.org/pr14047.
+---
+ js/src/frontend/BytecodeEmitter.cpp | 138 +++++++++++++++------------
+ js/src/frontend/BytecodeEmitter.h   | 139 ++++++++++++++++------------
+ 2 files changed, 158 insertions(+), 119 deletions(-)
+
+diff --git a/js/src/frontend/BytecodeEmitter.cpp b/js/src/frontend/BytecodeEmitter.cpp
+index 0cc545bf4a..1e580705e1 100644
+--- a/js/src/frontend/BytecodeEmitter.cpp
++++ b/js/src/frontend/BytecodeEmitter.cpp
+@@ -749,7 +749,8 @@ bool BytecodeEmitter::emitAtomOp(JSOp op, GCThingIndex atomIndex) {
+   return emitGCIndexOp(op, atomIndex);
+ }
+ 
+-bool BytecodeEmitter::emitStringOp(JSOp op, TaggedParserAtomIndex atom) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitStringOp(
++    JSOp op, TaggedParserAtomIndex atom) {
+   MOZ_ASSERT(atom);
+   GCThingIndex index;
+   if (!makeAtomIndex(atom, ParserAtom::Atomize::No, &index)) {
+@@ -759,7 +760,8 @@ bool BytecodeEmitter::emitStringOp(JSOp op, TaggedParserAtomIndex atom) {
+   return emitStringOp(op, index);
+ }
+ 
+-bool BytecodeEmitter::emitStringOp(JSOp op, GCThingIndex atomIndex) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitStringOp(JSOp op,
++                                                    GCThingIndex atomIndex) {
+   MOZ_ASSERT(JOF_OPTYPE(op) == JOF_STRING);
+   return emitGCIndexOp(op, atomIndex);
+ }
+@@ -776,7 +778,7 @@ bool BytecodeEmitter::emitInternedObjectOp(GCThingIndex index, JSOp op) {
+   return emitGCIndexOp(op, index);
+ }
+ 
+-bool BytecodeEmitter::emitRegExp(GCThingIndex index) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitRegExp(GCThingIndex index) {
+   return emitGCIndexOp(JSOp::RegExp, index);
+ }
+ 
+@@ -1552,18 +1554,19 @@ bool BytecodeEmitter::emitGetNameAtLocation(TaggedParserAtomIndex name,
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitGetName(NameNode* name) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitGetName(NameNode* name) {
+   MOZ_ASSERT(name->isKind(ParseNodeKind::Name));
+ 
+   return emitGetName(name->name());
+ }
+ 
+-bool BytecodeEmitter::emitGetPrivateName(NameNode* name) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitGetPrivateName(NameNode* name) {
+   MOZ_ASSERT(name->isKind(ParseNodeKind::PrivateName));
+   return emitGetPrivateName(name->name());
+ }
+ 
+-bool BytecodeEmitter::emitGetPrivateName(TaggedParserAtomIndex nameAtom) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitGetPrivateName(
++    TaggedParserAtomIndex nameAtom) {
+   // The parser ensures the private name is present on the environment chain,
+   // but its location can be Dynamic or Global when emitting debugger
+   // eval-in-frame code.
+@@ -1636,7 +1639,7 @@ bool BytecodeEmitter::emitTDZCheckIfNeeded(TaggedParserAtomIndex name,
+   return innermostTDZCheckCache->noteTDZCheck(this, name, DontCheckTDZ);
+ }
+ 
+-bool BytecodeEmitter::emitPropLHS(PropertyAccess* prop) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitPropLHS(PropertyAccess* prop) {
+   MOZ_ASSERT(!prop->isSuper());
+ 
+   ParseNode* expr = &prop->expression();
+@@ -1687,7 +1690,7 @@ bool BytecodeEmitter::emitPropLHS(PropertyAccess* prop) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitArgumentsLength() {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitArgumentsLength() {
+   if (sc->isFunctionBox() &&
+       sc->asFunctionBox()->isEligibleForArgumentsLength() &&
+       !sc->asFunctionBox()->needsArgsObj()) {
+@@ -1765,8 +1768,8 @@ bool BytecodeEmitter::emitNameIncDec(UnaryNode* incDec, ValueUsage valueUsage) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitElemObjAndKey(PropertyByValue* elem,
+-                                        ElemOpEmitter& eoe) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitElemObjAndKey(PropertyByValue* elem,
++                                                         ElemOpEmitter& eoe) {
+   ParseNode* exprOrSuper = &elem->expression();
+   ParseNode* key = &elem->key();
+ 
+@@ -1921,7 +1924,7 @@ bool BytecodeEmitter::emitDouble(double d) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitNumberOp(double dval) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitNumberOp(double dval) {
+   int32_t ival;
+   if (NumberIsInt32(dval, &ival)) {
+     if (ival == 0) {
+@@ -2210,7 +2213,7 @@ bool BytecodeEmitter::emitPushResumeKind(GeneratorResumeKind kind) {
+   return emit2(JSOp::ResumeKind, uint8_t(kind));
+ }
+ 
+-bool BytecodeEmitter::emitSetThis(BinaryNode* setThisNode) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitSetThis(BinaryNode* setThisNode) {
+   // ParseNodeKind::SetThis is used to update |this| after a super() call
+   // in a derived class constructor.
+ 
+@@ -4120,7 +4123,8 @@ bool BytecodeEmitter::emitDestructuringOps(ListNode* pattern,
+   return emitDestructuringOpsObject(pattern, flav);
+ }
+ 
+-bool BytecodeEmitter::emitTemplateString(ListNode* templateString) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitTemplateString(
++    ListNode* templateString) {
+   bool pushedString = false;
+ 
+   for (ParseNode* item : templateString->contents()) {
+@@ -4176,7 +4180,7 @@ bool BytecodeEmitter::emitTemplateString(ListNode* templateString) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitDeclarationList(ListNode* declList) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitDeclarationList(ListNode* declList) {
+   for (ParseNode* decl : declList->contents()) {
+     ParseNode* pattern;
+     ParseNode* initializer;
+@@ -4357,8 +4361,9 @@ static inline JSOp CompoundAssignmentParseNodeKindToJSOp(ParseNodeKind pnk) {
+   }
+ }
+ 
+-bool BytecodeEmitter::emitAssignmentOrInit(ParseNodeKind kind, ParseNode* lhs,
+-                                           ParseNode* rhs) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitAssignmentOrInit(ParseNodeKind kind,
++                                                            ParseNode* lhs,
++                                                            ParseNode* rhs) {
+   JSOp compoundOp = CompoundAssignmentParseNodeKindToJSOp(kind);
+   bool isCompound = compoundOp != JSOp::Nop;
+   bool isInit = kind == ParseNodeKind::InitExpr;
+@@ -4672,7 +4677,8 @@ bool BytecodeEmitter::emitAssignmentOrInit(ParseNodeKind kind, ParseNode* lhs,
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitShortCircuitAssignment(AssignmentNode* node) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitShortCircuitAssignment(
++    AssignmentNode* node) {
+   TDZCheckCache tdzCache(this);
+ 
+   JSOp op;
+@@ -4950,7 +4956,8 @@ bool BytecodeEmitter::emitCallSiteObjectArray(ObjLiteralWriter& writer,
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitCallSiteObject(CallSiteNode* callSiteObj) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitCallSiteObject(
++    CallSiteNode* callSiteObj) {
+   constexpr JSOp op = JSOp::CallSiteObj;
+ 
+   // The first element of a call-site node is the raw-values list. Skip over it.
+@@ -4986,7 +4993,7 @@ bool BytecodeEmitter::emitCallSiteObject(CallSiteNode* callSiteObj) {
+   return emitInternedObjectOp(cookedIndex, op);
+ }
+ 
+-bool BytecodeEmitter::emitCatch(BinaryNode* catchClause) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitCatch(BinaryNode* catchClause) {
+   // We must be nested under a try-finally statement.
+   MOZ_ASSERT(innermostNestableControl->is<TryFinallyControl>());
+ 
+@@ -5122,7 +5129,7 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitTry(TryNode* tryNode) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitIf(TernaryNode* ifNode) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitIf(TernaryNode* ifNode) {
+   IfEmitter ifThenElse(this);
+ 
+   if (!ifThenElse.emitIf(Some(ifNode->kid1()->pn_pos.begin))) {
+@@ -5319,7 +5326,7 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitLexicalScope(
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitWith(BinaryNode* withNode) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitWith(BinaryNode* withNode) {
+   // Ensure that the column of the 'with' is set properly.
+   if (!updateSourceCoordNotes(withNode->left()->pn_pos.begin)) {
+     return false;
+@@ -5408,7 +5415,7 @@ bool BytecodeEmitter::emitCopyDataProperties(CopyOption option) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitBigIntOp(BigIntLiteral* bigint) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitBigIntOp(BigIntLiteral* bigint) {
+   GCThingIndex index;
+   if (!perScriptData().gcThingList().append(bigint, &index)) {
+     return false;
+@@ -6170,8 +6177,8 @@ bool BytecodeEmitter::emitCStyleFor(
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitFor(ForNode* forNode,
+-                              const EmitterScope* headLexicalEmitterScope) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitFor(
++    ForNode* forNode, const EmitterScope* headLexicalEmitterScope) {
+   if (forNode->head()->isKind(ParseNodeKind::ForHead)) {
+     return emitCStyleFor(forNode, headLexicalEmitterScope);
+   }
+@@ -6257,7 +6264,7 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitFunction(
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitDo(BinaryNode* doNode) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitDo(BinaryNode* doNode) {
+   ParseNode* bodyNode = doNode->left();
+ 
+   DoWhileEmitter doWhile(this);
+@@ -6291,7 +6298,7 @@ bool BytecodeEmitter::emitDo(BinaryNode* doNode) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitWhile(BinaryNode* whileNode) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitWhile(BinaryNode* whileNode) {
+   ParseNode* bodyNode = whileNode->right();
+ 
+   WhileEmitter wh(this);
+@@ -6326,7 +6333,7 @@ bool BytecodeEmitter::emitWhile(BinaryNode* whileNode) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitBreak(TaggedParserAtomIndex label) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitBreak(TaggedParserAtomIndex label) {
+   BreakableControl* target;
+   if (label) {
+     // Any statement with the matching label may be the break target.
+@@ -6344,7 +6351,8 @@ bool BytecodeEmitter::emitBreak(TaggedParserAtomIndex label) {
+   return emitGoto(target, GotoKind::Break);
+ }
+ 
+-bool BytecodeEmitter::emitContinue(TaggedParserAtomIndex label) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitContinue(
++    TaggedParserAtomIndex label) {
+   LoopControl* target = nullptr;
+   if (label) {
+     // Find the loop statement enclosed by the matching label.
+@@ -6384,14 +6392,15 @@ bool BytecodeEmitter::emitGetFunctionThis(NameNode* thisName) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitGetThisForSuperBase(UnaryNode* superBase) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitGetThisForSuperBase(
++    UnaryNode* superBase) {
+   MOZ_ASSERT(superBase->isKind(ParseNodeKind::SuperBase));
+   NameNode* nameNode = &superBase->kid()->as<NameNode>();
+   return emitGetFunctionThis(nameNode);
+   //                [stack] THIS
+ }
+ 
+-bool BytecodeEmitter::emitThisLiteral(ThisLiteral* pn) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitThisLiteral(ThisLiteral* pn) {
+   if (ParseNode* kid = pn->kid()) {
+     NameNode* thisName = &kid->as<NameNode>();
+     return emitGetFunctionThis(thisName);
+@@ -6431,7 +6440,7 @@ bool BytecodeEmitter::emitCheckDerivedClassConstructorReturn() {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitNewTarget() {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitNewTarget() {
+   MOZ_ASSERT(sc->allowNewTarget());
+ 
+   if (!emitGetName(TaggedParserAtomIndex::WellKnown::dot_newTarget_())) {
+@@ -6441,14 +6450,14 @@ bool BytecodeEmitter::emitNewTarget() {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitNewTarget(NewTargetNode* pn) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitNewTarget(NewTargetNode* pn) {
+   MOZ_ASSERT(pn->newTargetName()->isName(
+       TaggedParserAtomIndex::WellKnown::dot_newTarget_()));
+ 
+   return emitNewTarget();
+ }
+ 
+-bool BytecodeEmitter::emitNewTarget(CallNode* pn) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitNewTarget(CallNode* pn) {
+   MOZ_ASSERT(pn->callOp() == JSOp::SuperCall ||
+              pn->callOp() == JSOp::SpreadSuperCall);
+ 
+@@ -6457,7 +6466,7 @@ bool BytecodeEmitter::emitNewTarget(CallNode* pn) {
+   return emitNewTarget();
+ }
+ 
+-bool BytecodeEmitter::emitReturn(UnaryNode* returnNode) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitReturn(UnaryNode* returnNode) {
+   if (!updateSourceCoordNotes(returnNode->pn_pos.begin)) {
+     return false;
+   }
+@@ -6574,7 +6583,7 @@ bool BytecodeEmitter::emitGetDotGeneratorInScope(EmitterScope& currentScope) {
+       TaggedParserAtomIndex::WellKnown::dot_generator_(), loc);
+ }
+ 
+-bool BytecodeEmitter::emitInitialYield(UnaryNode* yieldNode) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitInitialYield(UnaryNode* yieldNode) {
+   if (!emitTree(yieldNode->kid())) {
+     return false;
+   }
+@@ -6595,7 +6604,7 @@ bool BytecodeEmitter::emitInitialYield(UnaryNode* yieldNode) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitYield(UnaryNode* yieldNode) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitYield(UnaryNode* yieldNode) {
+   MOZ_ASSERT(sc->isFunctionBox());
+   MOZ_ASSERT(sc->asFunctionBox()->isGenerator());
+   MOZ_ASSERT(yieldNode->isKind(ParseNodeKind::YieldExpr));
+@@ -6718,7 +6727,7 @@ bool BytecodeEmitter::emitAwaitInScope(EmitterScope& currentScope) {
+ // ES2019 draft rev 49b781ec80117b60f73327ef3054703a3111e40c
+ // 14.4.14 Runtime Semantics: Evaluation
+ // YieldExpression : yield* AssignmentExpression
+-bool BytecodeEmitter::emitYieldStar(ParseNode* iter) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitYieldStar(ParseNode* iter) {
+   MOZ_ASSERT(getSelfHostedIterFor(iter) == SelfHostedIter::Deny,
+              "yield* is prohibited in self-hosted code because it can run "
+              "user-modifiable iteration code");
+@@ -7214,7 +7223,7 @@ bool BytecodeEmitter::emitYieldStar(ParseNode* iter) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitStatementList(ListNode* stmtList) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitStatementList(ListNode* stmtList) {
+   for (ParseNode* stmt : stmtList->contents()) {
+     if (!emitTree(stmt)) {
+       return false;
+@@ -7223,7 +7232,8 @@ bool BytecodeEmitter::emitStatementList(ListNode* stmtList) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitExpressionStatement(UnaryNode* exprStmt) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitExpressionStatement(
++    UnaryNode* exprStmt) {
+   MOZ_ASSERT(exprStmt->isKind(ParseNodeKind::ExpressionStmt));
+ 
+   /*
+@@ -7282,7 +7292,7 @@ bool BytecodeEmitter::emitExpressionStatement(UnaryNode* exprStmt) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitDeleteName(UnaryNode* deleteNode) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitDeleteName(UnaryNode* deleteNode) {
+   MOZ_ASSERT(deleteNode->isKind(ParseNodeKind::DeleteNameExpr));
+ 
+   NameNode* nameExpr = &deleteNode->kid()->as<NameNode>();
+@@ -7291,7 +7301,8 @@ bool BytecodeEmitter::emitDeleteName(UnaryNode* deleteNode) {
+   return emitAtomOp(JSOp::DelName, nameExpr->atom());
+ }
+ 
+-bool BytecodeEmitter::emitDeleteProperty(UnaryNode* deleteNode) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitDeleteProperty(
++    UnaryNode* deleteNode) {
+   MOZ_ASSERT(deleteNode->isKind(ParseNodeKind::DeletePropExpr));
+ 
+   PropertyAccess* propExpr = &deleteNode->kid()->as<PropertyAccess>();
+@@ -7330,7 +7341,8 @@ bool BytecodeEmitter::emitDeleteProperty(UnaryNode* deleteNode) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitDeleteElement(UnaryNode* deleteNode) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitDeleteElement(
++    UnaryNode* deleteNode) {
+   MOZ_ASSERT(deleteNode->isKind(ParseNodeKind::DeleteElemExpr));
+ 
+   auto* elemExpr = &deleteNode->kid()->as<PropertyByValue>();
+@@ -7359,7 +7371,8 @@ bool BytecodeEmitter::emitDeleteElement(UnaryNode* deleteNode) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitDeleteExpression(UnaryNode* deleteNode) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitDeleteExpression(
++    UnaryNode* deleteNode) {
+   MOZ_ASSERT(deleteNode->isKind(ParseNodeKind::DeleteExpr));
+ 
+   ParseNode* expression = deleteNode->kid();
+@@ -7383,7 +7396,8 @@ bool BytecodeEmitter::emitDeleteExpression(UnaryNode* deleteNode) {
+   return emit1(JSOp::True);
+ }
+ 
+-bool BytecodeEmitter::emitDeleteOptionalChain(UnaryNode* deleteNode) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitDeleteOptionalChain(
++    UnaryNode* deleteNode) {
+   MOZ_ASSERT(deleteNode->isKind(ParseNodeKind::DeleteOptionalChainExpr));
+ 
+   OptionalEmitter oe(this, bytecodeSection().stackDepth());
+@@ -8527,7 +8541,8 @@ bool BytecodeEmitter::emitSelfHostedDisposeResources(CallNode* callNode,
+ }
+ #endif
+ 
+-bool BytecodeEmitter::emitCallOrNew(CallNode* callNode, ValueUsage valueUsage) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitCallOrNew(CallNode* callNode,
++                                                     ValueUsage valueUsage) {
+   /*
+    * Emit callable invocation or operator new (constructor call) code.
+    * First, emit code for the left operand to evaluate the callable or
+@@ -8739,7 +8754,7 @@ static inline JSOp BinaryOpParseNodeKindToJSOp(ParseNodeKind pnk) {
+   return ParseNodeKindToJSOp[size_t(pnk) - parseNodeFirst];
+ }
+ 
+-bool BytecodeEmitter::emitRightAssociative(ListNode* node) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitRightAssociative(ListNode* node) {
+   // ** is the only right-associative operator.
+   MOZ_ASSERT(node->isKind(ParseNodeKind::PowExpr));
+ 
+@@ -8863,7 +8878,7 @@ bool BytecodeEmitter::tryEmitConstantEq(ListNode* node, JSOp op,
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitLeftAssociative(ListNode* node) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitLeftAssociative(ListNode* node) {
+   JSOp op = BinaryOpParseNodeKindToJSOp(node->getKind());
+   bool constantEqEmitted = false;
+   if (!tryEmitConstantEq(node, op, &constantEqEmitted)) {
+@@ -8891,7 +8906,7 @@ bool BytecodeEmitter::emitLeftAssociative(ListNode* node) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitPrivateInExpr(ListNode* node) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitPrivateInExpr(ListNode* node) {
+   MOZ_ASSERT(node->head()->isKind(ParseNodeKind::PrivateName));
+ 
+   NameNode& privateNameNode = node->head()->as<NameNode>();
+@@ -9092,8 +9107,8 @@ bool BytecodeEmitter::emitCalleeAndThisForOptionalChain(
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitOptionalChain(UnaryNode* optionalChain,
+-                                        ValueUsage valueUsage) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitOptionalChain(
++    UnaryNode* optionalChain, ValueUsage valueUsage) {
+   ParseNode* expr = optionalChain->kid();
+ 
+   OptionalEmitter oe(this, bytecodeSection().stackDepth());
+@@ -9237,7 +9252,8 @@ bool BytecodeEmitter::emitOptionalPrivateExpression(
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitShortCircuit(ListNode* node, ValueUsage valueUsage) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitShortCircuit(ListNode* node,
++                                                        ValueUsage valueUsage) {
+   MOZ_ASSERT(node->isKind(ParseNodeKind::OrExpr) ||
+              node->isKind(ParseNodeKind::CoalesceExpr) ||
+              node->isKind(ParseNodeKind::AndExpr));
+@@ -9297,7 +9313,8 @@ bool BytecodeEmitter::emitShortCircuit(ListNode* node, ValueUsage valueUsage) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitSequenceExpr(ListNode* node, ValueUsage valueUsage) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitSequenceExpr(ListNode* node,
++                                                        ValueUsage valueUsage) {
+   for (ParseNode* child : node->contentsTo(node->last())) {
+     if (!updateSourceCoordNotes(child->pn_pos.begin)) {
+       return false;
+@@ -9358,7 +9375,7 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitLabeledStatement(
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitConditionalExpression(
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitConditionalExpression(
+     ConditionalExpression& conditional, ValueUsage valueUsage) {
+   CondEmitter cond(this);
+   if (!cond.emitCond()) {
+@@ -11464,7 +11481,7 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitObject(ListNode* objNode) {
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitArrayLiteral(ListNode* array) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitArrayLiteral(ListNode* array) {
+   // Emit JSOp::Object if the array consists entirely of primitive values and we
+   // are in a singleton context.
+   if (checkSingletonContext() && !array->hasNonConstInitializer() &&
+@@ -11648,7 +11665,7 @@ static inline JSOp UnaryOpParseNodeKindToJSOp(ParseNodeKind pnk) {
+   }
+ }
+ 
+-bool BytecodeEmitter::emitUnary(UnaryNode* unaryNode) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitUnary(UnaryNode* unaryNode) {
+   if (!updateSourceCoordNotes(unaryNode->pn_pos.begin)) {
+     return false;
+   }
+@@ -11662,7 +11679,8 @@ bool BytecodeEmitter::emitUnary(UnaryNode* unaryNode) {
+   return emit1(op);
+ }
+ 
+-bool BytecodeEmitter::emitTypeof(UnaryNode* typeofNode, JSOp op) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitTypeof(UnaryNode* typeofNode,
++                                                  JSOp op) {
+   MOZ_ASSERT(op == JSOp::Typeof || op == JSOp::TypeofExpr);
+ 
+   if (!updateSourceCoordNotes(typeofNode->pn_pos.begin)) {
+@@ -11676,7 +11694,8 @@ bool BytecodeEmitter::emitTypeof(UnaryNode* typeofNode, JSOp op) {
+   return emit1(op);
+ }
+ 
+-bool BytecodeEmitter::tryEmitTypeofEq(ListNode* node, bool* emitted) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::tryEmitTypeofEq(ListNode* node,
++                                                       bool* emitted) {
+   // Emit specialized opcode for the following if possible:
+   //  * typeof val == "type"
+   //  * typeof val != "type"
+@@ -12143,7 +12162,7 @@ bool BytecodeEmitter::emitNewPrivateNames(
+ 
+ // This follows ES6 14.5.14 (ClassDefinitionEvaluation) and ES6 14.5.15
+ // (BindingClassDeclarationEvaluation).
+-bool BytecodeEmitter::emitClass(
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitClass(
+     ClassNode* classNode,
+     ClassNameKind nameKind /* = ClassNameKind::BindingName */,
+     TaggedParserAtomIndex
+@@ -12460,7 +12479,8 @@ bool BytecodeEmitter::emitClass(
+   return true;
+ }
+ 
+-bool BytecodeEmitter::emitExportDefault(BinaryNode* exportNode) {
++MOZ_NEVER_INLINE bool BytecodeEmitter::emitExportDefault(
++    BinaryNode* exportNode) {
+   MOZ_ASSERT(exportNode->isKind(ParseNodeKind::ExportDefaultStmt));
+ 
+   ParseNode* valueNode = exportNode->left();
+diff --git a/js/src/frontend/BytecodeEmitter.h b/js/src/frontend/BytecodeEmitter.h
+index 2dbd6266ad..23e0698032 100644
+--- a/js/src/frontend/BytecodeEmitter.h
++++ b/js/src/frontend/BytecodeEmitter.h
+@@ -507,7 +507,9 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+   // Control whether emitTree emits a line number note.
+   enum EmitLineNumberNote { EMIT_LINENOTE, SUPPRESS_LINENOTE };
+ 
+-  // Emit code for the tree rooted at pn.
++  // Emit code for the tree rooted at pn. This is the emitter's recursion
++  // point, so the helpers it dispatches to are MOZ_NEVER_INLINE to keep LTO
++  // and PGO from folding their locals into its frame (llvm.org/pr14047).
+   [[nodiscard]] bool emitTree(ParseNode* pn,
+                               ValueUsage valueUsage = ValueUsage::WantValue,
+                               EmitLineNumberNote emitLineNote = EMIT_LINENOTE);
+@@ -580,22 +582,23 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+                            BytecodeOffset* offset = nullptr);
+ 
+   [[nodiscard]] bool emitDouble(double dval);
+-  [[nodiscard]] bool emitNumberOp(double dval);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitNumberOp(double dval);
+ 
+-  [[nodiscard]] bool emitBigIntOp(BigIntLiteral* bigint);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitBigIntOp(BigIntLiteral* bigint);
+ 
+-  [[nodiscard]] bool emitThisLiteral(ThisLiteral* pn);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitThisLiteral(ThisLiteral* pn);
+   [[nodiscard]] bool emitGetFunctionThis(NameNode* thisName);
+-  [[nodiscard]] bool emitGetThisForSuperBase(UnaryNode* superBase);
+-  [[nodiscard]] bool emitSetThis(BinaryNode* setThisNode);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitGetThisForSuperBase(
++      UnaryNode* superBase);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitSetThis(BinaryNode* setThisNode);
+   [[nodiscard]] bool emitCheckDerivedClassConstructorReturn();
+ 
+  private:
+-  [[nodiscard]] bool emitNewTarget();
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitNewTarget();
+ 
+  public:
+-  [[nodiscard]] bool emitNewTarget(NewTargetNode* pn);
+-  [[nodiscard]] bool emitNewTarget(CallNode* pn);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitNewTarget(NewTargetNode* pn);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitNewTarget(CallNode* pn);
+ 
+   // Handle jump opcodes and jump targets.
+   [[nodiscard]] bool emitJumpTargetOp(JSOp op, BytecodeOffset* off);
+@@ -621,16 +624,18 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+   [[nodiscard]] bool emitAtomOp(JSOp op, TaggedParserAtomIndex atom);
+   [[nodiscard]] bool emitAtomOp(JSOp op, GCThingIndex atomIndex);
+ 
+-  [[nodiscard]] bool emitStringOp(JSOp op, TaggedParserAtomIndex atom);
+-  [[nodiscard]] bool emitStringOp(JSOp op, GCThingIndex atomIndex);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitStringOp(JSOp op,
++                                                   TaggedParserAtomIndex atom);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitStringOp(JSOp op,
++                                                   GCThingIndex atomIndex);
+ 
+-  [[nodiscard]] bool emitArrayLiteral(ListNode* array);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitArrayLiteral(ListNode* array);
+   [[nodiscard]] bool emitArray(ListNode* array);
+   [[nodiscard]] bool emitSpreadIntoArray(UnaryNode* elem);
+ 
+   [[nodiscard]] bool emitInternedScopeOp(GCThingIndex index, JSOp op);
+   [[nodiscard]] bool emitInternedObjectOp(GCThingIndex index, JSOp op);
+-  [[nodiscard]] bool emitRegExp(GCThingIndex index);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitRegExp(GCThingIndex index);
+ 
+   [[nodiscard]] MOZ_NEVER_INLINE bool emitFunction(FunctionNode* funNode,
+                                                    bool needsProto = false);
+@@ -696,12 +701,13 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+ 
+   [[nodiscard]] bool emitGetNameAtLocation(TaggedParserAtomIndex name,
+                                            const NameLocation& loc);
+-  [[nodiscard]] bool emitGetName(TaggedParserAtomIndex name) {
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitGetName(TaggedParserAtomIndex name) {
+     return emitGetNameAtLocation(name, lookupName(name));
+   }
+-  [[nodiscard]] bool emitGetName(NameNode* name);
+-  [[nodiscard]] bool emitGetPrivateName(NameNode* name);
+-  [[nodiscard]] bool emitGetPrivateName(TaggedParserAtomIndex name);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitGetName(NameNode* name);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitGetPrivateName(NameNode* name);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitGetPrivateName(
++      TaggedParserAtomIndex name);
+ 
+   [[nodiscard]] bool emitTDZCheckIfNeeded(TaggedParserAtomIndex name,
+                                           const NameLocation& loc,
+@@ -709,7 +715,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+ 
+   [[nodiscard]] bool emitNameIncDec(UnaryNode* incDec, ValueUsage valueUsage);
+ 
+-  [[nodiscard]] bool emitDeclarationList(ListNode* declList);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitDeclarationList(ListNode* declList);
+   [[nodiscard]] bool emitSingleDeclaration(ListNode* declList, NameNode* decl,
+                                            ParseNode* initializer);
+   [[nodiscard]] bool emitAssignmentRhs(ParseNode* rhs,
+@@ -735,10 +741,10 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+   [[nodiscard]] bool allocateResumeIndexRange(
+       mozilla::Span<BytecodeOffset> offsets, uint32_t* firstResumeIndex);
+ 
+-  [[nodiscard]] bool emitInitialYield(UnaryNode* yieldNode);
+-  [[nodiscard]] bool emitYield(UnaryNode* yieldNode);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitInitialYield(UnaryNode* yieldNode);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitYield(UnaryNode* yieldNode);
+   [[nodiscard]] bool emitYieldOp(JSOp op);
+-  [[nodiscard]] bool emitYieldStar(ParseNode* iter);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitYieldStar(ParseNode* iter);
+   [[nodiscard]] bool emitAwaitInInnermostScope() {
+     return emitAwaitInScope(*innermostEmitterScope());
+   }
+@@ -747,13 +753,13 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+ 
+   [[nodiscard]] bool emitPushResumeKind(GeneratorResumeKind kind);
+ 
+-  [[nodiscard]] bool emitPropLHS(PropertyAccess* prop);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitPropLHS(PropertyAccess* prop);
+   [[nodiscard]] bool emitPropIncDec(UnaryNode* incDec, ValueUsage valueUsage);
+ 
+   // Emit an ArgumentsLength node, leaving the value of |arguments.length| on
+   // the stack. Uses the JSOp::ArgumentsLength fast path when the optimization
+   // is still eligible, otherwise falls back to reading the |arguments| binding.
+-  [[nodiscard]] bool emitArgumentsLength();
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitArgumentsLength();
+ 
+   [[nodiscard]] bool emitComputedPropertyName(UnaryNode* computedPropName);
+ 
+@@ -764,8 +770,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+   [[nodiscard]] bool emitElemOperands(PropertyByValue* elem,
+                                       EmitElemOption opts);
+ 
+-  [[nodiscard]] bool emitElemObjAndKey(PropertyByValue* elem,
+-                                       ElemOpEmitter& eoe);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitElemObjAndKey(PropertyByValue* elem,
++                                                        ElemOpEmitter& eoe);
+   [[nodiscard]] bool emitElemOpBase(JSOp op);
+ 
+   [[nodiscard]] bool emitElemIncDec(UnaryNode* incDec, ValueUsage valueUsage);
+@@ -774,9 +780,9 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+   [[nodiscard]] bool emitPrivateIncDec(UnaryNode* incDec,
+                                        ValueUsage valueUsage);
+ 
+-  [[nodiscard]] bool emitCatch(BinaryNode* catchClause);
+-  [[nodiscard]] bool emitIf(TernaryNode* ifNode);
+-  [[nodiscard]] bool emitWith(BinaryNode* withNode);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitCatch(BinaryNode* catchClause);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitIf(TernaryNode* ifNode);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitWith(BinaryNode* withNode);
+ 
+   [[nodiscard]] MOZ_NEVER_INLINE bool emitLabeledStatement(
+       const LabeledStatement* labeledStmt);
+@@ -883,29 +889,37 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+   [[nodiscard]] bool emitCallSiteObjectArray(ObjLiteralWriter& writer,
+                                              ListNode* cookedOrRaw,
+                                              ParseNode* head, uint32_t count);
+-  [[nodiscard]] bool emitCallSiteObject(CallSiteNode* callSiteObj);
+-  [[nodiscard]] bool emitTemplateString(ListNode* templateString);
+-  [[nodiscard]] bool emitAssignmentOrInit(ParseNodeKind kind, ParseNode* lhs,
+-                                          ParseNode* rhs);
+-  [[nodiscard]] bool emitShortCircuitAssignment(AssignmentNode* node);
+-
+-  [[nodiscard]] bool emitReturn(UnaryNode* returnNode);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitCallSiteObject(
++      CallSiteNode* callSiteObj);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitTemplateString(
++      ListNode* templateString);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitAssignmentOrInit(ParseNodeKind kind,
++                                                           ParseNode* lhs,
++                                                           ParseNode* rhs);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitShortCircuitAssignment(
++      AssignmentNode* node);
++
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitReturn(UnaryNode* returnNode);
+   [[nodiscard]] bool finishReturn(BytecodeOffset setRvalOffset);
+ 
+-  [[nodiscard]] bool emitExpressionStatement(UnaryNode* exprStmt);
+-  [[nodiscard]] bool emitStatementList(ListNode* stmtList);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitExpressionStatement(
++      UnaryNode* exprStmt);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitStatementList(ListNode* stmtList);
+ 
+-  [[nodiscard]] bool emitDeleteName(UnaryNode* deleteNode);
+-  [[nodiscard]] bool emitDeleteProperty(UnaryNode* deleteNode);
+-  [[nodiscard]] bool emitDeleteElement(UnaryNode* deleteNode);
+-  [[nodiscard]] bool emitDeleteExpression(UnaryNode* deleteNode);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitDeleteName(UnaryNode* deleteNode);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitDeleteProperty(UnaryNode* deleteNode);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitDeleteElement(UnaryNode* deleteNode);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitDeleteExpression(
++      UnaryNode* deleteNode);
+ 
+   // Optional methods which emit Optional Jump Target
+-  [[nodiscard]] bool emitOptionalChain(UnaryNode* expr, ValueUsage valueUsage);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitOptionalChain(UnaryNode* expr,
++                                                        ValueUsage valueUsage);
+   [[nodiscard]] bool emitCalleeAndThisForOptionalChain(UnaryNode* expr,
+                                                        CallNode* callNode,
+                                                        CallOrNewEmitter& cone);
+-  [[nodiscard]] bool emitDeleteOptionalChain(UnaryNode* deleteNode);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitDeleteOptionalChain(
++      UnaryNode* deleteNode);
+ 
+   // Optional methods which emit a shortCircuit jump. They need to be called by
+   // a method which emits an Optional Jump Target, see below.
+@@ -927,22 +941,26 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+                                                  OptionalEmitter& oe);
+ 
+   // |op| must be JSOp::Typeof or JSOp::TypeofExpr.
+-  [[nodiscard]] bool emitTypeof(UnaryNode* typeofNode, JSOp op);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitTypeof(UnaryNode* typeofNode,
++                                                 JSOp op);
+ 
+-  [[nodiscard]] bool tryEmitTypeofEq(ListNode* node, bool* emitted);
++  [[nodiscard]] MOZ_NEVER_INLINE bool tryEmitTypeofEq(ListNode* node,
++                                                      bool* emitted);
+ 
+-  [[nodiscard]] bool emitUnary(UnaryNode* unaryNode);
+-  [[nodiscard]] bool emitRightAssociative(ListNode* node);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitUnary(UnaryNode* unaryNode);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitRightAssociative(ListNode* node);
+   [[nodiscard]] bool tryEmitConstantEq(ListNode* node, JSOp op, bool* emitted);
+-  [[nodiscard]] bool emitLeftAssociative(ListNode* node);
+-  [[nodiscard]] bool emitPrivateInExpr(ListNode* node);
+-  [[nodiscard]] bool emitShortCircuit(ListNode* node, ValueUsage valueUsage);
+-  [[nodiscard]] bool emitSequenceExpr(ListNode* node, ValueUsage valueUsage);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitLeftAssociative(ListNode* node);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitPrivateInExpr(ListNode* node);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitShortCircuit(ListNode* node,
++                                                       ValueUsage valueUsage);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitSequenceExpr(ListNode* node,
++                                                       ValueUsage valueUsage);
+ 
+   [[nodiscard]] MOZ_NEVER_INLINE bool emitIncOrDec(UnaryNode* incDec,
+                                                    ValueUsage valueUsage);
+ 
+-  [[nodiscard]] bool emitConditionalExpression(
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitConditionalExpression(
+       ConditionalExpression& conditional, ValueUsage valueUsage);
+ 
+   [[nodiscard]] ParseNode* getCoordNode(ParseNode* callNode,
+@@ -951,7 +969,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+ 
+   [[nodiscard]] bool emitArguments(ListNode* argsList, bool isCall,
+                                    bool isSpread, CallOrNewEmitter& cone);
+-  [[nodiscard]] bool emitCallOrNew(CallNode* callNode, ValueUsage valueUsage);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitCallOrNew(CallNode* callNode,
++                                                    ValueUsage valueUsage);
+   [[nodiscard]] bool emitDebugCheckSelfHosted();
+   [[nodiscard]] bool emitSelfHostedCallFunction(CallNode* callNode, JSOp op);
+   [[nodiscard]] bool emitSelfHostedResumeGenerator(CallNode* callNode);
+@@ -985,10 +1004,10 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+   void assertSelfHostedUnsafeSetReservedSlot(ListNode* argsList);
+ #endif
+ 
+-  [[nodiscard]] bool emitDo(BinaryNode* doNode);
+-  [[nodiscard]] bool emitWhile(BinaryNode* whileNode);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitDo(BinaryNode* doNode);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitWhile(BinaryNode* whileNode);
+ 
+-  [[nodiscard]] bool emitFor(
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitFor(
+       ForNode* forNode, const EmitterScope* headLexicalEmitterScope = nullptr);
+   [[nodiscard]] bool emitCStyleFor(ForNode* forNode,
+                                    const EmitterScope* headLexicalEmitterScope);
+@@ -999,8 +1018,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+ 
+   [[nodiscard]] bool emitInitializeForInOrOfTarget(TernaryNode* forHead);
+ 
+-  [[nodiscard]] bool emitBreak(TaggedParserAtomIndex label);
+-  [[nodiscard]] bool emitContinue(TaggedParserAtomIndex label);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitBreak(TaggedParserAtomIndex label);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitContinue(TaggedParserAtomIndex label);
+ 
+   [[nodiscard]] bool emitFunctionFormalParameters(ParamsBodyNode* paramsBody);
+   [[nodiscard]] bool emitInitializeFunctionSpecialNames();
+@@ -1027,7 +1046,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+     ComputedName
+   };
+ 
+-  [[nodiscard]] bool emitClass(
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitClass(
+       ClassNode* classNode, ClassNameKind nameKind = ClassNameKind::BindingName,
+       TaggedParserAtomIndex nameForAnonymousClass =
+           TaggedParserAtomIndex::null());
+@@ -1040,7 +1059,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
+                                                CallOrNewEmitter& cone,
+                                                OptionalEmitter& oe);
+ 
+-  [[nodiscard]] bool emitExportDefault(BinaryNode* exportNode);
++  [[nodiscard]] MOZ_NEVER_INLINE bool emitExportDefault(BinaryNode* exportNode);
+ 
+   [[nodiscard]] bool emitReturnRval() { return emit1(JSOp::RetRval); }
+ 

@@ -1,0 +1,2718 @@
+From 65404de08c98f80378e72b1c100129efca942ead Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Mon, 3 Aug 2026 20:10:23 +1000
+Subject: [PATCH 08/25] Add POWERPC 970 (Apple G4/G5) JIT support
+
+Add a pre-VSX tier to the PPC64 JIT so the engine runs with the JIT
+enabled on PowerPC 970 (ISA 2.01) hardware, detected at runtime via
+AT_HWCAP PPC_FEATURE_HAS_VSX and testable on newer silicon with
+MOZ_PPC64_FORCE_970=1.
+
+Scalar fallbacks replace every VSX and post-2.01 instruction the port
+emits: GPR<->FPR moves round-trip through the ABI red zone (mtvsrd,
+mfvsrd, mtvsrwz, mtvsrwa, lfiwax); round-to-integral swaps the FPSCR RN
+field around fctid/fcfid (friz, frip, frim) with a new mtfsfi emitter,
+quieting signaling NaNs on the pass-through path as the hardware forms
+do; fcpsgn, isel, popcntd/popcntw and the unsigned int64 conversions
+(fcfidu, fctiduz) get branch- or SWAR-based equivalents; int64-to-
+float32 converts with round-to-odd (truncate-mode fcfid, then FPSCR FI
+sets the mantissa lsb) so the final frsp rounds exactly like fcfids;
+the unsigned truncations split at 2**63 in the GPR domain and reject
+negative inputs the signed fctidz would accept; 64-bit byte-reversed
+wasm memory accesses use ldx/stdx plus a red-zone byte swap that needs
+no scratch register beyond r0, with store trap sites deferred to the
+faulting instruction; min/max and zero-constant materialization avoid
+xsmindp/xsmaxdp/xxlxor.
+
+Sub-word atomics (lbarx/lharx/stbcx./sthcx. are ISA 2.06) run the
+classic masked-word lwarx/stwcx. dance on the containing aligned word;
+the lowering allocates the value/offset/mask temps the dance needs
+(the native path never read them, and Ion collapses unused bogus temps
+onto one register). Wasm SIMD is unavailable on the tier: feature
+detection reports it absent, register save/restore skips the
+nonexistent v128 state, and SupportsFastUnalignedFPAccesses() gates
+the 16-byte tier of the inline wasm memory.copy/init expansion.
+Debug builds assert HasVSX() in every VSX-form encoder and each gated
+emitter so an unconverted call site fails fast instead of executing an
+illegal instruction on real hardware.
+
+Raise LIFO_ALLOC_ALIGN to 16: C++17 requires allocation functions to
+return storage aligned to __STDCPP_DEFAULT_NEW_ALIGNMENT__ (16 on
+ppc64), and GCC 16 exploits that guarantee when vectorizing member
+zero-initialization of TempObject-derived classes. At -mcpu=970 it
+emits VMX stvx, which masks the low 4 address bits, so 8-byte-aligned
+LifoAlloc storage caused wrong-address stores and uninitialized
+members.
+
+Assisted-by: Lance Albertson <lance@osuosl.org>
+Assisted-by: Thushan Fernando <thushan@thushanfernando.com>
+Assisted-by: Claude Fable 5 <noreply@anthropic.com>
+Assisted-by: Alexander Baldeck <alex.bldck@gmail.com>
+---
+ js/src/ds/LifoAlloc.h                         |    2 +-
+ .../tests/ion/round-modes-edge-values.js      |   80 ++
+ js/src/jit/ppc64/Architecture-ppc64.cpp       |   25 +
+ js/src/jit/ppc64/Architecture-ppc64.h         |    8 +
+ js/src/jit/ppc64/Assembler-ppc64.cpp          |  102 +-
+ js/src/jit/ppc64/Assembler-ppc64.h            |   25 +-
+ js/src/jit/ppc64/Lowering-ppc64.cpp           |   70 +-
+ js/src/jit/ppc64/MacroAssembler-ppc64-inl.h   |  142 ++-
+ js/src/jit/ppc64/MacroAssembler-ppc64.cpp     | 1040 ++++++++++++-----
+ js/src/jit/ppc64/MacroAssembler-ppc64.h       |  235 +++-
+ 10 files changed, 1366 insertions(+), 363 deletions(-)
+ create mode 100644 js/src/jit-test/tests/ion/round-modes-edge-values.js
+
+diff --git a/js/src/ds/LifoAlloc.h b/js/src/ds/LifoAlloc.h
+index 11d4b20ae8..015d3d1af9 100644
+--- a/js/src/ds/LifoAlloc.h
++++ b/js/src/ds/LifoAlloc.h
+@@ -392,7 +392,7 @@ class SingleLinkedList {
+   }
+ };
+ 
+-static const size_t LIFO_ALLOC_ALIGN = 8;
++static const size_t LIFO_ALLOC_ALIGN = 16;
+ 
+ MOZ_ALWAYS_INLINE
+ uint8_t* AlignPtr(uint8_t* orig) {
+diff --git a/js/src/jit-test/tests/ion/round-modes-edge-values.js b/js/src/jit-test/tests/ion/round-modes-edge-values.js
+new file mode 100644
+index 0000000000..834deda8e0
+--- /dev/null
++++ b/js/src/jit-test/tests/ion/round-modes-edge-values.js
+@@ -0,0 +1,80 @@
++// Floor/ceil/trunc/round of doubles and float32s, as doubles and as int32s,
++// on the values that distinguish truncation-based implementations from the
++// real rounding modes: fractions on both sides of zero, signed zeros, exact
++// integers, halfway cases, the 2^52 integrality boundary and the int32 range.
++
++// [input, floor, ceil, trunc, round] with expected results as doubles.
++var table = [
++  [0.3, 0, 1, 0, 0],
++  [-0.3, -1, -0, -0, -0],
++  [0.5, 0, 1, 0, 1],
++  [-0.5, -1, -0, -0, -0],
++  [2.5, 2, 3, 2, 3],
++  [-2.5, -3, -2, -2, -2],
++  [2.0, 2, 2, 2, 2],
++  [-2.0, -2, -2, -2, -2],
++  [0, 0, 0, 0, 0],
++  [-0, -0, -0, -0, -0],
++  [1.9999999999999998, 1, 2, 1, 2],
++  [-1.9999999999999998, -2, -1, -1, -2],
++  [4503599627370495.5, 4503599627370495, 4503599627370496, 4503599627370495, 4503599627370496],
++  [-4503599627370495.5, -4503599627370496, -4503599627370495, -4503599627370495, -4503599627370495],
++  [4503599627370496, 4503599627370496, 4503599627370496, 4503599627370496, 4503599627370496],
++  [-4503599627370497, -4503599627370497, -4503599627370497, -4503599627370497, -4503599627370497],
++  [2147483647.5, 2147483647, 2147483648, 2147483647, 2147483648],
++  [-2147483648.5, -2147483649, -2147483648, -2147483648, -2147483648],
++  [1e300, 1e300, 1e300, 1e300, 1e300],
++  [-1e300, -1e300, -1e300, -1e300, -1e300],
++  [Infinity, Infinity, Infinity, Infinity, Infinity],
++  [-Infinity, -Infinity, -Infinity, -Infinity, -Infinity],
++  [NaN, NaN, NaN, NaN, NaN],
++];
++
++function same(a, b) {
++  return Object.is(a, b);
++}
++
++function floorD(x) { return Math.floor(x); }
++function ceilD(x) { return Math.ceil(x); }
++function truncD(x) { return Math.trunc(x); }
++function roundD(x) { return Math.round(x); }
++// Int32-result forms: the JIT specialises Math.* to an int32 output when
++// the result has only been an int32 so far, bailing out on -0 and range.
++function floorI(x) { return Math.floor(x) | 0; }
++function ceilI(x) { return Math.ceil(x) | 0; }
++function truncI(x) { return Math.trunc(x) | 0; }
++function roundI(x) { return Math.round(x) | 0; }
++function floorF(x) { return Math.floor(Math.fround(x)); }
++function ceilF(x) { return Math.ceil(Math.fround(x)); }
++function truncF(x) { return Math.trunc(Math.fround(x)); }
++function roundF(x) { return Math.round(Math.fround(x)); }
++
++// Warm up on in-range positive values so the int32 specialisations compile,
++// then exercise every table row several times so bailouts also recompile.
++for (var i = 0; i < 2000; i++) {
++  var v = (i % 37) + 0.25;
++  floorD(v); ceilD(v); truncD(v); roundD(v);
++  floorI(v); ceilI(v); truncI(v); roundI(v);
++  floorF(v); ceilF(v); truncF(v); roundF(v);
++}
++for (var pass = 0; pass < 5; pass++) {
++  for (var [x, fl, ce, tr, ro] of table) {
++    assertEq(same(floorD(x), fl), true, "floor " + x);
++    assertEq(same(ceilD(x), ce), true, "ceil " + x);
++    assertEq(same(truncD(x), tr), true, "trunc " + x);
++    assertEq(same(roundD(x), ro), true, "round " + x);
++    assertEq(floorI(x), fl | 0, "floor|0 " + x);
++    assertEq(ceilI(x), ce | 0, "ceil|0 " + x);
++    assertEq(truncI(x), tr | 0, "trunc|0 " + x);
++    assertEq(roundI(x), ro | 0, "round|0 " + x);
++    var f = Math.fround(x);
++    if (f === x || !isFinite(f) || Math.abs(f) < 1e7) {
++      // Float32 rounding of the same value where it is representable.
++      var efl = f === x ? fl : Math.floor(f);
++      assertEq(same(floorF(x), efl), true, "floorF " + x);
++      assertEq(same(ceilF(x), f === x ? ce : Math.ceil(f)), true, "ceilF " + x);
++      assertEq(same(truncF(x), f === x ? tr : Math.trunc(f)), true, "truncF " + x);
++      assertEq(same(roundF(x), f === x ? ro : Math.round(f)), true, "roundF " + x);
++    }
++  }
++}
+diff --git a/js/src/jit/ppc64/Architecture-ppc64.cpp b/js/src/jit/ppc64/Architecture-ppc64.cpp
+index 5632865556..dda3c1ab94 100644
+--- a/js/src/jit/ppc64/Architecture-ppc64.cpp
++++ b/js/src/jit/ppc64/Architecture-ppc64.cpp
+@@ -93,6 +93,11 @@ uint32_t FloatRegister::getRegisterDumpOffsetInBytes() {
+ 
+ static bool sPOWER9Detected = false;
+ static bool sPOWER10Detected = false;
++// VSX (ISA 2.06+) is the POWER8 floor this backend normally requires. It is
++// absent only on the pre-VSX tier (970/G5, POWER5/6), where the JIT falls back
++// to scalar sequences. Defaults true so the simulator and any path that skips
++// Init() keeps the VSX-capable behaviour.
++static bool sVSXDetected = true;
+ static bool sCPUFlagsComputed = false;
+ 
+ #ifndef JS_SIMULATOR
+@@ -107,7 +112,11 @@ void PPC64Flags::Init() {
+     return;
+   }
+ #ifndef JS_SIMULATOR
++  unsigned long hwcap = getauxval(AT_HWCAP);
+   unsigned long hwcap2 = getauxval(AT_HWCAP2);
++  // PPC_FEATURE_HAS_VSX = 0x00000080 (ISA 2.06+; present on POWER7 and later,
++  // absent on the 970/G5 and POWER5/6 pre-VSX tier).
++  sVSXDetected = (hwcap & 0x00000080) != 0;
+   // PPC_FEATURE2_ARCH_3_00 = 0x00800000 (ISA 3.0 / POWER9)
+   sPOWER9Detected = (hwcap2 & 0x00800000) != 0;
+   // PPC_FEATURE2_ARCH_3_1 = 0x00040000 (ISA 3.1 / POWER10)
+@@ -142,6 +151,17 @@ void PPC64Flags::Init() {
+     sPOWER10Detected = true;
+     sPOWER9Detected = true;
+   }
++  // MOZ_PPC64_FORCE_970 forces the pre-VSX tier: no VSX, and therefore no P9
++  // or P10 fast paths either (both are strict supersets of VSX). This lets the
++  // scalar fallbacks be exercised on VSX-capable silicon, which runs both the
++  // scalar and the VSX encodings correctly. Applied last so it overrides any
++  // FORCE_POWER8/9/10 above.
++  const char* force970 = getenv("MOZ_PPC64_FORCE_970");
++  if (force970 && force970[0] == '1') {
++    sVSXDetected = false;
++    sPOWER9Detected = false;
++    sPOWER10Detected = false;
++  }
+   sCPUFlagsComputed = true;
+ }
+ 
+@@ -155,6 +175,11 @@ bool HasPOWER10() {
+   return sPOWER10Detected;
+ }
+ 
++bool HasVSX() {
++  MOZ_ASSERT(sCPUFlagsComputed);
++  return sVSXDetected;
++}
++
+ bool CPUFlagsHaveBeenComputed() { return sCPUFlagsComputed; }
+ 
+ // Per-bit feature flags packed into the wasm code signature. Adding a
+diff --git a/js/src/jit/ppc64/Architecture-ppc64.h b/js/src/jit/ppc64/Architecture-ppc64.h
+index e014b87583..88e3063fed 100644
+--- a/js/src/jit/ppc64/Architecture-ppc64.h
++++ b/js/src/jit/ppc64/Architecture-ppc64.h
+@@ -574,6 +574,14 @@ class PPC64Flags final {
+ bool HasPOWER9();
+ bool HasPOWER10();
+ 
++// True when the CPU implements VSX (ISA 2.06+, i.e. POWER7 and later, and in
++// practice the POWER8 floor this backend targets). False on the pre-VSX tier
++// (PowerPC 970/G5, POWER5/6), where the JIT must use scalar fallbacks for
++// every operation that would otherwise emit a VSX instruction, and wasm SIMD
++// is unavailable. Forced false by MOZ_PPC64_FORCE_970 for testing the tier on
++// VSX-capable silicon (which executes both the VSX and the scalar paths).
++bool HasVSX();
++
+ }  // namespace jit
+ }  // namespace js
+ 
+diff --git a/js/src/jit/ppc64/Assembler-ppc64.cpp b/js/src/jit/ppc64/Assembler-ppc64.cpp
+index b8f27771ff..f1b1cf5547 100644
+--- a/js/src/jit/ppc64/Assembler-ppc64.cpp
++++ b/js/src/jit/ppc64/Assembler-ppc64.cpp
+@@ -499,6 +499,11 @@ BufferOffset Assembler::as_mtcrf(uint32_t mask, Register rs) {
+   return writeInst(PPC_mtcrf | rs.code() << 21 | mask << 12);
+ }
+ 
++BufferOffset Assembler::as_mfcr(Register rd) {
++  spew("mfcr\t%3s", rd.name());
++  return writeInst(PPC_mfcr | rd.code() << 21);
++}
++
+ BufferOffset Assembler::as_mfocrf(Register rd, CRegisterID crfs) {
+   spew("mfocrf\t%3s,cr%d", rd.name(), crfs);
+   // FXM is a one-hot 8-bit mask at bits 12-19. Bit (7-crfs) selects the CR.
+@@ -643,6 +648,7 @@ static uint32_t DForm(uint32_t op, FloatRegister frt, Register ra,
+ // XX1-form: T + GPR (RA) + GPR (RB). TX bit at instruction bit 0.
+ // Used by lxvx, stxvx, lxvd2x, stxvd2x, mtvsrdd, mtvsrd, mtvsrws, mtvsrwz.
+ static uint32_t XX1Form(uint32_t op, uint32_t xt, uint32_t ra, uint32_t rb) {
++  MOZ_ASSERT(HasVSX());
+   return op | (xt & 31) << 21 | (ra & 31) << 16 | (rb & 31) << 11 |
+          ((xt >> 5) & 1);
+ }
+@@ -651,6 +657,7 @@ static uint32_t XX1Form(uint32_t op, uint32_t xt, uint32_t ra, uint32_t rb) {
+ // bit 0; the X spec calls this SX since the source register is the VSR.
+ // Used by mfvsrd, mfvsrld.
+ static uint32_t XX1FormMfvsr(uint32_t op, uint32_t rt, uint32_t xs) {
++  MOZ_ASSERT(HasVSX());
+   return op | (xs & 31) << 21 | (rt & 31) << 16 | ((xs >> 5) & 1);
+ }
+ 
+@@ -664,6 +671,7 @@ static uint32_t XX1FormMfvsr(uint32_t op, uint32_t rt, uint32_t xs) {
+ // DEF_VSX_UN.
+ static uint32_t XX2Form(uint32_t op, uint32_t xt, uint32_t xb,
+                         uint32_t bits16to20 = 0) {
++  MOZ_ASSERT(HasVSX());
+   return op | (xt & 31) << 21 | (bits16to20 & 31) << 16 | (xb & 31) << 11 |
+          ((xb >> 5) & 1) << 1 | ((xt >> 5) & 1);
+ }
+@@ -672,6 +680,7 @@ static uint32_t XX2Form(uint32_t op, uint32_t xt, uint32_t xb,
+ // Used by xxlor, xxland, xxlxor, xxlnor, xxlandc, xxpermdi, xsmaxjdp,
+ // xsminjdp, xvadd*, xvcmp*, etc.
+ static uint32_t XX3Form(uint32_t op, uint32_t xt, uint32_t xa, uint32_t xb) {
++  MOZ_ASSERT(HasVSX());
+   return op | (xt & 31) << 21 | (xa & 31) << 16 | (xb & 31) << 11 |
+          ((xa >> 5) & 1) << 2 | ((xb >> 5) & 1) << 1 | ((xt >> 5) & 1);
+ }
+@@ -680,6 +689,7 @@ static uint32_t XX3Form(uint32_t op, uint32_t xt, uint32_t xa, uint32_t xb) {
+ // Used by xxsel.
+ static uint32_t XX4Form(uint32_t op, uint32_t xt, uint32_t xa, uint32_t xb,
+                         uint32_t xc) {
++  MOZ_ASSERT(HasVSX());
+   return op | (xt & 31) << 21 | (xa & 31) << 16 | (xb & 31) << 11 |
+          (xc & 31) << 6 | ((xc >> 5) & 1) << 3 | ((xa >> 5) & 1) << 2 |
+          ((xb >> 5) & 1) << 1 | ((xt >> 5) & 1);
+@@ -1030,8 +1040,16 @@ DEF_XFORM2S_ISA(cnttzd, HasPOWER9())
+ DEF_XFORM2S_ISA(cnttzw, HasPOWER9())
+ #undef DEF_ALUE_S
+ 
+-DEF_XFORM2S(popcntd)
+-DEF_XFORM2S(popcntw)
++// popcntd/popcntw (ISA 2.06/2.05): absent on the pre-VSX tier.
++#define DEF_XFORM2S_VSXFLOOR(op)                              \
++  BufferOffset Assembler::as_##op(Register rd, Register ra) { \
++    MOZ_ASSERT(HasVSX());                                     \
++    spew(#op "\t%3s,%3s", rd.name(), ra.name());              \
++    return writeInst(InstReg(PPC_##op, ra, rd, r0).encode()); \
++  }
++DEF_XFORM2S_VSXFLOOR(popcntd)
++DEF_XFORM2S_VSXFLOOR(popcntw)
++#undef DEF_XFORM2S_VSXFLOOR
+ DEF_XFORM2S_ISA(brd, HasPOWER10())
+ DEF_XFORM2S_ISA(brh, HasPOWER10())
+ DEF_XFORM2S_ISA(brw, HasPOWER10())
+@@ -1147,24 +1165,37 @@ BufferOffset Assembler::as_stdu(Register rd, Register rb, int16_t off) {
+ 
+ #define DEF_MEMx(op) DEF_XFORM(op)
+ DEF_MEMx(lbzx) DEF_MEMx(lhax) DEF_MEMx(lhzx) DEF_MEMx(lwax)
+-    DEF_MEMx(lwzx) DEF_MEMx(lwarx) DEF_MEMx(lbarx)
+-        DEF_MEMx(lharx) DEF_MEMx(ldx) DEF_MEMx(ldarx) DEF_MEMx(stbx)
+-            DEF_MEMx(stbcx) DEF_MEMx(stwx) DEF_MEMx(stwbrx) DEF_MEMx(sthx)
+-                DEF_MEMx(sthcx) DEF_MEMx(stdx) DEF_MEMx(stdcx)
+-                    DEF_MEMx(stwcx) DEF_MEMx(lhbrx) DEF_MEMx(lwbrx)
+-                        DEF_MEMx(ldbrx) DEF_MEMx(sthbrx) DEF_MEMx(stdbrx)
++    DEF_MEMx(lwzx) DEF_MEMx(lwarx) DEF_MEMx(ldx) DEF_MEMx(ldarx)
++        DEF_MEMx(stbx) DEF_MEMx(stwx) DEF_MEMx(stwbrx) DEF_MEMx(sthx)
++            DEF_MEMx(stdx) DEF_MEMx(stdcx) DEF_MEMx(stwcx)
++                DEF_MEMx(lhbrx) DEF_MEMx(lwbrx) DEF_MEMx(sthbrx)
+ #undef DEF_MEMx
+ 
++// X-form loads/stores absent on the pre-VSX tier (970/G5): subword
++// larx/stcx (ISA 2.06) and 64-bit byte-reversed ld/st (ISA 2.06).
++#define DEF_MEMx_VSXFLOOR(op)                                              \
++  BufferOffset Assembler::as_##op(Register rd, Register ra, Register rb) { \
++    MOZ_ASSERT(HasVSX());                                                  \
++    spew(#op "\t%3s,%3s,%3s", rd.name(), ra.name(), rb.name());            \
++    return writeInst(InstReg(PPC_##op, rd, ra, rb).encode());              \
++  }
++DEF_MEMx_VSXFLOOR(lbarx) DEF_MEMx_VSXFLOOR(lharx)
++    DEF_MEMx_VSXFLOOR(stbcx) DEF_MEMx_VSXFLOOR(sthcx)
++        DEF_MEMx_VSXFLOOR(ldbrx) DEF_MEMx_VSXFLOOR(stdbrx)
++#undef DEF_MEMx_VSXFLOOR
++
+ // --- Integer select ---
+ 
+ BufferOffset Assembler::as_isel(Register rt, Register ra, Register rb,
+                                 uint16_t bc, CRegisterID cr) {
++  MOZ_ASSERT(HasVSX());
+   MOZ_ASSERT(ra != r0);
+   return as_isel0(rt, ra, rb, bc, cr);
+ }
+ 
+ BufferOffset Assembler::as_isel0(Register rt, Register ra, Register rb,
+                                  uint16_t bc, CRegisterID cr) {
++  MOZ_ASSERT(HasVSX());
+   spew("isel\t%3s,%3s,%3s,cr%d:0x%02x", rt.name(), ra.name(), rb.name(), cr,
+        bc);
+   MOZ_ASSERT((bc < 0x40) && ((bc & 0x0f) == 0x0c));
+@@ -1216,31 +1247,60 @@ DEF_FPUAB(fsub)
+ DEF_FPUAB(fadds)
+ DEF_FPUAB(fdivs)
+ DEF_FPUAB(fsubs)
+-DEF_FPUAB(fcpsgn)
+ #undef DEF_FPUAB
+ 
++// fcpsgn (ISA 2.05): absent on the pre-VSX tier; use ma_fcpsgn which has a
++// scalar fallback.
++BufferOffset Assembler::as_fcpsgn(FloatRegister rd, FloatRegister ra,
++                                  FloatRegister rb) {
++  MOZ_ASSERT(HasVSX());
++  spew("fcpsgn\t%3s,%3s,%3s", rd.name(), ra.name(), rb.name());
++  return writeInst(AForm(PPC_fcpsgn, rd, ra, rb, f0, false));
++}
++
++// mtfsfi: write a 4-bit immediate into FPSCR field BF (W=0). Field 7 covers
++// FPSCR bits 28-31 = XE, NI, RN -- used by the pre-VSX rounding fallback to
++// swap the RN rounding mode around fctid (XE/NI are always 0 in JIT code).
++BufferOffset Assembler::as_mtfsfi(uint8_t bf, uint8_t u) {
++  MOZ_ASSERT(bf < 8 && u < 16);
++  spew("mtfsfi\t%d,%d", bf, u);
++  return writeInst(PPC_mtfsfi | (uint32_t(bf) << 23) | (uint32_t(u) << 12));
++}
++
++
+ // --- FP unary/conversion/rounding ---
+ 
+ #define DEF_FPUDS(op) DEF_XFORM2_F(op)
+ DEF_FPUDS(fabs)
+ DEF_FPUDS(fneg)
++DEF_FPUDS(fnabs)
+ DEF_FPUDS(fmr)
+ DEF_FPUDS(fcfid)
+-DEF_FPUDS(fcfids)
+-DEF_FPUDS(fcfidu)
+-DEF_FPUDS(fcfidus)
+ DEF_FPUDS(fctid)
+ DEF_FPUDS(fctidz)
+-DEF_FPUDS(fctiduz)
+ DEF_FPUDS(fctiwz)
+-DEF_FPUDS(frim)
+-DEF_FPUDS(frip)
+-DEF_FPUDS(friz)
+ DEF_FPUDS(frsp)
+ DEF_FPUDS(fsqrt)
+ DEF_FPUDS(fsqrts)
+ #undef DEF_FPUDS
+ 
++// FP ops absent on the pre-VSX tier: fcfids/fcfidu(s)/fctiduz (ISA 2.06),
++// frim/frip/friz (ISA 2.02).
++#define DEF_FPUDS_VSXFLOOR(op)                                          \
++  BufferOffset Assembler::as_##op(FloatRegister rd, FloatRegister ra) { \
++    MOZ_ASSERT(HasVSX());                                               \
++    spew(#op "\t%3s,%3s", rd.name(), ra.name());                        \
++    return writeInst(XForm(PPC_##op, rd, f0, ra, false));               \
++  }
++DEF_FPUDS_VSXFLOOR(fcfids)
++DEF_FPUDS_VSXFLOOR(fcfidu)
++DEF_FPUDS_VSXFLOOR(fcfidus)
++DEF_FPUDS_VSXFLOOR(fctiduz)
++DEF_FPUDS_VSXFLOOR(frim)
++DEF_FPUDS_VSXFLOOR(frip)
++DEF_FPUDS_VSXFLOOR(friz)
++#undef DEF_FPUDS_VSXFLOOR
++
+ // --- FP loads/stores (D-form) ---
+ 
+ DEF_DFORM_F(lfd)
+@@ -1252,7 +1312,14 @@ DEF_DFORM_F(stfsu)
+ 
+ // --- FP loads/stores (X-form, indexed) ---
+ 
+-DEF_FMEMx(lfdx) DEF_FMEMx(lfsx) DEF_FMEMx(lfiwax)
++DEF_FMEMx(lfdx) DEF_FMEMx(lfsx)
++
++// lfiwax (ISA 2.05): absent on the pre-VSX tier.
++BufferOffset Assembler::as_lfiwax(FloatRegister rd, Register ra, Register rb) {
++  MOZ_ASSERT(HasVSX());
++  spew("lfiwax\t%3s,%3s,%3s", rd.name(), ra.name(), rb.name());
++  return writeInst(XForm(PPC_lfiwax, rd, ra, rb, false));
++}
+     DEF_FMEMx(stfdx) DEF_FMEMx(stfsx)
+ // Clean up macros.
+ #undef DEF_XFORM
+@@ -1315,6 +1382,7 @@ BufferOffset Assembler::as_mtvsrwa(FloatRegister xt, Register ra) {
+ 
+ BufferOffset Assembler::as_mtvsrws(FloatRegister xt, Register ra) {
+   MOZ_ASSERT(HasPOWER9());
++  MOZ_ASSERT(HasVSX());
+   spew("mtvsrws\t%3s,%3s", xt.name(), ra.name());
+   return writeInst(XX1Form(PPC_mtvsrws, xt.encoding(), ra.code(), 0));
+ }
+diff --git a/js/src/jit/ppc64/Assembler-ppc64.h b/js/src/jit/ppc64/Assembler-ppc64.h
+index 8feaee3f97..0e43295a36 100644
+--- a/js/src/jit/ppc64/Assembler-ppc64.h
++++ b/js/src/jit/ppc64/Assembler-ppc64.h
+@@ -469,6 +469,7 @@ enum PPCOpcodes {
+   PPC_fmr = 0xFC000090,
+   PPC_fmul = 0xFC000032,
+   PPC_fmuls = 0xEC000032,
++  PPC_fnabs = 0xFC000110,
+   PPC_fneg = 0xFC000050,
+   PPC_frim = 0xFC0003D0,
+   PPC_frip = 0xFC000390,
+@@ -516,12 +517,14 @@ enum PPCOpcodes {
+   PPC_stdbrx = 0x7C000528,  // XO=660 (POWER7+)
+   PPC_mcrxrx = 0x7C000480,
+   PPC_mcrfs = 0xFC000080,
++  PPC_mfcr = 0x7C000026,
+   PPC_mfocrf = 0x7C100026,
+   PPC_mffs = 0xFC00048E,
+   PPC_mfspr = 0x7C0002A6,
+   PPC_mfvsrd = 0x7C000066,
+   PPC_mtcrf = 0x7C000120,
+   PPC_mtfsb0 = 0xFC00008C,
++  PPC_mtfsfi = 0xFC00010C,
+   PPC_mtvsrd = 0x7C000166,
+   // POWER8+ (ISA 2.07). VSR[XT].dw[0] = sign_ext_64(RA[32:63]).
+   // XO=211 at bits 21-30. Combines extsw + mtvsrd into one insn.
+@@ -1426,6 +1429,7 @@ class Assembler : public AssemblerShared {
+   BufferOffset as_cror(uint8_t t, uint8_t a, uint8_t b);
+   BufferOffset as_crorc(uint8_t t, uint8_t a, uint8_t b);
+   BufferOffset as_mtcrf(uint32_t mask, Register rs);
++  BufferOffset as_mfcr(Register rd);
+   BufferOffset as_mfocrf(Register rd, CRegisterID crfs);
+   BufferOffset as_mcrxrx(CRegisterID crt);
+ 
+@@ -1611,6 +1615,7 @@ class Assembler : public AssemblerShared {
+   // FP unary.
+   BufferOffset as_fabs(FloatRegister rd, FloatRegister rs);
+   BufferOffset as_fneg(FloatRegister rd, FloatRegister rs);
++  BufferOffset as_fnabs(FloatRegister rd, FloatRegister rs);
+   BufferOffset as_fmr(FloatRegister rd, FloatRegister rs);
+   BufferOffset as_fsqrt(FloatRegister rd, FloatRegister rs);
+   BufferOffset as_fsqrts(FloatRegister rd, FloatRegister rs);
+@@ -1650,6 +1655,7 @@ class Assembler : public AssemblerShared {
+ 
+   // FPSCR operations.
+   BufferOffset as_mtfsb0(uint8_t bt);
++  BufferOffset as_mtfsfi(uint8_t bf, uint8_t u);
+   BufferOffset as_mcrfs(CRegisterID bf, uint8_t bfa);
+ 
+   // VSX (FPR-only subset).
+@@ -1997,17 +2003,26 @@ class Assembler : public AssemblerShared {
+ 
+   // --- Static capability queries.
+   static bool SupportsFloatingPoint() { return true; }
+-  static bool SupportsWasmSimd() { return true; }
++  // Wasm SIMD is VSX-based; the pre-VSX tier (970/G5) has no v128 support
++  // (VMX alone lacks the 2x64 lanes and unaligned loads the port relies on).
++  static bool SupportsWasmSimd() { return HasVSX(); }
+   static bool SupportsUnalignedAccesses() { return true; }
+-  static bool SupportsFastUnalignedFPAccesses() { return true; }
++  // Also the runtime gate for the 16-byte (v128) tier of the inline wasm
++  // memory.copy/init expansion; the pre-VSX tier has no v128 loads/stores,
++  // and its unaligned scalar FP accesses are not reliably fast either.
++  static bool SupportsFastUnalignedFPAccesses() { return HasVSX(); }
+   // POWER9 has scalar FP16 hardware (xscvdphp/xscvhpdp); POWER8 doesn't.
+   // Runtime-gate like x86's SupportsFloat32To16 (which keys off F16C).
+   static bool SupportsFloat64To16() { return HasPOWER9(); }
+   static bool SupportsFloat32To16() { return HasPOWER9(); }
+-  static bool HasRoundInstruction(RoundingMode) {
++  static bool HasRoundInstruction(RoundingMode mode) {
+     // friz, frip and frim are exact. frin rounds ties away from zero, so
+-    // ties-to-even uses VSX xsrdpic, which rounds in the FPSCR mode.
+-    return true;
++    // ties-to-even needs VSX xsrdpic, which rounds in the FPSCR mode.
++    if (mode == RoundingMode::NearestTiesToEven) {
++      return HasVSX();
++    }
++    return mode == RoundingMode::TowardsZero || mode == RoundingMode::Up ||
++           mode == RoundingMode::Down;
+   }
+ 
+  protected:
+diff --git a/js/src/jit/ppc64/Lowering-ppc64.cpp b/js/src/jit/ppc64/Lowering-ppc64.cpp
+index 57bae663a3..42b6bef36e 100644
+--- a/js/src/jit/ppc64/Lowering-ppc64.cpp
++++ b/js/src/jit/ppc64/Lowering-ppc64.cpp
+@@ -631,9 +631,13 @@ void LIRGenerator::visitCompareExchangeTypedArrayElement(
+   if (Scalar::byteSize(ins->arrayType()) < 4) {
+     // PPC64 sub-word CAS uses lbarx/lharx + stbcx./sthcx. (POWER7+); only
+     // valueTemp is needed, to hold the extsb/extsh-canonicalised oldval
+-    // for the 32-bit cmpw. offsetTemp/maskTemp are unused (no round-down
+-    // + bit-isolate dance), and remain BogusTemp.
++    // for the 32-bit cmpw. The pre-VSX tier (no lbarx/lharx) runs the
++    // masked-word dance instead and needs all three temps.
+     valueTemp = temp();
++    if (!HasVSX()) {
++      offsetTemp = temp();
++      maskTemp = temp();
++    }
+   }
+ 
+   LCompareExchangeTypedArrayElement* lir = new (alloc())
+@@ -677,9 +681,13 @@ void LIRGenerator::visitAtomicExchangeTypedArrayElement(
+   }
+ 
+   // PPC64 sub-word atomic exchange uses lbarx/lharx + stbcx./sthcx. directly
+-  // (POWER7+); valueTemp/offsetTemp/maskTemp are never read by the
+-  // implementation (see MacroAssembler-ppc64.cpp's AtomicExchange template).
+-  // Leave them as BogusTemp.
++  // (POWER7+) and reads no temps. The pre-VSX tier's masked-word dance
++  // needs all three.
++  if (Scalar::byteSize(ins->arrayType()) < 4 && !HasVSX()) {
++    valueTemp = temp();
++    offsetTemp = temp();
++    maskTemp = temp();
++  }
+ 
+   LAtomicExchangeTypedArrayElement* lir =
+       new (alloc()) LAtomicExchangeTypedArrayElement(
+@@ -724,10 +732,19 @@ void LIRGenerator::visitAtomicTypedArrayElementBinop(
+   // PPC64 sub-word atomic-binop uses lbarx/lharx + stbcx./sthcx. (POWER7+).
+   // The fetch-op variant needs valueTemp to hold the post-op value being
+   // condition-stored (MacroAssembler-ppc64.cpp's AtomicFetchOp); the
+-  // for-effect variant uses an internal scratch and needs no temps at
+-  // all. offsetTemp/maskTemp are unused in either path.
+-  if (Scalar::byteSize(ins->arrayType()) < 4 && !ins->isForEffect()) {
+-    valueTemp = temp();
++  // for-effect variant uses an internal scratch. The pre-VSX tier's
++  // masked-word dance needs all three temps in both variants.
++  if (Scalar::byteSize(ins->arrayType()) < 4) {
++    if (!ins->isForEffect()) {
++      valueTemp = temp();
++    }
++    if (!HasVSX()) {
++      if (ins->isForEffect()) {
++        valueTemp = temp();
++      }
++      offsetTemp = temp();
++      maskTemp = temp();
++    }
+   }
+ 
+   if (ins->isForEffect()) {
+@@ -868,10 +885,14 @@ void LIRGenerator::visitWasmCompareExchangeHeap(MWasmCompareExchangeHeap* ins) {
+   LDefinition maskTemp = LDefinition::BogusTemp();
+ 
+   // PPC64 sub-word wasm CAS uses lbarx/lharx + stbcx./sthcx. (POWER7+);
+-  // valueTemp holds the extsb/extsh-canonicalised oldval for cmpw, while
+-  // offsetTemp/maskTemp are unused (no round-down + bit-isolate dance).
++  // valueTemp holds the extsb/extsh-canonicalised oldval for cmpw. The
++  // pre-VSX tier's masked-word dance needs all three temps.
+   if (ins->access().byteSize() < 4) {
+     valueTemp = temp();
++    if (!HasVSX()) {
++      offsetTemp = temp();
++      maskTemp = temp();
++    }
+   }
+ 
+   auto* lir = new (alloc())
+@@ -896,12 +917,16 @@ void LIRGenerator::visitWasmAtomicExchangeHeap(MWasmAtomicExchangeHeap* ins) {
+   }
+ 
+   // PPC64 sub-word wasm atomic exchange uses lbarx/lharx + stbcx./sthcx.
+-  // (POWER7+); valueTemp/offsetTemp/maskTemp are never read by the
+-  // implementation (see MacroAssembler-ppc64.cpp's AtomicExchange template).
+-  // Pass BogusTemp for all three.
++  // (POWER7+) and reads no temps. The pre-VSX tier's masked-word dance
++  // needs all three.
+   LDefinition valueTemp = LDefinition::BogusTemp();
+   LDefinition offsetTemp = LDefinition::BogusTemp();
+   LDefinition maskTemp = LDefinition::BogusTemp();
++  if (ins->access().byteSize() < 4 && !HasVSX()) {
++    valueTemp = temp();
++    offsetTemp = temp();
++    maskTemp = temp();
++  }
+ 
+   auto* lir = new (alloc())
+       LWasmAtomicExchangeHeap(useRegister(base), useRegister(ins->value()),
+@@ -930,10 +955,19 @@ void LIRGenerator::visitWasmAtomicBinopHeap(MWasmAtomicBinopHeap* ins) {
+   // PPC64 sub-word wasm atomic-binop uses lbarx/lharx + stbcx./sthcx.
+   // (POWER7+). The fetch-op variant needs valueTemp for the post-op value
+   // being condition-stored; the for-effect variant uses an internal
+-  // scratch and needs no temps at all. offsetTemp/maskTemp are unused
+-  // in either path.
+-  if (ins->access().byteSize() < 4 && ins->hasUses()) {
+-    valueTemp = temp();
++  // scratch. The pre-VSX tier's masked-word dance needs all three temps
++  // in both variants.
++  if (ins->access().byteSize() < 4) {
++    if (ins->hasUses()) {
++      valueTemp = temp();
++    }
++    if (!HasVSX()) {
++      if (!ins->hasUses()) {
++        valueTemp = temp();
++      }
++      offsetTemp = temp();
++      maskTemp = temp();
++    }
+   }
+ 
+   if (!ins->hasUses()) {
+diff --git a/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h b/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
+index be97f82838..0277f7ab7f 100644
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
+@@ -28,11 +28,23 @@ void MacroAssembler::move64(Imm64 imm, Register64 dest) {
+ }
+ 
+ void MacroAssembler::moveDoubleToGPR64(FloatRegister src, Register64 dest) {
+-  as_mfvsrd(dest.reg, src);
++  if (HasVSX()) {
++    as_mfvsrd(dest.reg, src);
++  } else {
++    // Pre-VSX: round-trip through the ABI red zone (kernel preserves it
++    // across signals, so an interrupt between the two instructions is safe).
++    as_stfd(src, StackPointer, -8);
++    as_ld(dest.reg, StackPointer, -8);
++  }
+ }
+ 
+ void MacroAssembler::moveGPR64ToDouble(Register64 src, FloatRegister dest) {
+-  as_mtvsrd(dest, src.reg);
++  if (HasVSX()) {
++    as_mtvsrd(dest, src.reg);
++  } else {
++    as_std(src.reg, StackPointer, -8);
++    as_lfd(dest, StackPointer, -8);
++  }
+ }
+ 
+ void MacroAssembler::moveLowDoubleToGPR(FloatRegister src, Register dest) {
+@@ -61,14 +73,28 @@ void MacroAssembler::move32To64SignExtend(Register src, Register64 dest) {
+ }
+ 
+ void MacroAssembler::moveFloat32ToGPR(FloatRegister src, Register dest) {
+-  // FPR holds double-format value (PPC convention). Convert to
+-  // single-precision bits in bits 0:31 of the VSR, then extract.
+-  as_xscvdpspn(ScratchDoubleReg, src);
+-  as_mfvsrd(dest, ScratchDoubleReg);
+-  x_srdi(dest, dest, 32);
++  if (HasVSX()) {
++    // FPR holds double-format value (PPC convention). Convert to
++    // single-precision bits in bits 0:31 of the VSR, then extract.
++    as_xscvdpspn(ScratchDoubleReg, src);
++    as_mfvsrd(dest, ScratchDoubleReg);
++    x_srdi(dest, dest, 32);
++  } else {
++    // Pre-VSX: stfs converts the double-format FPR to single and stores the
++    // 32-bit bit pattern; lwz reads it back. Round-trip via the red zone.
++    as_stfs(src, StackPointer, -8);
++    as_lwz(dest, StackPointer, -8);
++  }
+ }
+ 
+ void MacroAssembler::moveGPRToFloat32(Register src, FloatRegister dest) {
++  if (!HasVSX()) {
++    // Pre-VSX: store the raw single-precision bits, then lfs loads them as
++    // single and expands to the FPR's double format (like the non-JIT path).
++    as_stw(src, StackPointer, -8);
++    as_lfs(dest, StackPointer, -8);
++    return;
++  }
+   // Place raw single-precision bits in VSR bits 0:31, then convert
+   // to double-precision format (matching PPC's FPR convention, like lfs).
+   if (HasPOWER9()) {
+@@ -1063,7 +1089,7 @@ void MacroAssembler::min32(Register lhs, Register rhs, Register dest) {
+   as_cmpw(lhs, rhs);
+   // isel rt, ra, rb, cond: rt = (CR[cond] set) ? ra : rb
+   // LessThan set if lhs < rhs (signed), so pick lhs; else rhs = min.
+-  as_isel(dest, lhs, rhs, LessThan, cr0);
++  ma_isel(dest, lhs, rhs, LessThan, cr0);
+ }
+ 
+ void MacroAssembler::min32(Register lhs, Imm32 rhs, Register dest) {
+@@ -1076,7 +1102,7 @@ void MacroAssembler::min32(Register lhs, Imm32 rhs, Register dest) {
+ void MacroAssembler::max32(Register lhs, Register rhs, Register dest) {
+   as_cmpw(lhs, rhs);
+   // GT set if lhs > rhs (signed), so pick lhs; else rhs = max.
+-  as_isel(dest, lhs, rhs, GreaterThan, cr0);
++  ma_isel(dest, lhs, rhs, GreaterThan, cr0);
+ }
+ 
+ void MacroAssembler::max32(Register lhs, Imm32 rhs, Register dest) {
+@@ -1088,7 +1114,7 @@ void MacroAssembler::max32(Register lhs, Imm32 rhs, Register dest) {
+ 
+ void MacroAssembler::minPtr(Register lhs, Register rhs, Register dest) {
+   as_cmpd(lhs, rhs);
+-  as_isel(dest, lhs, rhs, LessThan, cr0);
++  ma_isel(dest, lhs, rhs, LessThan, cr0);
+ }
+ 
+ void MacroAssembler::minPtr(Register lhs, ImmWord rhs, Register dest) {
+@@ -1100,7 +1126,7 @@ void MacroAssembler::minPtr(Register lhs, ImmWord rhs, Register dest) {
+ 
+ void MacroAssembler::maxPtr(Register lhs, Register rhs, Register dest) {
+   as_cmpd(lhs, rhs);
+-  as_isel(dest, lhs, rhs, GreaterThan, cr0);
++  ma_isel(dest, lhs, rhs, GreaterThan, cr0);
+ }
+ 
+ void MacroAssembler::maxPtr(Register lhs, ImmWord rhs, Register dest) {
+@@ -1129,7 +1155,16 @@ void MacroAssembler::minFloat32(FloatRegister other, FloatRegister srcDest,
+   ma_b(Assembler::DoubleEqual, &equal);
+   // Ordered and distinct: the base min/max form is exact on this
+   // domain (NaN and equal/zero cases were branched out above).
+-  as_xsmindp(srcDest, srcDest, other);
++  if (HasVSX()) {
++    as_xsmindp(srcDest, srcDest, other);
++  } else {
++    // Pre-VSX: values are ordered and distinct here (NaN and equal were
++    // branched out above), and the fcmpu CR bits are still live -- keep srcDest iff it is the smaller.
++    Label keep;
++    ma_b(Assembler::DoubleLessThan, &keep);
++    as_fmr(srcDest, other);
++    bind(&keep);
++  }
+   jump(&done);
+ 
+   bind(&equal);
+@@ -1170,7 +1205,16 @@ void MacroAssembler::minDouble(FloatRegister other, FloatRegister srcDest,
+   ma_b(Assembler::DoubleEqual, &equal);
+   // Ordered and distinct: the base min/max form is exact on this
+   // domain (NaN and equal/zero cases were branched out above).
+-  as_xsmindp(srcDest, srcDest, other);
++  if (HasVSX()) {
++    as_xsmindp(srcDest, srcDest, other);
++  } else {
++    // Pre-VSX: values are ordered and distinct here (NaN and equal were
++    // branched out above), and the fcmpu CR bits are still live -- keep srcDest iff it is the smaller.
++    Label keep;
++    ma_b(Assembler::DoubleLessThan, &keep);
++    as_fmr(srcDest, other);
++    bind(&keep);
++  }
+   jump(&done);
+ 
+   bind(&equal);
+@@ -1206,7 +1250,16 @@ void MacroAssembler::maxFloat32(FloatRegister other, FloatRegister srcDest,
+   ma_b(Assembler::DoubleEqual, &equal);
+   // Ordered and distinct: the base min/max form is exact on this
+   // domain (NaN and equal/zero cases were branched out above).
+-  as_xsmaxdp(srcDest, srcDest, other);
++  if (HasVSX()) {
++    as_xsmaxdp(srcDest, srcDest, other);
++  } else {
++    // Pre-VSX: values are ordered and distinct here (NaN and equal were
++    // branched out above), and the fcmpu CR bits are still live -- keep srcDest iff it is the larger.
++    Label keep;
++    ma_b(Assembler::DoubleGreaterThan, &keep);
++    as_fmr(srcDest, other);
++    bind(&keep);
++  }
+   jump(&done);
+ 
+   bind(&equal);
+@@ -1240,7 +1293,16 @@ void MacroAssembler::maxDouble(FloatRegister other, FloatRegister srcDest,
+   ma_b(Assembler::DoubleEqual, &equal);
+   // Ordered and distinct: the base min/max form is exact on this
+   // domain (NaN and equal/zero cases were branched out above).
+-  as_xsmaxdp(srcDest, srcDest, other);
++  if (HasVSX()) {
++    as_xsmaxdp(srcDest, srcDest, other);
++  } else {
++    // Pre-VSX: values are ordered and distinct here (NaN and equal were
++    // branched out above), and the fcmpu CR bits are still live -- keep srcDest iff it is the larger.
++    Label keep;
++    ma_b(Assembler::DoubleGreaterThan, &keep);
++    as_fmr(srcDest, other);
++    bind(&keep);
++  }
+   jump(&done);
+ 
+   bind(&equal);
+@@ -1504,13 +1566,26 @@ void MacroAssembler::ctz64(Register64 src, Register64 dest) {
+     // ((x-1) & ~x is all-ones there). No CR write, no isel.
+     as_addi(tmp, src.reg, -1);
+     as_andc(tmp, tmp, src.reg);
+-    as_popcntd(dest.reg, tmp);
++    if (HasVSX()) {
++      as_popcntd(dest.reg, tmp);
++    } else {
++      Register work = temps.Acquire();
++      ma_popcnt64_970(dest.reg, tmp, work);
++    }
+   }
+ }
+ 
+ void MacroAssembler::popcnt64(Register64 input, Register64 output,
+                               Register tmp) {
+-  as_popcntd(output.reg, input.reg);
++  if (HasVSX()) {
++    as_popcntd(output.reg, input.reg);
++    return;
++  }
++  UseScratchRegisterScope temps(*this);
++  Register copy = temps.Acquire();
++  xs_mr(copy, input.reg);
++  Register work = (tmp != InvalidReg) ? tmp : temps.Acquire();
++  ma_popcnt64_970(output.reg, copy, work);
+ }
+ 
+ void MacroAssembler::clz32(Register src, Register dest, bool knownNotZero) {
+@@ -1528,16 +1603,31 @@ void MacroAssembler::ctz32(Register src, Register dest, bool knownNotZero) {
+     // in the high word (via borrow/garbage bits), so clear it.
+     as_addi(tmp, src, -1);
+     as_andc(tmp, tmp, src);
+-    as_popcntw(dest, tmp);
+-    as_rldicl(dest, dest, 0, 32);
++    if (HasVSX()) {
++      as_popcntw(dest, tmp);
++      as_rldicl(dest, dest, 0, 32);
++    } else {
++      // Count only the low word: zero-extend so x==0 yields 32, not 64.
++      as_rldicl(tmp, tmp, 0, 32);
++      Register work = temps.Acquire();
++      ma_popcnt64_970(dest, tmp, work);
++    }
+   }
+ }
+ 
+ void MacroAssembler::popcnt32(Register input, Register output, Register tmp) {
+-  as_popcntw(output, input);
+-  // popcntw gives per-word results; on 64-bit the low word count is in
+-  // bits 32:63, so just mask to 32 bits.
+-  as_rlwinm(output, output, 0, 0, 31);
++  if (HasVSX()) {
++    as_popcntw(output, input);
++    // popcntw gives per-word results; on 64-bit the low word count is in
++    // bits 32:63, so just mask to 32 bits.
++    as_rlwinm(output, output, 0, 0, 31);
++    return;
++  }
++  UseScratchRegisterScope temps(*this);
++  Register copy = temps.Acquire();
++  as_rldicl(copy, input, 0, 32);
++  Register work = (tmp != InvalidReg) ? tmp : temps.Acquire();
++  ma_popcnt64_970(output, copy, work);
+ }
+ 
+ // ===============================================================
+@@ -1929,7 +2019,7 @@ void MacroAssembler::branchTruncateFloat32MaybeModUint32(FloatRegister src,
+                                                          Label* fail) {
+   // Convert float32 to int64 (truncating toward zero), fail on NaN/overflow.
+   as_fctidz(ScratchDoubleReg, src);
+-  as_mfvsrd(dest, ScratchDoubleReg);
++  ma_mffprd(dest, ScratchDoubleReg);
+   // PPC64 fctidz saturates to INT64_MIN on negative overflow/NaN,
+   // and to INT64_MAX on positive overflow. Check both.
+   asMasm().branchPtr(Assembler::Equal, dest, ImmWord(int64_t(INT64_MIN)), fail);
+@@ -1954,7 +2044,7 @@ void MacroAssembler::branchTruncateDoubleMaybeModUint32(FloatRegister src,
+                                                         Label* fail) {
+   // Convert double to int64 (truncating toward zero), fail on NaN/overflow.
+   as_fctidz(ScratchDoubleReg, src);
+-  as_mfvsrd(dest, ScratchDoubleReg);
++  ma_mffprd(dest, ScratchDoubleReg);
+   // PPC64 fctidz saturates to INT64_MIN on negative overflow/NaN,
+   // and to INT64_MAX on positive overflow. Check both.
+   asMasm().branchPtr(Assembler::Equal, dest, ImmWord(int64_t(INT64_MIN)), fail);
+@@ -2484,7 +2574,7 @@ void MacroAssembler::branchTestDoubleTruthy(bool b, FloatRegister value,
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+   xs_li(scratch, 0);
+-  as_mtvsrd(ScratchDoubleReg, scratch);
++  ma_mtfprd(ScratchDoubleReg, scratch);
+   as_fcmpu(value, ScratchDoubleReg);
+   DoubleCondition cond = b ? DoubleNotEqual : DoubleEqualOrUnordered;
+   ma_b(cond, label);
+diff --git a/js/src/jit/ppc64/MacroAssembler-ppc64.cpp b/js/src/jit/ppc64/MacroAssembler-ppc64.cpp
+index fa81733e73..42c0ed5624 100644
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.cpp
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.cpp
+@@ -55,14 +55,14 @@ void MacroAssemblerPPC64Compat::loadInt32OrDouble(const Address& src,
+   // GPR for the tag test.  Only one scratch GPR is held here so that
+   // branchTestInt32 can acquire the second one for the ImmTag constant.
+   loadPtr(Address(src.base, src.offset), scratch);
+-  as_mtvsrd(dest, scratch);
++  ma_mtfprd(dest, scratch);
+   x_srdi(scratch, scratch, JSVAL_TAG_SHIFT);
+   asMasm().branchTestInt32(Assembler::NotEqual, scratch, &end);
+   // It was an int32.  Recover the boxed value from the FPR, sign-extend
+   // the low 32 bits, and convert to double.
+-  as_mfvsrd(scratch, dest);
++  ma_mffprd(scratch, dest);
+   as_extsw(scratch, scratch);
+-  as_mtvsrd(dest, scratch);
++  ma_mtfprd(dest, scratch);
+   as_fcfid(dest, dest);
+ 
+   bind(&end);
+@@ -76,12 +76,12 @@ void MacroAssemblerPPC64Compat::loadInt32OrDouble(const BaseIndex& addr,
+ 
+   computeScaledAddress(addr, scratch);
+   loadPtr(Address(scratch, addr.offset), scratch);
+-  as_mtvsrd(dest, scratch);
++  ma_mtfprd(dest, scratch);
+   x_srdi(scratch, scratch, JSVAL_TAG_SHIFT);
+   asMasm().branchTestInt32(Assembler::NotEqual, scratch, &end);
+-  as_mfvsrd(scratch, dest);
++  ma_mffprd(scratch, dest);
+   as_extsw(scratch, scratch);
+-  as_mtvsrd(dest, scratch);
++  ma_mtfprd(dest, scratch);
+   as_fcfid(dest, dest);
+ 
+   bind(&end);
+@@ -94,15 +94,15 @@ void MacroAssemblerPPC64Compat::convertUInt32ToDouble(Register src,
+                                                       FloatRegister dest) {
+   // mtvsrwz: VSR[dest].dw0 = zero_ext_64(src[32:63]); P8+ (ISA 2.07).
+   // Replaces rldicl + mtvsrd (2 insns + scratch) with 1 insn.
+-  as_mtvsrwz(dest, src);
++  ma_mtfprwz(dest, src);
+   as_fcfid(dest, dest);
+ }
+ 
+ void MacroAssemblerPPC64Compat::convertUInt32ToFloat32(Register src,
+                                                        FloatRegister dest) {
+   // mtvsrwz + fcfids; same recipe as convertUInt32ToDouble.
+-  as_mtvsrwz(dest, src);
+-  as_fcfids(dest, dest);
++  ma_mtfprwz(dest, src);
++  ma_fcfids(dest, dest);
+ }
+ 
+ // Helper for the negative-zero check after a successful round-trip.
+@@ -120,7 +120,7 @@ static void EmitNegativeZeroCheck(MacroAssemblerPPC64Compat& masm,
+   masm.ma_b(Assembler::NotEqual, &notZero);
+   UseScratchRegisterScope temps(masm);
+   Register scratch = temps.Acquire();
+-  masm.as_mfvsrd(scratch, src);
++  masm.ma_mffprd(scratch, src);
+   masm.as_cmpdi(scratch, 0);
+   masm.ma_b(Assembler::LessThan, fail);
+   masm.bind(&notZero);
+@@ -135,9 +135,9 @@ void MacroAssemblerPPC64Compat::convertDoubleToInt32(FloatRegister src,
+   // The compare also catches NaN (unordered) and Inf (saturated to
+   // INT32_{MIN,MAX}, won't round-trip equal).
+   as_fctiwz(ScratchDoubleReg, src);
+-  as_mfvsrd(dest, ScratchDoubleReg);
++  ma_mffprd(dest, ScratchDoubleReg);
+   as_extsw(dest, dest);
+-  as_mtvsrd(ScratchDoubleReg, dest);
++  ma_mtfprd(ScratchDoubleReg, dest);
+   as_fcfid(ScratchDoubleReg, ScratchDoubleReg);
+   as_fcmpu(ScratchDoubleReg, src);
+   ma_b(Assembler::DoubleNotEqualOrUnordered, fail);
+@@ -153,8 +153,8 @@ void MacroAssemblerPPC64Compat::convertDoubleToPtr(FloatRegister src,
+   // Same pattern as convertDoubleToInt32 but to int64 (no sign-extend
+   // needed since fctidz already produces a 64-bit result).
+   as_fctidz(ScratchDoubleReg, src);
+-  as_mfvsrd(dest, ScratchDoubleReg);
+-  as_mtvsrd(ScratchDoubleReg, dest);
++  ma_mffprd(dest, ScratchDoubleReg);
++  ma_mtfprd(ScratchDoubleReg, dest);
+   as_fcfid(ScratchDoubleReg, ScratchDoubleReg);
+   as_fcmpu(ScratchDoubleReg, src);
+   ma_b(Assembler::DoubleNotEqualOrUnordered, fail);
+@@ -171,10 +171,10 @@ void MacroAssemblerPPC64Compat::convertFloat32ToInt32(FloatRegister src,
+   // Same as convertDoubleToInt32 but the round-trip uses fcfids so the
+   // comparison happens at single precision (matches src's actual width).
+   as_fctiwz(ScratchDoubleReg, src);
+-  as_mfvsrd(dest, ScratchDoubleReg);
++  ma_mffprd(dest, ScratchDoubleReg);
+   as_extsw(dest, dest);
+-  as_mtvsrd(ScratchDoubleReg, dest);
+-  as_fcfids(ScratchDoubleReg, ScratchDoubleReg);
++  ma_mtfprd(ScratchDoubleReg, dest);
++  ma_fcfids(ScratchDoubleReg, ScratchDoubleReg);
+   as_fcmpu(ScratchDoubleReg, src);
+   ma_b(Assembler::DoubleNotEqualOrUnordered, fail);
+ 
+@@ -378,12 +378,12 @@ void MacroAssembler::clampDoubleToUint8(FloatRegister input, Register output) {
+     zeroDouble(fpscratch);
+     as_xsmaxjdp(fpscratch, input, fpscratch);
+     as_fctid(fpscratch, fpscratch);
+-    as_mfvsrd(output, fpscratch);
++    ma_mffprd(output, fpscratch);
+     UseScratchRegisterScope temps(asMasm());
+     Register max255 = temps.Acquire();
+     xs_li(max255, 255);
+     as_cmpdi(output, 255);
+-    as_isel(output, max255, output, GreaterThan);
++    ma_isel(output, max255, output, GreaterThan);
+     return;
+   }
+ 
+@@ -410,7 +410,7 @@ void MacroAssembler::clampDoubleToUint8(FloatRegister input, Register output) {
+   bind(&below255);
+ 
+   as_fctid(fpscratch, input);
+-  as_mfvsrd(output, fpscratch);
++  ma_mffprd(output, fpscratch);
+   bind(&done);
+ }
+ 
+@@ -482,7 +482,11 @@ void MacroAssembler::PushRegsInMask(LiveRegisterSet set) {
+     FloatRegister reg = *iter;
+     diff -= reg.size();
+     if (reg.isSimd128()) {
+-      storeUnalignedSimd128(reg, Address(StackPointer, diff));
++      // Pre-VSX tier: no wasm SIMD, so no live v128 state exists. Keep the
++      // slot (offset math must match getPushSizeInBytes) but skip the store.
++      if (HasVSX()) {
++        storeUnalignedSimd128(reg, Address(StackPointer, diff));
++      }
+     } else {
+       storeDouble(reg.asDouble(), Address(StackPointer, diff));
+     }
+@@ -509,7 +513,9 @@ void MacroAssembler::PopRegsInMaskIgnore(LiveRegisterSet set,
+     diff -= reg.size();
+     if (!ignore.has(reg)) {
+       if (reg.isSimd128()) {
+-        loadUnalignedSimd128(Address(StackPointer, diff), reg);
++        if (HasVSX()) {
++          loadUnalignedSimd128(Address(StackPointer, diff), reg);
++        }
+       } else {
+         loadDouble(Address(StackPointer, diff), reg.asDouble());
+       }
+@@ -914,26 +920,190 @@ void MacroAssembler::shiftIndex32AndAdd(Register indexTemp32, int shift,
+ }
+ 
+ void MacroAssembler::convertInt64ToDouble(Register64 src, FloatRegister dest) {
+-  as_mtvsrd(dest, src.reg);
++  ma_mtfprd(dest, src.reg);
++  as_fcfid(dest, dest);
++}
++
++void MacroAssemblerPPC64Compat::ma_fcpsgn(FloatRegister dest, FloatRegister signSrc,
++                                    FloatRegister magSrc) {
++  if (HasVSX()) {
++    as_fcpsgn(dest, signSrc, magSrc);
++    return;
++  }
++  // Read the sign via the red zone, then negate |magSrc| when it is set.
++  // Works for -0.0 and NaN: the stored bit pattern's MSB is the sign, and
++  // the signed 64-bit compare against zero tests exactly that bit.
++  Label positive;
++  UseScratchRegisterScope temps(*this);
++  Register scratch = temps.Acquire();
++  as_stfd(signSrc, StackPointer, -8);
++  as_ld(scratch, StackPointer, -8);
++  as_fabs(dest, magSrc);
++  as_cmpdi(scratch, 0);
++  ma_b(Assembler::GreaterThanOrEqual, &positive);
++  as_fneg(dest, dest);
++  bind(&positive);
++}
++
++void MacroAssemblerPPC64Compat::ma_fri970(uint8_t rn, FloatRegister dest,
++                                    FloatRegister src) {
++  // Pre-VSX round-to-integral: swap the FPSCR RN field around fctid + fcfid
++  // (all 970-legal). Values with |src| >= 2^52 (incl. NaN/Inf) are already
++  // integral and must pass through untouched -- fctid would saturate them.
++  // The original bit pattern stays in the red-zone slot for the whole
++  // sequence (no calls intervene), so the final sign fixup -- needed when
++  // the result collapses to zero, e.g. frim(-0.3) = -0.0 -- rereads it
++  // rather than requiring a second FPR. dest == src and dest ==
++  // ScratchDoubleReg are both safe.
++  Label done, passthrough;
++  UseScratchRegisterScope temps(*this);
++  Register scratch = temps.Acquire();
++  as_stfd(src, StackPointer, -8);
++  as_ld(scratch, StackPointer, -8);
++  if (src != dest) {
++    as_fmr(dest, src);
++  }
++  x_srdi(scratch, scratch, 52);
++  as_andi_rc(scratch, scratch, 0x7FF);
++  ma_cmp(scratch, Imm32(1075), Assembler::GreaterThanOrEqual);
++  ma_b(Assembler::GreaterThanOrEqual, &passthrough);
++  as_mtfsfi(7, rn);
++  as_fctid(dest, dest);
+   as_fcfid(dest, dest);
++  as_mtfsfi(7, 0);
++  as_ld(scratch, StackPointer, -8);
++  as_cmpdi(scratch, 0);
++  ma_b(Assembler::GreaterThanOrEqual, &done);
++  as_fnabs(dest, dest);
++  jump(&done);
++
++  // The guard path passes already-integral values, infinities, and NaN
++  // through unchanged -- but hardware fri* quiets a signaling NaN, so
++  // match that. Only NaN is unordered with itself; adding it to itself
++  // sets the quiet bit and leaves everything else untouched.
++  bind(&passthrough);
++  as_fcmpu(dest, dest);
++  ma_b(Assembler::DoubleOrdered, &done);
++  as_fadd(dest, dest, dest);
++  bind(&done);
++}
++
++void MacroAssemblerPPC64Compat::ma_roundToInt64_970(RoundingMode mode,
++                                                    Register dest,
++                                                    FloatRegister src,
++                                                    FloatRegister tmp) {
++  // Truncate to int64, then step by one when src lies strictly beyond the
++  // truncation on the rounding side (see ma_fri970). NaN compares unordered
++  // and is never stepped; it and the saturated values fail the callers'
++  // int32 range check.
++  Label exact;
++  as_fctidz(tmp, src);
++  as_stfd(tmp, StackPointer, -8);
++  as_ld(dest, StackPointer, -8);
++  as_fcfid(tmp, tmp);
++  as_fcmpu(src, tmp);
++  if (mode == RoundingMode::Down) {
++    ma_b(Assembler::DoubleGreaterThanOrEqual, &exact);
++    as_addi(dest, dest, -1);
++  } else {
++    MOZ_ASSERT(mode == RoundingMode::Up);
++    ma_b(Assembler::DoubleLessThanOrEqual, &exact);
++    as_addi(dest, dest, 1);
++  }
++  bind(&exact);
++}
++
++void MacroAssemblerPPC64Compat::ma_popcnt64_970(Register out, Register in,
++                                          Register work) {
++  MOZ_ASSERT(out != in && out != work && in != work);
++  auto splat16 = [&](uint16_t v) {
++    xs_lis(work, int16_t(v));
++    as_ori(work, work, v);
++    as_rldimi(work, work, 32, 0);
++  };
++  x_srdi(out, in, 1);
++  splat16(0x5555);
++  as_and_(out, out, work);
++  as_subf(in, out, in);
++  splat16(0x3333);
++  as_and_(out, in, work);
++  x_srdi(in, in, 2);
++  as_and_(in, in, work);
++  as_add(in, in, out);
++  x_srdi(out, in, 4);
++  as_add(in, in, out);
++  splat16(0x0F0F);
++  as_and_(in, in, work);
++  splat16(0x0101);
++  as_mulld(out, in, work);
++  x_srdi(out, out, 56);
++}
++
++void MacroAssemblerPPC64Compat::ma_fcfid_rto(FloatRegister dest,
++                                             FloatRegister src) {
++  // Truncate-mode conversion, then mark inexactness in the mantissa lsb.
++  // FPSCR FI is bit 14 (field 3); after mcrfs it lands in the EQ slot of
++  // cr0, so Equal == inexact. The lsb OR is monotone away from zero on the
++  // sign-magnitude double format, which is exactly round-to-odd. A mantissa
++  // of all-ones is odd and never incremented, so no carry into the exponent.
++  Label exact;
++  UseScratchRegisterScope temps(*this);
++  Register scratch = temps.Acquire();
++  as_mtfsfi(7, 1);
++  as_fcfid(dest, src);
++  as_mtfsfi(7, 0);
++  as_mcrfs(cr0, 3);
++  ma_b(Assembler::NotEqual, &exact);
++  as_stfd(dest, StackPointer, -8);
++  as_ld(scratch, StackPointer, -8);
++  as_ori(scratch, scratch, 1);
++  as_std(scratch, StackPointer, -8);
++  as_lfd(dest, StackPointer, -8);
++  bind(&exact);
++}
++
++void MacroAssemblerPPC64Compat::ma_friz(FloatRegister dest, FloatRegister src) {
++  if (HasVSX()) {
++    as_friz(dest, src);
++  } else {
++    ma_fri970(1, dest, src);
++  }
++}
++
++void MacroAssemblerPPC64Compat::ma_frip(FloatRegister dest, FloatRegister src) {
++  if (HasVSX()) {
++    as_frip(dest, src);
++  } else {
++    ma_fri970(2, dest, src);
++  }
++}
++
++void MacroAssemblerPPC64Compat::ma_frim(FloatRegister dest, FloatRegister src) {
++  if (HasVSX()) {
++    as_frim(dest, src);
++  } else {
++    ma_fri970(3, dest, src);
++  }
+ }
+ 
+ void MacroAssembler::nearbyIntDouble(RoundingMode mode, FloatRegister src,
+                                      FloatRegister dest) {
+   switch (mode) {
+     case RoundingMode::NearestTiesToEven:
+-      // xsrdpic rounds in the FPSCR mode, which the JIT leaves at
+-      // ties-to-even, and keeps the sign of zero, NaN and Inf.
++      // Only offered when HasRoundInstruction says so, i.e. with VSX. xsrdpic
++      // rounds in the FPSCR mode, which the JIT leaves at ties-to-even, and
++      // keeps the sign of zero, NaN and Inf.
++      MOZ_ASSERT(HasVSX());
+       as_xsrdpic(dest, src);
+       break;
+     case RoundingMode::TowardsZero:
+-      as_friz(dest, src);
++      ma_friz(dest, src);
+       break;
+     case RoundingMode::Up:
+-      as_frip(dest, src);
++      ma_frip(dest, src);
+       break;
+     case RoundingMode::Down:
+-      as_frim(dest, src);
++      ma_frim(dest, src);
+       break;
+     default:
+       MOZ_CRASH("Unexpected rounding mode");
+@@ -1048,7 +1218,9 @@ void MacroAssembler::storeRegsInMask(LiveRegisterSet set, Address dest,
+     numFpu -= 1;
+     dest.offset -= reg.size();
+     if (reg.isSimd128()) {
+-      storeUnalignedSimd128(reg, dest);
++      if (HasVSX()) {
++        storeUnalignedSimd128(reg, dest);
++      }
+     } else {
+       storeDouble(reg.asDouble(), dest);
+     }
+@@ -1310,267 +1482,118 @@ void MacroAssembler::flexibleRemainderPtr(Register lhs, Register rhs,
+ // ===============================================================
+ // Rounding helpers.
+ 
+-void MacroAssembler::floorDoubleToInt32(FloatRegister src, Register dest,
+-                                        Label* fail) {
+-  ScratchDoubleScope fpscratch(asMasm());
++void MacroAssemblerPPC64Compat::ma_roundToInt64(RoundingMode mode,
++                                                Register dest,
++                                                FloatRegister src,
++                                                FloatRegister tmp) {
++  if (mode == RoundingMode::TowardsZero) {
++    as_fctidz(tmp, src);
++  } else if (!HasVSX()) {
++    ma_roundToInt64_970(mode, dest, src, tmp);
++    return;
++  } else if (mode == RoundingMode::Down) {
++    as_frim(tmp, src);
++    as_fctidz(tmp, tmp);
++  } else {
++    MOZ_ASSERT(mode == RoundingMode::Up);
++    as_frip(tmp, src);
++    as_fctidz(tmp, tmp);
++  }
++  ma_mffprd(dest, tmp);
++}
++
++void MacroAssemblerPPC64Compat::ma_roundToInt32(RoundingMode mode,
++                                                FloatRegister value,
++                                                FloatRegister src,
++                                                FloatRegister fpTemp,
++                                                Register dest, Label* fail) {
+   UseScratchRegisterScope temps(asMasm());
+   Register scratch = temps.Acquire();
+-
+-  // Round toward negative infinity, then convert to int64.
+-  as_frim(fpscratch, src);
+-  as_fctidz(fpscratch, fpscratch);
+-  as_mfvsrd(dest, fpscratch);
++  ma_roundToInt64(mode, dest, value, fpTemp);
+ 
+   // Check if result fits in int32.
+   as_extsw(scratch, dest);
+   as_cmpd(dest, scratch);
+-  ma_b(NotEqual, fail);
++  ma_b(Assembler::NotEqual, fail);
+ 
+-  // Check for -0 and NaN when result is zero.
++  // A zero result must not stand for -0. ceil maps every input in (-1, 0]
++  // to -0, so only a +0 input may pass; floor, trunc and round produce zero
++  // only from inputs in [0, 1) and -0, so the sign bit decides. NaN never
++  // gets here: it fails the range check above.
+   Label notZero;
+   as_cmpdi(dest, 0);
+-  ma_b(NotEqual, &notZero);
+-  {
+-    // If top 2 bits of src are set, it's negative or NaN.
+-    as_mfvsrd(dest, src);
+-    // rldicl. = x_srdi + record form: dest = top 2 bits, CR0[eq]=(dest==0).
+-    // Folds the explicit cmpdi src,0 that would otherwise drive the branch.
+-    as_rldicl_rc(dest, dest, 2, 62);
+-    ma_b(NotEqual, fail);
+-  }
++  ma_b(Assembler::NotEqual, &notZero);
++  ma_mffprd(scratch, src);
++  as_cmpdi(scratch, 0);
++  ma_b(mode == RoundingMode::Up ? Assembler::NotEqual : Assembler::LessThan,
++       fail);
+   bind(&notZero);
+ }
+ 
++void MacroAssembler::floorDoubleToInt32(FloatRegister src, Register dest,
++                                        Label* fail) {
++  ScratchDoubleScope fpscratch(asMasm());
++  ma_roundToInt32(RoundingMode::Down, src, src, fpscratch, dest, fail);
++}
++
+ void MacroAssembler::floorFloat32ToInt32(FloatRegister src, Register dest,
+                                          Label* fail) {
+   ScratchDoubleScope fpscratch(asMasm());
+-  UseScratchRegisterScope temps(asMasm());
+-  Register scratch = temps.Acquire();
+-
+-  // PPC FP rounding works on doubles. Single-precision FPRs are
+-  // already in double-width registers, so frim works fine.
+-  as_frim(fpscratch, src);
+-  as_fctidz(fpscratch, fpscratch);
+-  as_mfvsrd(dest, fpscratch);
+-
+-  // Check if result fits in int32.
+-  as_extsw(scratch, dest);
+-  as_cmpd(dest, scratch);
+-  ma_b(NotEqual, fail);
+-
+-  // Check for -0 and NaN when result is zero.
+-  Label notZero;
+-  as_cmpdi(dest, 0);
+-  ma_b(NotEqual, &notZero);
+-  {
+-    // src is held in the FPR as a 64-bit double (lfs widens float32 to
+-    // double on load), so the same top-2-bits check used for doubles
+-    // applies: bit 63 = sign, bit 62 = exponent MSB. Nonzero means -0,
+-    // ±Inf, NaN, or a large magnitude — none of which is +0.
+-    as_mfvsrd(dest, src);
+-    // rldicl. = x_srdi + record form: dest = top 2 bits, CR0[eq]=(dest==0).
+-    // Folds the explicit cmpdi src,0 that would otherwise drive the branch.
+-    as_rldicl_rc(dest, dest, 2, 62);
+-    ma_b(NotEqual, fail);
+-  }
+-  bind(&notZero);
++  ma_roundToInt32(RoundingMode::Down, src, src, fpscratch, dest, fail);
+ }
+ 
+ void MacroAssembler::ceilDoubleToInt32(FloatRegister src, Register dest,
+                                        Label* fail) {
+   ScratchDoubleScope fpscratch(asMasm());
+-  UseScratchRegisterScope temps(asMasm());
+-  Register scratch = temps.Acquire();
+-
+-  as_frip(fpscratch, src);
+-  as_fctidz(fpscratch, fpscratch);
+-  as_mfvsrd(dest, fpscratch);
+-
+-  // Check if result fits in int32.
+-  as_extsw(scratch, dest);
+-  as_cmpd(dest, scratch);
+-  ma_b(NotEqual, fail);
+-
+-  // Check for (-1, -0] and NaN when result is zero.
+-  Label notZero;
+-  as_cmpdi(dest, 0);
+-  ma_b(NotEqual, &notZero);
+-  {
+-    // If binary value is not zero, input was not 0 (could be -0 or NaN).
+-    as_mfvsrd(dest, src);
+-    as_cmpdi(dest, 0);
+-    ma_b(NotEqual, fail);
+-  }
+-  bind(&notZero);
++  ma_roundToInt32(RoundingMode::Up, src, src, fpscratch, dest, fail);
+ }
+ 
+ void MacroAssembler::ceilFloat32ToInt32(FloatRegister src, Register dest,
+                                         Label* fail) {
+   ScratchDoubleScope fpscratch(asMasm());
+-  UseScratchRegisterScope temps(asMasm());
+-  Register scratch = temps.Acquire();
+-
+-  as_frip(fpscratch, src);
+-  as_fctidz(fpscratch, fpscratch);
+-  as_mfvsrd(dest, fpscratch);
+-
+-  // Check if result fits in int32.
+-  as_extsw(scratch, dest);
+-  as_cmpd(dest, scratch);
+-  ma_b(NotEqual, fail);
+-
+-  // Check for (-1, -0] and NaN when result is zero.
+-  Label notZero;
+-  as_cmpdi(dest, 0);
+-  ma_b(NotEqual, &notZero);
+-  {
+-    as_mfvsrd(dest, src);
+-    as_cmpdi(dest, 0);
+-    ma_b(NotEqual, fail);
+-  }
+-  bind(&notZero);
++  ma_roundToInt32(RoundingMode::Up, src, src, fpscratch, dest, fail);
+ }
+ 
+ void MacroAssembler::truncDoubleToInt32(FloatRegister src, Register dest,
+                                         Label* fail) {
+   ScratchDoubleScope fpscratch(asMasm());
+-  UseScratchRegisterScope temps(asMasm());
+-  Register scratch = temps.Acquire();
+-
+-  as_fctidz(fpscratch, src);
+-  as_mfvsrd(dest, fpscratch);
+-
+-  // Check if result fits in int32.
+-  as_extsw(scratch, dest);
+-  as_cmpd(dest, scratch);
+-  ma_b(NotEqual, fail);
+-
+-  // Check for -0 and NaN when result is zero.
+-  Label notZero;
+-  as_cmpdi(dest, 0);
+-  ma_b(NotEqual, &notZero);
+-  {
+-    as_mfvsrd(dest, src);
+-    // rldicl. = x_srdi + record form: dest = top 2 bits, CR0[eq]=(dest==0).
+-    // Folds the explicit cmpdi src,0 that would otherwise drive the branch.
+-    as_rldicl_rc(dest, dest, 2, 62);
+-    ma_b(NotEqual, fail);
+-  }
+-  bind(&notZero);
++  ma_roundToInt32(RoundingMode::TowardsZero, src, src, fpscratch, dest, fail);
+ }
+ 
+ void MacroAssembler::truncFloat32ToInt32(FloatRegister src, Register dest,
+                                          Label* fail) {
+   ScratchDoubleScope fpscratch(asMasm());
+-  UseScratchRegisterScope temps(asMasm());
+-  Register scratch = temps.Acquire();
+-
+-  as_fctidz(fpscratch, src);
+-  as_mfvsrd(dest, fpscratch);
+-
+-  // Check if result fits in int32.
+-  as_extsw(scratch, dest);
+-  as_cmpd(dest, scratch);
+-  ma_b(NotEqual, fail);
+-
+-  // Check for -0 and NaN when result is zero.
+-  Label notZero;
+-  as_cmpdi(dest, 0);
+-  ma_b(NotEqual, &notZero);
+-  {
+-    as_mfvsrd(dest, src);
+-    // rldicl. = x_srdi + record form: dest = top 2 bits, CR0[eq]=(dest==0).
+-    // Folds the explicit cmpdi src,0 that would otherwise drive the branch.
+-    as_rldicl_rc(dest, dest, 2, 62);
+-    ma_b(NotEqual, fail);
+-  }
+-  bind(&notZero);
++  ma_roundToInt32(RoundingMode::TowardsZero, src, src, fpscratch, dest, fail);
+ }
+ 
++// Math.round: inputs in [-0.5, 0) round to -0 and bail; everything else is
++// floor(src + biggest-double-below-0.5), so halves round up.
+ void MacroAssembler::roundDoubleToInt32(FloatRegister src, Register dest,
+                                         FloatRegister temp, Label* fail) {
+   ScratchDoubleScope fpscratch(asMasm());
+-  UseScratchRegisterScope temps(asMasm());
+-  Register scratch = temps.Acquire();
+-
+   Label performRound;
+-
+-  // Branch for negative inputs.
+   zeroDouble(fpscratch);
+   branchDouble(DoubleGreaterThanOrEqual, src, fpscratch, &performRound);
+-
+-  // Input is negative.
+   loadConstantDouble(-0.5, fpscratch);
+   branchDouble(DoubleGreaterThanOrEqual, src, fpscratch, fail);
+-
+   bind(&performRound);
+-  {
+-    loadConstantDouble(GetBiggestNumberLessThan(0.5), temp);
+-    as_fadd(fpscratch, src, temp);
+-    as_frim(fpscratch, fpscratch);
+-    as_fctidz(fpscratch, fpscratch);
+-    as_mfvsrd(dest, fpscratch);
+-
+-    // Check if result fits in int32.
+-    as_extsw(scratch, dest);
+-    as_cmpd(dest, scratch);
+-    ma_b(NotEqual, fail);
+-  }
+-
+-  // Only -0 can produce a zero result here: NaN failed the range check
+-  // above and inputs in [0, 0.5) round to 0. Test the sign bit.
+-  Label notZero;
+-  as_cmpdi(dest, 0);
+-  ma_b(NotEqual, &notZero);
+-  {
+-    as_mfvsrd(scratch, src);
+-    as_cmpdi(scratch, 0);
+-    ma_b(LessThan, fail);
+-  }
+-  bind(&notZero);
++  loadConstantDouble(GetBiggestNumberLessThan(0.5), temp);
++  as_fadd(fpscratch, src, temp);
++  ma_roundToInt32(RoundingMode::Down, fpscratch, src, temp, dest, fail);
+ }
+ 
+ void MacroAssembler::roundFloat32ToInt32(FloatRegister src, Register dest,
+                                          FloatRegister temp, Label* fail) {
+   ScratchDoubleScope fpscratch(asMasm());
+-  UseScratchRegisterScope temps(asMasm());
+-  Register scratch = temps.Acquire();
+-
+   Label performRound;
+-
+-  // Branch for non-negative inputs.
+   loadConstantFloat32(0.0f, fpscratch);
+   branchFloat(DoubleGreaterThanOrEqual, src, fpscratch, &performRound);
+-
+-  // Input is negative.
+   loadConstantFloat32(-0.5f, fpscratch);
+   branchFloat(DoubleGreaterThanOrEqual, src, fpscratch, fail);
+-
+   bind(&performRound);
+-  {
+-    loadConstantFloat32(float(GetBiggestNumberLessThan(0.5)), temp);
+-    as_fadds(fpscratch, src, temp);
+-    as_frim(fpscratch, fpscratch);
+-    as_fctidz(fpscratch, fpscratch);
+-    as_mfvsrd(dest, fpscratch);
+-
+-    // Check if result fits in int32.
+-    as_extsw(scratch, dest);
+-    as_cmpd(dest, scratch);
+-    ma_b(NotEqual, fail);
+-  }
+-
+-  // Only -0 can produce a zero result here: NaN failed the range check
+-  // above and inputs in [0, 0.5) round to 0. Test the sign bit.
+-  Label notZero;
+-  as_cmpdi(dest, 0);
+-  ma_b(NotEqual, &notZero);
+-  {
+-    as_mfvsrd(scratch, src);
+-    as_cmpdi(scratch, 0);
+-    ma_b(LessThan, fail);
+-  }
+-  bind(&notZero);
++  loadConstantFloat32(float(GetBiggestNumberLessThan(0.5)), temp);
++  as_fadds(fpscratch, src, temp);
++  ma_roundToInt32(RoundingMode::Down, fpscratch, src, temp, dest, fail);
+ }
+ 
+ // ===============================================================
+@@ -1584,12 +1607,12 @@ void MacroAssembler::copySignDouble(FloatRegister lhs, FloatRegister rhs,
+                                     FloatRegister output) {
+   // fcpsgn frt, fra, frb: copies sign of fra to magnitude of frb.
+   // lhs = magnitude source, rhs = sign source.
+-  as_fcpsgn(output, rhs, lhs);
++  ma_fcpsgn(output, rhs, lhs);
+ }
+ 
+ void MacroAssembler::copySignFloat32(FloatRegister lhs, FloatRegister rhs,
+                                      FloatRegister output) {
+-  as_fcpsgn(output, rhs, lhs);
++  ma_fcpsgn(output, rhs, lhs);
+ }
+ 
+ // ===============================================================
+@@ -1736,23 +1759,72 @@ void MacroAssembler::call(ImmWord imm) { call(ImmPtr((void*)imm.value)); }
+ void MacroAssembler::convertUInt64ToDouble(Register64 src, FloatRegister dest,
+                                            Register temp) {
+   MOZ_ASSERT(temp == Register::Invalid());
+-  // POWER7+ has fcfidu (unsigned i64 → f64) as a single instruction; no
+-  // sign-split / branch / GPR scratch needed.
+-  as_mtvsrd(dest, src.reg);
+-  as_fcfidu(dest, dest);
++  if (HasVSX()) {
++    // POWER7+ has fcfidu (unsigned i64 → f64) as a single instruction; no
++    // sign-split / branch / GPR scratch needed.
++    ma_mtfprd(dest, src.reg);
++    as_fcfidu(dest, dest);
++    return;
++  }
++  // Pre-VSX: values with the top bit clear convert directly via the signed
++  // fcfid. Otherwise halve with a sticky low bit (round-to-odd, which
++  // preserves the correctly rounded result), convert, and double.
++  Label big, even, done;
++  UseScratchRegisterScope temps(*this);
++  Register scratch = temps.Acquire();
++  as_cmpdi(src.reg, 0);
++  ma_b(Assembler::LessThan, &big);
++  ma_mtfprd(dest, src.reg);
++  as_fcfid(dest, dest);
++  jump(&done);
++  bind(&big);
++  as_rldicl_rc(scratch, src.reg, 0, 63);  // scratch = src & 1, sets CR0
++  as_rldicl(scratch, src.reg, 63, 1);     // scratch = src >> 1
++  ma_b(Assembler::Equal, &even);
++  as_ori(scratch, scratch, 1);
++  bind(&even);
++  ma_mtfprd(dest, scratch);
++  as_fcfid(dest, dest);
++  as_fadd(dest, dest, dest);
++  bind(&done);
+ }
+ 
+ void MacroAssembler::convertInt64ToFloat32(Register64 src, FloatRegister dest) {
+-  as_mtvsrd(dest, src.reg);
+-  as_fcfids(dest, dest);
++  ma_mtfprd(dest, src.reg);
++  ma_fcfids(dest, dest);
+ }
+ 
+ void MacroAssembler::convertUInt64ToFloat32(Register64 src, FloatRegister dest,
+                                             Register temp) {
+   MOZ_ASSERT(temp == Register::Invalid());
+-  // POWER7+ has fcfidus (unsigned i64 → f32) as a single instruction.
+-  as_mtvsrd(dest, src.reg);
+-  as_fcfidus(dest, dest);
++  if (HasVSX()) {
++    // POWER7+ has fcfidus (unsigned i64 → f32) as a single instruction.
++    ma_mtfprd(dest, src.reg);
++    as_fcfidus(dest, dest);
++    return;
++  }
++  // Pre-VSX: same sign-split as convertUInt64ToDouble, but the i64->f64
++  // step converts with round-to-odd so the final frsp single-rounds
++  // correctly (no double rounding).
++  Label big, even, done;
++  UseScratchRegisterScope temps(*this);
++  Register scratch = temps.Acquire();
++  as_cmpdi(src.reg, 0);
++  ma_b(Assembler::LessThan, &big);
++  ma_mtfprd(dest, src.reg);
++  ma_fcfid_rto(dest, dest);
++  jump(&done);
++  bind(&big);
++  as_rldicl_rc(scratch, src.reg, 0, 63);  // scratch = src & 1, sets CR0
++  as_rldicl(scratch, src.reg, 63, 1);     // scratch = src >> 1
++  ma_b(Assembler::Equal, &even);
++  as_ori(scratch, scratch, 1);
++  bind(&even);
++  ma_mtfprd(dest, scratch);
++  ma_fcfid_rto(dest, dest);
++  as_fadd(dest, dest, dest);
++  bind(&done);
++  as_frsp(dest, dest);
+ }
+ 
+ void MacroAssembler::flexibleQuotient32(
+@@ -1971,7 +2043,7 @@ void MacroAssembler::wasmTruncateDoubleToInt32(FloatRegister input,
+   // Clear VXCVI (bit 23) before the conversion so we can detect overflow.
+   as_mtfsb0(23);
+   as_fctiwz(fpscratch, input);
+-  as_mfvsrd(output, fpscratch);
++  ma_mffprd(output, fpscratch);
+   as_extsw(output, output);
+   // Move FPSCR field 5 (which contains VXCVI) to CR0.
+   // If the conversion was invalid (NaN or out-of-range), VXCVI=1 → SO set.
+@@ -1990,7 +2062,7 @@ void MacroAssembler::wasmTruncateDoubleToUInt32(FloatRegister input,
+   as_fcmpu(input, input);
+   ma_b(DoubleUnordered, oolEntry);
+   as_fctidz(fpscratch, input);
+-  as_mfvsrd(output, fpscratch);
++  ma_mffprd(output, fpscratch);
+   x_srdi(scratch, output, 32);
+   as_extsw(output, output);
+   as_cmpdi(scratch, 0);
+@@ -2004,7 +2076,7 @@ void MacroAssembler::wasmTruncateFloat32ToInt32(FloatRegister input,
+   ScratchDoubleScope fpscratch(asMasm());
+   as_mtfsb0(23);
+   as_fctiwz(fpscratch, input);
+-  as_mfvsrd(output, fpscratch);
++  ma_mffprd(output, fpscratch);
+   as_extsw(output, output);
+   as_mcrfs(cr0, 5);
+   ma_b(SOBit, oolEntry);
+@@ -2020,7 +2092,7 @@ void MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input,
+   as_fcmpu(input, input);
+   ma_b(DoubleUnordered, oolEntry);
+   as_fctidz(fpscratch, input);
+-  as_mfvsrd(output, fpscratch);
++  ma_mffprd(output, fpscratch);
+   x_srdi(scratch, output, 32);
+   as_extsw(output, output);
+   as_cmpdi(scratch, 0);
+@@ -2034,7 +2106,7 @@ void MacroAssembler::wasmTruncateDoubleToInt64(
+   ScratchDoubleScope fpscratch(asMasm());
+   as_mtfsb0(23);
+   as_fctidz(fpscratch, input);
+-  as_mfvsrd(output.reg, fpscratch);
++  ma_mffprd(output.reg, fpscratch);
+   as_mcrfs(cr0, 5);
+   ma_b(SOBit, oolEntry);
+   if (isSaturating) {
+@@ -2049,7 +2121,7 @@ void MacroAssembler::wasmTruncateFloat32ToInt64(
+   ScratchDoubleScope fpscratch(asMasm());
+   as_mtfsb0(23);
+   as_fctidz(fpscratch, input);
+-  as_mfvsrd(output.reg, fpscratch);
++  ma_mffprd(output.reg, fpscratch);
+   as_mcrfs(cr0, 5);
+   ma_b(SOBit, oolEntry);
+   if (isSaturating) {
+@@ -2063,8 +2135,43 @@ void MacroAssembler::wasmTruncateDoubleToUInt64(
+   MOZ_ASSERT(tempDouble.isInvalid());
+   ScratchDoubleScope fpscratch(asMasm());
+   as_mtfsb0(23);
+-  as_fctiduz(fpscratch, input);
+-  as_mfvsrd(output.reg, fpscratch);
++  if (HasVSX()) {
++    as_fctiduz(fpscratch, input);
++    ma_mffprd(output.reg, fpscratch);
++  } else {
++    // Pre-VSX: no fctiduz. Split at 2^63 by comparing the raw bit pattern
++    // (positive doubles order like their bits): below it the signed fctidz
++    // covers the unsigned range [0, 2^63); at or above it convert
++    // input - 2^63 (exact: ulp >= 2^11 there) and set the top bit. The big
++    // path traps for x >= 2^64 and positive NaN via fctidz's VXCVI. The
++    // below path must additionally trap x <= -1 explicitly: signed fctidz
++    // accepts those (valid signed results) but they are out of unsigned
++    // range. Negative NaN also lands here and fctidz maps it to INT64_MIN,
++    // which the same negative test rejects.
++    Label big, join;
++    UseScratchRegisterScope temps(*this);
++    Register scratch = temps.Acquire();
++    ma_mffprd(output.reg, input);
++    xs_li(scratch, 0x43E);
++    x_sldi(scratch, scratch, 52);  // 0x43E0000000000000 = 2^63 as double
++    as_cmpd(output.reg, scratch);
++    ma_b(Assembler::GreaterThanOrEqual, &big);
++    as_fctidz(fpscratch, input);
++    ma_mffprd(output.reg, fpscratch);
++    as_cmpdi(output.reg, 0);
++    ma_b(Assembler::LessThan, oolEntry);
++    jump(&join);
++    bind(&big);
++    as_std(scratch, StackPointer, -8);
++    as_lfd(fpscratch, StackPointer, -8);
++    as_fsub(fpscratch, input, fpscratch);
++    as_fctidz(fpscratch, fpscratch);
++    ma_mffprd(output.reg, fpscratch);
++    xs_li(scratch, 1);
++    x_sldi(scratch, scratch, 63);
++    as_or_(output.reg, output.reg, scratch);
++    bind(&join);
++  }
+   as_mcrfs(cr0, 5);
+   ma_b(SOBit, oolEntry);
+   if (isSaturating) {
+@@ -2078,8 +2185,43 @@ void MacroAssembler::wasmTruncateFloat32ToUInt64(
+   MOZ_ASSERT(tempFloat.isInvalid());
+   ScratchDoubleScope fpscratch(asMasm());
+   as_mtfsb0(23);
+-  as_fctiduz(fpscratch, input);
+-  as_mfvsrd(output.reg, fpscratch);
++  if (HasVSX()) {
++    as_fctiduz(fpscratch, input);
++    ma_mffprd(output.reg, fpscratch);
++  } else {
++    // Pre-VSX: no fctiduz. Split at 2^63 by comparing the raw bit pattern
++    // (positive doubles order like their bits): below it the signed fctidz
++    // covers the unsigned range [0, 2^63); at or above it convert
++    // input - 2^63 (exact: ulp >= 2^11 there) and set the top bit. The big
++    // path traps for x >= 2^64 and positive NaN via fctidz's VXCVI. The
++    // below path must additionally trap x <= -1 explicitly: signed fctidz
++    // accepts those (valid signed results) but they are out of unsigned
++    // range. Negative NaN also lands here and fctidz maps it to INT64_MIN,
++    // which the same negative test rejects.
++    Label big, join;
++    UseScratchRegisterScope temps(*this);
++    Register scratch = temps.Acquire();
++    ma_mffprd(output.reg, input);
++    xs_li(scratch, 0x43E);
++    x_sldi(scratch, scratch, 52);  // 0x43E0000000000000 = 2^63 as double
++    as_cmpd(output.reg, scratch);
++    ma_b(Assembler::GreaterThanOrEqual, &big);
++    as_fctidz(fpscratch, input);
++    ma_mffprd(output.reg, fpscratch);
++    as_cmpdi(output.reg, 0);
++    ma_b(Assembler::LessThan, oolEntry);
++    jump(&join);
++    bind(&big);
++    as_std(scratch, StackPointer, -8);
++    as_lfd(fpscratch, StackPointer, -8);
++    as_fsub(fpscratch, input, fpscratch);
++    as_fctidz(fpscratch, fpscratch);
++    ma_mffprd(output.reg, fpscratch);
++    xs_li(scratch, 1);
++    x_sldi(scratch, scratch, 63);
++    as_or_(output.reg, output.reg, scratch);
++    bind(&join);
++  }
+   as_mcrfs(cr0, 5);
+   ma_b(SOBit, oolEntry);
+   if (isSaturating) {
+@@ -2126,6 +2268,36 @@ static void ReverseWordBytesForAtomics(MacroAssembler& masm, Register reg) {
+ }
+ #endif
+ 
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++// Byte-reverse a 16-bit value in place (value order <-> wasm's little-endian
++// memory order) using `tmp` as a pair register. Result is clean in the low
++// 16 bits regardless of junk above them.
++static void SwapHalf(MacroAssembler& masm, Register reg, Register tmp) {
++  masm.as_rlwinm(tmp, reg, 8, 16, 23);
++  masm.as_rlwinm(reg, reg, 24, 24, 31);
++  masm.as_or_(reg, reg, tmp);
++}
++#endif
++
++// Pre-VSX (970/G5) sub-word atomics: lbarx/lharx/stbcx./sthcx. are ISA 2.06,
++// so operate on the containing aligned word with lwarx/stwcx. and a shifted
++// mask. Converts the byte EA in `mem` to the word EA in place, computes the
++// sub-word's big-endian bit position into `shift`, and the shifted width
++// mask into `mask`. Sub-word atomics are naturally aligned (JS typed arrays
++// by construction, wasm by its alignment trap), so a halfword never
++// straddles words.
++static void SubwordAtomicPrologue970(MacroAssembler& masm, unsigned nbytes,
++                                     Register mem, Register shift,
++                                     Register mask) {
++  masm.as_andi_rc(shift, mem, 3);
++  masm.as_xori(shift, shift, nbytes == 1 ? 3 : 2);
++  masm.x_slwi(shift, shift, 3);
++  masm.as_rldicr(mem, mem, 0, 61);
++  masm.xs_li(mask, 0);
++  masm.as_ori(mask, mask, nbytes == 1 ? 0xff : 0xffff);
++  masm.as_slw(mask, mask, shift);
++}
++
+ template <typename T>
+ static void CompareExchange(MacroAssembler& masm,
+                             const wasm::MemoryAccessDesc* access,
+@@ -2210,6 +2382,69 @@ static void CompareExchange(MacroAssembler& masm,
+     return;
+   }
+ 
++  if (!HasVSX()) {
++    // Pre-VSX masked-word compare-exchange. Both shifted constants (expected
++    // and replacement, in memory byte order) are parked in the protected
++    // zone below SP so the loop needs only one temp; the in-loop reloads are
++    // plain loads, which do not clear the lwarx reservation.
++    SubwordAtomicPrologue970(masm, nbytes, scratch, offsetTemp, maskTemp);
++    masm.as_rlwinm(valueTemp, oldval, 0, nbytes == 1 ? 24 : 16, 31);
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++    if (access && nbytes == 2) {
++      SwapHalf(masm, valueTemp, r0);
++    }
++#endif
++    masm.as_slw(valueTemp, valueTemp, offsetTemp);
++    masm.as_std(valueTemp, StackPointer, -16);
++    masm.as_rlwinm(valueTemp, newval, 0, nbytes == 1 ? 24 : 16, 31);
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++    if (access && nbytes == 2) {
++      SwapHalf(masm, valueTemp, r0);
++    }
++#endif
++    masm.as_slw(valueTemp, valueTemp, offsetTemp);
++    masm.as_std(valueTemp, StackPointer, -24);
++
++    masm.memoryBarrierBefore(sync);
++    masm.bind(&again);
++
++    if (access) {
++      masm.flushBuffer();  // see comment in wasmLoadImpl
++      masm.append(*access, wasm::TrapMachineInsn::Atomic,
++                  FaultingCodeOffset(masm.currentOffset()));
++    }
++
++    masm.as_lwarx(output, r0, scratch);
++    masm.as_ld(valueTemp, StackPointer, -16);
++    masm.as_and_(r0, output, maskTemp);
++    masm.ma_cmp(r0, valueTemp, Assembler::NotEqual, /* is32bit */ true);
++    masm.ma_b(Assembler::NotEqual, &end);
++    masm.as_andc(r0, output, maskTemp);
++    masm.as_ld(valueTemp, StackPointer, -24);
++    masm.as_or_(r0, r0, valueTemp);
++    masm.as_stwcx(r0, r0, scratch);
++    masm.ma_b(Assembler::NotEqual, &again);
++
++    masm.memoryBarrierAfter(sync);
++    masm.bind(&end);
++    masm.as_srw(output, output, offsetTemp);
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++    if (access && nbytes == 2) {
++      SwapHalf(masm, output, r0);
++    }
++#endif
++    if (signExtend) {
++      if (nbytes == 1) {
++        masm.as_extsb(output, output);
++      } else {
++        masm.as_extsh(output, output);
++      }
++    } else {
++      masm.as_rlwinm(output, output, 0, nbytes == 1 ? 24 : 16, 31);
++    }
++    return;
++  }
++
+   // Sub-word (1 or 2 byte) compare-exchange via native lbarx/lharx +
+   // stbcx./sthcx. POWER7+ (well below our POWER8 baseline). Replaces the prior
+   // round-down-to-word
+@@ -2426,6 +2661,52 @@ static void AtomicExchange(MacroAssembler& masm,
+     return;
+   }
+ 
++  if (!HasVSX()) {
++    // Pre-VSX masked-word exchange: the shifted replacement is loop-invariant
++    // and lives in valueTemp.
++    SubwordAtomicPrologue970(masm, nbytes, memTemp, offsetTemp, maskTemp);
++    masm.as_rlwinm(valueTemp, value, 0, nbytes == 1 ? 24 : 16, 31);
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++    if (access && nbytes == 2) {
++      SwapHalf(masm, valueTemp, r0);
++    }
++#endif
++    masm.as_slw(valueTemp, valueTemp, offsetTemp);
++
++    masm.memoryBarrierBefore(sync);
++    masm.bind(&again);
++
++    if (access) {
++      masm.flushBuffer();  // see comment in wasmLoadImpl
++      masm.append(*access, wasm::TrapMachineInsn::Atomic,
++                  FaultingCodeOffset(masm.currentOffset()));
++    }
++
++    masm.as_lwarx(output, r0, memTemp);
++    masm.as_andc(r0, output, maskTemp);
++    masm.as_or_(r0, r0, valueTemp);
++    masm.as_stwcx(r0, r0, memTemp);
++    masm.ma_b(Assembler::NotEqual, &again);
++
++    masm.memoryBarrierAfter(sync);
++    masm.as_srw(output, output, offsetTemp);
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++    if (access && nbytes == 2) {
++      SwapHalf(masm, output, r0);
++    }
++#endif
++    if (signExtend) {
++      if (nbytes == 1) {
++        masm.as_extsb(output, output);
++      } else {
++        masm.as_extsh(output, output);
++      }
++    } else {
++      masm.as_rlwinm(output, output, 0, nbytes == 1 ? 24 : 16, 31);
++    }
++    return;
++  }
++
+   // Sub-word exchange via native lbarx/lharx + stbcx./sthcx. (POWER7+).
+   // valueTemp / offsetTemp / maskTemp are still allocated by the lowering but
+   // unused here.
+@@ -2629,6 +2910,81 @@ static void AtomicFetchOp(MacroAssembler& masm,
+     return;
+   }
+ 
++  if (!HasVSX()) {
++    // Pre-VSX masked-word fetch-and-op: extract the sub-word each iteration,
++    // apply the op in value order, and reinsert under the mask. Junk above
++    // the sub-word after the extract shift is harmless (add/sub carries only
++    // propagate upward; the reinsert masks) and the wasm halfword swap
++    // cleans its own high bits.
++    SubwordAtomicPrologue970(masm, nbytes, memTemp, offsetTemp, maskTemp);
++
++    masm.memoryBarrierBefore(sync);
++    masm.bind(&again);
++
++    if (access) {
++      masm.flushBuffer();  // see comment in wasmLoadImpl
++      masm.append(*access, wasm::TrapMachineInsn::Atomic,
++                  FaultingCodeOffset(masm.currentOffset()));
++    }
++
++    masm.as_lwarx(output, r0, memTemp);
++    masm.as_srw(valueTemp, output, offsetTemp);
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++    if (access && nbytes == 2) {
++      SwapHalf(masm, valueTemp, r0);
++    }
++#endif
++    switch (op) {
++      case AtomicOp::Add:
++        masm.as_add(valueTemp, valueTemp, value);
++        break;
++      case AtomicOp::Sub:
++        masm.as_subf(valueTemp, value, valueTemp);
++        break;
++      case AtomicOp::And:
++        masm.as_and_(valueTemp, valueTemp, value);
++        break;
++      case AtomicOp::Or:
++        masm.as_or_(valueTemp, valueTemp, value);
++        break;
++      case AtomicOp::Xor:
++        masm.as_xor_(valueTemp, valueTemp, value);
++        break;
++      default:
++        MOZ_CRASH();
++    }
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++    if (access && nbytes == 2) {
++      SwapHalf(masm, valueTemp, r0);
++    }
++#endif
++    masm.as_slw(valueTemp, valueTemp, offsetTemp);
++    masm.as_and_(valueTemp, valueTemp, maskTemp);
++    masm.as_andc(scratch, output, maskTemp);
++    masm.as_or_(valueTemp, valueTemp, scratch);
++    masm.as_stwcx(valueTemp, r0, memTemp);
++    masm.ma_b(Assembler::NotEqual, &again);
++
++    masm.as_srw(output, output, offsetTemp);
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++    if (access && nbytes == 2) {
++      SwapHalf(masm, output, r0);
++    }
++#endif
++    if (signExtend) {
++      if (nbytes == 1) {
++        masm.as_extsb(output, output);
++      } else {
++        masm.as_extsh(output, output);
++      }
++    } else {
++      masm.as_rlwinm(output, output, 0, nbytes == 1 ? 24 : 16, 31);
++    }
++
++    masm.memoryBarrierAfter(sync);
++    return;
++  }
++
+   // Sub-word fetch-and-op via native lbarx/lharx + stbcx./sthcx. (POWER7+).
+   // `output` holds the pre-op loaded value (returned to caller); `valueTemp`
+   // is the post-op value we condition-store. stXcx. only stores low 8/16 bits
+@@ -2866,6 +3222,62 @@ static void AtomicEffectOp(MacroAssembler& masm,
+     return;
+   }
+ 
++  if (!HasVSX()) {
++    // Pre-VSX masked-word effect-only op; same dance as AtomicFetchOp minus
++    // the old-value extraction.
++    SubwordAtomicPrologue970(masm, nbytes, scratch, offsetTemp, maskTemp);
++
++    masm.memoryBarrierBefore(sync);
++    masm.bind(&again);
++
++    if (access) {
++      masm.flushBuffer();  // see comment in wasmLoadImpl
++      masm.append(*access, wasm::TrapMachineInsn::Atomic,
++                  FaultingCodeOffset(masm.currentOffset()));
++    }
++
++    masm.as_lwarx(scratch2, r0, scratch);
++    masm.as_srw(valueTemp, scratch2, offsetTemp);
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++    if (access && nbytes == 2) {
++      SwapHalf(masm, valueTemp, r0);
++    }
++#endif
++    switch (op) {
++      case AtomicOp::Add:
++        masm.as_add(valueTemp, valueTemp, value);
++        break;
++      case AtomicOp::Sub:
++        masm.as_subf(valueTemp, value, valueTemp);
++        break;
++      case AtomicOp::And:
++        masm.as_and_(valueTemp, valueTemp, value);
++        break;
++      case AtomicOp::Or:
++        masm.as_or_(valueTemp, valueTemp, value);
++        break;
++      case AtomicOp::Xor:
++        masm.as_xor_(valueTemp, valueTemp, value);
++        break;
++      default:
++        MOZ_CRASH();
++    }
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++    if (access && nbytes == 2) {
++      SwapHalf(masm, valueTemp, r0);
++    }
++#endif
++    masm.as_slw(valueTemp, valueTemp, offsetTemp);
++    masm.as_and_(valueTemp, valueTemp, maskTemp);
++    masm.as_andc(r0, scratch2, maskTemp);
++    masm.as_or_(valueTemp, valueTemp, r0);
++    masm.as_stwcx(valueTemp, r0, scratch);
++    masm.ma_b(Assembler::NotEqual, &again);
++
++    masm.memoryBarrierAfter(sync);
++    return;
++  }
++
+   // Sub-word effect-only op via native lbarx/lharx + stbcx./sthcx. (POWER7+).
+   // No output to return; scratch2 holds the load+op+store value.
+   // valueTemp / offsetTemp / maskTemp are still allocated by the lowering but
+@@ -3415,8 +3827,18 @@ void MacroAssemblerPPC64Compat::wasmLoadImpl(
+   // emitted load shifts the load and leaves the pool guard branch at the
+   // recorded offset (SummarizeTrapInstruction then rejects the trap site).
+   m_buffer.flushPool();
+-  append(access, wasm::TrapMachineInsnForLoad(Scalar::byteSize(access.type())),
+-         FaultingCodeOffset(currentOffset()));
++  // Pre-VSX big-endian 8-byte loads are two word loads (ma_lwbrx2); that
++  // branch records its own site, as a 4-byte load.
++  bool wordPair = false;
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++  wordPair = !HasVSX() && (access.type() == Scalar::Int64 ||
++                           access.type() == Scalar::Float64);
++#endif
++  if (!wordPair) {
++    append(access,
++           wasm::TrapMachineInsnForLoad(Scalar::byteSize(access.type())),
++           FaultingCodeOffset(currentOffset()));
++  }
+ 
+   switch (access.type()) {
+     case Scalar::Int8:
+@@ -3468,7 +3890,7 @@ void MacroAssemblerPPC64Compat::wasmLoadImpl(
+           UseScratchRegisterScope temps(asMasm());
+           Register tmp = temps.Acquire();
+           as_ldbrx(tmp, memoryBase, ptr);
+-          as_mtvsrd(dscratch, tmp);
++          ma_mtfprd(dscratch, tmp);
+         }
+ #endif
+         if (access.isZeroExtendSimd128Load()) {
+@@ -3509,8 +3931,14 @@ void MacroAssemblerPPC64Compat::wasmLoadImpl(
+         // then move into the FPR (matches what lfdx would place in dw0).
+         UseScratchRegisterScope temps(asMasm());
+         Register tmp = temps.Acquire();
+-        as_ldbrx(tmp, memoryBase, ptr);
+-        as_mtvsrd(output.fpu(), tmp);
++        if (HasVSX()) {
++          as_ldbrx(tmp, memoryBase, ptr);
++        } else {
++          append(access, wasm::TrapMachineInsnForLoad(4),
++                 FaultingCodeOffset(currentOffset()));
++          ma_lwbrx2(tmp, memoryBase, ptr);
++        }
++        ma_mtfprd(output.fpu(), tmp);
+ #else
+         as_lfdx(output.fpu(), memoryBase, ptr);
+ #endif
+@@ -3535,7 +3963,7 @@ void MacroAssemblerPPC64Compat::wasmLoadImpl(
+           // POWER8: mtvsrd puts value in BE dw0 low 32 bits.
+           // xxpermdi(dest, zero, scratch, 0) = {zero[dw0], scratch[dw0]}
+           // in BE, placing the value in LE word 0 with the rest zero.
+-          as_mtvsrd(ScratchSimd128Reg, tmp);
++          ma_mtfprd(ScratchSimd128Reg, tmp);
+           as_xxpermdi(output.fpu(), output.fpu(), ScratchSimd128Reg, 0);
+         }
+       } else {
+@@ -3549,9 +3977,16 @@ void MacroAssemblerPPC64Compat::wasmLoadImpl(
+         UseScratchRegisterScope temps(asMasm());
+         Register tmp = temps.Acquire();
+         as_lwbrx(tmp, memoryBase, ptr);
+-        x_sldi(tmp, tmp, 32);
+-        as_mtvsrd(output.fpu(), tmp);
+-        as_xscvspdpn(output.fpu(), output.fpu());
++        if (HasVSX()) {
++          x_sldi(tmp, tmp, 32);
++          ma_mtfprd(output.fpu(), tmp);
++          as_xscvspdpn(output.fpu(), output.fpu());
++        } else {
++          // Pre-VSX reinterpret: red-zone stw + lfs (lfs expands single to
++          // the FPR's double format).
++          as_stw(tmp, StackPointer, -8);
++          as_lfs(output.fpu(), StackPointer, -8);
++        }
+ #else
+         as_lfsx(output.fpu(), memoryBase, ptr);
+ #endif
+@@ -3616,6 +4051,10 @@ void MacroAssemblerPPC64Compat::wasmStoreImpl(
+   if (access.type() == Scalar::Simd128) {
+     deferTrapSite = true;
+   }
++  // Pre-VSX Int64 byte-swaps in registers before the faulting stdx.
++  if (access.type() == Scalar::Int64 && !HasVSX()) {
++    deferTrapSite = true;
++  }
+ #endif
+   if (!deferTrapSite) {
+     m_buffer.flushPool();
+@@ -3648,7 +4087,16 @@ void MacroAssemblerPPC64Compat::wasmStoreImpl(
+       break;
+     case Scalar::Int64:
+ #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+-      as_stdbrx(value.gpr(), memoryBase, ptr);
++      if (HasVSX()) {
++        as_stdbrx(value.gpr(), memoryBase, ptr);
++      } else {
++        UseScratchRegisterScope temps(asMasm());
++        Register tmp = temps.Acquire();
++        m_buffer.flushPool();
++        append(access, wasm::TrapMachineInsnForStore(4),
++               FaultingCodeOffset(currentOffset()));
++        ma_stwbrx2(value.gpr(), memoryBase, ptr, tmp);
++      }
+ #else
+       as_stdx(value.gpr(), memoryBase, ptr);
+ #endif
+@@ -3660,11 +4108,17 @@ void MacroAssemblerPPC64Compat::wasmStoreImpl(
+       // byte-reversed. Record the trap site at the faulting stdbrx.
+       UseScratchRegisterScope temps(asMasm());
+       Register tmp = temps.Acquire();
+-      as_mfvsrd(tmp, value.fpu());
++      ma_mffprd(tmp, value.fpu());
+       m_buffer.flushPool();
+-      append(access, wasm::TrapMachineInsnForStore(8),
+-             FaultingCodeOffset(currentOffset()));
+-      as_stdbrx(tmp, memoryBase, ptr);
++      if (HasVSX()) {
++        append(access, wasm::TrapMachineInsnForStore(8),
++               FaultingCodeOffset(currentOffset()));
++        as_stdbrx(tmp, memoryBase, ptr);
++      } else {
++        append(access, wasm::TrapMachineInsnForStore(4),
++               FaultingCodeOffset(currentOffset()));
++        ma_stwbrx2(tmp, memoryBase, ptr, tmp);
++      }
+     }
+ #else
+       as_stfdx(value.fpu(), memoryBase, ptr);
+@@ -3738,8 +4192,18 @@ void MacroAssemblerPPC64Compat::wasmLoadI64Impl(
+ 
+   asMasm().memoryBarrierBefore(access.sync());
+   m_buffer.flushPool();  // see comment in wasmLoadImpl
+-  append(access, wasm::TrapMachineInsnForLoad(Scalar::byteSize(access.type())),
+-         FaultingCodeOffset(currentOffset()));
++  // Pre-VSX big-endian 8-byte loads are two word loads (ma_lwbrx2); that
++  // branch records its own site, as a 4-byte load.
++  bool wordPair = false;
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++  wordPair = !HasVSX() && (access.type() == Scalar::Int64 ||
++                           access.type() == Scalar::Float64);
++#endif
++  if (!wordPair) {
++    append(access,
++           wasm::TrapMachineInsnForLoad(Scalar::byteSize(access.type())),
++           FaultingCodeOffset(currentOffset()));
++  }
+ 
+   switch (access.type()) {
+     case Scalar::Int8:
+@@ -3782,7 +4246,13 @@ void MacroAssemblerPPC64Compat::wasmLoadI64Impl(
+       break;
+     case Scalar::Int64:
+ #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+-      as_ldbrx(output.reg, memoryBase, ptr);
++      if (HasVSX()) {
++        as_ldbrx(output.reg, memoryBase, ptr);
++      } else {
++        append(access, wasm::TrapMachineInsnForLoad(4),
++               FaultingCodeOffset(currentOffset()));
++        ma_lwbrx2(output.reg, memoryBase, ptr);
++      }
+ #else
+       as_ldx(output.reg, memoryBase, ptr);
+ #endif
+@@ -3806,9 +4276,20 @@ void MacroAssemblerPPC64Compat::wasmStoreI64Impl(
+   wasmProbeLastByte(access, memoryBase, ptr);
+ 
+   asMasm().memoryBarrierBefore(access.sync());
+-  m_buffer.flushPool();  // see comment in wasmLoadImpl
+-  append(access, wasm::TrapMachineInsnForStore(Scalar::byteSize(access.type())),
+-         FaultingCodeOffset(currentOffset()));
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++  // Pre-VSX Int64 byte-swaps in registers before the faulting stdx, so its
++  // trap-site record is deferred into the case (like wasmStoreImpl's BE FP
++  // paths).
++  bool deferTrapSite = (access.type() == Scalar::Int64 && !HasVSX());
++#else
++  bool deferTrapSite = false;
++#endif
++  if (!deferTrapSite) {
++    m_buffer.flushPool();  // see comment in wasmLoadImpl
++    append(access,
++           wasm::TrapMachineInsnForStore(Scalar::byteSize(access.type())),
++           FaultingCodeOffset(currentOffset()));
++  }
+ 
+   switch (access.type()) {
+     case Scalar::Int8:
+@@ -3833,7 +4314,16 @@ void MacroAssemblerPPC64Compat::wasmStoreI64Impl(
+       break;
+     case Scalar::Int64:
+ #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+-      as_stdbrx(value.reg, memoryBase, ptr);
++      if (HasVSX()) {
++        as_stdbrx(value.reg, memoryBase, ptr);
++      } else {
++        UseScratchRegisterScope temps(asMasm());
++        Register tmp = temps.Acquire();
++        m_buffer.flushPool();
++        append(access, wasm::TrapMachineInsnForStore(4),
++               FaultingCodeOffset(currentOffset()));
++        ma_stwbrx2(value.reg, memoryBase, ptr, tmp);
++      }
+ #else
+       as_stdx(value.reg, memoryBase, ptr);
+ #endif
+diff --git a/js/src/jit/ppc64/MacroAssembler-ppc64.h b/js/src/jit/ppc64/MacroAssembler-ppc64.h
+index 5db14a13c0..c560f7920d 100644
+--- a/js/src/jit/ppc64/MacroAssembler-ppc64.h
++++ b/js/src/jit/ppc64/MacroAssembler-ppc64.h
+@@ -181,7 +181,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+   void convertInt32ToDouble(Register src, FloatRegister dest) {
+     // mtvsrwa: VSR[dest].dw0 = sign_ext_64(src[32:63]); P8+ (ISA 2.07).
+     // Replaces extsw + mtvsrd (2 insns + scratch GPR) with 1 insn.
+-    as_mtvsrwa(dest, src);
++    ma_mtfprwa(dest, src);
+     as_fcfid(dest, dest);
+   }
+   void convertInt32ToDouble(const Address& srcArg, FloatRegister dest) {
+@@ -191,6 +191,17 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+     // unboxInt32(Address)'s valuePayload() shift so we read the low word rather
+     // than the high word. No-op on little-endian.
+     Address src = valuePayload(srcArg);
++    if (!HasVSX()) {
++      // Pre-VSX: no lfiwax. Signed load + red-zone reinterpret.
++      UseScratchRegisterScope temps(*this);
++      Register scratch = temps.Acquire();
++      load32(src, scratch);
++      as_extsw(scratch, scratch);
++      as_std(scratch, StackPointer, -8);
++      as_lfd(dest, StackPointer, -8);
++      as_fcfid(dest, dest);
++      return;
++    }
+     // lfiwax (P7+): FPR.dw[0] = sign_ext_64(MEM[addr, 4]). X-form indexed
+     // — no immediate offset, so when offset != 0 we add it into a scratch
+     // first. Replaces lwz + extsw + mtvsrd with lfiwax (one insn) plus
+@@ -266,10 +277,20 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+   }
+   void convertInt32ToFloat32(Register src, FloatRegister dest) {
+     // mtvsrwa + fcfids; same recipe as convertInt32ToDouble(Register).
+-    as_mtvsrwa(dest, src);
+-    as_fcfids(dest, dest);
++    ma_mtfprwa(dest, src);
++    ma_fcfids(dest, dest);
+   }
+   void convertInt32ToFloat32(const Address& src, FloatRegister dest) {
++    if (!HasVSX()) {
++      UseScratchRegisterScope temps(*this);
++      Register scratch = temps.Acquire();
++      load32(src, scratch);
++      as_extsw(scratch, scratch);
++      as_std(scratch, StackPointer, -8);
++      as_lfd(dest, StackPointer, -8);
++      ma_fcfids(dest, dest);
++      return;
++    }
+     // lfiwax + fcfids; same recipe as convertInt32ToDouble(Address).
+     if (src.offset == 0) {
+       as_lfiwax(dest, r0, src.base);
+@@ -540,6 +561,153 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+       movePtr(ImmWord(uintptr_t(addr)), dest);
+     }
+   }
++
++  // GPR <-> FPR moves. VSX has direct moves; the pre-VSX tier (970/G5)
++  // round-trips through the ABI red zone, which the Linux kernel preserves
++  // across signal delivery, so an async signal between the store and the
++  // load cannot clobber the slot.
++  void ma_mffprd(Register dest, FloatRegister src) {
++    if (HasVSX()) {
++      as_mfvsrd(dest, src);
++    } else {
++      as_stfd(src, StackPointer, -8);
++      as_ld(dest, StackPointer, -8);
++    }
++  }
++  void ma_mtfprd(FloatRegister dest, Register src) {
++    if (HasVSX()) {
++      as_mtvsrd(dest, src);
++    } else {
++      as_std(src, StackPointer, -8);
++      as_lfd(dest, StackPointer, -8);
++    }
++  }
++  // FPR = sign-extended low 32 bits of src (mtvsrwa semantics).
++  void ma_mtfprwa(FloatRegister dest, Register src) {
++    if (HasVSX()) {
++      as_mtvsrwa(dest, src);
++    } else {
++      UseScratchRegisterScope temps(*this);
++      Register scratch = temps.Acquire();
++      as_extsw(scratch, src);
++      as_std(scratch, StackPointer, -8);
++      as_lfd(dest, StackPointer, -8);
++    }
++  }
++  // FPR = zero-extended low 32 bits of src (mtvsrwz semantics).
++  void ma_mtfprwz(FloatRegister dest, Register src) {
++    if (HasVSX()) {
++      as_mtvsrwz(dest, src);
++    } else {
++      UseScratchRegisterScope temps(*this);
++      Register scratch = temps.Acquire();
++      as_rldicl(scratch, src, 0, 32);
++      as_std(scratch, StackPointer, -8);
++      as_lfd(dest, StackPointer, -8);
++    }
++  }
++  // i64 (bit pattern in src) -> f64 with round-to-odd: truncate-mode fcfid,
++  // then set the mantissa lsb when the conversion was inexact (FPSCR FI).
++  // Round-to-odd at 53 bits followed by a round-to-nearest frsp at 24 bits
++  // yields the correctly rounded single (valid since 53 >= 24 + 2).
++  void ma_fcfid_rto(FloatRegister dest, FloatRegister src);
++  // fcfids (ISA 2.06): int64 -> float32. The pre-VSX fallback converts with
++  // round-to-odd, then rounds to single, matching fcfids exactly.
++  void ma_fcfids(FloatRegister dest, FloatRegister src) {
++    if (HasVSX()) {
++      as_fcfids(dest, src);
++    } else {
++      ma_fcfid_rto(dest, src);
++      as_frsp(dest, dest);
++    }
++  }
++  // isel (ISA 2.03): rt = crbit ? ra : rb. The pre-VSX fallback branches on
++  // the same CR0 bit (the bc encodings are the ma_b Condition values).
++  void ma_isel(Register rt, Register ra, Register rb, uint16_t bc,
++               CRegisterID cr = cr0) {
++    if (HasVSX()) {
++      as_isel(rt, ra, rb, bc, cr);
++      return;
++    }
++    MOZ_ASSERT(cr == cr0);
++    Label take, done;
++    ma_b(static_cast<Assembler::Condition>(bc), &take);
++    xs_mr(rt, rb);
++    jump(&done);
++    bind(&take);
++    xs_mr(rt, ra);
++    bind(&done);
++  }
++  // isel with RA=0 meaning constant zero (the ISA's r0 special case).
++  void ma_isel0(Register rt, Register rb, uint16_t bc,
++                CRegisterID cr = cr0) {
++    if (HasVSX()) {
++      as_isel0(rt, r0, rb, bc, cr);
++      return;
++    }
++    MOZ_ASSERT(cr == cr0);
++    Label take, done;
++    ma_b(static_cast<Assembler::Condition>(bc), &take);
++    xs_mr(rt, rb);
++    jump(&done);
++    bind(&take);
++    xs_li(rt, 0);
++    bind(&done);
++  }
++  // fcpsgn (ISA 2.05): dest = |magSrc| carrying signSrc's sign bit.
++  void ma_fcpsgn(FloatRegister dest, FloatRegister signSrc,
++                 FloatRegister magSrc);
++  // friz/frip/frim (ISA 2.02): round to integral toward zero / +inf / -inf.
++  void ma_friz(FloatRegister dest, FloatRegister src);
++  void ma_frip(FloatRegister dest, FloatRegister src);
++  void ma_frim(FloatRegister dest, FloatRegister src);
++  // Shared pre-VSX rounding fallback: FPSCR RN swap around fctid + fcfid.
++  void ma_fri970(uint8_t rn, FloatRegister dest, FloatRegister src);
++  // Pre-VSX floor/ceil of src straight to an int64 in dest, clobbering tmp.
++  // Saturated and NaN results stay outside the int32 range callers check.
++  void ma_roundToInt64_970(RoundingMode mode, Register dest, FloatRegister src,
++                           FloatRegister tmp);
++  // Round src (Down, Up or TowardsZero) to an int64 in dest; tmp is an FPR
++  // scratch. NaN and out-of-range inputs leave a value outside int32.
++  void ma_roundToInt64(RoundingMode mode, Register dest, FloatRegister src,
++                       FloatRegister tmp);
++  // Shared body of the {floor,ceil,trunc,round}{Double,Float32}ToInt32
++  // functions: round `value`, bail to fail unless the result fits int32 and,
++  // when it is zero, unless the original input `src` allows +0. Float32
++  // inputs live double-width in the FPR, so one body serves both widths.
++  void ma_roundToInt32(RoundingMode mode, FloatRegister value,
++                       FloatRegister src, FloatRegister fpTemp, Register dest,
++                       Label* fail);
++  // Pre-VSX popcount (no popcntd/popcntw): 64-bit SWAR. All three registers
++  // must be distinct; `in` is clobbered, `work` holds constants.
++  void ma_popcnt64_970(Register out, Register in, Register work);
++  // Pre-VSX (no ldbrx/stdbrx) little-endian i64 wasm access as two
++  // byte-reversed word accesses, using only r0 beyond the named registers:
++  // the scratch pool can already be exhausted here. Neither half can fault --
++  // wasmProbeLastByte has already proved the whole access in bounds -- and
++  // the first instruction is the low-word access, so a trap site recorded at
++  // the sequence start still names a 4-byte access. dest may alias base or
++  // index (Ion defines the load's output at-start); the second address goes
++  // through dest with RA=0, so r0 keeps the low word.
++  void ma_lwbrx2(Register dest, Register base, Register index) {
++    MOZ_ASSERT(dest != r0 && base != r0 && index != r0);
++    as_lwbrx(r0, base, index);
++    as_add(dest, base, index);
++    as_addi(dest, dest, 4);
++    as_lwbrx(dest, r0, dest);
++    x_sldi(dest, dest, 32);
++    as_rldimi(dest, r0, 0, 32);
++  }
++  // `scratch` is clobbered; it may be `src` itself when src is dead.
++  void ma_stwbrx2(Register src, Register base, Register index,
++                  Register scratch) {
++    MOZ_ASSERT(src != r0 && base != r0 && index != r0 && scratch != r0);
++    MOZ_ASSERT(scratch != base && scratch != index);
++    as_stwbrx(src, base, index);
++    as_addi(r0, index, 4);
++    x_srdi(scratch, src, 32);
++    as_stwbrx(scratch, base, r0);
++  }
+   // Load a 32-bit FPR constant from the inline constant pool.
+   // Same shape as loadFromPoolFloat64 (above). lfs/plfs auto-expand the
+   // 32-bit single-precision value to double in the FPR, so no follow-up
+@@ -765,14 +933,24 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+       }
+       return;
+     }
++    if (!HasVSX()) {
++      // No isel: extract the cr0 bit (the condition's top nybble) from the
++      // whole CR with a rotate instead of branching.
++      as_mfcr(dest);
++      as_rlwinm(dest, dest, ((base & 0xf0) >> 4) + 1, 31, 31);
++      if ((base & BranchOptionMask) == BranchOnClear) {
++        as_xori(dest, dest, 1);
++      }
++      return;
++    }
+     UseScratchRegisterScope temps(*this);
+     Register scratch = temps.Acquire();
+     xs_li(scratch, 1);
+     if ((base & BranchOptionMask) == BranchOnSet) {
+       xs_li(dest, 0);
+-      as_isel(dest, scratch, dest, setbase, cr0);
++      ma_isel(dest, scratch, dest, setbase, cr0);
+     } else {
+-      as_isel0(dest, r0, scratch, setbase, cr0);
++      ma_isel0(dest, scratch, setbase, cr0);
+     }
+   }
+ 
+@@ -797,21 +975,21 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+       xs_li(scratch, 1);
+       if ((base & BranchOptionMask) == BranchOnSet) {
+         xs_li(dest, 0);
+-        as_isel(dest, scratch, dest, setbase, cr0);
++        ma_isel(dest, scratch, dest, setbase, cr0);
+       } else {
+-        as_isel0(dest, r0, scratch, setbase, cr0);
++        ma_isel0(dest, scratch, setbase, cr0);
+       }
+     }
+     if (hasUnorderedFlag) {
+       // Condition includes unordered (NaN): force dest=1 when SO is set.
+       // isel dest, scratch(=1), dest, SO
+-      as_isel(dest, scratch, dest, uint16_t(SOBit), cr0);
++      ma_isel(dest, scratch, dest, uint16_t(SOBit), cr0);
+     } else if ((base & BranchOptionMask) != BranchOnSet &&
+                cond != DoubleOrdered) {
+       // Ordered comparison that negates a CR bit (BranchOnClear): NaN
+       // produces all-zero LT/GT/EQ bits which makes the negation return
+       // true.  Fix by forcing dest=0 when SO is set.
+-      as_isel0(dest, r0, dest, uint16_t(SOBit), cr0);
++      ma_isel0(dest, dest, uint16_t(SOBit), cr0);
+     }
+   }
+ 
+@@ -820,9 +998,9 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+     uint32_t base = uint32_t(cond) & 0xff;
+     uint32_t setbase = (base & ~BranchOptionMask) | BranchOnSet;
+     if ((base & BranchOptionMask) == BranchOnSet) {
+-      as_isel(dest, src, dest, setbase, cr0);
++      ma_isel(dest, src, dest, setbase, cr0);
+     } else {
+-      as_isel(dest, dest, src, setbase, cr0);
++      ma_isel(dest, dest, src, setbase, cr0);
+     }
+   }
+ 
+@@ -832,7 +1010,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+   // does not make a zero condition read as non-zero.
+   void moveIfZero(Register dst, Register src, Register cond) {
+     as_cmpwi(cond, 0);
+-    as_isel(dst, src, dst, Equal, cr0);
++    ma_isel(dst, src, dst, Equal, cr0);
+   }
+ 
+   void ma_add32TestCarry(Condition cond, Register rd, Register rs, Imm32 imm,
+@@ -1121,7 +1299,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+   }
+ 
+   void boxDouble(FloatRegister src, const ValueOperand& dest, FloatRegister) {
+-    as_mfvsrd(dest.valueReg(), src);
++    ma_mffprd(dest.valueReg(), src);
+   }
+   void boxNonDouble(JSValueType type, Register src, const ValueOperand& dest) {
+     boxValue(type, src, dest.valueReg());
+@@ -1148,7 +1326,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+     load32(valuePayload(src), dest);
+   }
+   void unboxDouble(const ValueOperand& operand, FloatRegister dest) {
+-    as_mtvsrd(dest, operand.valueReg());
++    ma_mtfprd(dest, operand.valueReg());
+   }
+   void unboxDouble(const Address& src, FloatRegister dest) {
+     loadDouble(src, dest);
+@@ -1688,7 +1866,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+   // `inhibitPools_ == 0`). The POWER8 inline path is unaffected.
+   void loadConstantDouble(double dp, FloatRegister dest) {
+     if (mozilla::IsPositiveZero(dp)) {
+-      as_xxlxor(dest, dest, dest);
++      zeroDouble(dest);
+       return;
+     }
+     if (HasPOWER9()) {
+@@ -1703,11 +1881,11 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+     } u;
+     u.d = dp;
+     movePtr(ImmWord(u.u), scratch);
+-    as_mtvsrd(dest, scratch);
++    ma_mtfprd(dest, scratch);
+   }
+   void loadConstantFloat32(float f, FloatRegister dest) {
+     if (mozilla::IsPositiveZero(f)) {
+-      as_xxlxor(dest, dest, dest);
++      zeroDouble(dest);
+       return;
+     }
+     if (HasPOWER9()) {
+@@ -1722,9 +1900,14 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+     } u;
+     u.f = f;
+     movePtr(ImmWord(u.u), scratch);
+-    x_sldi(scratch, scratch, 32);
+-    as_mtvsrd(dest, scratch);
+-    as_xscvspdpn(dest, dest);
++    if (HasVSX()) {
++      x_sldi(scratch, scratch, 32);
++      as_mtvsrd(dest, scratch);
++      as_xscvspdpn(dest, dest);
++    } else {
++      as_stw(scratch, StackPointer, -8);
++      as_lfs(dest, StackPointer, -8);
++    }
+   }
+ 
+   void notBoolean(const ValueOperand& val) {
+@@ -2065,7 +2248,17 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+ 
+   inline void incrementInt32Value(const Address& addr);
+ 
+-  void zeroDouble(FloatRegister reg) { as_xxlxor(reg, reg, reg); }
++  void zeroDouble(FloatRegister reg) {
++    if (HasVSX()) {
++      as_xxlxor(reg, reg, reg);
++    } else {
++      UseScratchRegisterScope temps(*this);
++      Register scratch = temps.Acquire();
++      xs_li(scratch, 0);
++      as_std(scratch, StackPointer, -8);
++      as_lfd(reg, StackPointer, -8);
++    }
++  }
+ 
+   void writeCodePointer(CodeLabel* label) {
+     // Raw data in the instruction stream: a pool dump between the two words

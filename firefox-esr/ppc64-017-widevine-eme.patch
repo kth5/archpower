@@ -1,0 +1,2635 @@
+From 5082a434ed543836aed2abe716aa37a367401282 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Tue, 3 Nov 2026 16:19:24 +1100
+Subject: [PATCH 26/26] Enable Widevine EME on Linux ppc64
+
+The x86_64 Widevine CDM is run through a native proxy CDM that forwards the
+Chromium CDM interface to a helper process under box64. Listing widevine in
+eme_choices makes the little-endian ppc64 build define MOZ_WIDEVINE_EME,
+register the com.widevine.alpha key system and carry the gmp-widevinecdm
+preferences. box64 does not support big-endian PowerPC, so big-endian builds
+are unchanged.
+
+The GMP child starts its sandbox before it loads the plugin library and the
+seccomp filter would be inherited by anything the plugin forked, so on Linux
+the child now starts a gmp-helper program found in the plugin directory just
+before the sandbox engages, with one end of a socketpair as its argument, and
+publishes the other end to the plugin in MOZ_GMP_HELPER_FD. The helper is as
+trusted as the plugin library and runs in the child's network and IPC
+namespaces. Plugins without a gmp-helper are unaffected.
+
+The update servers do not serve Widevine for ppc64, so the local source
+config aliases Linux_ppc64-gcc3 to the x86_64 package and the install manager
+always consults that config for the plugin on little-endian ppc64. After the
+package is extracted the downloaded library is moved aside as
+libwidevinecdm-x86_64.so and the proxy library, its helper, the gmp-helper
+launcher and the x64lib runtime are copied in from the directory named by
+media.gmp-widevinecdm.proxy-dir, by default widevine-proxy under the
+application directory. The Chromium update service is asked for the x64
+package on that platform as well.
+
+That bundle is built in dom/media/gmp/widevine-proxy when MOZ_WIDEVINE_PROXY
+is set, on Linux ppc64le with clang, and packaged as widevine-proxy in the
+application directory. The proxy, libwidevinecdm.so, and the gmp-helper
+launcher are native. wvhost, the helper box64 runs to load the real CDM, and
+libgcc_s.so.1, the one x86_64 library the CDM needs besides libc, are built
+for x86_64 by the same clang with lld. All of it is freestanding, so no x86_64
+sysroot is involved and box64 supplies libc at run time. The CDM is built
+without exceptions, so the libgcc_s only provides what it links against:
+__udivti3 and unwinder entry points that report that no handler was found,
+which is what the real unwinder would conclude for it too.
+
+A CDM that fails to instantiate is fatal for the GMP child, so a proxy CDM
+whose helper cannot run would turn a missing box64 into a plugin crash on
+first use. GMPUtils.proxyCdmProblem checks that gmp-helper, wvhost and the
+box64 the launcher will run are executable, box64 being taken from PATH
+unless WV_BOX64 names one, as it is packaged separately from the proxy. The
+install manager fails the install with that reason and GMPProvider leaves an
+installed plugin unregistered, logging the reason, so key system requests get
+NotSupportedError instead.
+
+Two update checks can run together at startup (a version change and a due
+check), and the second would re-extract the package into a directory that a
+plugin started by the first is already using, so installs of the same addon
+version now share one in-flight install.
+---
+ browser/installer/package-manifest.in         |   6 +
+ dom/media/gmp/GMPChild.cpp                    |  55 ++
+ dom/media/gmp/moz.build                       |   3 +
+ dom/media/gmp/widevine-proxy/build_proxy.py   | 156 ++++
+ dom/media/gmp/widevine-proxy/gmp-helper       |  15 +
+ dom/media/gmp/widevine-proxy/libgcc_s.c       |  79 ++
+ dom/media/gmp/widevine-proxy/libgcc_s.map     |  13 +
+ dom/media/gmp/widevine-proxy/minilibc.h       |  74 ++
+ dom/media/gmp/widevine-proxy/moz.build        |  38 +
+ dom/media/gmp/widevine-proxy/shim/cstdint     |   7 +
+ .../widevine-proxy/shim/mozilla/DefineEnum.h  |   8 +
+ dom/media/gmp/widevine-proxy/shim/type_traits |  15 +
+ dom/media/gmp/widevine-proxy/start.S          |  22 +
+ dom/media/gmp/widevine-proxy/wvhost.cc        | 522 ++++++++++++
+ dom/media/gmp/widevine-proxy/wvinput.h        |  55 ++
+ dom/media/gmp/widevine-proxy/wvipc.h          | 190 +++++
+ dom/media/gmp/widevine-proxy/wvproxy.cc       | 786 ++++++++++++++++++
+ dom/media/gmp/widevine-proxy/wvproxy.map      |   1 +
+ toolkit/content/gmp-sources/widevinecdm.json  |   3 +
+ toolkit/modules/GMPInstallManager.sys.mjs     |  95 ++-
+ toolkit/modules/GMPUtils.sys.mjs              |  79 +-
+ toolkit/moz.configure                         |  28 +
+ .../extensions/internal/GMPProvider.sys.mjs   |  27 +-
+ 23 files changed, 2267 insertions(+), 10 deletions(-)
+ create mode 100644 dom/media/gmp/widevine-proxy/build_proxy.py
+ create mode 100755 dom/media/gmp/widevine-proxy/gmp-helper
+ create mode 100644 dom/media/gmp/widevine-proxy/libgcc_s.c
+ create mode 100644 dom/media/gmp/widevine-proxy/libgcc_s.map
+ create mode 100644 dom/media/gmp/widevine-proxy/minilibc.h
+ create mode 100644 dom/media/gmp/widevine-proxy/moz.build
+ create mode 100644 dom/media/gmp/widevine-proxy/shim/cstdint
+ create mode 100644 dom/media/gmp/widevine-proxy/shim/mozilla/DefineEnum.h
+ create mode 100644 dom/media/gmp/widevine-proxy/shim/type_traits
+ create mode 100644 dom/media/gmp/widevine-proxy/start.S
+ create mode 100644 dom/media/gmp/widevine-proxy/wvhost.cc
+ create mode 100644 dom/media/gmp/widevine-proxy/wvinput.h
+ create mode 100644 dom/media/gmp/widevine-proxy/wvipc.h
+ create mode 100644 dom/media/gmp/widevine-proxy/wvproxy.cc
+ create mode 100644 dom/media/gmp/widevine-proxy/wvproxy.map
+
+diff --git a/browser/installer/package-manifest.in b/browser/installer/package-manifest.in
+index 5936f8a8d9..8bfa863575 100644
+--- a/browser/installer/package-manifest.in
++++ b/browser/installer/package-manifest.in
+@@ -441,6 +441,12 @@ bin/libfreebl_64int_3.so
+ ; media
+ @RESPATH@/gmp-clearkey/0.1/@DLL_PREFIX@clearkey@DLL_SUFFIX@
+ @RESPATH@/gmp-clearkey/0.1/manifest.json
++#ifdef MOZ_WIDEVINE_PROXY
++@BINPATH@/widevine-proxy/gmp-helper
++@BINPATH@/widevine-proxy/libwidevinecdm.so
++@BINPATH@/widevine-proxy/wvhost
++@BINPATH@/widevine-proxy/x64lib/libgcc_s.so.1
++#endif
+ #if defined(MOZ_WMF_CDM) && defined(ENABLE_TESTS)
+ @BINPATH@/@DLL_PREFIX@wmfclearkey@DLL_SUFFIX@
+ #endif
+diff --git a/dom/media/gmp/GMPChild.cpp b/dom/media/gmp/GMPChild.cpp
+index bbe722074b..5f217c33c7 100644
+--- a/dom/media/gmp/GMPChild.cpp
++++ b/dom/media/gmp/GMPChild.cpp
+@@ -46,6 +46,12 @@
+ #include "nsXPCOMPrivate.h"  // for XUL_DLL
+ #include "nsXULAppAPI.h"
+ #include "prio.h"
++#if defined(XP_LINUX)
++#  include <sys/socket.h>
++
++#  include "base/process_util.h"
++#  include "prenv.h"
++#endif
+ #ifdef XP_WIN
+ #  include <stdlib.h>  // for _exit()
+ 
+@@ -512,6 +518,51 @@ static auto ToCString(const nsTArray<std::pair<nsCString, nsCString>>& aPairs) {
+   });
+ }
+ 
++#if defined(XP_LINUX)
++// Starts the helper program a plugin ships as "gmp-helper" in its directory,
++// before the sandbox engages. The helper gets one end of a socketpair as its
++// only argument; the plugin finds the other end in MOZ_GMP_HELPER_FD. The
++// helper is as trusted as the plugin library itself and shares this process's
++// network and IPC namespaces, but not its seccomp filter or chroot.
++static void StartPluginHelper(const nsAString& aPluginPath) {
++  nsCOMPtr<nsIFile> helper;
++  if (NS_FAILED(NS_NewLocalFile(aPluginPath, getter_AddRefs(helper))) ||
++      NS_FAILED(helper->Append(u"gmp-helper"_ns))) {
++    return;
++  }
++  bool executable = false;
++  if (NS_FAILED(helper->IsExecutable(&executable)) || !executable) {
++    return;
++  }
++  nsAutoCString path;
++  if (NS_FAILED(helper->GetNativePath(path))) {
++    return;
++  }
++
++  int fds[2];
++  if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) != 0) {
++    GMP_CHILD_LOG(LogLevel::Error, "{} socketpair failed: {}", __func__, errno);
++    return;
++  }
++  const int kHelperFd = 3;
++  base::LaunchOptions options;
++  options.fds_to_remap.push_back({fds[1], kHelperFd});
++  std::vector<std::string> argv{path.get(), std::to_string(kHelperFd)};
++  base::ProcessHandle pid = 0;
++  auto result = base::LaunchApp(argv, std::move(options), &pid);
++  close(fds[1]);
++  if (result.isErr()) {
++    GMP_CHILD_LOG(LogLevel::Error, "{} failed to start {}", __func__,
++                  path.get());
++    close(fds[0]);
++    return;
++  }
++  GMP_CHILD_LOG_DEBUG("{} started {} (pid {}) on fd {}", __func__, path.get(),
++                      pid, fds[0]);
++  PR_SetEnv(ToNewCString(nsPrintfCString("MOZ_GMP_HELPER_FD=%d", fds[0])));
++}
++#endif
++
+ mozilla::ipc::IPCResult GMPChild::RecvStartPlugin(const nsString& aAdapter) {
+   GMP_CHILD_LOG_DEBUG("{}", __FUNCTION__);
+ 
+@@ -548,6 +599,10 @@ mozilla::ipc::IPCResult GMPChild::RecvStartPlugin(const nsString& aAdapter) {
+     adapter = new ChromiumCDMAdapter(std::move(paths));
+   }
+ 
++#if defined(XP_LINUX)
++  StartPluginHelper(mPluginPath);
++#endif
++
+   if (!mGMPLoader->Load(libPath.get(), libPath.Length(), platformAPI,
+                         adapter)) {
+ #ifdef XP_WIN
+diff --git a/dom/media/gmp/moz.build b/dom/media/gmp/moz.build
+index 0a824ed3ac..10c2fc1835 100644
+--- a/dom/media/gmp/moz.build
++++ b/dom/media/gmp/moz.build
+@@ -105,6 +105,9 @@ DIRS += [
+     "widevine-adapter",
+ ]
+ 
++if CONFIG["MOZ_WIDEVINE_PROXY"]:
++    DIRS += ["widevine-proxy"]
++
+ IPDL_SOURCES += [
+     "GMPTypes.ipdlh",
+     "PChromiumCDM.ipdl",
+diff --git a/dom/media/gmp/widevine-proxy/build_proxy.py b/dom/media/gmp/widevine-proxy/build_proxy.py
+new file mode 100644
+index 0000000000..f9bd581cae
+--- /dev/null
++++ b/dom/media/gmp/widevine-proxy/build_proxy.py
+@@ -0,0 +1,156 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++# Builds the Widevine proxy bundle: the native proxy CDM, and the x86_64
++# helper and runtime library that box64 runs. Everything is freestanding, so
++# the x86_64 parts need only clang and lld, not an x86_64 sysroot.
++
++import os
++import shlex
++import subprocess
++import tempfile
++
++import buildconfig
++
++X86_64 = "--target=x86_64-linux-gnu"
++
++FLAGS = [
++    "-O2",
++    "-ffreestanding",
++    "-nostdinc",
++    "-fno-stack-protector",
++    "-Wall",
++]
++
++CXX_FLAGS = [
++    "-fno-exceptions",
++    "-fno-rtti",
++    "-fno-threadsafe-statics",
++    "-Wno-unused-private-field",
++]
++
++X86_64_LINK = [
++    "-nostdlib",
++    "-fuse-ld=lld",
++    "-Wl,-z,now",
++    "-Wl,-z,noexecstack",
++    "-Wl,--build-id",
++]
++
++
++def configured(name):
++    value = buildconfig.substs[name]
++    return shlex.split(value) if isinstance(value, str) else list(value)
++
++
++def retarget(compiler):
++    """The configured compiler, targeting x86_64 instead."""
++    args = []
++    skip = False
++    for arg in compiler:
++        if skip:
++            skip = False
++        elif arg == "-target":
++            skip = True
++        elif not arg.startswith("--target="):
++            args.append(arg)
++    return args + [X86_64]
++
++
++def run(args):
++    print(shlex.join(args), flush=True)
++    subprocess.check_call(args)
++
++
++def main(output, *inputs):
++    """Builds the bundle into the directory of |output|; |inputs| are its
++    sources, the first being wvproxy.cc."""
++    srcdir = os.path.dirname(inputs[0])
++    cc = configured("CC")
++    cxx = configured("CXX")
++    out_dir = os.path.dirname(os.path.abspath(output.name))
++    resource_dir = subprocess.check_output(
++        cxx + ["-print-resource-dir"], text=True
++    ).strip()
++    builtin = ["-isystem", os.path.join(resource_dir, "include")]
++    includes = builtin + [
++        "-isystem",
++        os.path.join(srcdir, "shim"),
++        "-I",
++        srcdir,
++        "-I",
++        os.path.join(srcdir, "..", "widevine-adapter"),
++    ]
++
++    with tempfile.TemporaryDirectory(dir=out_dir) as tmp:
++        # The native proxy CDM, which Firefox loads as libwidevinecdm.so.
++        proxy = os.path.join(tmp, "libwidevinecdm.so")
++        run(
++            cxx
++            + FLAGS
++            + CXX_FLAGS
++            + includes
++            + [
++                "-fPIC",
++                "-fvisibility=hidden",
++                "-shared",
++                "-nostdlib++",
++                "-Wl,--no-undefined",
++                "-Wl,--version-script=" + os.path.join(srcdir, "wvproxy.map"),
++                os.path.join(srcdir, "wvproxy.cc"),
++                "-o",
++                proxy,
++            ]
++        )
++
++        # Empty libc.so.6 and libdl.so.2 for the helper to link against, so
++        # that it records them as needed; box64 supplies the real ones.
++        empty = os.path.join(tmp, "empty.c")
++        open(empty, "w").close()
++        stubs = []
++        for soname in ("libc.so.6", "libdl.so.2"):
++            stub = os.path.join(tmp, soname)
++            run(
++                retarget(cc)
++                + X86_64_LINK
++                + ["-shared", "-Wl,-soname," + soname, empty, "-o", stub]
++            )
++            stubs.append(stub)
++
++        # The helper box64 runs to load the real CDM.
++        run(
++            retarget(cxx)
++            + FLAGS
++            + CXX_FLAGS
++            + includes
++            + ["-fPIE", "-fno-asynchronous-unwind-tables", "-pie"]
++            + X86_64_LINK
++            + [
++                "-Wl,--dynamic-linker=/lib64/ld-linux-x86-64.so.2",
++                "-Wl,--unresolved-symbols=ignore-all",
++                os.path.join(srcdir, "start.S"),
++                os.path.join(srcdir, "wvhost.cc"),
++            ]
++            + stubs
++            + ["-o", os.path.join(out_dir, "wvhost")]
++        )
++
++        # The one x86_64 runtime library the real CDM needs besides libc.
++        run(
++            retarget(cc)
++            + FLAGS
++            + builtin
++            + ["-fPIC", "-shared"]
++            + X86_64_LINK
++            + [
++                "-Wl,-soname,libgcc_s.so.1",
++                "-Wl,--version-script=" + os.path.join(srcdir, "libgcc_s.map"),
++                os.path.join(srcdir, "libgcc_s.c"),
++                "-o",
++                os.path.join(out_dir, "libgcc_s.so.1"),
++            ]
++        )
++
++        with open(proxy, "rb") as f:
++            output.write(f.read())
+diff --git a/dom/media/gmp/widevine-proxy/gmp-helper b/dom/media/gmp/widevine-proxy/gmp-helper
+new file mode 100755
+index 0000000000..b589a3eaae
+--- /dev/null
++++ b/dom/media/gmp/widevine-proxy/gmp-helper
+@@ -0,0 +1,15 @@
++#!/bin/sh
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++# Started by Firefox's GMP child, before its sandbox engages, with the helper
++# end of the proxy's socket as the only argument. Runs the x86_64 helper and
++# the real CDM under box64.
++d=$(dirname "$(readlink -f "$0")")
++# box64 is packaged separately from the proxy, so it comes from PATH unless
++# WV_BOX64 names one. GMPUtils.box64Path in Firefox resolves it the same way.
++box64=${WV_BOX64:-box64}
++export BOX64_LD_LIBRARY_PATH="${BOX64_LD_LIBRARY_PATH:-$d/x64lib}"
++export BOX64_NOBANNER=1
++exec "$box64" "$d/wvhost" "$d/libwidevinecdm-x86_64.so" "$1"
+diff --git a/dom/media/gmp/widevine-proxy/libgcc_s.c b/dom/media/gmp/widevine-proxy/libgcc_s.c
+new file mode 100644
+index 0000000000..7c565b1011
+--- /dev/null
++++ b/dom/media/gmp/widevine-proxy/libgcc_s.c
+@@ -0,0 +1,79 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++// The x86_64 libgcc_s.so.1 the Widevine CDM is linked against, for box64 to
++// load in place of the system's (there is none on ppc64le). The CDM imports
++// only these GCC_3.0 symbols.
++//
++// The CDM is built without exceptions, so nothing in it catches one: with the
++// real unwinder a throw finds no handler and the C++ runtime calls
++// std::terminate. _Unwind_RaiseException reports that outcome directly, and
++// the remaining unwinder entry points are only reached while unwinding to a
++// handler, which never happens.
++
++#include <stddef.h>
++#include <stdint.h>
++
++#define EXPORT __attribute__((visibility("default")))
++
++typedef enum {
++  _URC_NO_REASON = 0,
++  _URC_FOREIGN_EXCEPTION_CAUGHT = 1,
++  _URC_END_OF_STACK = 5,
++} _Unwind_Reason_Code;
++
++struct _Unwind_Exception;
++typedef void (*_Unwind_Exception_Cleanup_Fn)(_Unwind_Reason_Code,
++                                             struct _Unwind_Exception*);
++struct _Unwind_Exception {
++  uint64_t exception_class;
++  _Unwind_Exception_Cleanup_Fn exception_cleanup;
++  uint64_t private_1;
++  uint64_t private_2;
++};
++struct _Unwind_Context;
++
++EXPORT _Unwind_Reason_Code
++_Unwind_RaiseException(struct _Unwind_Exception* exc) {
++  return _URC_END_OF_STACK;
++}
++
++EXPORT void _Unwind_Resume(struct _Unwind_Exception* exc) { __builtin_trap(); }
++
++EXPORT void _Unwind_DeleteException(struct _Unwind_Exception* exc) {
++  if (exc->exception_cleanup) {
++    exc->exception_cleanup(_URC_FOREIGN_EXCEPTION_CAUGHT, exc);
++  }
++}
++
++EXPORT uintptr_t _Unwind_GetIP(struct _Unwind_Context* ctx) { return 0; }
++
++EXPORT uintptr_t _Unwind_GetLanguageSpecificData(struct _Unwind_Context* ctx) {
++  return 0;
++}
++
++EXPORT uintptr_t _Unwind_GetRegionStart(struct _Unwind_Context* ctx) {
++  return 0;
++}
++
++EXPORT void _Unwind_SetGR(struct _Unwind_Context* ctx, int reg,
++                          uintptr_t value) {}
++
++EXPORT void _Unwind_SetIP(struct _Unwind_Context* ctx, uintptr_t value) {}
++
++// Shift-and-subtract, so that the compiler has no reason to call __udivti3.
++EXPORT unsigned __int128 __udivti3(unsigned __int128 n, unsigned __int128 d) {
++  if (d == 0) {
++    __builtin_trap();
++  }
++  unsigned __int128 q = 0, r = 0;
++  for (int i = 127; i >= 0; i--) {
++    r = (r << 1) | ((n >> i) & 1);
++    if (r >= d) {
++      r -= d;
++      q |= (unsigned __int128)1 << i;
++    }
++  }
++  return q;
++}
+diff --git a/dom/media/gmp/widevine-proxy/libgcc_s.map b/dom/media/gmp/widevine-proxy/libgcc_s.map
+new file mode 100644
+index 0000000000..2edd27b350
+--- /dev/null
++++ b/dom/media/gmp/widevine-proxy/libgcc_s.map
+@@ -0,0 +1,13 @@
++GCC_3.0 {
++  global:
++    _Unwind_DeleteException;
++    _Unwind_GetIP;
++    _Unwind_GetLanguageSpecificData;
++    _Unwind_GetRegionStart;
++    _Unwind_RaiseException;
++    _Unwind_Resume;
++    _Unwind_SetGR;
++    _Unwind_SetIP;
++    __udivti3;
++  local: *;
++};
+diff --git a/dom/media/gmp/widevine-proxy/minilibc.h b/dom/media/gmp/widevine-proxy/minilibc.h
+new file mode 100644
+index 0000000000..61f032e87e
+--- /dev/null
++++ b/dom/media/gmp/widevine-proxy/minilibc.h
+@@ -0,0 +1,74 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++// Declarations of the few libc functions the proxy and the helper use. Both are
++// built freestanding, the helper without an x86_64 sysroot; at run time box64
++// or the system supplies libc.
++#pragma once
++#include <stddef.h>
++#include <stdint.h>
++
++extern "C" {
++typedef struct FILE FILE;
++struct timespec {
++  long tv_sec;
++  long tv_nsec;
++};
++
++int printf(const char* fmt, ...);
++int snprintf(char* buf, size_t n, const char* fmt, ...);
++int fflush(FILE* f);
++FILE* fopen(const char* path, const char* mode);
++size_t fread(void* p, size_t size, size_t n, FILE* f);
++size_t fwrite(const void* p, size_t size, size_t n, FILE* f);
++int fclose(FILE* f);
++void* malloc(size_t n);
++void* realloc(void* p, size_t n);
++void free(void* p);
++void* memcpy(void* d, const void* s, size_t n);
++void* memset(void* d, int c, size_t n);
++int memcmp(const void* a, const void* b, size_t n);
++size_t strlen(const char* s);
++int system(const char* cmd);
++int clock_gettime(int clk, struct timespec* ts);
++int usleep(unsigned usec);
++void exit(int code) __attribute__((noreturn));
++int unlink(const char* path);
++
++long read(int fd, void* p, size_t n);
++long write(int fd, const void* p, size_t n);
++int close(int fd);
++int socketpair(int domain, int type, int protocol, int fds[2]);
++int fork(void);
++int execv(const char* path, char* const argv[]);
++void _exit(int code) __attribute__((noreturn));
++int waitpid(int pid, int* status, int options);
++char* getenv(const char* name);
++int setenv(const char* name, const char* value, int overwrite);
++int fcntl(int fd, int cmd, ...);
++char* strrchr(const char* s, int c);
++
++void* dlopen(const char* path, int flags);
++void* dlsym(void* handle, const char* name);
++char* dlerror(void);
++typedef struct {
++  const char* dli_fname;
++  void* dli_fbase;
++  const char* dli_sname;
++  void* dli_saddr;
++} Dl_info;
++int dladdr(const void* addr, Dl_info* info);
++}
++
++#define AF_UNIX 1
++#define SOCK_STREAM 1
++#define RTLD_NOW 2
++#define CLOCK_REALTIME 0
++#define CLOCK_MONOTONIC 1
++#define F_SETFD 2
++#define FD_CLOEXEC 1
++
++inline void* operator new(size_t, void* p) noexcept { return p; }
++// Objects are never deleted through these; virtual destructors reference it.
++__attribute__((weak)) void operator delete(void*, size_t) noexcept {}
+diff --git a/dom/media/gmp/widevine-proxy/moz.build b/dom/media/gmp/widevine-proxy/moz.build
+new file mode 100644
+index 0000000000..7bc14192ce
+--- /dev/null
++++ b/dom/media/gmp/widevine-proxy/moz.build
+@@ -0,0 +1,38 @@
++# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
++# vim: set filetype=python:
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++# What GMPInstallManager copies beside a downloaded x86_64 Widevine CDM on
++# Linux ppc64le: the native proxy CDM Firefox loads in its place, the x86_64
++# helper that runs the real CDM under box64, the gmp-helper launcher, and the
++# x86_64 libgcc_s the CDM needs.
++bundle = ("libwidevinecdm.so", "wvhost", "libgcc_s.so.1")
++GENERATED_FILES += [bundle]
++GENERATED_FILES[bundle].script = "build_proxy.py"
++GENERATED_FILES[bundle].inputs = [
++    "wvproxy.cc",
++    "libgcc_s.c",
++    "libgcc_s.map",
++    "minilibc.h",
++    "shim/cstdint",
++    "shim/mozilla/DefineEnum.h",
++    "shim/type_traits",
++    "start.S",
++    "wvhost.cc",
++    "wvinput.h",
++    "wvipc.h",
++    "wvproxy.map",
++    "/dom/media/gmp/widevine-adapter/content_decryption_module.h",
++    "/dom/media/gmp/widevine-adapter/content_decryption_module_export.h",
++]
++
++FINAL_TARGET_FILES["widevine-proxy"] += [
++    "!libwidevinecdm.so",
++    "!wvhost",
++    "gmp-helper",
++]
++FINAL_TARGET_FILES["widevine-proxy"].x64lib += [
++    "!libgcc_s.so.1",
++]
+diff --git a/dom/media/gmp/widevine-proxy/shim/cstdint b/dom/media/gmp/widevine-proxy/shim/cstdint
+new file mode 100644
+index 0000000000..92c8f9fe8e
+--- /dev/null
++++ b/dom/media/gmp/widevine-proxy/shim/cstdint
+@@ -0,0 +1,7 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#pragma once
++#include <stdint.h>
++#include <stddef.h>
+diff --git a/dom/media/gmp/widevine-proxy/shim/mozilla/DefineEnum.h b/dom/media/gmp/widevine-proxy/shim/mozilla/DefineEnum.h
+new file mode 100644
+index 0000000000..0d94540b44
+--- /dev/null
++++ b/dom/media/gmp/widevine-proxy/shim/mozilla/DefineEnum.h
+@@ -0,0 +1,8 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#pragma once
++#define MOZ_WV_UNPAREN(...) __VA_ARGS__
++#define MOZ_DEFINE_ENUM_WITH_BASE_AND_TOSTRING(Name, Base, List) \
++  enum Name : Base { MOZ_WV_UNPAREN List }
+diff --git a/dom/media/gmp/widevine-proxy/shim/type_traits b/dom/media/gmp/widevine-proxy/shim/type_traits
+new file mode 100644
+index 0000000000..53cfabe661
+--- /dev/null
++++ b/dom/media/gmp/widevine-proxy/shim/type_traits
+@@ -0,0 +1,15 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#pragma once
++namespace std {
++template <class T>
++struct is_standard_layout {
++  constexpr operator bool() const { return __is_standard_layout(T); }
++};
++template <class T>
++struct is_trivial {
++  constexpr operator bool() const { return __is_trivial(T); }
++};
++}  // namespace std
+diff --git a/dom/media/gmp/widevine-proxy/start.S b/dom/media/gmp/widevine-proxy/start.S
+new file mode 100644
+index 0000000000..d7da474105
+--- /dev/null
++++ b/dom/media/gmp/widevine-proxy/start.S
+@@ -0,0 +1,22 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++# Minimal x86_64 _start: the same hand-off to __libc_start_main as glibc's crt1.
++	.text
++	.globl _start
++	.type _start, @function
++_start:
++	xorl %ebp, %ebp
++	movq %rdx, %r9
++	popq %rsi
++	movq %rsp, %rdx
++	andq $-16, %rsp
++	pushq %rax
++	pushq %rsp
++	xorl %r8d, %r8d
++	xorl %ecx, %ecx
++	leaq main(%rip), %rdi
++	call *__libc_start_main@GOTPCREL(%rip)
++	hlt
++	.section .note.GNU-stack,"",@progbits
+diff --git a/dom/media/gmp/widevine-proxy/wvhost.cc b/dom/media/gmp/widevine-proxy/wvhost.cc
+new file mode 100644
+index 0000000000..b1c33895f7
+--- /dev/null
++++ b/dom/media/gmp/widevine-proxy/wvhost.cc
+@@ -0,0 +1,522 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++// x86_64 helper run under box64 for the native proxy CDM (wvproxy.cc). It
++// loads the real CDM, executes the proxy's requests on it and forwards the
++// CDM's Host_10 callbacks over the socket. It serves every CDM instance the
++// proxy creates and exits when the socket closes. See wvipc.h for the
++// protocol.
++//
++// usage: wvhost <libwidevinecdm.so> <socket fd>
++
++#include "wvinput.h"
++
++using namespace wvipc;
++
++extern "C" void __cxa_pure_virtual() { _exit(70); }
++
++namespace {
++
++int gFd = -1;
++uint32_t gInstance = kNoInstance;
++
++void Fail(const char* what) {
++  printf("wvhost: %s\n", what);
++  fflush(nullptr);
++  _exit(1);
++}
++
++void Callback(uint32_t type, const Writer& w) {
++  if (!Send(gFd, type, gInstance, w)) Fail("lost the proxy");
++}
++
++void Callback(uint32_t type) {
++  Writer w;
++  Callback(type, w);
++}
++
++class LocalBuffer final : public cdm::Buffer {
++ public:
++  explicit LocalBuffer(uint32_t cap)
++      : mData(static_cast<uint8_t*>(malloc(cap ? cap : 1))), mCap(cap) {}
++  void Destroy() override {
++    free(mData);
++    free(this);
++  }
++  uint32_t Capacity() const override { return mCap; }
++  uint8_t* Data() override { return mData; }
++  void SetSize(uint32_t size) override { mSize = size; }
++  uint32_t Size() const override { return mSize; }
++
++ private:
++  uint8_t* mData;
++  uint32_t mCap;
++  uint32_t mSize = 0;
++};
++
++class LocalDecryptedBlock final : public cdm::DecryptedBlock {
++ public:
++  void SetDecryptedBuffer(cdm::Buffer* buffer) override { mBuffer = buffer; }
++  cdm::Buffer* DecryptedBuffer() override { return mBuffer; }
++  void SetTimestamp(int64_t timestamp) override { mTimestamp = timestamp; }
++  int64_t Timestamp() const override { return mTimestamp; }
++
++ private:
++  cdm::Buffer* mBuffer = nullptr;
++  int64_t mTimestamp = 0;
++};
++
++class LocalVideoFrame final : public cdm::VideoFrame {
++ public:
++  void SetFormat(cdm::VideoFormat format) override { mFormat = format; }
++  cdm::VideoFormat Format() const override { return mFormat; }
++  void SetSize(cdm::Size size) override { mSize = size; }
++  cdm::Size Size() const override { return mSize; }
++  void SetFrameBuffer(cdm::Buffer* buffer) override { mBuffer = buffer; }
++  cdm::Buffer* FrameBuffer() override { return mBuffer; }
++  void SetPlaneOffset(cdm::VideoPlane plane, uint32_t offset) override {
++    mOffset[plane] = offset;
++  }
++  uint32_t PlaneOffset(cdm::VideoPlane plane) override {
++    return mOffset[plane];
++  }
++  void SetStride(cdm::VideoPlane plane, uint32_t stride) override {
++    mStride[plane] = stride;
++  }
++  uint32_t Stride(cdm::VideoPlane plane) override { return mStride[plane]; }
++  void SetTimestamp(int64_t timestamp) override { mTimestamp = timestamp; }
++  int64_t Timestamp() const override { return mTimestamp; }
++
++  cdm::VideoFormat mFormat = cdm::kUnknownVideoFormat;
++  cdm::Size mSize = {0, 0};
++  cdm::Buffer* mBuffer = nullptr;
++  uint32_t mOffset[3] = {0, 0, 0};
++  uint32_t mStride[3] = {0, 0, 0};
++  int64_t mTimestamp = 0;
++};
++
++class LocalAudioFrames final : public cdm::AudioFrames {
++ public:
++  void SetFrameBuffer(cdm::Buffer* buffer) override { mBuffer = buffer; }
++  cdm::Buffer* FrameBuffer() override { return mBuffer; }
++  void SetFormat(cdm::AudioFormat format) override { mFormat = format; }
++  cdm::AudioFormat Format() const override { return mFormat; }
++
++  cdm::Buffer* mBuffer = nullptr;
++  cdm::AudioFormat mFormat = cdm::kUnknownAudioFormat;
++};
++
++// The CDM's storage, backed by a FileIO the proxy creates on Firefox's host.
++constexpr uint32_t kMaxFiles = 64;
++cdm::FileIOClient* gFileClients[kMaxFiles];
++
++class RemoteFileIO final : public cdm::FileIO {
++ public:
++  explicit RemoteFileIO(uint32_t id) : mId(id) {}
++  void Open(const char* name, uint32_t size) override {
++    Writer w;
++    w.U32(mId);
++    w.Bytes(name, size);
++    Callback(kFileOpen, w);
++  }
++  void Read() override {
++    Writer w;
++    w.U32(mId);
++    Callback(kFileRead, w);
++  }
++  void Write(const uint8_t* data, uint32_t size) override {
++    Writer w;
++    w.U32(mId);
++    w.Bytes(data, size);
++    Callback(kFileWrite, w);
++  }
++  void Close() override {
++    Writer w;
++    w.U32(mId);
++    Callback(kFileClose, w);
++    gFileClients[mId] = nullptr;
++    free(this);
++  }
++
++ private:
++  uint32_t mId;
++};
++
++class HostProxy final : public cdm::Host_10 {
++ public:
++  cdm::Buffer* Allocate(uint32_t capacity) override {
++    return new (malloc(sizeof(LocalBuffer))) LocalBuffer(capacity);
++  }
++  void SetTimer(int64_t delay_ms, void* context) override {
++    Writer w;
++    w.I64(delay_ms);
++    w.U64(reinterpret_cast<uint64_t>(context));
++    Callback(kSetTimer, w);
++  }
++  cdm::Time GetCurrentWallTime() override {
++    timespec ts;
++    clock_gettime(CLOCK_REALTIME, &ts);
++    return ts.tv_sec + ts.tv_nsec / 1e9;
++  }
++  void OnInitialized(bool success) override {
++    Writer w;
++    w.U32(success);
++    Callback(kOnInitialized, w);
++  }
++  void OnResolveKeyStatusPromise(uint32_t id, cdm::KeyStatus s) override {
++    Writer w;
++    w.U32(id);
++    w.U32(s);
++    Callback(kOnResolveKeyStatusPromise, w);
++  }
++  void OnResolveNewSessionPromise(uint32_t id, const char* sid,
++                                  uint32_t len) override {
++    Writer w;
++    w.U32(id);
++    w.Bytes(sid, len);
++    Callback(kOnResolveNewSessionPromise, w);
++  }
++  void OnResolvePromise(uint32_t id) override {
++    Writer w;
++    w.U32(id);
++    Callback(kOnResolvePromise, w);
++  }
++  void OnRejectPromise(uint32_t id, cdm::Exception e, uint32_t code,
++                       const char* msg, uint32_t len) override {
++    Writer w;
++    w.U32(id);
++    w.U32(e);
++    w.U32(code);
++    w.Bytes(msg, len);
++    Callback(kOnRejectPromise, w);
++  }
++  void OnSessionMessage(const char* sid, uint32_t sidlen, cdm::MessageType t,
++                        const char* msg, uint32_t len) override {
++    Writer w;
++    w.Bytes(sid, sidlen);
++    w.U32(t);
++    w.Bytes(msg, len);
++    Callback(kOnSessionMessage, w);
++  }
++  void OnSessionKeysChange(const char* sid, uint32_t sidlen, bool more,
++                           const cdm::KeyInformation* keys,
++                           uint32_t count) override {
++    Writer w;
++    w.Bytes(sid, sidlen);
++    w.U32(more);
++    w.U32(count);
++    for (uint32_t i = 0; i < count; i++) {
++      w.Bytes(keys[i].key_id, keys[i].key_id_size);
++      w.U32(keys[i].status);
++      w.U32(keys[i].system_code);
++    }
++    Callback(kOnSessionKeysChange, w);
++  }
++  void OnExpirationChange(const char* sid, uint32_t len, cdm::Time t) override {
++    Writer w;
++    w.Bytes(sid, len);
++    w.F64(t);
++    Callback(kOnExpirationChange, w);
++  }
++  void OnSessionClosed(const char* sid, uint32_t len) override {
++    Writer w;
++    w.Bytes(sid, len);
++    Callback(kOnSessionClosed, w);
++  }
++  void SendPlatformChallenge(const char* service, uint32_t serviceLen,
++                             const char* challenge,
++                             uint32_t challengeLen) override {
++    Writer w;
++    w.Bytes(service, serviceLen);
++    w.Bytes(challenge, challengeLen);
++    Callback(kSendPlatformChallenge, w);
++  }
++  void EnableOutputProtection(uint32_t mask) override {
++    Writer w;
++    w.U32(mask);
++    Callback(kEnableOutputProtection, w);
++  }
++  void QueryOutputProtectionStatus() override {
++    Callback(kQueryOutputProtectionStatus);
++  }
++  void OnDeferredInitializationDone(cdm::StreamType type,
++                                    cdm::Status status) override {
++    Writer w;
++    w.U32(type);
++    w.U32(status);
++    Callback(kOnDeferredInitializationDone, w);
++  }
++  cdm::FileIO* CreateFileIO(cdm::FileIOClient* client) override {
++    for (uint32_t id = 0; id < kMaxFiles; id++) {
++      if (!gFileClients[id]) {
++        gFileClients[id] = client;
++        Writer w;
++        w.U32(id);
++        Callback(kFileCreate, w);
++        return new (malloc(sizeof(RemoteFileIO))) RemoteFileIO(id);
++      }
++    }
++    return nullptr;
++  }
++  void RequestStorageId(uint32_t version) override {
++    Writer w;
++    w.U32(version);
++    Callback(kRequestStorageId, w);
++  }
++};
++
++HostProxy* gHost;
++
++void* GetHost(int version, void*) {
++  return version == cdm::Host_10::kVersion ? gHost : nullptr;
++}
++
++cdm::FileIOClient* FileClient(uint32_t id) {
++  return id < kMaxFiles ? gFileClients[id] : nullptr;
++}
++
++typedef void (*InitFn)();
++typedef void* (*CreateFn)(int, const char*, uint32_t, GetCdmHostFunc, void*);
++
++// Runs one request on the CDM and fills |out| with the kDone payload.
++// Returns false once the CDM has been destroyed.
++bool Handle(cdm::ContentDecryptionModule_10* cdm, uint32_t type, Reader& r,
++            Writer& out) {
++  static cdm::SubsampleEntry* subs;
++  static uint32_t subsCap;
++  uint32_t n, m, k;
++  const uint8_t *a, *b, *c;
++  switch (type) {
++    case kInitialize: {
++      uint32_t x = r.U32(), y = r.U32(), z = r.U32();
++      cdm->Initialize(x, y, z);
++      break;
++    }
++    case kGetStatusForPolicy: {
++      uint32_t id = r.U32();
++      cdm::Policy policy = {cdm::HdcpVersion(r.U32())};
++      cdm->GetStatusForPolicy(id, policy);
++      break;
++    }
++    case kSetServerCertificate: {
++      uint32_t id = r.U32();
++      a = r.Bytes(&n);
++      cdm->SetServerCertificate(id, a, n);
++      break;
++    }
++    case kCreateSessionAndGenerateRequest: {
++      uint32_t id = r.U32();
++      auto st = cdm::SessionType(r.U32());
++      auto it = cdm::InitDataType(r.U32());
++      a = r.Bytes(&n);
++      cdm->CreateSessionAndGenerateRequest(id, st, it, a, n);
++      break;
++    }
++    case kLoadSession: {
++      uint32_t id = r.U32();
++      auto st = cdm::SessionType(r.U32());
++      a = r.Bytes(&n);
++      cdm->LoadSession(id, st, reinterpret_cast<const char*>(a), n);
++      break;
++    }
++    case kUpdateSession: {
++      uint32_t id = r.U32();
++      a = r.Bytes(&n);
++      b = r.Bytes(&m);
++      cdm->UpdateSession(id, reinterpret_cast<const char*>(a), n, b, m);
++      break;
++    }
++    case kCloseSession:
++    case kRemoveSession: {
++      uint32_t id = r.U32();
++      a = r.Bytes(&n);
++      auto sid = reinterpret_cast<const char*>(a);
++      if (type == kCloseSession) {
++        cdm->CloseSession(id, sid, n);
++      } else {
++        cdm->RemoveSession(id, sid, n);
++      }
++      break;
++    }
++    case kTimerExpired:
++      cdm->TimerExpired(reinterpret_cast<void*>(r.U64()));
++      break;
++    case kDecrypt: {
++      cdm::InputBuffer_2 in;
++      if (!ReadInput(r, in, &subs, &subsCap)) Fail("bad decrypt request");
++      LocalDecryptedBlock block;
++      cdm::Status st = cdm->Decrypt(in, &block);
++      cdm::Buffer* buf = block.DecryptedBuffer();
++      out.U32(st);
++      out.Bytes(buf ? buf->Data() : nullptr, buf ? buf->Size() : 0);
++      out.I64(block.Timestamp());
++      if (buf) buf->Destroy();
++      break;
++    }
++    case kInitializeAudioDecoder: {
++      cdm::AudioDecoderConfig_2 cfg = {};
++      cfg.codec = cdm::AudioCodec(r.U32());
++      cfg.channel_count = int32_t(r.U32());
++      cfg.bits_per_channel = int32_t(r.U32());
++      cfg.samples_per_second = int32_t(r.U32());
++      cfg.extra_data = const_cast<uint8_t*>(r.Bytes(&cfg.extra_data_size));
++      cfg.encryption_scheme = cdm::EncryptionScheme(r.U32());
++      out.U32(cdm->InitializeAudioDecoder(cfg));
++      break;
++    }
++    case kInitializeVideoDecoder: {
++      cdm::VideoDecoderConfig_2 cfg = {};
++      cfg.codec = cdm::VideoCodec(r.U32());
++      cfg.profile = cdm::VideoCodecProfile(r.U32());
++      cfg.format = cdm::VideoFormat(r.U32());
++      cfg.coded_size.width = int32_t(r.U32());
++      cfg.coded_size.height = int32_t(r.U32());
++      cfg.extra_data = const_cast<uint8_t*>(r.Bytes(&cfg.extra_data_size));
++      cfg.encryption_scheme = cdm::EncryptionScheme(r.U32());
++      out.U32(cdm->InitializeVideoDecoder(cfg));
++      break;
++    }
++    case kDeinitializeDecoder:
++      cdm->DeinitializeDecoder(cdm::StreamType(r.U32()));
++      break;
++    case kResetDecoder:
++      cdm->ResetDecoder(cdm::StreamType(r.U32()));
++      break;
++    case kDecryptAndDecodeFrame: {
++      cdm::InputBuffer_2 in;
++      if (!ReadInput(r, in, &subs, &subsCap)) Fail("bad decode request");
++      LocalVideoFrame frame;
++      cdm::Status st = cdm->DecryptAndDecodeFrame(in, &frame);
++      cdm::Buffer* buf = frame.mBuffer;
++      out.U32(st);
++      out.U32(frame.mFormat);
++      out.U32(uint32_t(frame.mSize.width));
++      out.U32(uint32_t(frame.mSize.height));
++      for (int i = 0; i < 3; i++) {
++        out.U32(frame.mOffset[i]);
++        out.U32(frame.mStride[i]);
++      }
++      out.I64(frame.mTimestamp);
++      out.Bytes(buf ? buf->Data() : nullptr, buf ? buf->Size() : 0);
++      if (buf) buf->Destroy();
++      break;
++    }
++    case kDecryptAndDecodeSamples: {
++      cdm::InputBuffer_2 in;
++      if (!ReadInput(r, in, &subs, &subsCap)) Fail("bad decode request");
++      LocalAudioFrames frames;
++      cdm::Status st = cdm->DecryptAndDecodeSamples(in, &frames);
++      cdm::Buffer* buf = frames.mBuffer;
++      out.U32(st);
++      out.U32(frames.mFormat);
++      out.Bytes(buf ? buf->Data() : nullptr, buf ? buf->Size() : 0);
++      if (buf) buf->Destroy();
++      break;
++    }
++    case kOnPlatformChallengeResponse: {
++      cdm::PlatformChallengeResponse resp = {};
++      a = r.Bytes(&n);
++      b = r.Bytes(&m);
++      c = r.Bytes(&k);
++      resp.signed_data = a;
++      resp.signed_data_length = n;
++      resp.signed_data_signature = b;
++      resp.signed_data_signature_length = m;
++      resp.platform_key_certificate = c;
++      resp.platform_key_certificate_length = k;
++      cdm->OnPlatformChallengeResponse(resp);
++      break;
++    }
++    case kOnQueryOutputProtectionStatus: {
++      auto result = cdm::QueryResult(r.U32());
++      uint32_t links = r.U32(), mask = r.U32();
++      cdm->OnQueryOutputProtectionStatus(result, links, mask);
++      break;
++    }
++    case kOnStorageId: {
++      uint32_t version = r.U32();
++      a = r.Bytes(&n);
++      cdm->OnStorageId(version, a, n);
++      break;
++    }
++    case kFileOpenComplete:
++    case kFileWriteComplete: {
++      cdm::FileIOClient* client = FileClient(r.U32());
++      auto st = cdm::FileIOClient::Status(r.U32());
++      if (client && type == kFileOpenComplete) client->OnOpenComplete(st);
++      if (client && type == kFileWriteComplete) client->OnWriteComplete(st);
++      break;
++    }
++    case kFileReadComplete: {
++      cdm::FileIOClient* client = FileClient(r.U32());
++      auto st = cdm::FileIOClient::Status(r.U32());
++      a = r.Bytes(&n);
++      if (client) client->OnReadComplete(st, a, n);
++      break;
++    }
++    case kDestroy:
++      cdm->Destroy();
++      return false;
++    default:
++      Fail("unknown request");
++  }
++  if (!r.Ok()) Fail("short request");
++  return true;
++}
++
++}  // namespace
++
++extern "C" int main(int argc, char** argv) {
++  if (argc != 3) {
++    printf("usage: %s cdm.so fd\n", argv[0]);
++    return 2;
++  }
++  gFd = 0;
++  for (const char* p = argv[2]; *p; p++) gFd = gFd * 10 + (*p - '0');
++
++  void* h = dlopen(argv[1], RTLD_NOW);
++  if (!h) {
++    printf("wvhost: dlopen %s failed: %s\n", argv[1], dlerror());
++    return 1;
++  }
++  auto init = reinterpret_cast<InitFn>(dlsym(h, "InitializeCdmModule_4"));
++  auto create = reinterpret_cast<CreateFn>(dlsym(h, "CreateCdmInstance"));
++  if (!init || !create) Fail("missing CDM entry points");
++  init();
++
++  HostProxy host;
++  gHost = &host;
++  cdm::ContentDecryptionModule_10* cdms[kMaxInstances] = {};
++
++  uint8_t* buf = nullptr;
++  uint32_t cap = 0, len = 0, type = 0, instance = 0;
++  while (Receive(gFd, &type, &instance, &buf, &cap, &len)) {
++    Reader r(buf, len);
++    Writer out;
++    if (type == kCreate) {
++      uint32_t ksLen;
++      const uint8_t* ks = r.Bytes(&ksLen);
++      uint32_t id = 0;
++      while (id < kMaxInstances && cdms[id]) id++;
++      if (id < kMaxInstances) {
++        gInstance = id;
++        cdms[id] = static_cast<cdm::ContentDecryptionModule_10*>(
++            create(cdm::ContentDecryptionModule_10::kVersion,
++                   reinterpret_cast<const char*>(ks), ksLen, GetHost, nullptr));
++      }
++      bool ok = id < kMaxInstances && cdms[id];
++      out.U32(ok);
++      out.U32(id);
++      gInstance = kNoInstance;
++      Send(gFd, kDone, kNoInstance, out);
++      continue;
++    }
++    if (instance >= kMaxInstances || !cdms[instance]) Fail("bad instance");
++    gInstance = instance;
++    if (!Handle(cdms[instance], type, r, out)) cdms[instance] = nullptr;
++    Send(gFd, kDone, instance, out);
++    gInstance = kNoInstance;
++  }
++  return 0;
++}
+diff --git a/dom/media/gmp/widevine-proxy/wvinput.h b/dom/media/gmp/widevine-proxy/wvinput.h
+new file mode 100644
+index 0000000000..1bf6b523a5
+--- /dev/null
++++ b/dom/media/gmp/widevine-proxy/wvinput.h
+@@ -0,0 +1,55 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++// Serialisation of cdm::InputBuffer_2, shared by the proxy and the helper.
++#pragma once
++#include "wvipc.h"
++#include "content_decryption_module.h"
++
++namespace wvipc {
++
++inline void WriteInput(Writer& w, const cdm::InputBuffer_2& in) {
++  w.Bytes(in.data, in.data_size);
++  w.U32(uint32_t(in.encryption_scheme));
++  w.Bytes(in.key_id, in.key_id_size);
++  w.Bytes(in.iv, in.iv_size);
++  w.U32(in.num_subsamples);
++  for (uint32_t i = 0; i < in.num_subsamples; i++) {
++    w.U32(in.subsamples[i].clear_bytes);
++    w.U32(in.subsamples[i].cipher_bytes);
++  }
++  w.U32(in.pattern.crypt_byte_block);
++  w.U32(in.pattern.skip_byte_block);
++  w.I64(in.timestamp);
++}
++
++// |*subs| is grown as needed and owned by the caller. The pointers in |in|
++// point into the message payload.
++inline bool ReadInput(Reader& r, cdm::InputBuffer_2& in,
++                      cdm::SubsampleEntry** subs, uint32_t* subsCap) {
++  in = {};
++  in.data = r.Bytes(&in.data_size);
++  in.encryption_scheme = cdm::EncryptionScheme(r.U32());
++  in.key_id = r.Bytes(&in.key_id_size);
++  in.iv = r.Bytes(&in.iv_size);
++  uint32_t n = r.U32();
++  if (n > 65536) return false;
++  if (n > *subsCap) {
++    *subsCap = n;
++    *subs = static_cast<cdm::SubsampleEntry*>(
++        realloc(*subs, n * sizeof(cdm::SubsampleEntry)));
++  }
++  for (uint32_t i = 0; i < n; i++) {
++    (*subs)[i].clear_bytes = r.U32();
++    (*subs)[i].cipher_bytes = r.U32();
++  }
++  in.subsamples = n ? *subs : nullptr;
++  in.num_subsamples = n;
++  in.pattern.crypt_byte_block = r.U32();
++  in.pattern.skip_byte_block = r.U32();
++  in.timestamp = r.I64();
++  return r.Ok();
++}
++
++}  // namespace wvipc
+diff --git a/dom/media/gmp/widevine-proxy/wvipc.h b/dom/media/gmp/widevine-proxy/wvipc.h
+new file mode 100644
+index 0000000000..b747e6a35f
+--- /dev/null
++++ b/dom/media/gmp/widevine-proxy/wvipc.h
+@@ -0,0 +1,190 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++// Wire protocol between the native proxy CDM (wvproxy.cc) and the x86_64
++// helper that runs the real CDM under box64 (wvhost.cc).
++//
++// The CDM interface is single-threaded, so the protocol is a synchronous RPC
++// over a socketpair. Each proxy -> helper message is a request (a CDM call, a
++// timer, or a FileIO completion). While handling it the helper sends any number
++// of Host_10 callbacks, then one kDone message with the call's results. The
++// proxy forwards the callbacks to Firefox's host as they arrive.
++//
++// One helper serves every CDM instance of a GMP process: kCreate returns an
++// instance id and each later request names the instance it is for.
++//
++// Message: u32 type, u32 instance, u32 payload length, payload. Payload fields
++// are written in order with Writer and read back with Reader; both ends are
++// little-endian.
++#pragma once
++#include "minilibc.h"
++
++namespace wvipc {
++
++enum Type : uint32_t {
++  // Requests, proxy -> helper. kCreate is the first message and names the
++  // key system; the helper answers it with kDone carrying a success flag.
++  kCreate = 0,
++  kInitialize = 1,
++  kGetStatusForPolicy,
++  kSetServerCertificate,
++  kCreateSessionAndGenerateRequest,
++  kLoadSession,
++  kUpdateSession,
++  kCloseSession,
++  kRemoveSession,
++  kTimerExpired,
++  kDecrypt,
++  kInitializeAudioDecoder,
++  kInitializeVideoDecoder,
++  kDeinitializeDecoder,
++  kResetDecoder,
++  kDecryptAndDecodeFrame,
++  kDecryptAndDecodeSamples,
++  kOnPlatformChallengeResponse,
++  kOnQueryOutputProtectionStatus,
++  kOnStorageId,
++  kDestroy,
++  kFileOpenComplete,
++  kFileReadComplete,
++  kFileWriteComplete,
++
++  // Callbacks, helper -> proxy.
++  kDone = 100,
++  kSetTimer,
++  kOnInitialized,
++  kOnResolveKeyStatusPromise,
++  kOnResolveNewSessionPromise,
++  kOnResolvePromise,
++  kOnRejectPromise,
++  kOnSessionMessage,
++  kOnSessionKeysChange,
++  kOnExpirationChange,
++  kOnSessionClosed,
++  kSendPlatformChallenge,
++  kEnableOutputProtection,
++  kQueryOutputProtectionStatus,
++  kOnDeferredInitializationDone,
++  kRequestStorageId,
++  kFileCreate,
++  kFileOpen,
++  kFileRead,
++  kFileWrite,
++  kFileClose,
++};
++
++constexpr uint32_t kMaxMessage = 64 << 20;
++constexpr uint32_t kMaxInstances = 16;
++constexpr uint32_t kNoInstance = 0xffffffff;
++
++class Writer {
++ public:
++  ~Writer() { free(mData); }
++  void U32(uint32_t v) { Raw(&v, 4); }
++  void U64(uint64_t v) { Raw(&v, 8); }
++  void I64(int64_t v) { Raw(&v, 8); }
++  void F64(double v) { Raw(&v, 8); }
++  void Bytes(const void* p, uint32_t n) {
++    U32(n);
++    Raw(p, n);
++  }
++  void Raw(const void* p, uint32_t n) {
++    if (mLen + n > mCap) {
++      while (mLen + n > mCap) mCap = mCap ? mCap * 2 : 256;
++      mData = static_cast<uint8_t*>(realloc(mData, mCap));
++    }
++    if (n) memcpy(mData + mLen, p, n);
++    mLen += n;
++  }
++  const uint8_t* Data() const { return mData; }
++  uint32_t Length() const { return mLen; }
++
++ private:
++  uint8_t* mData = nullptr;
++  uint32_t mLen = 0, mCap = 0;
++};
++
++// Reads fields from a received payload. A short payload sets mBad and yields
++// zeros, so callers check Ok() once at the end.
++class Reader {
++ public:
++  Reader(const uint8_t* p, uint32_t n) : mP(p), mEnd(p + n) {}
++  uint32_t U32() { return Get<uint32_t>(); }
++  uint64_t U64() { return Get<uint64_t>(); }
++  int64_t I64() { return Get<int64_t>(); }
++  double F64() { return Get<double>(); }
++  // Returns a pointer into the payload, valid until the next message.
++  const uint8_t* Bytes(uint32_t* n) {
++    *n = U32();
++    if (uint32_t(mEnd - mP) < *n) {
++      mBad = true;
++      *n = 0;
++      return nullptr;
++    }
++    const uint8_t* p = mP;
++    mP += *n;
++    return p;
++  }
++  bool Ok() const { return !mBad; }
++
++ private:
++  template <typename T>
++  T Get() {
++    T v{};
++    if (uint32_t(mEnd - mP) < sizeof(T)) {
++      mBad = true;
++      return v;
++    }
++    memcpy(&v, mP, sizeof(T));
++    mP += sizeof(T);
++    return v;
++  }
++  const uint8_t* mP;
++  const uint8_t* mEnd;
++  bool mBad = false;
++};
++
++inline bool WriteAll(int fd, const void* p, uint32_t n) {
++  const uint8_t* c = static_cast<const uint8_t*>(p);
++  while (n) {
++    long w = write(fd, c, n);
++    if (w <= 0) return false;
++    c += w;
++    n -= uint32_t(w);
++  }
++  return true;
++}
++
++inline bool ReadAll(int fd, void* p, uint32_t n) {
++  uint8_t* c = static_cast<uint8_t*>(p);
++  while (n) {
++    long r = read(fd, c, n);
++    if (r <= 0) return false;
++    c += r;
++    n -= uint32_t(r);
++  }
++  return true;
++}
++
++inline bool Send(int fd, uint32_t type, uint32_t instance, const Writer& w) {
++  uint32_t hdr[3] = {type, instance, w.Length()};
++  return WriteAll(fd, hdr, 12) && WriteAll(fd, w.Data(), w.Length());
++}
++
++// Receives one message into |*buf| (grown as needed).
++inline bool Receive(int fd, uint32_t* type, uint32_t* instance, uint8_t** buf,
++                    uint32_t* cap, uint32_t* len) {
++  uint32_t hdr[3];
++  if (!ReadAll(fd, hdr, 12) || hdr[2] > kMaxMessage) return false;
++  if (hdr[2] > *cap) {
++    *cap = hdr[2];
++    *buf = static_cast<uint8_t*>(realloc(*buf, *cap));
++  }
++  *type = hdr[0];
++  *instance = hdr[1];
++  *len = hdr[2];
++  return ReadAll(fd, *buf, hdr[2]);
++}
++
++}  // namespace wvipc
+diff --git a/dom/media/gmp/widevine-proxy/wvproxy.cc b/dom/media/gmp/widevine-proxy/wvproxy.cc
+new file mode 100644
+index 0000000000..bede04c175
+--- /dev/null
++++ b/dom/media/gmp/widevine-proxy/wvproxy.cc
+@@ -0,0 +1,786 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++// Native proxy CDM. Firefox loads it as libwidevinecdm.so and it forwards every
++// ContentDecryptionModule_10/11 call to the x86_64 helper (wvhost), which runs
++// the real CDM under box64. See wvipc.h for the protocol.
++//
++// Inside Firefox the GMP child starts the helper before its sandbox engages
++// (through the gmp-helper program beside this library) and passes the socket
++// in MOZ_GMP_HELPER_FD; that one helper serves every CDM instance. Without
++// that variable the proxy starts a helper of its own per instance, for use
++// outside Firefox. Paths for that case, overridable through the environment:
++//   WV_BOX64               box64 (default: box64 from PATH)
++//   WV_HOST                x86_64 helper (default: <this dir>/wvhost)
++//   WV_REAL_CDM            real x86_64 CDM
++//                          (default: <this dir>/libwidevinecdm-x86_64.so)
++//   BOX64_LD_LIBRARY_PATH  (default: <this dir>/x64lib)
++
++#include "wvinput.h"
++
++using namespace wvipc;
++
++extern "C" {
++int execvp(const char* file, char* const argv[]);
++}
++
++extern "C" void __cxa_pure_virtual() { _exit(70); }
++
++#define WV_EXPORT extern "C" __attribute__((visibility("default")))
++
++namespace {
++
++// Firefox passes a Host_10 or a Host_11; they differ only in ReportMetrics,
++// which the real CDM (driven as a CDM 10) never calls.
++class HostRef {
++ public:
++  virtual ~HostRef() {}
++  virtual cdm::Buffer* Allocate(uint32_t capacity) = 0;
++  virtual void SetTimer(int64_t delay_ms, void* context) = 0;
++  virtual void OnInitialized(bool success) = 0;
++  virtual void OnResolveKeyStatusPromise(uint32_t id, cdm::KeyStatus s) = 0;
++  virtual void OnResolveNewSessionPromise(uint32_t id, const char* sid,
++                                          uint32_t len) = 0;
++  virtual void OnResolvePromise(uint32_t id) = 0;
++  virtual void OnRejectPromise(uint32_t id, cdm::Exception e, uint32_t code,
++                               const char* msg, uint32_t len) = 0;
++  virtual void OnSessionMessage(const char* sid, uint32_t sidlen,
++                                cdm::MessageType t, const char* msg,
++                                uint32_t len) = 0;
++  virtual void OnSessionKeysChange(const char* sid, uint32_t sidlen, bool more,
++                                   const cdm::KeyInformation* keys,
++                                   uint32_t count) = 0;
++  virtual void OnExpirationChange(const char* sid, uint32_t len,
++                                  cdm::Time t) = 0;
++  virtual void OnSessionClosed(const char* sid, uint32_t len) = 0;
++  virtual void SendPlatformChallenge(const char* service, uint32_t serviceLen,
++                                     const char* challenge,
++                                     uint32_t challengeLen) = 0;
++  virtual void EnableOutputProtection(uint32_t mask) = 0;
++  virtual void QueryOutputProtectionStatus() = 0;
++  virtual void OnDeferredInitializationDone(cdm::StreamType type,
++                                            cdm::Status status) = 0;
++  virtual cdm::FileIO* CreateFileIO(cdm::FileIOClient* client) = 0;
++  virtual void RequestStorageId(uint32_t version) = 0;
++};
++
++template <typename H>
++class HostImpl final : public HostRef {
++ public:
++  explicit HostImpl(H* h) : mH(h) {}
++  cdm::Buffer* Allocate(uint32_t c) override { return mH->Allocate(c); }
++  void SetTimer(int64_t d, void* ctx) override { mH->SetTimer(d, ctx); }
++  void OnInitialized(bool ok) override { mH->OnInitialized(ok); }
++  void OnResolveKeyStatusPromise(uint32_t id, cdm::KeyStatus s) override {
++    mH->OnResolveKeyStatusPromise(id, s);
++  }
++  void OnResolveNewSessionPromise(uint32_t id, const char* sid,
++                                  uint32_t len) override {
++    mH->OnResolveNewSessionPromise(id, sid, len);
++  }
++  void OnResolvePromise(uint32_t id) override { mH->OnResolvePromise(id); }
++  void OnRejectPromise(uint32_t id, cdm::Exception e, uint32_t code,
++                       const char* msg, uint32_t len) override {
++    mH->OnRejectPromise(id, e, code, msg, len);
++  }
++  void OnSessionMessage(const char* sid, uint32_t sidlen, cdm::MessageType t,
++                        const char* msg, uint32_t len) override {
++    mH->OnSessionMessage(sid, sidlen, t, msg, len);
++  }
++  void OnSessionKeysChange(const char* sid, uint32_t sidlen, bool more,
++                           const cdm::KeyInformation* keys,
++                           uint32_t count) override {
++    mH->OnSessionKeysChange(sid, sidlen, more, keys, count);
++  }
++  void OnExpirationChange(const char* sid, uint32_t len, cdm::Time t) override {
++    mH->OnExpirationChange(sid, len, t);
++  }
++  void OnSessionClosed(const char* sid, uint32_t len) override {
++    mH->OnSessionClosed(sid, len);
++  }
++  void SendPlatformChallenge(const char* s, uint32_t sl, const char* c,
++                             uint32_t cl) override {
++    mH->SendPlatformChallenge(s, sl, c, cl);
++  }
++  void EnableOutputProtection(uint32_t mask) override {
++    mH->EnableOutputProtection(mask);
++  }
++  void QueryOutputProtectionStatus() override {
++    mH->QueryOutputProtectionStatus();
++  }
++  void OnDeferredInitializationDone(cdm::StreamType t, cdm::Status s) override {
++    mH->OnDeferredInitializationDone(t, s);
++  }
++  cdm::FileIO* CreateFileIO(cdm::FileIOClient* c) override {
++    return mH->CreateFileIO(c);
++  }
++  void RequestStorageId(uint32_t v) override { mH->RequestStorageId(v); }
++
++ private:
++  H* mH;
++};
++
++class ProxyCdm;
++class Connection;
++
++// Forwards Firefox's FileIO completions for one helper-side FileIO.
++class ProxyFileClient final : public cdm::FileIOClient {
++ public:
++  ProxyFileClient(ProxyCdm* cdm, uint32_t id) : mCdm(cdm), mId(id) {}
++  void OnOpenComplete(Status status) override;
++  void OnReadComplete(Status status, const uint8_t* data,
++                      uint32_t size) override;
++  void OnWriteComplete(Status status) override;
++
++  cdm::FileIO* mFile = nullptr;
++
++ private:
++  ProxyCdm* mCdm;
++  uint32_t mId;
++};
++
++constexpr uint32_t kMaxFiles = 64;
++
++// A request raised while a call to the helper is in progress (a synchronous
++// FileIO completion, for instance); it is sent once that call has returned.
++struct PendingRequest {
++  ProxyCdm* cdm;
++  uint32_t type;
++  Writer* payload;
++  PendingRequest* next;
++};
++
++template <typename T, typename... Args>
++T* New(Args... args) {
++  return new (malloc(sizeof(T))) T(args...);
++}
++
++template <typename T>
++void Delete(T* p) {
++  if (p) {
++    p->~T();
++    free(p);
++  }
++}
++
++const char* Env(const char* name, const char* fallback) {
++  const char* v = getenv(name);
++  return v && *v ? v : fallback;
++}
++
++// Directory this library was loaded from, with a trailing slash.
++void SelfDir(char* buf, size_t n) {
++  Dl_info info;
++  buf[0] = 0;
++  if (dladdr(reinterpret_cast<void*>(&SelfDir), &info) && info.dli_fname) {
++    const char* slash = strrchr(info.dli_fname, '/');
++    size_t len = slash ? size_t(slash - info.dli_fname + 1) : 0;
++    if (len < n) {
++      memcpy(buf, info.dli_fname, len);
++      buf[len] = 0;
++    }
++  }
++}
++
++void PathFrom(char* buf, size_t n, const char* env, const char* dir,
++              const char* leaf) {
++  const char* v = getenv(env);
++  if (v && *v) {
++    snprintf(buf, n, "%s", v);
++  } else {
++    snprintf(buf, n, "%s%s", dir, leaf);
++  }
++}
++
++// The socket to one helper, shared by the CDM instances it serves.
++class Connection {
++ public:
++  // The helper Firefox started, or null outside Firefox.
++  static Connection* Shared();
++  // A helper of our own under box64; null if it could not be started.
++  static Connection* Spawn();
++
++  Connection(int fd, int pid) : mFd(fd), mPid(pid) {}
++  ~Connection() {
++    if (mFd >= 0) close(mFd);
++    if (mPid > 0) {
++      int status;
++      waitpid(mPid, &status, 0);
++    }
++    free(mBuf);
++  }
++
++  // Sends one request for |who| and serves the helper's callbacks until its
++  // kDone, whose payload the returned Reader covers (until the next call).
++  Reader Call(ProxyCdm* who, uint32_t type, const Writer& w);
++  // Sends a request now, or queues it while a call is in progress.
++  void Request(ProxyCdm* who, uint32_t type, Writer* w);
++  void Flush();
++
++ private:
++  void Dispatch(uint32_t type, Reader& r);
++  HostRef* Host();
++
++  int mFd;
++  int mPid;
++  bool mDead = false;
++  ProxyCdm* mInCall = nullptr;
++  uint8_t* mBuf = nullptr;
++  uint32_t mCap = 0, mLen = 0;
++  PendingRequest* mPending = nullptr;
++  PendingRequest** mPendingTail = &mPending;
++  ProxyFileClient* mFiles[kMaxFiles] = {};
++};
++
++class ProxyCdm final : public cdm::ContentDecryptionModule_10,
++                       public cdm::ContentDecryptionModule_11 {
++ public:
++  ProxyCdm(HostRef* host, Connection* conn, bool ownsConn)
++      : mHost(host), mConn(conn), mOwnsConn(ownsConn) {}
++  ~ProxyCdm() {
++    if (mOwnsConn) Delete(mConn);
++    Delete(mHost);
++  }
++
++  bool Create(const char* keySystem, uint32_t len) {
++    Writer w;
++    w.Bytes(keySystem, len);
++    Reader r = mConn->Call(this, kCreate, w);
++    bool ok = r.U32() != 0;
++    mId = r.U32();
++    return ok && r.Ok();
++  }
++
++  HostRef* Host() const { return mHost; }
++  uint32_t Id() const { return mId; }
++
++  // cdm::ContentDecryptionModule_10 and _11 (identical method sets).
++  void Initialize(bool distinctive, bool persistent, bool hw) override {
++    Writer w;
++    w.U32(distinctive);
++    w.U32(persistent);
++    w.U32(hw);
++    Call(kInitialize, w);
++  }
++  void GetStatusForPolicy(uint32_t id, const cdm::Policy& policy) override {
++    Writer w;
++    w.U32(id);
++    w.U32(policy.min_hdcp_version);
++    Call(kGetStatusForPolicy, w);
++  }
++  void SetServerCertificate(uint32_t id, const uint8_t* cert,
++                            uint32_t len) override {
++    Writer w;
++    w.U32(id);
++    w.Bytes(cert, len);
++    Call(kSetServerCertificate, w);
++  }
++  void CreateSessionAndGenerateRequest(uint32_t id, cdm::SessionType st,
++                                       cdm::InitDataType it,
++                                       const uint8_t* data,
++                                       uint32_t len) override {
++    Writer w;
++    w.U32(id);
++    w.U32(st);
++    w.U32(it);
++    w.Bytes(data, len);
++    Call(kCreateSessionAndGenerateRequest, w);
++  }
++  void LoadSession(uint32_t id, cdm::SessionType st, const char* sid,
++                   uint32_t len) override {
++    Writer w;
++    w.U32(id);
++    w.U32(st);
++    w.Bytes(sid, len);
++    Call(kLoadSession, w);
++  }
++  void UpdateSession(uint32_t id, const char* sid, uint32_t sidlen,
++                     const uint8_t* resp, uint32_t len) override {
++    Writer w;
++    w.U32(id);
++    w.Bytes(sid, sidlen);
++    w.Bytes(resp, len);
++    Call(kUpdateSession, w);
++  }
++  void CloseSession(uint32_t id, const char* sid, uint32_t len) override {
++    SessionCall(kCloseSession, id, sid, len);
++  }
++  void RemoveSession(uint32_t id, const char* sid, uint32_t len) override {
++    SessionCall(kRemoveSession, id, sid, len);
++  }
++  void TimerExpired(void* context) override {
++    Writer* w = New<Writer>();
++    w->U64(reinterpret_cast<uint64_t>(context));
++    mConn->Request(this, kTimerExpired, w);
++  }
++  cdm::Status Decrypt(const cdm::InputBuffer_2& in,
++                      cdm::DecryptedBlock* block) override {
++    Writer w;
++    WriteInput(w, in);
++    Reader r = mConn->Call(this, kDecrypt, w);
++    auto st = cdm::Status(r.U32());
++    uint32_t n;
++    const uint8_t* data = r.Bytes(&n);
++    int64_t ts = r.I64();
++    if (!r.Ok()) st = cdm::kDecryptError;
++    if (st == cdm::kSuccess) {
++      block->SetDecryptedBuffer(CopyOut(data, n));
++      block->SetTimestamp(ts);
++    }
++    mConn->Flush();
++    return st;
++  }
++  cdm::Status InitializeAudioDecoder(
++      const cdm::AudioDecoderConfig_2& cfg) override {
++    Writer w;
++    w.U32(cfg.codec);
++    w.U32(uint32_t(cfg.channel_count));
++    w.U32(uint32_t(cfg.bits_per_channel));
++    w.U32(uint32_t(cfg.samples_per_second));
++    w.Bytes(cfg.extra_data, cfg.extra_data_size);
++    w.U32(uint32_t(cfg.encryption_scheme));
++    return StatusCall(kInitializeAudioDecoder, w);
++  }
++  cdm::Status InitializeVideoDecoder(
++      const cdm::VideoDecoderConfig_2& cfg) override {
++    Writer w;
++    w.U32(cfg.codec);
++    w.U32(cfg.profile);
++    w.U32(cfg.format);
++    w.U32(uint32_t(cfg.coded_size.width));
++    w.U32(uint32_t(cfg.coded_size.height));
++    w.Bytes(cfg.extra_data, cfg.extra_data_size);
++    w.U32(uint32_t(cfg.encryption_scheme));
++    return StatusCall(kInitializeVideoDecoder, w);
++  }
++  void DeinitializeDecoder(cdm::StreamType type) override {
++    Writer w;
++    w.U32(type);
++    Call(kDeinitializeDecoder, w);
++  }
++  void ResetDecoder(cdm::StreamType type) override {
++    Writer w;
++    w.U32(type);
++    Call(kResetDecoder, w);
++  }
++  cdm::Status DecryptAndDecodeFrame(const cdm::InputBuffer_2& in,
++                                    cdm::VideoFrame* frame) override {
++    Writer w;
++    WriteInput(w, in);
++    Reader r = mConn->Call(this, kDecryptAndDecodeFrame, w);
++    auto st = cdm::Status(r.U32());
++    auto format = cdm::VideoFormat(r.U32());
++    cdm::Size size;
++    size.width = int32_t(r.U32());
++    size.height = int32_t(r.U32());
++    uint32_t offset[3], stride[3];
++    for (int i = 0; i < 3; i++) {
++      offset[i] = r.U32();
++      stride[i] = r.U32();
++    }
++    int64_t ts = r.I64();
++    uint32_t n;
++    const uint8_t* data = r.Bytes(&n);
++    if (!r.Ok()) st = cdm::kDecodeError;
++    if (st == cdm::kSuccess) {
++      frame->SetFormat(format);
++      frame->SetSize(size);
++      frame->SetFrameBuffer(CopyOut(data, n));
++      for (int i = 0; i < 3; i++) {
++        frame->SetPlaneOffset(cdm::VideoPlane(i), offset[i]);
++        frame->SetStride(cdm::VideoPlane(i), stride[i]);
++      }
++      frame->SetTimestamp(ts);
++    }
++    mConn->Flush();
++    return st;
++  }
++  cdm::Status DecryptAndDecodeSamples(const cdm::InputBuffer_2& in,
++                                      cdm::AudioFrames* frames) override {
++    Writer w;
++    WriteInput(w, in);
++    Reader r = mConn->Call(this, kDecryptAndDecodeSamples, w);
++    auto st = cdm::Status(r.U32());
++    auto format = cdm::AudioFormat(r.U32());
++    uint32_t n;
++    const uint8_t* data = r.Bytes(&n);
++    if (!r.Ok()) st = cdm::kDecodeError;
++    if (st == cdm::kSuccess) {
++      frames->SetFormat(format);
++      frames->SetFrameBuffer(CopyOut(data, n));
++    }
++    mConn->Flush();
++    return st;
++  }
++  void OnPlatformChallengeResponse(
++      const cdm::PlatformChallengeResponse& resp) override {
++    Writer* w = New<Writer>();
++    w->Bytes(resp.signed_data, resp.signed_data_length);
++    w->Bytes(resp.signed_data_signature, resp.signed_data_signature_length);
++    w->Bytes(resp.platform_key_certificate,
++             resp.platform_key_certificate_length);
++    mConn->Request(this, kOnPlatformChallengeResponse, w);
++  }
++  void OnQueryOutputProtectionStatus(cdm::QueryResult result, uint32_t links,
++                                     uint32_t mask) override {
++    Writer* w = New<Writer>();
++    w->U32(result);
++    w->U32(links);
++    w->U32(mask);
++    mConn->Request(this, kOnQueryOutputProtectionStatus, w);
++  }
++  void OnStorageId(uint32_t version, const uint8_t* id, uint32_t len) override {
++    Writer* w = New<Writer>();
++    w->U32(version);
++    w->Bytes(id, len);
++    mConn->Request(this, kOnStorageId, w);
++  }
++  void Destroy() override {
++    Writer w;
++    Call(kDestroy, w);
++    Delete(this);
++  }
++
++  // Called by ProxyFileClient.
++  void FileComplete(uint32_t type, uint32_t id, uint32_t status,
++                    const uint8_t* data, uint32_t len) {
++    Writer* w = New<Writer>();
++    w->U32(id);
++    w->U32(status);
++    if (type == kFileReadComplete) w->Bytes(data, len);
++    mConn->Request(this, type, w);
++  }
++
++ private:
++  void Call(uint32_t type, const Writer& w) {
++    mConn->Call(this, type, w);
++    mConn->Flush();
++  }
++  void SessionCall(uint32_t type, uint32_t id, const char* sid, uint32_t len) {
++    Writer w;
++    w.U32(id);
++    w.Bytes(sid, len);
++    Call(type, w);
++  }
++  cdm::Status StatusCall(uint32_t type, const Writer& w) {
++    Reader r = mConn->Call(this, type, w);
++    auto st = cdm::Status(r.U32());
++    if (!r.Ok()) st = cdm::kInitializationError;
++    mConn->Flush();
++    return st;
++  }
++  cdm::Buffer* CopyOut(const uint8_t* data, uint32_t n) {
++    cdm::Buffer* buf = mHost->Allocate(n);
++    if (!buf) return nullptr;
++    if (n) memcpy(buf->Data(), data, n);
++    buf->SetSize(n);
++    return buf;
++  }
++
++  HostRef* mHost;
++  Connection* mConn;
++  bool mOwnsConn;
++  uint32_t mId = kNoInstance;
++};
++
++void ProxyFileClient::OnOpenComplete(Status status) {
++  mCdm->FileComplete(kFileOpenComplete, mId, uint32_t(status), nullptr, 0);
++}
++
++void ProxyFileClient::OnReadComplete(Status status, const uint8_t* data,
++                                     uint32_t size) {
++  mCdm->FileComplete(kFileReadComplete, mId, uint32_t(status), data, size);
++}
++
++void ProxyFileClient::OnWriteComplete(Status status) {
++  mCdm->FileComplete(kFileWriteComplete, mId, uint32_t(status), nullptr, 0);
++}
++
++Connection* Connection::Shared() {
++  static Connection* shared = nullptr;
++  static bool looked = false;
++  if (!looked) {
++    looked = true;
++    const char* v = getenv("MOZ_GMP_HELPER_FD");
++    if (v && *v) {
++      int fd = 0;
++      for (const char* p = v; *p >= '0' && *p <= '9'; p++) {
++        fd = fd * 10 + (*p - '0');
++      }
++      shared = New<Connection>(fd, 0);
++    }
++  }
++  return shared;
++}
++
++Connection* Connection::Spawn() {
++  char dir[1024], box64[1024], host[1024], realCdm[1024], x64lib[1024];
++  SelfDir(dir, sizeof(dir));
++  snprintf(box64, sizeof(box64), "%s", Env("WV_BOX64", "box64"));
++  PathFrom(host, sizeof(host), "WV_HOST", dir, "wvhost");
++  PathFrom(realCdm, sizeof(realCdm), "WV_REAL_CDM", dir,
++           "libwidevinecdm-x86_64.so");
++  snprintf(x64lib, sizeof(x64lib), "%sx64lib", dir);
++
++  int fds[2];
++  if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) return nullptr;
++  char fdstr[16];
++  snprintf(fdstr, sizeof(fdstr), "%d", fds[1]);
++
++  int pid = fork();
++  if (pid < 0) {
++    close(fds[0]);
++    close(fds[1]);
++    return nullptr;
++  }
++  if (pid == 0) {
++    close(fds[0]);
++    if (!getenv("BOX64_LD_LIBRARY_PATH")) {
++      setenv("BOX64_LD_LIBRARY_PATH", x64lib, 1);
++    }
++    setenv("BOX64_NOBANNER", "1", 0);
++    char* argv[] = {box64, host, realCdm, fdstr, nullptr};
++    execvp(box64, argv);
++    _exit(127);
++  }
++  close(fds[1]);
++  fcntl(fds[0], F_SETFD, FD_CLOEXEC);
++  return New<Connection>(fds[0], pid);
++}
++
++HostRef* Connection::Host() { return mInCall ? mInCall->Host() : nullptr; }
++
++Reader Connection::Call(ProxyCdm* who, uint32_t type, const Writer& w) {
++  uint32_t instance = type == kCreate ? kNoInstance : who->Id();
++  if (mDead || !Send(mFd, type, instance, w)) {
++    mDead = true;
++    return Reader(nullptr, 0);
++  }
++  ProxyCdm* outer = mInCall;
++  mInCall = who;
++  uint32_t t, from;
++  for (;;) {
++    if (!Receive(mFd, &t, &from, &mBuf, &mCap, &mLen)) {
++      mDead = true;
++      mLen = 0;
++      break;
++    }
++    if (t == kDone) break;
++    Reader r(mBuf, mLen);
++    Dispatch(t, r);
++  }
++  mInCall = outer;
++  return Reader(mBuf, mLen);
++}
++
++void Connection::Request(ProxyCdm* who, uint32_t type, Writer* w) {
++  if (mInCall) {
++    PendingRequest* p = New<PendingRequest>();
++    p->cdm = who;
++    p->type = type;
++    p->payload = w;
++    p->next = nullptr;
++    *mPendingTail = p;
++    mPendingTail = &p->next;
++    return;
++  }
++  Call(who, type, *w);
++  Delete(w);
++  Flush();
++}
++
++void Connection::Flush() {
++  while (mPending && !mInCall) {
++    PendingRequest* p = mPending;
++    mPending = p->next;
++    if (!mPending) mPendingTail = &mPending;
++    Call(p->cdm, p->type, *p->payload);
++    Delete(p->payload);
++    free(p);
++  }
++}
++
++void Connection::Dispatch(uint32_t type, Reader& r) {
++  HostRef* host = Host();
++  if (!host) return;
++  uint32_t n, m;
++  const uint8_t *a, *b;
++  switch (type) {
++    case kSetTimer: {
++      int64_t delay = r.I64();
++      uint64_t ctx = r.U64();
++      host->SetTimer(delay, reinterpret_cast<void*>(ctx));
++      break;
++    }
++    case kOnInitialized:
++      host->OnInitialized(r.U32() != 0);
++      break;
++    case kOnResolveKeyStatusPromise: {
++      uint32_t id = r.U32();
++      host->OnResolveKeyStatusPromise(id, cdm::KeyStatus(r.U32()));
++      break;
++    }
++    case kOnResolveNewSessionPromise: {
++      uint32_t id = r.U32();
++      a = r.Bytes(&n);
++      host->OnResolveNewSessionPromise(id, reinterpret_cast<const char*>(a), n);
++      break;
++    }
++    case kOnResolvePromise:
++      host->OnResolvePromise(r.U32());
++      break;
++    case kOnRejectPromise: {
++      uint32_t id = r.U32();
++      auto e = cdm::Exception(r.U32());
++      uint32_t code = r.U32();
++      a = r.Bytes(&n);
++      host->OnRejectPromise(id, e, code, reinterpret_cast<const char*>(a), n);
++      break;
++    }
++    case kOnSessionMessage: {
++      a = r.Bytes(&n);
++      auto t = cdm::MessageType(r.U32());
++      b = r.Bytes(&m);
++      host->OnSessionMessage(reinterpret_cast<const char*>(a), n, t,
++                             reinterpret_cast<const char*>(b), m);
++      break;
++    }
++    case kOnSessionKeysChange: {
++      a = r.Bytes(&n);
++      bool more = r.U32() != 0;
++      uint32_t count = r.U32();
++      if (count > 4096) count = 0;
++      auto* keys = static_cast<cdm::KeyInformation*>(
++          malloc((count ? count : 1) * sizeof(cdm::KeyInformation)));
++      for (uint32_t i = 0; i < count; i++) {
++        keys[i].key_id = r.Bytes(&keys[i].key_id_size);
++        keys[i].status = cdm::KeyStatus(r.U32());
++        keys[i].system_code = r.U32();
++      }
++      if (r.Ok()) {
++        host->OnSessionKeysChange(reinterpret_cast<const char*>(a), n, more,
++                                  keys, count);
++      }
++      free(keys);
++      break;
++    }
++    case kOnExpirationChange: {
++      a = r.Bytes(&n);
++      double t = r.F64();
++      host->OnExpirationChange(reinterpret_cast<const char*>(a), n, t);
++      break;
++    }
++    case kOnSessionClosed:
++      a = r.Bytes(&n);
++      host->OnSessionClosed(reinterpret_cast<const char*>(a), n);
++      break;
++    case kSendPlatformChallenge:
++      a = r.Bytes(&n);
++      b = r.Bytes(&m);
++      host->SendPlatformChallenge(reinterpret_cast<const char*>(a), n,
++                                  reinterpret_cast<const char*>(b), m);
++      break;
++    case kEnableOutputProtection:
++      host->EnableOutputProtection(r.U32());
++      break;
++    case kQueryOutputProtectionStatus:
++      host->QueryOutputProtectionStatus();
++      break;
++    case kOnDeferredInitializationDone: {
++      auto t = cdm::StreamType(r.U32());
++      host->OnDeferredInitializationDone(t, cdm::Status(r.U32()));
++      break;
++    }
++    case kRequestStorageId:
++      host->RequestStorageId(r.U32());
++      break;
++    case kFileCreate: {
++      uint32_t id = r.U32();
++      if (id < kMaxFiles && !mFiles[id]) {
++        mFiles[id] = New<ProxyFileClient>(mInCall, id);
++        mFiles[id]->mFile = host->CreateFileIO(mFiles[id]);
++      }
++      break;
++    }
++    case kFileOpen:
++    case kFileRead:
++    case kFileWrite:
++    case kFileClose: {
++      uint32_t id = r.U32();
++      ProxyFileClient* client = id < kMaxFiles ? mFiles[id] : nullptr;
++      if (!client) break;
++      cdm::FileIO* file = client->mFile;
++      if (type == kFileClose) {
++        mFiles[id] = nullptr;
++        if (file) file->Close();
++        Delete(client);
++        break;
++      }
++      if (!file) {
++        uint32_t done = type == kFileOpen   ? kFileOpenComplete
++                        : type == kFileRead ? kFileReadComplete
++                                            : kFileWriteComplete;
++        mInCall->FileComplete(
++            done, id, uint32_t(cdm::FileIOClient::Status::kError), nullptr, 0);
++        break;
++      }
++      if (type == kFileOpen) {
++        a = r.Bytes(&n);
++        file->Open(reinterpret_cast<const char*>(a), n);
++      } else if (type == kFileRead) {
++        file->Read();
++      } else {
++        a = r.Bytes(&n);
++        file->Write(a, n);
++      }
++      break;
++    }
++    default:
++      break;
++  }
++}
++
++}  // namespace
++
++WV_EXPORT void InitializeCdmModule_4() {}
++
++WV_EXPORT void DeinitializeCdmModule() {}
++
++WV_EXPORT const char* GetCdmVersion() { return "wvproxy"; }
++
++WV_EXPORT void* CreateCdmInstance(int version, const char* keySystem,
++                                  uint32_t len, GetCdmHostFunc getHost,
++                                  void* userData) {
++  HostRef* host = nullptr;
++  if (version == cdm::ContentDecryptionModule_11::kVersion) {
++    auto* h =
++        static_cast<cdm::Host_11*>(getHost(cdm::Host_11::kVersion, userData));
++    if (h) host = New<HostImpl<cdm::Host_11>>(h);
++  } else if (version == cdm::ContentDecryptionModule_10::kVersion) {
++    auto* h =
++        static_cast<cdm::Host_10*>(getHost(cdm::Host_10::kVersion, userData));
++    if (h) host = New<HostImpl<cdm::Host_10>>(h);
++  }
++  if (!host) return nullptr;
++
++  bool owned = false;
++  Connection* conn = Connection::Shared();
++  if (!conn) {
++    conn = Connection::Spawn();
++    owned = true;
++  }
++  if (!conn) {
++    Delete(host);
++    return nullptr;
++  }
++  ProxyCdm* cdm = New<ProxyCdm>(host, conn, owned);
++  if (!cdm->Create(keySystem, len)) {
++    Delete(cdm);
++    return nullptr;
++  }
++  if (version == cdm::ContentDecryptionModule_11::kVersion) {
++    return static_cast<cdm::ContentDecryptionModule_11*>(cdm);
++  }
++  return static_cast<cdm::ContentDecryptionModule_10*>(cdm);
++}
+diff --git a/dom/media/gmp/widevine-proxy/wvproxy.map b/dom/media/gmp/widevine-proxy/wvproxy.map
+new file mode 100644
+index 0000000000..8f09aa306f
+--- /dev/null
++++ b/dom/media/gmp/widevine-proxy/wvproxy.map
+@@ -0,0 +1 @@
++{ global: InitializeCdmModule_4; DeinitializeCdmModule; CreateCdmInstance; GetCdmVersion; local: *; };
+diff --git a/toolkit/content/gmp-sources/widevinecdm.json b/toolkit/content/gmp-sources/widevinecdm.json
+index fba7ba9d0b..8c5cab2eb5 100644
+--- a/toolkit/content/gmp-sources/widevinecdm.json
++++ b/toolkit/content/gmp-sources/widevinecdm.json
+@@ -35,6 +35,9 @@
+         "Linux_x86_64-gcc3-asan": {
+           "alias": "Linux_x86_64-gcc3"
+         },
++        "Linux_ppc64-gcc3": {
++          "alias": "Linux_x86_64-gcc3"
++        },
+         "WINNT_aarch64-msvc-aarch64": {
+           "fileUrl": "https://edgedl.me.gvt1.com/edgedl/release2/chrome_component/mubkn7mn6cy5fk3644kmxgyueu_4.10.3050.0/oimompecagnajdejgnnjijobebaeigek_4.10.3050.0_win_arm64_fyramdylknoqrjqvzyqaipdjki.crx3",
+           "mirrorUrls": [
+diff --git a/toolkit/modules/GMPInstallManager.sys.mjs b/toolkit/modules/GMPInstallManager.sys.mjs
+index 347c35ec57..1f6fe00b43 100644
+--- a/toolkit/modules/GMPInstallManager.sys.mjs
++++ b/toolkit/modules/GMPInstallManager.sys.mjs
+@@ -48,6 +48,12 @@ const LOCAL_GMP_SOURCES = [
+   },
+ ];
+ 
++// Installs in flight, keyed by addon id and version. Overlapping update checks
++// (a version change and a due check can run together at startup) must not
++// extract into a directory that a plugin started by the first install is
++// already using.
++const gInstallsInFlight = new Map();
++
+ function getLocalSources() {
+   if (GMPPrefs.getBool(GMPPrefs.KEY_ALLOW_LOCAL_SOURCES, true)) {
+     return LOCAL_GMP_SOURCES;
+@@ -346,10 +352,12 @@ GMPInstallManager.prototype = {
+     // server configuration.
+     try {
+       let forcedSources = localSources.filter(function (gmpSource) {
+-        return GMPPrefs.getBool(
+-          GMPPrefs.KEY_PLUGIN_FORCE_INSTALL,
+-          false,
+-          gmpSource.id
++        return (
++          GMPPrefs.getBool(
++            GMPPrefs.KEY_PLUGIN_FORCE_INSTALL,
++            false,
++            gmpSource.id
++          ) || GMPUtils._usesProxyCdm(gmpSource)
+         );
+       });
+ 
+@@ -513,8 +521,17 @@ GMPInstallManager.prototype = {
+       log.error("previous error encountered");
+       return Promise.reject({ type: "previouserrorencountered" });
+     }
++    let key = `${gmpAddon.id}/${gmpAddon.version}`;
++    let inFlight = gInstallsInFlight.get(key);
++    if (inFlight) {
++      return inFlight;
++    }
+     this.gmpDownloader = new GMPDownloader(gmpAddon);
+-    return this.gmpDownloader.start();
++    let install = this.gmpDownloader.start().finally(() => {
++      gInstallsInFlight.delete(key);
++    });
++    gInstallsInFlight.set(key, install);
++    return install;
+   },
+   _getTimeSinceLastCheck() {
+     let now = Math.round(Date.now() / 1000);
+@@ -835,6 +852,65 @@ GMPExtractor.prototype = {
+   },
+ };
+ 
++/**
++ * Completes the install of a CDM that runs through a proxy CDM (see
++ * GMPUtils._usesProxyCdm): moves the downloaded library aside as
++ * libwidevinecdm-x86_64.so and copies the proxy library, its helper, the
++ * gmp-helper launcher and the x64lib runtime into the plugin directory. They
++ * are taken from the directory named by the plugin's proxy-dir pref, or by
++ * default from widevine-proxy under the application directory. box64 itself
++ * is not part of the bundle; it is packaged separately and found on PATH.
++ * The install fails, with the reason recorded in the plugin's
++ * last-install-fail-reason pref, when the helper could not be started from
++ * the result, so a missing box64 leaves Widevine uninstalled instead of
++ * crashing the plugin process on first use.
++ *
++ * @param gmpAddon The addon that was just extracted.
++ */
++async function installProxyCdm(gmpAddon) {
++  let log = getScopedLogger("GMPInstallManager.installProxyCdm");
++  let source = GMPPrefs.getString(
++    GMPPrefs.KEY_PLUGIN_PROXY_DIR,
++    "",
++    gmpAddon.id
++  );
++  if (!source) {
++    source = PathUtils.join(
++      Services.dirsvc.get("GreD", Ci.nsIFile).path,
++      "widevine-proxy"
++    );
++  }
++  let installDir = PathUtils.join(
++    Services.dirsvc.get("ProfD", Ci.nsIFile).path,
++    gmpAddon.id,
++    gmpAddon.version
++  );
++  const lib = "libwidevinecdm.so";
++  if (!(await IOUtils.exists(PathUtils.join(source, lib)))) {
++    throw new Error(`Proxy CDM not found in ${source}`);
++  }
++  log.info(`Installing proxy CDM from ${source} into ${installDir}`);
++  await IOUtils.move(
++    PathUtils.join(installDir, lib),
++    PathUtils.join(installDir, "libwidevinecdm-x86_64.so")
++  );
++  for (let name of [lib, "wvhost", "gmp-helper"]) {
++    let dest = PathUtils.join(installDir, name);
++    await IOUtils.copy(PathUtils.join(source, name), dest);
++    await IOUtils.setPermissions(dest, 0o755);
++  }
++  await IOUtils.copy(
++    PathUtils.join(source, "x64lib"),
++    PathUtils.join(installDir, "x64lib"),
++    { recursive: true }
++  );
++  let problem = GMPUtils.proxyCdmProblem(installDir);
++  if (problem) {
++    log.error(`Proxy CDM cannot start its helper: ${problem}`);
++    throw new Error(`Proxy CDM cannot start its helper: ${problem}`);
++  }
++}
++
+ /**
+  * Constructs an object which downloads and initiates an install of
+  * the specified GMPAddon object.
+@@ -876,7 +952,14 @@ GMPDownloader.prototype = {
+           gmpAddon.id,
+           gmpAddon.version,
+         ]);
+-        let installPromise = gmpInstaller.install();
++        let installPromise = gmpInstaller
++          .install()
++          .then(async extractedPaths => {
++            if (GMPUtils._usesProxyCdm(gmpAddon)) {
++              await installProxyCdm(gmpAddon);
++            }
++            return extractedPaths;
++          });
+         return installPromise
+           .then(
+             extractedPaths => {
+diff --git a/toolkit/modules/GMPUtils.sys.mjs b/toolkit/modules/GMPUtils.sys.mjs
+index 4782ca4f75..a5d9e8f3a1 100644
+--- a/toolkit/modules/GMPUtils.sys.mjs
++++ b/toolkit/modules/GMPUtils.sys.mjs
+@@ -105,6 +105,82 @@ export var GMPUtils = {
+     );
+   },
+ 
++  /**
++   * Checks whether a given plugin is the x86_64 Widevine CDM run through a
++   * proxy CDM and an emulated helper process, as on Linux ppc64le. Such a
++   * plugin is not served for the platform by the update servers: it is taken
++   * from the local source config, which aliases the x86_64 package, and the
++   * proxy is installed beside the downloaded library (see
++   * GMPInstallManager.installProxyCdm). The ppc64 ABI covers both byte
++   * orders; the emulated helper exists for little-endian only.
++   *
++   * @param   aPlugin
++   *          The plugin to check.
++   */
++  _usesProxyCdm(aPlugin) {
++    return (
++      aPlugin.id == WIDEVINE_L3_ID &&
++      AppConstants.platform == "linux" &&
++      Services.appinfo.XPCOMABI.startsWith("ppc64-") &&
++      new Uint8Array(new Uint16Array([1]).buffer)[0] === 1
++    );
++  },
++
++  /**
++   * Names what stops a proxy CDM installed in aDir from starting its helper,
++   * or returns null when gmp-helper, wvhost and box64 can all be run.
++   *
++   * @param   aDir
++   *          The plugin's install directory.
++   */
++  proxyCdmProblem(aDir) {
++    for (let name of ["gmp-helper", "wvhost"]) {
++      let path = PathUtils.join(aDir, name);
++      if (!this._isExecutable(path)) {
++        return `${path} is missing or not executable`;
++      }
++    }
++    if (!this.box64Path()) {
++      let fromEnv = Services.env.get("WV_BOX64");
++      return fromEnv
++        ? `box64 not found at ${fromEnv}, named by WV_BOX64`
++        : "box64 was not found on PATH; install box64 or set WV_BOX64";
++    }
++    return null;
++  },
++
++  /**
++   * The box64 the plugin's gmp-helper will run, or null when there is none.
++   * box64 is packaged separately from the proxy, so it is taken from PATH
++   * unless WV_BOX64 names one, which is how gmp-helper resolves it too.
++   */
++  box64Path() {
++    let fromEnv = Services.env.get("WV_BOX64");
++    if (fromEnv) {
++      return this._isExecutable(fromEnv) ? fromEnv : null;
++    }
++    for (let dir of (Services.env.get("PATH") || "").split(":")) {
++      if (!dir.startsWith("/")) {
++        continue;
++      }
++      let path = PathUtils.join(dir, "box64");
++      if (this._isExecutable(path)) {
++        return path;
++      }
++    }
++    return null;
++  },
++
++  _isExecutable(aPath) {
++    try {
++      let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
++      file.initWithPath(aPath);
++      return file.exists() && file.isExecutable();
++    } catch (e) {
++      return false;
++    }
++  },
++
+   _getChromiumUpdateParameters(aPlugin) {
+     let params = "";
+     if (AppConstants.platform === "win") {
+@@ -120,7 +196,7 @@ export var GMPUtils = {
+     const abi = Services.appinfo.XPCOMABI;
+     if (abi.match(/aarch64/)) {
+       params += "&arch=arm64&os_arch=arm64";
+-    } else if (abi.match(/x86_64/)) {
++    } else if (abi.match(/x86_64/) || this._usesProxyCdm(aPlugin)) {
+       params += "&arch=x64&os_arch=x64";
+     } else if (abi.match(/x86/)) {
+       params += "&arch=x86&os_arch=x86";
+@@ -178,6 +254,7 @@ export var GMPPrefs = {
+   KEY_PLUGIN_ALLOW_CHROMIUM_UPDATE: "media.{0}.allow-chromium-update",
+   KEY_PLUGIN_FORCE_CHROMIUM_UPDATE: "media.{0}.force-chromium-update",
+   KEY_PLUGIN_FORCE_CHROMIUM_BETA: "media.{0}.force-chromium-beta",
++  KEY_PLUGIN_PROXY_DIR: "media.{0}.proxy-dir",
+   KEY_ALLOW_LOCAL_SOURCES: "media.gmp-manager.allowLocalSources",
+   KEY_URL: "media.gmp-manager.url",
+   KEY_URL_OVERRIDE: "media.gmp-manager.url.override",
+diff --git a/toolkit/moz.configure b/toolkit/moz.configure
+index 593f8b9b9c..cb2c5ab116 100644
+--- a/toolkit/moz.configure
++++ b/toolkit/moz.configure
+@@ -930,6 +930,15 @@ def eme_choices(target, wmf):
+         return ("widevine",)
+     if target.os in ("OSX"):
+         return ("widevine",)
++    # Linux ppc64le runs the x86_64 Widevine CDM through a native proxy CDM and
++    # a helper under box64, which has no big-endian support; see
++    # dom/media/gmp/widevine-proxy.
++    if (
++        target.kernel == "Linux"
++        and target.cpu == "ppc64"
++        and target.endianness == "little"
++    ):
++        return ("widevine",)
+ 
+ 
+ # Widevine is enabled by default in desktop browser builds.
+@@ -971,6 +980,25 @@ set_config("MOZ_WMF_CDM", True, when=wmfcdm)
+ set_define("MOZ_WMF_CDM", True, when=wmfcdm)
+ 
+ 
++# Linux ppc64le runs the x86_64 Widevine CDM through a native proxy CDM and a
++# helper under box64 (see dom/media/gmp/widevine-proxy). The helper parts are
++# built for x86_64, which needs clang.
++@depends(eme_modules, target, c_compiler, when=eme_choices)
++def widevine_proxy(modules, target, c_compiler):
++    if (
++        "widevine" in modules
++        and target.kernel == "Linux"
++        and target.cpu == "ppc64"
++        and target.endianness == "little"
++        and c_compiler.type == "clang"
++    ):
++        return True
++
++
++set_config("MOZ_WIDEVINE_PROXY", True, when=widevine_proxy)
++set_define("MOZ_WIDEVINE_PROXY", True, when=widevine_proxy)
++
++
+ option(
+     name="--enable-chrome-format",
+     help="Select FORMAT of chrome files during packaging",
+diff --git a/toolkit/mozapps/extensions/internal/GMPProvider.sys.mjs b/toolkit/mozapps/extensions/internal/GMPProvider.sys.mjs
+index e0844cef4d..50c00371fa 100644
+--- a/toolkit/mozapps/extensions/internal/GMPProvider.sys.mjs
++++ b/toolkit/mozapps/extensions/internal/GMPProvider.sys.mjs
+@@ -498,7 +498,7 @@ GMPWrapper.prototype = {
+         this._log.info(
+           "onPrefEnabledChanged() - adding gmp directory " + this._gmpPath
+         );
+-        lazy.gmpService.addPluginDirectory(this._gmpPath);
++        this.addPluginDirectory();
+       } else {
+         this._log.info(
+           "onPrefEnabledChanged() - removing gmp directory " + this._gmpPath
+@@ -612,7 +612,7 @@ GMPWrapper.prototype = {
+       this._log.info(
+         "onPrefVersionChanged() - registering gmp directory " + this._gmpPath
+       );
+-      lazy.gmpService.addPluginDirectory(this._gmpPath);
++      this.addPluginDirectory();
+     }
+     lazy.AddonManagerPrivate.callAddonListeners("onInstalled", this);
+   },
+@@ -694,6 +694,27 @@ GMPWrapper.prototype = {
+     );
+   },
+ 
++  /**
++   * Registers the installed plugin directory with the GMP service, unless the
++   * plugin is a proxy CDM whose helper cannot be started, in which case the
++   * plugin stays unregistered and the reason is logged.
++   */
++  addPluginDirectory() {
++    if (GMPUtils._usesProxyCdm(this._plugin)) {
++      let problem = GMPUtils.proxyCdmProblem(this.gmpPath);
++      if (problem) {
++        this._log.error(
++          "addPluginDirectory() - not registering " +
++            this._plugin.id +
++            ", its helper cannot start: " +
++            problem
++        );
++        return;
++      }
++    }
++    lazy.gmpService.addPluginDirectory(this.gmpPath);
++  },
++
+   validate() {
+     if (!this.isInstalled) {
+       // Not installed -> Valid.
+@@ -772,7 +793,7 @@ var GMPProvider = {
+         }
+         this._log.info("startup - adding gmp directory " + gmpPath);
+         try {
+-          lazy.gmpService.addPluginDirectory(gmpPath);
++          wrapper.addPluginDirectory();
+         } catch (e) {
+           if (e.name != "NS_ERROR_NOT_AVAILABLE") {
+             throw e;

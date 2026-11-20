@@ -1,0 +1,131 @@
+From b247b5c954266bb84c9929dd7b8ef60035f92e96 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Sat, 31 Oct 2026 07:57:13 +1100
+Subject: [PATCH 21/25] Split SWGL shuffles of wide vectors into 16-byte halves
+ for GCC
+
+GCC has no 32-byte vector mode on PowerPC (nor on x86 without AVX or on
+AArch64), so a __builtin_shufflevector whose result is 32 bytes wide,
+such as the alpha splat on a 16-lane u16 vector in blend.h, is lowered to
+one scalar load and store per lane. Build a wide result from two 16-byte
+shuffles when each half of the result reads from at most two 16-byte
+operands, remapping the lane indices at compile time, and keep the plain
+builtin otherwise. Clang already splits these itself.
+
+(cherry picked from commit 242bb090b26839fff520710f2329e16a269187f4)
+---
+ gfx/wr/swgl/src/vector_type.h | 88 +++++++++++++++++++++++++++++++++--
+ 1 file changed, 84 insertions(+), 4 deletions(-)
+
+diff --git a/gfx/wr/swgl/src/vector_type.h b/gfx/wr/swgl/src/vector_type.h
+index cacf355d8b..88e07897d1 100644
+--- a/gfx/wr/swgl/src/vector_type.h
++++ b/gfx/wr/swgl/src/vector_type.h
+@@ -2,6 +2,8 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
++#include <utility>
++
+ #ifdef __clang__
+ #  ifdef __SSE2__
+ #    include <xmmintrin.h>
+@@ -316,16 +318,94 @@ struct VectorType {
+   }
+ 
+ #  ifdef HAS_BUILTIN_SHUFFLEVECTOR
++  // GCC lowers a shuffle whose result is wider than a register to scalar
++  // element moves, so a wide result is built from two shuffles of 16-byte
++  // operands when each half of it reads from at most two of them.
++  template <int OFFSET, int COUNT, mask_index... INDEXES>
++  struct HalfShuffle {
++    static constexpr mask_index indexes[] = {INDEXES...};
++    static constexpr int part = sizeof(data_type) > 16 ? N / 2 : N;
++    static constexpr int source(int k) {
++      return indexes[OFFSET + k] < 0 ? -1 : int(indexes[OFFSET + k]) / part;
++    }
++    static constexpr int first() {
++      for (int k = 0; k < COUNT; k++) {
++        if (source(k) >= 0) return source(k);
++      }
++      return 0;
++    }
++    static constexpr int second() {
++      for (int k = 0; k < COUNT; k++) {
++        if (source(k) >= 0 && source(k) != first()) return source(k);
++      }
++      return first();
++    }
++    static constexpr bool fits() {
++      for (int k = 0; k < COUNT; k++) {
++        if (source(k) >= 0 && source(k) != first() && source(k) != second()) {
++          return false;
++        }
++      }
++      return true;
++    }
++    static constexpr mask_index remap(int k) {
++      return indexes[OFFSET + k] < 0 ? -1
++             : source(k) == first()
++                 ? indexes[OFFSET + k] - first() * part
++                 : indexes[OFFSET + k] - second() * part + part;
++    }
++  };
++
++  template <int Q>
++  const auto& part(const VectorType& b) const {
++    if constexpr (sizeof(data_type) > 16) {
++      if constexpr (Q == 0) {
++        return low_half;
++      } else if constexpr (Q == 1) {
++        return high_half;
++      } else if constexpr (Q == 2) {
++        return b.low_half;
++      } else {
++        return b.high_half;
++      }
++    } else if constexpr (Q == 0) {
++      return data;
++    } else {
++      return b.data;
++    }
++  }
++
++  template <int Q0, int Q1, mask_index... R>
++  auto shuffleParts(const VectorType& b,
++                    std::integer_sequence<mask_index, R...>) const {
++    return __builtin_shufflevector(part<Q0>(b), part<Q1>(b), R...);
++  }
++
++  template <int OFFSET, mask_index... INDEXES, size_t... K>
++  auto shuffleHalf(const VectorType& b, std::index_sequence<K...>) const {
++    typedef HalfShuffle<OFFSET, sizeof...(K), INDEXES...> H;
++    return shuffleParts<H::first(), H::second()>(
++        b, std::integer_sequence<mask_index, H::remap(K)...>());
++  }
++
+   template <mask_index... INDEXES, int M = sizeof...(INDEXES)>
+   VectorType<T, M> shuffle(VectorType b) const {
+-    return VectorType<T, M>::wrap(
+-        __builtin_shufflevector(data, b.data, INDEXES...));
++    if constexpr (sizeof(T) * M > 16 &&
++                  HalfShuffle<0, M / 2, INDEXES...>::fits() &&
++                  HalfShuffle<M / 2, M / 2, INDEXES...>::fits()) {
++      return VectorType<T, M>::wrap(
++          shuffleHalf<0, INDEXES...>(b, std::make_index_sequence<M / 2>()),
++          shuffleHalf<M / 2, INDEXES...>(b,
++                                         std::make_index_sequence<M / 2>()));
++    } else {
++      return VectorType<T, M>::wrap(
++          __builtin_shufflevector(data, b.data, INDEXES...));
++    }
+   }
+ 
+   template <mask_index... INDEXES, int M = sizeof...(INDEXES)>
+   VectorType<T, M> swizzle() const {
+-    return VectorType<T, M>::wrap(
+-        __builtin_shufflevector(data, data, INDEXES...));
++    return shuffle<INDEXES...>(*this);
+   }
+ #  else
+   template <mask_index... INDEXES, int M = sizeof...(INDEXES)>

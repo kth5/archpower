@@ -1,0 +1,28 @@
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Sun, 1 Nov 2026 12:00:00 +1100
+Subject: [PATCH] Use a vector register constraint for wasm2c SIMD_FORCE_READ
+ on PowerPC
+
+The fallback "f" constraint names a scalar floating-point register, which
+cannot hold a 128-bit v128. clang rejects every SIMD load in the generated
+rlbox sandboxes on ppc64le:
+
+  error: could not allocate input reg for constraint 'f'
+
+Use "v", an AltiVec register, when AltiVec is available.
+---
+diff --git a/third_party/wasm2c/src/prebuilt/wasm2c_simd_source_declarations.cc b/third_party/wasm2c/src/prebuilt/wasm2c_simd_source_declarations.cc
+index 659bfdf..8132ed4 100644
+--- a/third_party/wasm2c/src/prebuilt/wasm2c_simd_source_declarations.cc
++++ b/third_party/wasm2c/src/prebuilt/wasm2c_simd_source_declarations.cc
+@@ -24,6 +24,10 @@ R"w2c_template(#elif defined(__s390x__)
+ )w2c_template"
+ R"w2c_template(#define SIMD_FORCE_READ(var) __asm__("" ::"d"(var));
+ )w2c_template"
++R"w2c_template(#elif defined(__powerpc__) && defined(__ALTIVEC__)
++)w2c_template"
++R"w2c_template(#define SIMD_FORCE_READ(var) __asm__("" ::"v"(var));
++)w2c_template"
+ R"w2c_template(#else
+ )w2c_template"
+ R"w2c_template(#define SIMD_FORCE_READ(var) __asm__("" ::"f"(var));

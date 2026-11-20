@@ -1,0 +1,1298 @@
+From ad23e792959016c9e7b2a371d28b64102ff72bae Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Sat, 31 Oct 2026 03:06:01 +1100
+Subject: [PATCH 18/25] Generalise the gfx/2d VSX kernels to plain AltiVec for
+ the PowerPC 970
+
+The convolution filter, filter-processing SIMD primitives and luminance
+mask kernels carried over from the main branch used VSX unaligned loads
+and stores, a 64-bit lane splat and the VSX float multiply and divide.
+This ESR tree still serves the PowerPC 970 (Apple G5), so the kernels now
+use the lvsl/vperm load and rotate plus vec_ste store idioms, 32-bit lane
+construction, vmaddfp with a -0.0 addend for the float multiply and a
+per-lane divide when VSX is not available, with the VSX forms kept under
+__VSX__. They are renamed from VSX to AltiVec, built whenever the target
+baseline has AltiVec, and selected at run time through supports_vmx().
+---
+ ...erVSX.cpp => ConvolutionFilterAltiVec.cpp} |  53 +++-
+ gfx/2d/DrawTarget.cpp                         |  10 +-
+ gfx/2d/FilterProcessing.cpp                   |  62 ++--
+ gfx/2d/FilterProcessing.h                     |  22 +-
+ gfx/2d/FilterProcessingAltiVec.cpp            |  94 ++++++
+ gfx/2d/FilterProcessingVSX.cpp                |  95 ------
+ ...{LuminanceVSX.cpp => LuminanceAltiVec.cpp} |  36 ++-
+ gfx/2d/LuminanceAltiVec.h                     |  16 +
+ gfx/2d/LuminanceVSX.h                         |  16 -
+ gfx/2d/SIMD.h                                 | 293 +++++++++---------
+ gfx/2d/SkConvolver.cpp                        |  20 +-
+ gfx/2d/moz.build                              |  15 +-
+ 12 files changed, 387 insertions(+), 345 deletions(-)
+ rename gfx/2d/{ConvolutionFilterVSX.cpp => ConvolutionFilterAltiVec.cpp} (84%)
+ create mode 100644 gfx/2d/FilterProcessingAltiVec.cpp
+ delete mode 100644 gfx/2d/FilterProcessingVSX.cpp
+ rename gfx/2d/{LuminanceVSX.cpp => LuminanceAltiVec.cpp} (75%)
+ create mode 100644 gfx/2d/LuminanceAltiVec.h
+ delete mode 100644 gfx/2d/LuminanceVSX.h
+
+diff --git a/gfx/2d/ConvolutionFilterVSX.cpp b/gfx/2d/ConvolutionFilterAltiVec.cpp
+similarity index 84%
+rename from gfx/2d/ConvolutionFilterVSX.cpp
+rename to gfx/2d/ConvolutionFilterAltiVec.cpp
+index 8729eef238..f38dcfcc77 100644
+--- a/gfx/2d/ConvolutionFilterVSX.cpp
++++ b/gfx/2d/ConvolutionFilterAltiVec.cpp
+@@ -22,8 +22,34 @@ static constexpr bool kLE = std::endian::native == std::endian::little;
+ // Byte select mask for the alpha channel of each pixel.
+ static constexpr unsigned int kAlphaMask = kLE ? 0xFF000000u : 0x000000FFu;
+ 
++// VSX has unaligned vector loads and stores; plain AltiVec (PowerPC 970)
++// only has aligned ones, so use the lvsl/vperm idiom for loads and rotate
++// plus per-word element stores for 4-byte aligned pixel stores.
+ static MOZ_ALWAYS_INLINE u8x16 Load16(const unsigned char* aPtr) {
++#if defined(__VSX__)
+   return vec_xl(0, aPtr);
++#elif defined(__BIG_ENDIAN__)
++  return vec_perm(vec_ld(0, aPtr), vec_ld(15, aPtr), vec_lvsl(0, aPtr));
++#else
++  u8x16 v;
++  memcpy(&v, aPtr, 16);
++  return v;
++#endif
++}
++
++static MOZ_ALWAYS_INLINE void Store16(unsigned char* aPtr, u8x16 aV) {
++#if defined(__VSX__)
++  vec_xst(aV, 0, aPtr);
++#elif defined(__BIG_ENDIAN__)
++  u8x16 r = vec_perm(aV, aV, vec_lvsr(0, aPtr));
++  unsigned int* w = reinterpret_cast<unsigned int*>(aPtr);
++  vec_ste((u32x4)r, 0, w);
++  vec_ste((u32x4)r, 4, w);
++  vec_ste((u32x4)r, 8, w);
++  vec_ste((u32x4)r, 12, w);
++#else
++  memcpy(aPtr, &aV, 16);
++#endif
+ }
+ 
+ // Zero-extend the low or high 8 bytes to 16-bit lanes.
+@@ -87,9 +113,9 @@ static MOZ_ALWAYS_INLINE i32x4 RoundShift(i32x4 aAccum) {
+ 
+ // Convolves horizontally along a single row. The row data is given in
+ // |srcData| and continues for the numValues() of the filter.
+-void convolve_horizontally_vsx(const unsigned char* srcData,
+-                               const SkConvolutionFilter1D& filter,
+-                               unsigned char* outRow, bool /*hasAlpha*/) {
++void convolve_horizontally_altivec(const unsigned char* srcData,
++                                   const SkConvolutionFilter1D& filter,
++                                   unsigned char* outRow, bool /*hasAlpha*/) {
+   const u8x16 zero = vec_splats((unsigned char)0);
+   const u8x16 pairMask01 = PairMask(0);
+   const u8x16 pairMask23 = PairMask(8);
+@@ -106,9 +132,10 @@ void convolve_horizontally_vsx(const unsigned char* srcData,
+     // Four coefficients and four pixels per iteration.
+     for (int filterX = 0; filterX < filterLength >> 2; filterX++) {
+       // [c0 c1 c2 c3 c0 c1 c2 c3], then [c0 c1 c0 c1 ...] and [c2 c3 c2 c3 ...]
+-      uint64_t coeffBits;
+-      memcpy(&coeffBits, filterValues, 8);
+-      u32x4 coeff = (u32x4)vec_splats((unsigned long long)coeffBits);
++      unsigned int bits01, bits23;
++      memcpy(&bits01, filterValues, 4);
++      memcpy(&bits23, filterValues + 2, 4);
++      u32x4 coeff = {bits01, bits23, bits01, bits23};
+       i16x8 coeff01 = (i16x8)vec_splat(coeff, 0);
+       i16x8 coeff23 = (i16x8)vec_splat(coeff, 1);
+ 
+@@ -212,7 +239,7 @@ static void ConvolveVertically(const ConvolutionFixed* filterValues,
+   for (int outX = 0; outX < width; outX += 4) {
+     u8x16 px = ConvolveBlock<hasAlpha>(filterValues, filterLength,
+                                        sourceDataRows, outX << 2);
+-    vec_xst(px, 0, outRow);
++    Store16(outRow, px);
+     outRow += 16;
+   }
+ 
+@@ -223,16 +250,16 @@ static void ConvolveVertically(const ConvolutionFixed* filterValues,
+     u8x16 px = ConvolveBlock<hasAlpha>(filterValues, filterLength,
+                                        sourceDataRows, width << 2);
+     alignas(16) unsigned char tmp[16];
+-    vec_xst(px, 0, tmp);
++    vec_st(px, 0, tmp);
+     memcpy(outRow, tmp, r * 4);
+   }
+ }
+ 
+-void convolve_vertically_vsx(const ConvolutionFixed* filterValues,
+-                             int filterLength,
+-                             unsigned char* const* sourceDataRows,
+-                             int pixelWidth, unsigned char* outRow,
+-                             bool hasAlpha) {
++void convolve_vertically_altivec(const ConvolutionFixed* filterValues,
++                                 int filterLength,
++                                 unsigned char* const* sourceDataRows,
++                                 int pixelWidth, unsigned char* outRow,
++                                 bool hasAlpha) {
+   if (hasAlpha) {
+     ConvolveVertically<true>(filterValues, filterLength, sourceDataRows,
+                              pixelWidth, outRow);
+diff --git a/gfx/2d/DrawTarget.cpp b/gfx/2d/DrawTarget.cpp
+index 113c3ad955..65cd23e80d 100644
+--- a/gfx/2d/DrawTarget.cpp
++++ b/gfx/2d/DrawTarget.cpp
+@@ -19,8 +19,8 @@
+ #  include "LuminanceNEON.h"
+ #endif
+ 
+-#ifdef USE_VSX
+-#  include "LuminanceVSX.h"
++#ifdef USE_ALTIVEC
++#  include "LuminanceAltiVec.h"
+ #  include "mozilla/ppc.h"
+ #endif
+ 
+@@ -69,9 +69,9 @@ static void ComputesRGBLuminanceMask(const uint8_t* aSourceData,
+   }
+ #endif
+ 
+-#ifdef USE_VSX
+-  if (mozilla::supports_vsx()) {
+-    ComputesRGBLuminanceMask_VSX(aSourceData, aSourceStride, aDestData,
++#ifdef USE_ALTIVEC
++  if (mozilla::supports_vmx()) {
++    ComputesRGBLuminanceMask_AltiVec(aSourceData, aSourceStride, aDestData,
+                                  aDestStride, aSize, aOpacity);
+     return;
+   }
+diff --git a/gfx/2d/FilterProcessing.cpp b/gfx/2d/FilterProcessing.cpp
+index e8e7b3f5be..61ebc4a197 100644
+--- a/gfx/2d/FilterProcessing.cpp
++++ b/gfx/2d/FilterProcessing.cpp
+@@ -8,7 +8,7 @@
+ 
+ #include "mozilla/SSE.h"
+ 
+-#ifdef USE_VSX
++#ifdef USE_ALTIVEC
+ #  include "mozilla/ppc.h"
+ #endif
+ 
+@@ -39,9 +39,9 @@ already_AddRefed<DataSourceSurface> FilterProcessing::ExtractAlpha(
+ #ifdef USE_SSE2
+     ExtractAlpha_SSE2(size, sourceData, sourceStride, alphaData, alphaStride);
+ #endif
+-#ifdef USE_VSX
+-  } else if (mozilla::supports_vsx()) {
+-    ExtractAlpha_VSX(size, sourceData, sourceStride, alphaData, alphaStride);
++#ifdef USE_ALTIVEC
++  } else if (mozilla::supports_vmx()) {
++    ExtractAlpha_AltiVec(size, sourceData, sourceStride, alphaData, alphaStride);
+ #endif
+   } else {
+     ExtractAlpha_Scalar(size, sourceData, sourceStride, alphaData, alphaStride);
+@@ -56,9 +56,9 @@ already_AddRefed<DataSourceSurface> FilterProcessing::ConvertToB8G8R8A8(
+ #ifdef USE_SSE2
+     return ConvertToB8G8R8A8_SSE2(aSurface);
+ #endif
+-#ifdef USE_VSX
+-  } else if (mozilla::supports_vsx()) {
+-    return ConvertToB8G8R8A8_VSX(aSurface);
++#ifdef USE_ALTIVEC
++  } else if (mozilla::supports_vmx()) {
++    return ConvertToB8G8R8A8_AltiVec(aSurface);
+ #endif
+   }
+   return ConvertToB8G8R8A8_Scalar(aSurface);
+@@ -71,9 +71,9 @@ already_AddRefed<DataSourceSurface> FilterProcessing::ApplyBlending(
+ #ifdef USE_SSE2
+     return ApplyBlending_SSE2(aInput1, aInput2, aBlendMode);
+ #endif
+-#ifdef USE_VSX
+-  } else if (mozilla::supports_vsx()) {
+-    return ApplyBlending_VSX(aInput1, aInput2, aBlendMode);
++#ifdef USE_ALTIVEC
++  } else if (mozilla::supports_vmx()) {
++    return ApplyBlending_AltiVec(aInput1, aInput2, aBlendMode);
+ #endif
+   }
+   return nullptr;
+@@ -88,9 +88,9 @@ void FilterProcessing::ApplyMorphologyHorizontal(
+     ApplyMorphologyHorizontal_SSE2(aSourceData, aSourceStride, aDestData,
+                                    aDestStride, aDestRect, aRadius, aOp);
+ #endif
+-#ifdef USE_VSX
+-  } else if (mozilla::supports_vsx()) {
+-    ApplyMorphologyHorizontal_VSX(aSourceData, aSourceStride, aDestData,
++#ifdef USE_ALTIVEC
++  } else if (mozilla::supports_vmx()) {
++    ApplyMorphologyHorizontal_AltiVec(aSourceData, aSourceStride, aDestData,
+                                   aDestStride, aDestRect, aRadius, aOp);
+ #endif
+   } else {
+@@ -108,9 +108,9 @@ void FilterProcessing::ApplyMorphologyVertical(
+     ApplyMorphologyVertical_SSE2(aSourceData, aSourceStride, aDestData,
+                                  aDestStride, aDestRect, aRadius, aOp);
+ #endif
+-#ifdef USE_VSX
+-  } else if (mozilla::supports_vsx()) {
+-    ApplyMorphologyVertical_VSX(aSourceData, aSourceStride, aDestData,
++#ifdef USE_ALTIVEC
++  } else if (mozilla::supports_vmx()) {
++    ApplyMorphologyVertical_AltiVec(aSourceData, aSourceStride, aDestData,
+                                 aDestStride, aDestRect, aRadius, aOp);
+ #endif
+   } else {
+@@ -125,9 +125,9 @@ already_AddRefed<DataSourceSurface> FilterProcessing::ApplyColorMatrix(
+ #ifdef USE_SSE2
+     return ApplyColorMatrix_SSE2(aInput, aMatrix);
+ #endif
+-#ifdef USE_VSX
+-  } else if (mozilla::supports_vsx()) {
+-    return ApplyColorMatrix_VSX(aInput, aMatrix);
++#ifdef USE_ALTIVEC
++  } else if (mozilla::supports_vmx()) {
++    return ApplyColorMatrix_AltiVec(aInput, aMatrix);
+ #endif
+   }
+   return ApplyColorMatrix_Scalar(aInput, aMatrix);
+@@ -140,9 +140,9 @@ void FilterProcessing::ApplyComposition(DataSourceSurface* aSource,
+ #ifdef USE_SSE2
+     ApplyComposition_SSE2(aSource, aDest, aOperator);
+ #endif
+-#ifdef USE_VSX
+-  } else if (mozilla::supports_vsx()) {
+-    ApplyComposition_VSX(aSource, aDest, aOperator);
++#ifdef USE_ALTIVEC
++  } else if (mozilla::supports_vmx()) {
++    ApplyComposition_AltiVec(aSource, aDest, aOperator);
+ #endif
+   } else {
+     ApplyComposition_Scalar(aSource, aDest, aOperator);
+@@ -171,9 +171,9 @@ void FilterProcessing::DoOpacityCalculation(
+     DoOpacityCalculation_SSE2(aSize, aTargetData, aTargetStride, aSourceData,
+                               aSourceStride, aValue);
+ #endif
+-#ifdef USE_VSX
+-  } else if (mozilla::supports_vsx()) {
+-    DoOpacityCalculation_VSX(aSize, aTargetData, aTargetStride, aSourceData,
++#ifdef USE_ALTIVEC
++  } else if (mozilla::supports_vmx()) {
++    DoOpacityCalculation_AltiVec(aSize, aTargetData, aTargetStride, aSourceData,
+                              aSourceStride, aValue);
+ #endif
+   } else {
+@@ -198,9 +198,9 @@ already_AddRefed<DataSourceSurface> FilterProcessing::RenderTurbulence(
+     return RenderTurbulence_SSE2(aSize, aOffset, aBaseFrequency, aSeed,
+                                  aNumOctaves, aType, aStitch, aTileRect);
+ #endif
+-#ifdef USE_VSX
+-  } else if (mozilla::supports_vsx()) {
+-    return RenderTurbulence_VSX(aSize, aOffset, aBaseFrequency, aSeed,
++#ifdef USE_ALTIVEC
++  } else if (mozilla::supports_vmx()) {
++    return RenderTurbulence_AltiVec(aSize, aOffset, aBaseFrequency, aSeed,
+                                 aNumOctaves, aType, aStitch, aTileRect);
+ #endif
+   }
+@@ -215,9 +215,9 @@ already_AddRefed<DataSourceSurface> FilterProcessing::ApplyArithmeticCombine(
+ #ifdef USE_SSE2
+     return ApplyArithmeticCombine_SSE2(aInput1, aInput2, aK1, aK2, aK3, aK4);
+ #endif
+-#ifdef USE_VSX
+-  } else if (mozilla::supports_vsx()) {
+-    return ApplyArithmeticCombine_VSX(aInput1, aInput2, aK1, aK2, aK3, aK4);
++#ifdef USE_ALTIVEC
++  } else if (mozilla::supports_vmx()) {
++    return ApplyArithmeticCombine_AltiVec(aInput1, aInput2, aK1, aK2, aK3, aK4);
+ #endif
+   }
+   return ApplyArithmeticCombine_Scalar(aInput1, aInput2, aK1, aK2, aK3, aK4);
+diff --git a/gfx/2d/FilterProcessing.h b/gfx/2d/FilterProcessing.h
+index f5cfcee8ec..4c5b2aba2e 100644
+--- a/gfx/2d/FilterProcessing.h
++++ b/gfx/2d/FilterProcessing.h
+@@ -148,38 +148,38 @@ class FilterProcessing {
+       Float aK2, Float aK3, Float aK4);
+ #endif
+ 
+-#ifdef USE_VSX
+-  static void ExtractAlpha_VSX(const IntSize& size, const uint8_t* sourceData,
++#ifdef USE_ALTIVEC
++  static void ExtractAlpha_AltiVec(const IntSize& size, const uint8_t* sourceData,
+                                int32_t sourceStride, uint8_t* alphaData,
+                                int32_t alphaStride);
+-  static already_AddRefed<DataSourceSurface> ConvertToB8G8R8A8_VSX(
++  static already_AddRefed<DataSourceSurface> ConvertToB8G8R8A8_AltiVec(
+       SourceSurface* aSurface);
+-  static already_AddRefed<DataSourceSurface> ApplyBlending_VSX(
++  static already_AddRefed<DataSourceSurface> ApplyBlending_AltiVec(
+       DataSourceSurface* aInput1, DataSourceSurface* aInput2,
+       BlendMode aBlendMode);
+-  static void ApplyMorphologyHorizontal_VSX(
++  static void ApplyMorphologyHorizontal_AltiVec(
+       const uint8_t* aSourceData, int32_t aSourceStride, uint8_t* aDestData,
+       int32_t aDestStride, const IntRect& aDestRect, int32_t aRadius,
+       MorphologyOperator aOperator);
+-  static void ApplyMorphologyVertical_VSX(
++  static void ApplyMorphologyVertical_AltiVec(
+       const uint8_t* aSourceData, int32_t aSourceStride, uint8_t* aDestData,
+       int32_t aDestStride, const IntRect& aDestRect, int32_t aRadius,
+       MorphologyOperator aOperator);
+-  static already_AddRefed<DataSourceSurface> ApplyColorMatrix_VSX(
++  static already_AddRefed<DataSourceSurface> ApplyColorMatrix_AltiVec(
+       DataSourceSurface* aInput, const Matrix5x4& aMatrix);
+-  static void ApplyComposition_VSX(DataSourceSurface* aSource,
++  static void ApplyComposition_AltiVec(DataSourceSurface* aSource,
+                                    DataSourceSurface* aDest,
+                                    CompositeOperator aOperator);
+-  static void DoOpacityCalculation_VSX(const IntSize& aSize,
++  static void DoOpacityCalculation_AltiVec(const IntSize& aSize,
+                                        uint8_t* aTargetData,
+                                        int32_t aTargetStride,
+                                        const uint8_t* aSourceData,
+                                        int32_t aSourceStride, Float aValue);
+-  static already_AddRefed<DataSourceSurface> RenderTurbulence_VSX(
++  static already_AddRefed<DataSourceSurface> RenderTurbulence_AltiVec(
+       const IntSize& aSize, const Point& aOffset, const Size& aBaseFrequency,
+       int32_t aSeed, int aNumOctaves, TurbulenceType aType, bool aStitch,
+       const Rect& aTileRect);
+-  static already_AddRefed<DataSourceSurface> ApplyArithmeticCombine_VSX(
++  static already_AddRefed<DataSourceSurface> ApplyArithmeticCombine_AltiVec(
+       DataSourceSurface* aInput1, DataSourceSurface* aInput2, Float aK1,
+       Float aK2, Float aK3, Float aK4);
+ #endif
+diff --git a/gfx/2d/FilterProcessingAltiVec.cpp b/gfx/2d/FilterProcessingAltiVec.cpp
+new file mode 100644
+index 0000000000..1c29c69b94
+--- /dev/null
++++ b/gfx/2d/FilterProcessingAltiVec.cpp
+@@ -0,0 +1,94 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#define SIMD_COMPILE_ALTIVEC
++
++#include "FilterProcessingSIMD-inl.h"
++
++#ifndef USE_ALTIVEC
++static_assert(
++    false, "If this file is built, FilterProcessing.h should know about it!");
++#endif
++
++namespace mozilla::gfx {
++
++void FilterProcessing::ExtractAlpha_AltiVec(const IntSize& size,
++                                            const uint8_t* sourceData,
++                                            int32_t sourceStride,
++                                            uint8_t* alphaData,
++                                            int32_t alphaStride) {
++  ExtractAlpha_SIMD<simd::u8x16_av>(size, sourceData, sourceStride, alphaData,
++                                    alphaStride);
++}
++
++already_AddRefed<DataSourceSurface> FilterProcessing::ConvertToB8G8R8A8_AltiVec(
++    SourceSurface* aSurface) {
++  return ConvertToB8G8R8A8_SIMD<simd::u8x16_av>(aSurface);
++}
++
++already_AddRefed<DataSourceSurface> FilterProcessing::ApplyBlending_AltiVec(
++    DataSourceSurface* aInput1, DataSourceSurface* aInput2,
++    BlendMode aBlendMode) {
++  return ApplyBlending_SIMD<simd::i32x4_av, simd::i16x8_av, simd::u8x16_av>(
++      aInput1, aInput2, aBlendMode);
++}
++
++void FilterProcessing::ApplyMorphologyHorizontal_AltiVec(
++    const uint8_t* aSourceData, int32_t aSourceStride, uint8_t* aDestData,
++    int32_t aDestStride, const IntRect& aDestRect, int32_t aRadius,
++    MorphologyOperator aOp) {
++  ApplyMorphologyHorizontal_SIMD<simd::i16x8_av, simd::u8x16_av>(
++      aSourceData, aSourceStride, aDestData, aDestStride, aDestRect, aRadius,
++      aOp);
++}
++
++void FilterProcessing::ApplyMorphologyVertical_AltiVec(
++    const uint8_t* aSourceData, int32_t aSourceStride, uint8_t* aDestData,
++    int32_t aDestStride, const IntRect& aDestRect, int32_t aRadius,
++    MorphologyOperator aOp) {
++  ApplyMorphologyVertical_SIMD<simd::i16x8_av, simd::u8x16_av>(
++      aSourceData, aSourceStride, aDestData, aDestStride, aDestRect, aRadius,
++      aOp);
++}
++
++already_AddRefed<DataSourceSurface> FilterProcessing::ApplyColorMatrix_AltiVec(
++    DataSourceSurface* aInput, const Matrix5x4& aMatrix) {
++  return ApplyColorMatrix_SIMD<simd::i32x4_av, simd::i16x8_av, simd::u8x16_av>(
++      aInput, aMatrix);
++}
++
++void FilterProcessing::ApplyComposition_AltiVec(DataSourceSurface* aSource,
++                                                DataSourceSurface* aDest,
++                                                CompositeOperator aOperator) {
++  return ApplyComposition_SIMD<simd::i32x4_av, simd::i16x8_av, simd::u8x16_av>(
++      aSource, aDest, aOperator);
++}
++
++void FilterProcessing::DoOpacityCalculation_AltiVec(
++    const IntSize& aSize, uint8_t* aTargetData, int32_t aTargetStride,
++    const uint8_t* aSourceData, int32_t aSourceStride, Float aValue) {
++  DoOpacityCalculation_SIMD<simd::i16x8_av, simd::u8x16_av>(
++      aSize, aTargetData, aTargetStride, aSourceData, aSourceStride, aValue);
++}
++
++already_AddRefed<DataSourceSurface> FilterProcessing::RenderTurbulence_AltiVec(
++    const IntSize& aSize, const Point& aOffset, const Size& aBaseFrequency,
++    int32_t aSeed, int aNumOctaves, TurbulenceType aType, bool aStitch,
++    const Rect& aTileRect) {
++  return RenderTurbulence_SIMD<simd::f32x4_av, simd::i32x4_av, simd::u8x16_av>(
++      aSize, aOffset, aBaseFrequency, aSeed, aNumOctaves, aType, aStitch,
++      aTileRect);
++}
++
++already_AddRefed<DataSourceSurface>
++FilterProcessing::ApplyArithmeticCombine_AltiVec(DataSourceSurface* aInput1,
++                                                 DataSourceSurface* aInput2,
++                                                 Float aK1, Float aK2,
++                                                 Float aK3, Float aK4) {
++  return ApplyArithmeticCombine_SIMD<simd::i32x4_av, simd::i16x8_av,
++                                     simd::u8x16_av>(aInput1, aInput2, aK1, aK2,
++                                                     aK3, aK4);
++}
++
++}  // namespace mozilla::gfx
+diff --git a/gfx/2d/FilterProcessingVSX.cpp b/gfx/2d/FilterProcessingVSX.cpp
+deleted file mode 100644
+index cf671fb9d9..0000000000
+--- a/gfx/2d/FilterProcessingVSX.cpp
++++ /dev/null
+@@ -1,95 +0,0 @@
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#define SIMD_COMPILE_VSX
+-
+-#include "FilterProcessingSIMD-inl.h"
+-
+-#ifndef USE_VSX
+-static_assert(
+-    false, "If this file is built, FilterProcessing.h should know about it!");
+-#endif
+-
+-namespace mozilla::gfx {
+-
+-void FilterProcessing::ExtractAlpha_VSX(const IntSize& size,
+-                                        const uint8_t* sourceData,
+-                                        int32_t sourceStride,
+-                                        uint8_t* alphaData,
+-                                        int32_t alphaStride) {
+-  ExtractAlpha_SIMD<simd::u8x16_vsx>(size, sourceData, sourceStride, alphaData,
+-                                     alphaStride);
+-}
+-
+-already_AddRefed<DataSourceSurface> FilterProcessing::ConvertToB8G8R8A8_VSX(
+-    SourceSurface* aSurface) {
+-  return ConvertToB8G8R8A8_SIMD<simd::u8x16_vsx>(aSurface);
+-}
+-
+-already_AddRefed<DataSourceSurface> FilterProcessing::ApplyBlending_VSX(
+-    DataSourceSurface* aInput1, DataSourceSurface* aInput2,
+-    BlendMode aBlendMode) {
+-  return ApplyBlending_SIMD<simd::i32x4_vsx, simd::i16x8_vsx, simd::u8x16_vsx>(
+-      aInput1, aInput2, aBlendMode);
+-}
+-
+-void FilterProcessing::ApplyMorphologyHorizontal_VSX(
+-    const uint8_t* aSourceData, int32_t aSourceStride, uint8_t* aDestData,
+-    int32_t aDestStride, const IntRect& aDestRect, int32_t aRadius,
+-    MorphologyOperator aOp) {
+-  ApplyMorphologyHorizontal_SIMD<simd::i16x8_vsx, simd::u8x16_vsx>(
+-      aSourceData, aSourceStride, aDestData, aDestStride, aDestRect, aRadius,
+-      aOp);
+-}
+-
+-void FilterProcessing::ApplyMorphologyVertical_VSX(
+-    const uint8_t* aSourceData, int32_t aSourceStride, uint8_t* aDestData,
+-    int32_t aDestStride, const IntRect& aDestRect, int32_t aRadius,
+-    MorphologyOperator aOp) {
+-  ApplyMorphologyVertical_SIMD<simd::i16x8_vsx, simd::u8x16_vsx>(
+-      aSourceData, aSourceStride, aDestData, aDestStride, aDestRect, aRadius,
+-      aOp);
+-}
+-
+-already_AddRefed<DataSourceSurface> FilterProcessing::ApplyColorMatrix_VSX(
+-    DataSourceSurface* aInput, const Matrix5x4& aMatrix) {
+-  return ApplyColorMatrix_SIMD<simd::i32x4_vsx, simd::i16x8_vsx,
+-                               simd::u8x16_vsx>(aInput, aMatrix);
+-}
+-
+-void FilterProcessing::ApplyComposition_VSX(DataSourceSurface* aSource,
+-                                            DataSourceSurface* aDest,
+-                                            CompositeOperator aOperator) {
+-  return ApplyComposition_SIMD<simd::i32x4_vsx, simd::i16x8_vsx,
+-                               simd::u8x16_vsx>(aSource, aDest, aOperator);
+-}
+-
+-void FilterProcessing::DoOpacityCalculation_VSX(
+-    const IntSize& aSize, uint8_t* aTargetData, int32_t aTargetStride,
+-    const uint8_t* aSourceData, int32_t aSourceStride, Float aValue) {
+-  DoOpacityCalculation_SIMD<simd::i16x8_vsx, simd::u8x16_vsx>(
+-      aSize, aTargetData, aTargetStride, aSourceData, aSourceStride, aValue);
+-}
+-
+-already_AddRefed<DataSourceSurface> FilterProcessing::RenderTurbulence_VSX(
+-    const IntSize& aSize, const Point& aOffset, const Size& aBaseFrequency,
+-    int32_t aSeed, int aNumOctaves, TurbulenceType aType, bool aStitch,
+-    const Rect& aTileRect) {
+-  return RenderTurbulence_SIMD<simd::f32x4_vsx, simd::i32x4_vsx,
+-                               simd::u8x16_vsx>(aSize, aOffset, aBaseFrequency,
+-                                                aSeed, aNumOctaves, aType,
+-                                                aStitch, aTileRect);
+-}
+-
+-already_AddRefed<DataSourceSurface>
+-FilterProcessing::ApplyArithmeticCombine_VSX(DataSourceSurface* aInput1,
+-                                             DataSourceSurface* aInput2,
+-                                             Float aK1, Float aK2, Float aK3,
+-                                             Float aK4) {
+-  return ApplyArithmeticCombine_SIMD<simd::i32x4_vsx, simd::i16x8_vsx,
+-                                     simd::u8x16_vsx>(aInput1, aInput2, aK1,
+-                                                      aK2, aK3, aK4);
+-}
+-
+-}  // namespace mozilla::gfx
+diff --git a/gfx/2d/LuminanceVSX.cpp b/gfx/2d/LuminanceAltiVec.cpp
+similarity index 75%
+rename from gfx/2d/LuminanceVSX.cpp
+rename to gfx/2d/LuminanceAltiVec.cpp
+index 02c74bdcf3..27419e7df5 100644
+--- a/gfx/2d/LuminanceVSX.cpp
++++ b/gfx/2d/LuminanceAltiVec.cpp
+@@ -2,11 +2,12 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+-#include "LuminanceVSX.h"
++#include "LuminanceAltiVec.h"
+ 
+ #include <altivec.h>
+ 
+ #include <bit>
++#include <cstring>
+ 
+ using namespace mozilla::gfx;
+ 
+@@ -16,13 +17,34 @@ using namespace mozilla::gfx;
+ #define GFX_ARGB32_OFFSET_G 1
+ #define GFX_ARGB32_OFFSET_B 0
+ 
+-void ComputesRGBLuminanceMask_VSX(const uint8_t* aSourceData,
+-                                  int32_t aSourceStride, uint8_t* aDestData,
+-                                  int32_t aDestStride, const IntSize& aSize,
+-                                  float aOpacity) {
++void ComputesRGBLuminanceMask_AltiVec(const uint8_t* aSourceData,
++                                      int32_t aSourceStride, uint8_t* aDestData,
++                                      int32_t aDestStride, const IntSize& aSize,
++                                      float aOpacity) {
+   typedef __vector unsigned char u8x16;
+   typedef __vector unsigned short u16x8;
+   typedef __vector unsigned int u32x4;
++  // Plain AltiVec only has aligned vector accesses.
++  auto load16 = [](const uint8_t* aPtr) -> u8x16 {
++#if defined(__VSX__)
++    return vec_xl(0, aPtr);
++#elif defined(__BIG_ENDIAN__)
++    return vec_perm(vec_ld(0, aPtr), vec_ld(15, aPtr), vec_lvsl(0, aPtr));
++#else
++    u8x16 v;
++    memcpy(&v, aPtr, 16);
++    return v;
++#endif
++  };
++  auto store16 = [](uint8_t* aPtr, u8x16 aV) {
++#if defined(__VSX__)
++    vec_xst(aV, 0, aPtr);
++#else
++    alignas(16) uint8_t tmp[16];
++    vec_st(aV, 0, tmp);
++    memcpy(aPtr, tmp, 16);
++#endif
++  };
+ 
+   int32_t redFactor = 55 * aOpacity;     // 255 * 0.2125 * opacity
+   int32_t greenFactor = 183 * aOpacity;  // 255 * 0.7154 * opacity
+@@ -46,7 +68,7 @@ void ComputesRGBLuminanceMask_VSX(const uint8_t* aSourceData,
+   const u32x4 eight = vec_splats(8u);
+ 
+   auto grayOf = [&](const uint8_t* aPx) {
+-    u8x16 px = vec_xl(0, aPx);
++    u8x16 px = load16(aPx);
+     u32x4 gray = vec_sr(vec_msum(px, factors, zero), eight);
+     // Transparent pixels get a zero mask value.
+     __vector __bool int transparent =
+@@ -65,7 +87,7 @@ void ComputesRGBLuminanceMask_VSX(const uint8_t* aSourceData,
+       u32x4 g3 = grayOf(sourcePixel + 48);
+       u16x8 g01 = vec_pack(g0, g1);
+       u16x8 g23 = vec_pack(g2, g3);
+-      vec_xst(vec_pack(g01, g23), 0, destPixel);
++      store16(destPixel, vec_pack(g01, g23));
+       sourcePixel += 16 * 4;
+       destPixel += 16;
+     }
+diff --git a/gfx/2d/LuminanceAltiVec.h b/gfx/2d/LuminanceAltiVec.h
+new file mode 100644
+index 0000000000..c0838c98d6
+--- /dev/null
++++ b/gfx/2d/LuminanceAltiVec.h
+@@ -0,0 +1,16 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef LUMINANCEALTIVEC_H_
++#define LUMINANCEALTIVEC_H_
++
++#include "mozilla/gfx/Point.h"
++
++void ComputesRGBLuminanceMask_AltiVec(const uint8_t* aSourceData,
++                                      int32_t aSourceStride, uint8_t* aDestData,
++                                      int32_t aDestStride,
++                                      const mozilla::gfx::IntSize& aSize,
++                                      float aOpacity);
++
++#endif /* LUMINANCEALTIVEC_H_ */
+diff --git a/gfx/2d/LuminanceVSX.h b/gfx/2d/LuminanceVSX.h
+deleted file mode 100644
+index 26b904ad01..0000000000
+--- a/gfx/2d/LuminanceVSX.h
++++ /dev/null
+@@ -1,16 +0,0 @@
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#ifndef LUMINANCEVSX_H_
+-#define LUMINANCEVSX_H_
+-
+-#include "mozilla/gfx/Point.h"
+-
+-void ComputesRGBLuminanceMask_VSX(const uint8_t* aSourceData,
+-                                  int32_t aSourceStride, uint8_t* aDestData,
+-                                  int32_t aDestStride,
+-                                  const mozilla::gfx::IntSize& aSize,
+-                                  float aOpacity);
+-
+-#endif /* LUMINANCEVSX_H_ */
+diff --git a/gfx/2d/SIMD.h b/gfx/2d/SIMD.h
+index b7dee34b9f..c391214449 100644
+--- a/gfx/2d/SIMD.h
++++ b/gfx/2d/SIMD.h
+@@ -7,15 +7,15 @@
+ 
+ /**
+  * Consumers of this file need to #define SIMD_COMPILE_SSE2 (or
+- * SIMD_COMPILE_VSX) before including it if they want access to the SSE2 (or
+- * VSX) functions.
++ * SIMD_COMPILE_ALTIVEC) before including it if they want access to the SSE2
++ * (or AltiVec) functions.
+  */
+ 
+ #ifdef SIMD_COMPILE_SSE2
+ #  include <xmmintrin.h>
+ #endif
+ 
+-#ifdef SIMD_COMPILE_VSX
++#ifdef SIMD_COMPILE_ALTIVEC
+ #  include <altivec.h>
+ 
+ #  include <bit>
+@@ -1039,180 +1039,169 @@ inline __m128i F32ToI32(__m128 m) { return _mm_cvtps_epi32(m); }
+ 
+ #endif  // SIMD_COMPILE_SSE2
+ 
+-#ifdef SIMD_COMPILE_VSX
++#ifdef SIMD_COMPILE_ALTIVEC
+ 
+-// VSX
++// AltiVec (VMX, with VSX used where available)
+ 
+-typedef __vector unsigned char u8x16_vsx;
++typedef __vector unsigned char u8x16_av;
+ // Also used for the unsigned 16-bit lane types; the lane arithmetic is the
+ // same and the saturating packs pick the signedness explicitly.
+-typedef __vector signed short i16x8_vsx;
+-typedef __vector signed int i32x4_vsx;
+-typedef __vector float f32x4_vsx;
++typedef __vector signed short i16x8_av;
++typedef __vector signed int i32x4_av;
++typedef __vector float f32x4_av;
+ 
+-static constexpr bool kVsxLittleEndian =
++static constexpr bool kAltiVecLittleEndian =
+     std::endian::native == std::endian::little;
+ 
+ template <>
+-inline u8x16_vsx Load8<u8x16_vsx>(const uint8_t* aSource) {
++inline u8x16_av Load8<u8x16_av>(const uint8_t* aSource) {
++  // vec_xl keeps the address unmasked; GCC 16 cannot reload the masked lvx
++  // address once it fuses this load with a following splat.
++#ifdef __VSX__
+   return vec_xl(0, aSource);
++#else
++  return vec_ld(0, aSource);
++#endif
+ }
+ 
+-inline void Store8(uint8_t* aTarget, u8x16_vsx aM) { vec_xst(aM, 0, aTarget); }
++inline void Store8(uint8_t* aTarget, u8x16_av aM) { vec_st(aM, 0, aTarget); }
+ 
+ template <>
+-inline u8x16_vsx FromZero8<u8x16_vsx>() {
++inline u8x16_av FromZero8<u8x16_av>() {
+   return vec_splats((unsigned char)0);
+ }
+ 
+ template <>
+-inline u8x16_vsx From8<u8x16_vsx>(uint8_t a, uint8_t b, uint8_t c, uint8_t d,
+-                                  uint8_t e, uint8_t f, uint8_t g, uint8_t h,
+-                                  uint8_t i, uint8_t j, uint8_t k, uint8_t l,
+-                                  uint8_t m, uint8_t n, uint8_t o, uint8_t p) {
+-  u8x16_vsx v = {a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p};
++inline u8x16_av From8<u8x16_av>(uint8_t a, uint8_t b, uint8_t c, uint8_t d,
++                                uint8_t e, uint8_t f, uint8_t g, uint8_t h,
++                                uint8_t i, uint8_t j, uint8_t k, uint8_t l,
++                                uint8_t m, uint8_t n, uint8_t o, uint8_t p) {
++  u8x16_av v = {a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p};
+   return v;
+ }
+ 
+ template <>
+-inline i16x8_vsx FromI16<i16x8_vsx>(int16_t a, int16_t b, int16_t c, int16_t d,
+-                                    int16_t e, int16_t f, int16_t g,
+-                                    int16_t h) {
+-  i16x8_vsx v = {a, b, c, d, e, f, g, h};
++inline i16x8_av FromI16<i16x8_av>(int16_t a, int16_t b, int16_t c, int16_t d,
++                                  int16_t e, int16_t f, int16_t g, int16_t h) {
++  i16x8_av v = {a, b, c, d, e, f, g, h};
+   return v;
+ }
+ 
+ template <>
+-inline i16x8_vsx FromU16<i16x8_vsx>(uint16_t a, uint16_t b, uint16_t c,
+-                                    uint16_t d, uint16_t e, uint16_t f,
+-                                    uint16_t g, uint16_t h) {
+-  i16x8_vsx v = {int16_t(a), int16_t(b), int16_t(c), int16_t(d),
+-                 int16_t(e), int16_t(f), int16_t(g), int16_t(h)};
++inline i16x8_av FromU16<i16x8_av>(uint16_t a, uint16_t b, uint16_t c,
++                                  uint16_t d, uint16_t e, uint16_t f,
++                                  uint16_t g, uint16_t h) {
++  i16x8_av v = {int16_t(a), int16_t(b), int16_t(c), int16_t(d),
++                int16_t(e), int16_t(f), int16_t(g), int16_t(h)};
+   return v;
+ }
+ 
+ template <>
+-inline i16x8_vsx FromI16<i16x8_vsx>(int16_t a) {
++inline i16x8_av FromI16<i16x8_av>(int16_t a) {
+   return vec_splats(a);
+ }
+ 
+ template <>
+-inline i16x8_vsx FromU16<i16x8_vsx>(uint16_t a) {
++inline i16x8_av FromU16<i16x8_av>(uint16_t a) {
+   return vec_splats(int16_t(a));
+ }
+ 
+ template <>
+-inline i32x4_vsx From32<i32x4_vsx>(int32_t a, int32_t b, int32_t c, int32_t d) {
+-  i32x4_vsx v = {a, b, c, d};
++inline i32x4_av From32<i32x4_av>(int32_t a, int32_t b, int32_t c, int32_t d) {
++  i32x4_av v = {a, b, c, d};
+   return v;
+ }
+ 
+ template <>
+-inline i32x4_vsx From32<i32x4_vsx>(int32_t a) {
++inline i32x4_av From32<i32x4_av>(int32_t a) {
+   return vec_splats(a);
+ }
+ 
+ template <>
+-inline f32x4_vsx FromF32<f32x4_vsx>(float a, float b, float c, float d) {
+-  f32x4_vsx v = {a, b, c, d};
++inline f32x4_av FromF32<f32x4_av>(float a, float b, float c, float d) {
++  f32x4_av v = {a, b, c, d};
+   return v;
+ }
+ 
+ template <>
+-inline f32x4_vsx FromF32<f32x4_vsx>(float a) {
++inline f32x4_av FromF32<f32x4_av>(float a) {
+   return vec_splats(a);
+ }
+ 
+ template <int32_t aNumberOfBits>
+-inline i16x8_vsx ShiftRight16(i16x8_vsx aM) {
+-  return (i16x8_vsx)vec_sr((__vector unsigned short)aM,
+-                           vec_splats((unsigned short)aNumberOfBits));
++inline i16x8_av ShiftRight16(i16x8_av aM) {
++  return (i16x8_av)vec_sr((__vector unsigned short)aM,
++                          vec_splats((unsigned short)aNumberOfBits));
+ }
+ 
+ template <int32_t aNumberOfBits>
+-inline i32x4_vsx ShiftRight32(i32x4_vsx aM) {
++inline i32x4_av ShiftRight32(i32x4_av aM) {
+   return vec_sra(aM, vec_splats((unsigned int)aNumberOfBits));
+ }
+ 
+-inline i16x8_vsx Add16(i16x8_vsx aM1, i16x8_vsx aM2) {
+-  return vec_add(aM1, aM2);
+-}
++inline i16x8_av Add16(i16x8_av aM1, i16x8_av aM2) { return vec_add(aM1, aM2); }
+ 
+-inline i32x4_vsx Add32(i32x4_vsx aM1, i32x4_vsx aM2) {
+-  return vec_add(aM1, aM2);
+-}
++inline i32x4_av Add32(i32x4_av aM1, i32x4_av aM2) { return vec_add(aM1, aM2); }
+ 
+-inline i16x8_vsx Sub16(i16x8_vsx aM1, i16x8_vsx aM2) {
+-  return vec_sub(aM1, aM2);
+-}
++inline i16x8_av Sub16(i16x8_av aM1, i16x8_av aM2) { return vec_sub(aM1, aM2); }
+ 
+-inline i32x4_vsx Sub32(i32x4_vsx aM1, i32x4_vsx aM2) {
+-  return vec_sub(aM1, aM2);
+-}
++inline i32x4_av Sub32(i32x4_av aM1, i32x4_av aM2) { return vec_sub(aM1, aM2); }
+ 
+-inline u8x16_vsx Min8(u8x16_vsx aM1, u8x16_vsx aM2) {
+-  return vec_min(aM1, aM2);
+-}
++inline u8x16_av Min8(u8x16_av aM1, u8x16_av aM2) { return vec_min(aM1, aM2); }
+ 
+-inline u8x16_vsx Max8(u8x16_vsx aM1, u8x16_vsx aM2) {
+-  return vec_max(aM1, aM2);
+-}
++inline u8x16_av Max8(u8x16_av aM1, u8x16_av aM2) { return vec_max(aM1, aM2); }
+ 
+-inline i32x4_vsx Min32(i32x4_vsx aM1, i32x4_vsx aM2) {
+-  return vec_min(aM1, aM2);
+-}
++inline i32x4_av Min32(i32x4_av aM1, i32x4_av aM2) { return vec_min(aM1, aM2); }
+ 
+-inline i32x4_vsx Max32(i32x4_vsx aM1, i32x4_vsx aM2) {
+-  return vec_max(aM1, aM2);
+-}
++inline i32x4_av Max32(i32x4_av aM1, i32x4_av aM2) { return vec_max(aM1, aM2); }
+ 
+-inline i16x8_vsx Mul16(i16x8_vsx aM1, i16x8_vsx aM2) {
++inline i16x8_av Mul16(i16x8_av aM1, i16x8_av aM2) {
+   return vec_mladd(aM1, aM2, vec_splats(int16_t(0)));
+ }
+ 
+-inline i16x8_vsx MulU16(i16x8_vsx aM1, i16x8_vsx aM2) {
++inline i16x8_av MulU16(i16x8_av aM1, i16x8_av aM2) {
+   return vec_mladd(aM1, aM2, vec_splats(int16_t(0)));
+ }
+ 
+-inline void Mul16x4x2x2To32x4x2(i16x8_vsx aFactorsA1B1, i16x8_vsx aFactorsA2B2,
+-                                i32x4_vsx& aProductA, i32x4_vsx& aProductB) {
+-  i32x4_vsx even = vec_mule(aFactorsA1B1, aFactorsA2B2);
+-  i32x4_vsx odd = vec_mulo(aFactorsA1B1, aFactorsA2B2);
++inline void Mul16x4x2x2To32x4x2(i16x8_av aFactorsA1B1, i16x8_av aFactorsA2B2,
++                                i32x4_av& aProductA, i32x4_av& aProductB) {
++  i32x4_av even = vec_mule(aFactorsA1B1, aFactorsA2B2);
++  i32x4_av odd = vec_mulo(aFactorsA1B1, aFactorsA2B2);
+   aProductA = vec_mergeh(even, odd);
+   aProductB = vec_mergel(even, odd);
+ }
+ 
+-inline i32x4_vsx MulAdd16x8x2To32x4(i16x8_vsx aFactorsA, i16x8_vsx aFactorsB) {
++inline i32x4_av MulAdd16x8x2To32x4(i16x8_av aFactorsA, i16x8_av aFactorsB) {
+   return vec_msum(aFactorsA, aFactorsB, vec_splats(0));
+ }
+ 
+ // Byte permute masks in memory (element) order: lane |aLane| of |aWidth|
+ // bytes goes to position |aPos|.
+ template <int8_t l0, int8_t l1, int8_t l2, int8_t l3>
+-inline u8x16_vsx Lanes32Mask() {
+-  u8x16_vsx m = {uint8_t(4 * l0),     uint8_t(4 * l0 + 1), uint8_t(4 * l0 + 2),
+-                 uint8_t(4 * l0 + 3), uint8_t(4 * l1),     uint8_t(4 * l1 + 1),
+-                 uint8_t(4 * l1 + 2), uint8_t(4 * l1 + 3), uint8_t(4 * l2),
+-                 uint8_t(4 * l2 + 1), uint8_t(4 * l2 + 2), uint8_t(4 * l2 + 3),
+-                 uint8_t(4 * l3),     uint8_t(4 * l3 + 1), uint8_t(4 * l3 + 2),
+-                 uint8_t(4 * l3 + 3)};
++inline u8x16_av Lanes32Mask() {
++  u8x16_av m = {uint8_t(4 * l0),     uint8_t(4 * l0 + 1), uint8_t(4 * l0 + 2),
++                uint8_t(4 * l0 + 3), uint8_t(4 * l1),     uint8_t(4 * l1 + 1),
++                uint8_t(4 * l1 + 2), uint8_t(4 * l1 + 3), uint8_t(4 * l2),
++                uint8_t(4 * l2 + 1), uint8_t(4 * l2 + 2), uint8_t(4 * l2 + 3),
++                uint8_t(4 * l3),     uint8_t(4 * l3 + 1), uint8_t(4 * l3 + 2),
++                uint8_t(4 * l3 + 3)};
+   return m;
+ }
+ 
+ template <int8_t l0, int8_t l1, int8_t l2, int8_t l3, int8_t l4, int8_t l5,
+           int8_t l6, int8_t l7>
+-inline u8x16_vsx Lanes16Mask() {
+-  u8x16_vsx m = {uint8_t(2 * l0),     uint8_t(2 * l0 + 1), uint8_t(2 * l1),
+-                 uint8_t(2 * l1 + 1), uint8_t(2 * l2),     uint8_t(2 * l2 + 1),
+-                 uint8_t(2 * l3),     uint8_t(2 * l3 + 1), uint8_t(2 * l4),
+-                 uint8_t(2 * l4 + 1), uint8_t(2 * l5),     uint8_t(2 * l5 + 1),
+-                 uint8_t(2 * l6),     uint8_t(2 * l6 + 1), uint8_t(2 * l7),
+-                 uint8_t(2 * l7 + 1)};
++inline u8x16_av Lanes16Mask() {
++  u8x16_av m = {uint8_t(2 * l0),     uint8_t(2 * l0 + 1), uint8_t(2 * l1),
++                uint8_t(2 * l1 + 1), uint8_t(2 * l2),     uint8_t(2 * l2 + 1),
++                uint8_t(2 * l3),     uint8_t(2 * l3 + 1), uint8_t(2 * l4),
++                uint8_t(2 * l4 + 1), uint8_t(2 * l5),     uint8_t(2 * l5 + 1),
++                uint8_t(2 * l6),     uint8_t(2 * l6 + 1), uint8_t(2 * l7),
++                uint8_t(2 * l7 + 1)};
+   return m;
+ }
+ 
+ template <int8_t i0, int8_t i1, int8_t i2, int8_t i3>
+-inline i32x4_vsx Shuffle32(i32x4_vsx aM) {
++inline i32x4_av Shuffle32(i32x4_av aM) {
+   AssertIndex<i0>();
+   AssertIndex<i1>();
+   AssertIndex<i2>();
+@@ -1223,12 +1212,12 @@ inline i32x4_vsx Shuffle32(i32x4_vsx aM) {
+ // The blending code shuffles 32-bit lanes of a vector it otherwise treats as
+ // 16-bit lanes.
+ template <int8_t i0, int8_t i1, int8_t i2, int8_t i3>
+-inline i16x8_vsx Shuffle32(i16x8_vsx aM) {
+-  return (i16x8_vsx)Shuffle32<i0, i1, i2, i3>((i32x4_vsx)aM);
++inline i16x8_av Shuffle32(i16x8_av aM) {
++  return (i16x8_av)Shuffle32<i0, i1, i2, i3>((i32x4_av)aM);
+ }
+ 
+ template <int8_t i0, int8_t i1, int8_t i2, int8_t i3>
+-inline i16x8_vsx ShuffleLo16(i16x8_vsx aM) {
++inline i16x8_av ShuffleLo16(i16x8_av aM) {
+   AssertIndex<i0>();
+   AssertIndex<i1>();
+   AssertIndex<i2>();
+@@ -1237,7 +1226,7 @@ inline i16x8_vsx ShuffleLo16(i16x8_vsx aM) {
+ }
+ 
+ template <int8_t i0, int8_t i1, int8_t i2, int8_t i3>
+-inline i16x8_vsx ShuffleHi16(i16x8_vsx aM) {
++inline i16x8_av ShuffleHi16(i16x8_av aM) {
+   AssertIndex<i0>();
+   AssertIndex<i1>();
+   AssertIndex<i2>();
+@@ -1247,19 +1236,19 @@ inline i16x8_vsx ShuffleHi16(i16x8_vsx aM) {
+ }
+ 
+ template <int8_t aIndex>
+-inline i32x4_vsx Splat32(i32x4_vsx aM) {
++inline i32x4_av Splat32(i32x4_av aM) {
+   AssertIndex<aIndex>();
+   return vec_splat(aM, aIndex);
+ }
+ 
+ template <int8_t aIndex>
+-inline u8x16_vsx Splat32On8(u8x16_vsx aM) {
++inline u8x16_av Splat32On8(u8x16_av aM) {
+   AssertIndex<aIndex>();
+-  return (u8x16_vsx)vec_splat((i32x4_vsx)aM, aIndex);
++  return (u8x16_av)vec_splat((i32x4_av)aM, aIndex);
+ }
+ 
+ template <int8_t aIndexLo, int8_t aIndexHi>
+-inline i16x8_vsx Splat16(i16x8_vsx aM) {
++inline i16x8_av Splat16(i16x8_av aM) {
+   AssertIndex<aIndexLo>();
+   AssertIndex<aIndexHi>();
+   return vec_perm(
+@@ -1270,56 +1259,52 @@ inline i16x8_vsx Splat16(i16x8_vsx aM) {
+ 
+ // Zero-extends bytes to 16-bit lanes; the zero half of each lane is the high
+ // byte, which is the second byte on little-endian and the first on big-endian.
+-inline i16x8_vsx UnpackLo8x8ToI16x8(u8x16_vsx m) {
+-  const u8x16_vsx zero = vec_splats((unsigned char)0);
+-  if constexpr (kVsxLittleEndian) {
+-    return (i16x8_vsx)vec_mergeh(m, zero);
++inline i16x8_av UnpackLo8x8ToI16x8(u8x16_av m) {
++  const u8x16_av zero = vec_splats((unsigned char)0);
++  if constexpr (kAltiVecLittleEndian) {
++    return (i16x8_av)vec_mergeh(m, zero);
+   } else {
+-    return (i16x8_vsx)vec_mergeh(zero, m);
++    return (i16x8_av)vec_mergeh(zero, m);
+   }
+ }
+ 
+-inline i16x8_vsx UnpackHi8x8ToI16x8(u8x16_vsx m) {
+-  const u8x16_vsx zero = vec_splats((unsigned char)0);
+-  if constexpr (kVsxLittleEndian) {
+-    return (i16x8_vsx)vec_mergel(m, zero);
++inline i16x8_av UnpackHi8x8ToI16x8(u8x16_av m) {
++  const u8x16_av zero = vec_splats((unsigned char)0);
++  if constexpr (kAltiVecLittleEndian) {
++    return (i16x8_av)vec_mergel(m, zero);
+   } else {
+-    return (i16x8_vsx)vec_mergel(zero, m);
++    return (i16x8_av)vec_mergel(zero, m);
+   }
+ }
+ 
+-inline i16x8_vsx UnpackLo8x8ToU16x8(u8x16_vsx m) {
+-  return UnpackLo8x8ToI16x8(m);
+-}
++inline i16x8_av UnpackLo8x8ToU16x8(u8x16_av m) { return UnpackLo8x8ToI16x8(m); }
+ 
+-inline i16x8_vsx UnpackHi8x8ToU16x8(u8x16_vsx m) {
+-  return UnpackHi8x8ToI16x8(m);
+-}
++inline i16x8_av UnpackHi8x8ToU16x8(u8x16_av m) { return UnpackHi8x8ToI16x8(m); }
+ 
+-inline u8x16_vsx InterleaveLo8(u8x16_vsx m1, u8x16_vsx m2) {
++inline u8x16_av InterleaveLo8(u8x16_av m1, u8x16_av m2) {
+   return vec_mergeh(m1, m2);
+ }
+ 
+-inline u8x16_vsx InterleaveHi8(u8x16_vsx m1, u8x16_vsx m2) {
++inline u8x16_av InterleaveHi8(u8x16_av m1, u8x16_av m2) {
+   return vec_mergel(m1, m2);
+ }
+ 
+-inline i16x8_vsx InterleaveLo16(i16x8_vsx m1, i16x8_vsx m2) {
++inline i16x8_av InterleaveLo16(i16x8_av m1, i16x8_av m2) {
+   return vec_mergeh(m1, m2);
+ }
+ 
+-inline i16x8_vsx InterleaveHi16(i16x8_vsx m1, i16x8_vsx m2) {
++inline i16x8_av InterleaveHi16(i16x8_av m1, i16x8_av m2) {
+   return vec_mergel(m1, m2);
+ }
+ 
+-inline i32x4_vsx InterleaveLo32(i32x4_vsx m1, i32x4_vsx m2) {
++inline i32x4_av InterleaveLo32(i32x4_av m1, i32x4_av m2) {
+   return vec_mergeh(m1, m2);
+ }
+ 
+ template <uint8_t aNumBytes>
+-inline u8x16_vsx Rotate8(u8x16_vsx a1234, u8x16_vsx a5678) {
++inline u8x16_av Rotate8(u8x16_av a1234, u8x16_av a5678) {
+   constexpr uint8_t n = aNumBytes;
+-  const u8x16_vsx mask = {
++  const u8x16_av mask = {
+       uint8_t(n),      uint8_t(n + 1),  uint8_t(n + 2),  uint8_t(n + 3),
+       uint8_t(n + 4),  uint8_t(n + 5),  uint8_t(n + 6),  uint8_t(n + 7),
+       uint8_t(n + 8),  uint8_t(n + 9),  uint8_t(n + 10), uint8_t(n + 11),
+@@ -1327,81 +1312,99 @@ inline u8x16_vsx Rotate8(u8x16_vsx a1234, u8x16_vsx a5678) {
+   return vec_perm(a1234, a5678, mask);
+ }
+ 
+-inline i16x8_vsx PackAndSaturate32To16(i32x4_vsx m1, i32x4_vsx m2) {
++inline i16x8_av PackAndSaturate32To16(i32x4_av m1, i32x4_av m2) {
+   return vec_packs(m1, m2);
+ }
+ 
+ // Clamps to [0, INT16_MAX] like the scalar SaturateToU16.
+-inline i16x8_vsx PackAndSaturate32ToU16(i32x4_vsx m1, i32x4_vsx m2) {
+-  const i32x4_vsx zero = vec_splats(0);
++inline i16x8_av PackAndSaturate32ToU16(i32x4_av m1, i32x4_av m2) {
++  const i32x4_av zero = vec_splats(0);
+   return vec_packs(vec_max(m1, zero), vec_max(m2, zero));
+ }
+ 
+-inline u8x16_vsx PackAndSaturate32To8(i32x4_vsx m1, i32x4_vsx m2, i32x4_vsx m3,
+-                                      const i32x4_vsx& m4) {
++inline u8x16_av PackAndSaturate32To8(i32x4_av m1, i32x4_av m2, i32x4_av m3,
++                                     const i32x4_av& m4) {
+   return vec_packsu(vec_packs(m1, m2), vec_packs(m3, m4));
+ }
+ 
+-inline u8x16_vsx PackAndSaturate16To8(i16x8_vsx m1, i16x8_vsx m2) {
++inline u8x16_av PackAndSaturate16To8(i16x8_av m1, i16x8_av m2) {
+   return vec_packsu(m1, m2);
+ }
+ 
+-inline i32x4_vsx FastDivideBy255(i32x4_vsx m) {
++inline i32x4_av FastDivideBy255(i32x4_av m) {
+   // (m << 8) + m + 255, then an arithmetic shift right by 16.
+-  i32x4_vsx v = vec_sl(m, vec_splats(8u));
++  i32x4_av v = vec_sl(m, vec_splats(8u));
+   v = vec_add(v, vec_add(m, vec_splats(255)));
+   return vec_sra(v, vec_splats(16u));
+ }
+ 
+-inline i16x8_vsx FastDivideBy255_16(i16x8_vsx m) {
+-  const i16x8_vsx zero = vec_splats(int16_t(0));
+-  i32x4_vsx lo, hi;
+-  if constexpr (kVsxLittleEndian) {
+-    lo = (i32x4_vsx)vec_mergeh(m, zero);
+-    hi = (i32x4_vsx)vec_mergel(m, zero);
++inline i16x8_av FastDivideBy255_16(i16x8_av m) {
++  const i16x8_av zero = vec_splats(int16_t(0));
++  i32x4_av lo, hi;
++  if constexpr (kAltiVecLittleEndian) {
++    lo = (i32x4_av)vec_mergeh(m, zero);
++    hi = (i32x4_av)vec_mergel(m, zero);
+   } else {
+-    lo = (i32x4_vsx)vec_mergeh(zero, m);
+-    hi = (i32x4_vsx)vec_mergel(zero, m);
++    lo = (i32x4_av)vec_mergeh(zero, m);
++    hi = (i32x4_av)vec_mergel(zero, m);
+   }
+   return vec_packs(FastDivideBy255(lo), FastDivideBy255(hi));
+ }
+ 
+-inline u8x16_vsx Pick(u8x16_vsx mask, u8x16_vsx a, u8x16_vsx b) {
++inline u8x16_av Pick(u8x16_av mask, u8x16_av a, u8x16_av b) {
+   return vec_sel(a, b, mask);
+ }
+ 
+-inline i32x4_vsx Pick(i32x4_vsx mask, i32x4_vsx a, i32x4_vsx b) {
++inline i32x4_av Pick(i32x4_av mask, i32x4_av a, i32x4_av b) {
+   return vec_sel(a, b, (__vector unsigned int)mask);
+ }
+ 
+-inline f32x4_vsx MixF32(f32x4_vsx a, f32x4_vsx b, float t) {
+-  return vec_add(a, vec_mul(vec_sub(b, a), vec_splats(t)));
++// Plain AltiVec has no vector float multiply; vmaddfp with a -0.0 addend
++// rounds the product once like a multiply would.
++inline f32x4_av MulF32Raw(f32x4_av a, f32x4_av b) {
++#  ifdef __VSX__
++  return vec_mul(a, b);
++#  else
++  return vec_madd(a, b, vec_splats(-0.0f));
++#  endif
+ }
+ 
+-inline f32x4_vsx WSumF32(f32x4_vsx a, f32x4_vsx b, float wa, float wb) {
+-  return vec_add(vec_mul(a, vec_splats(wa)), vec_mul(b, vec_splats(wb)));
++inline f32x4_av MixF32(f32x4_av a, f32x4_av b, float t) {
++  return vec_add(a, MulF32Raw(vec_sub(b, a), vec_splats(t)));
+ }
+ 
+-inline f32x4_vsx AbsF32(f32x4_vsx a) { return vec_abs(a); }
++inline f32x4_av WSumF32(f32x4_av a, f32x4_av b, float wa, float wb) {
++  return vec_add(MulF32Raw(a, vec_splats(wa)), MulF32Raw(b, vec_splats(wb)));
++}
++
++inline f32x4_av AbsF32(f32x4_av a) { return vec_abs(a); }
+ 
+-inline f32x4_vsx AddF32(f32x4_vsx a, f32x4_vsx b) { return vec_add(a, b); }
++inline f32x4_av AddF32(f32x4_av a, f32x4_av b) { return vec_add(a, b); }
+ 
+-inline f32x4_vsx MulF32(f32x4_vsx a, f32x4_vsx b) { return vec_mul(a, b); }
++inline f32x4_av MulF32(f32x4_av a, f32x4_av b) { return MulF32Raw(a, b); }
+ 
+-inline f32x4_vsx DivF32(f32x4_vsx a, f32x4_vsx b) { return vec_div(a, b); }
++inline f32x4_av DivF32(f32x4_av a, f32x4_av b) {
++#  ifdef __VSX__
++  return vec_div(a, b);
++#  else
++  // Plain AltiVec has no divide; keep the scalar exactness.
++  f32x4_av r = {a[0] / b[0], a[1] / b[1], a[2] / b[2], a[3] / b[3]};
++  return r;
++#  endif
++}
+ 
+ template <uint8_t aIndex>
+-inline f32x4_vsx SplatF32(f32x4_vsx m) {
++inline f32x4_av SplatF32(f32x4_av m) {
+   AssertIndex<aIndex>();
+   return vec_splat(m, aIndex);
+ }
+ 
+ // floor(x + 0.5) like the scalar F32ToI32.
+-inline i32x4_vsx F32ToI32(f32x4_vsx m) {
++inline i32x4_av F32ToI32(f32x4_av m) {
+   return vec_cts(vec_floor(vec_add(m, vec_splats(0.5f))), 0);
+ }
+ 
+-#endif  // SIMD_COMPILE_VSX
++#endif  // SIMD_COMPILE_ALTIVEC
+ 
+ }  // namespace simd
+ 
+diff --git a/gfx/2d/SkConvolver.cpp b/gfx/2d/SkConvolver.cpp
+index 69db3a45e2..b717336a4b 100644
+--- a/gfx/2d/SkConvolver.cpp
++++ b/gfx/2d/SkConvolver.cpp
+@@ -14,7 +14,7 @@
+ #  include "mozilla/arm.h"
+ #endif
+ 
+-#ifdef USE_VSX
++#ifdef USE_ALTIVEC
+ #  include "mozilla/ppc.h"
+ #endif
+ 
+@@ -239,11 +239,11 @@ void convolve_horizontally_neon(const unsigned char* srcData,
+ void convolve_vertically_neon(const int16_t* filter, int filterLen,
+                               uint8_t* const* srcRows, int width, uint8_t* out,
+                               bool hasAlpha);
+-#elif defined(USE_VSX)
+-void convolve_horizontally_vsx(const unsigned char* srcData,
++#elif defined(USE_ALTIVEC)
++void convolve_horizontally_altivec(const unsigned char* srcData,
+                                const SkConvolutionFilter1D& filter,
+                                unsigned char* outRow, bool hasAlpha);
+-void convolve_vertically_vsx(const int16_t* filter, int filterLen,
++void convolve_vertically_altivec(const int16_t* filter, int filterLen,
+                              uint8_t* const* srcRows, int width, uint8_t* out,
+                              bool hasAlpha);
+ #endif
+@@ -267,9 +267,9 @@ void convolve_horizontally(const unsigned char* srcData,
+     convolve_horizontally_neon(srcData, filter, outRow, hasAlpha);
+     return;
+   }
+-#elif defined(USE_VSX)
+-  if (mozilla::supports_vsx()) {
+-    convolve_horizontally_vsx(srcData, filter, outRow, hasAlpha);
++#elif defined(USE_ALTIVEC)
++  if (mozilla::supports_vmx()) {
++    convolve_horizontally_altivec(srcData, filter, outRow, hasAlpha);
+     return;
+   }
+ #endif
+@@ -308,9 +308,9 @@ void convolve_vertically(
+                              pixelWidth, outRow, hasAlpha);
+     return;
+   }
+-#elif defined(USE_VSX)
+-  if (mozilla::supports_vsx()) {
+-    convolve_vertically_vsx(filterValues, filterLength, sourceDataRows,
++#elif defined(USE_ALTIVEC)
++  if (mozilla::supports_vmx()) {
++    convolve_vertically_altivec(filterValues, filterLength, sourceDataRows,
+                             pixelWidth, outRow, hasAlpha);
+     return;
+   }
+diff --git a/gfx/2d/moz.build b/gfx/2d/moz.build
+index 6ffe706d29..37483a3283 100644
+--- a/gfx/2d/moz.build
++++ b/gfx/2d/moz.build
+@@ -190,22 +190,13 @@ if CONFIG["TARGET_CPU"] == "aarch64" or CONFIG["BUILD_ARM_NEON"]:
+ 
+ if CONFIG["TARGET_CPU"].startswith("ppc") and CONFIG["PPC_TARGET_HAS_ALTIVEC"]:
+     SOURCES += [
++        "ConvolutionFilterAltiVec.cpp",
++        "FilterProcessingAltiVec.cpp",
++        "LuminanceAltiVec.cpp",
+         "SwizzleAltiVec.cpp",
+     ]
+     DEFINES["USE_ALTIVEC"] = True
+ 
+-if CONFIG["TARGET_CPU"].startswith("ppc") and CONFIG["PPC_TARGET_HAS_VSX"]:
+-    SOURCES += [
+-        "ConvolutionFilterVSX.cpp",
+-        "FilterProcessingVSX.cpp",
+-        "LuminanceVSX.cpp",
+-    ]
+-    DEFINES["USE_VSX"] = True
+-
+-    SOURCE_HEADERS += [
+-        "LuminanceVSX.h",
+-    ]
+-
+ include("/ipc/chromium/chromium-config.mozbuild")
+ 
+ FINAL_LIBRARY = "xul"
