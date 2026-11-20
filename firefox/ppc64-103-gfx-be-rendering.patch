@@ -1,8 +1,8 @@
-From 5be19ed8ca194dfa2d15e104ee60240b01101c31 Mon Sep 17 00:00:00 2001
+From c10415d124096ff1b745b7e22616784e3780aa17 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
 Date: Sun, 5 Jul 2026 22:03:59 +1000
-Subject: [PATCH 7/9] Add big-endian rendering support for Skia and software
- WebRender
+Subject: [PATCH 09/30] Add big-endian rendering support for Skia, image
+ encoding and software WebRender
 
 Big-endian used to flip the OS_RGBA surface format synonyms to the
 A8R8G8B8 memory layout, which Skia has no color type for, so surface
@@ -45,6 +45,32 @@ to a solid fill, so the mask came out fully transparent and the masked
 content disappeared entirely, which is what hid the DevTools toolbar
 labels.
 
+SkBlitRow's Factory32 procs have the same disagreement. They walk rows of
+device pixels, so their operands are in memory order, but they process
+them with the packed-order accessors. The per-byte-lane arithmetic is
+order agnostic; the source alpha that SkPMSrcOver and SkBlendARGB32 read
+is not, and on big-endian it came from the blue byte. An opaque source
+then looked about half transparent and the destination bled through,
+washing out every sprite blit of an image that has an alpha channel: a
+SaveLayer restore, and so an SVG group with opacity drawn over existing
+content, as well as canvas drawImage. Convert at the same load and store
+boundary. blit_row_s32_blend needs no conversion because SkPMLerp reads
+no channel. blend_row_lcd16 and blend_row_LCD16_opaque, which paint LCD
+subpixel text through a shader, address every channel of both operands
+the same wrong way, and are converted too.
+
+The image encoders have the same disagreement at the far end of the
+pipeline. nsPNGEncoder, nsJPEGEncoder, nsBMPEncoder and nsWebPEncoder
+each read a surface pixel as a native uint32_t and pull the channels out
+with hard-coded little-endian shifts, so on big-endian the alpha came
+from the blue byte and the colour channels were rotated. Use the
+SurfaceFormatBit::OS_* shifts, which already mirror on big-endian, the
+same way gfxPackedPixel does; on little-endian they are the same
+24/16/8/0 and the generated code does not change. This is what corrupted
+favicons: the favicon service re-encodes a decoded icon to PNG before
+storing it and the tab renders that stored copy, so an icon that decoded
+correctly was written back out scrambled.
+
 Software WebRender resolves frames in the B8G8R8A8 memory layout, but
 X11 consumes native-endian 32-bit pixel values, so swizzle the dirty
 region to the A8R8G8B8 layout when handing the buffer to the widget.
@@ -52,19 +78,76 @@ region to the A8R8G8B8 layout when handing the buffer to the widget.
 Known gap: the headless screenshot readback still assumes
 little-endian and is unchanged.
 ---
- gfx/2d/Types.h                                | 24 +++++-----
- gfx/skia/skia/src/core/SkBlitRow_D32.cpp      |  6 ++-
- gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp   | 47 ++++++++++---------
- gfx/skia/skia/src/core/SkColorData.h          | 12 +++++
- .../skia/src/core/SkRasterPipelineBlitter.cpp |  8 ++++
- gfx/skia/skia/src/opts/SkBlitMask_opts.h      |  7 ++-
- gfx/skia/skia/src/opts/SkBlitRow_opts.h       |  5 +-
- .../skia/src/opts/SkRasterPipeline_opts.h     | 24 ++++++++--
- .../RenderCompositorSWGL.cpp                  | 23 +++++++++
- 9 files changed, 112 insertions(+), 44 deletions(-)
+ gfx/2d/DrawTarget.cpp                         | 15 ++--
+ gfx/2d/FilterProcessing.h                     | 13 ++--
+ gfx/2d/Types.h                                | 24 +++----
+ gfx/skia/skia/src/core/SkBlitRow_D32.cpp      | 11 ++-
+ gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp   | 72 ++++++++++---------
+ gfx/skia/skia/src/core/SkColorData.h          | 12 ++++
+ .../skia/src/core/SkRasterPipelineBlitter.cpp |  8 +++
+ gfx/skia/skia/src/opts/SkBlitMask_opts.h      |  7 +-
+ gfx/skia/skia/src/opts/SkBlitRow_opts.h       | 10 ++-
+ .../skia/src/opts/SkRasterPipeline_opts.h     | 24 +++++--
+ .../RenderCompositorSWGL.cpp                  | 23 ++++++
+ gfx/ycbcr/YCbCrUtils.cpp                      | 31 +-------
+ image/encoders/bmp/nsBMPEncoder.cpp           | 15 ++--
+ image/encoders/jpeg/nsJPEGEncoder.cpp         |  6 +-
+ image/encoders/png/nsPNGEncoder.cpp           | 17 +++--
+ image/encoders/webp/nsWebPEncoder.cpp         | 20 +++---
+ 16 files changed, 177 insertions(+), 131 deletions(-)
 
+diff --git a/gfx/2d/DrawTarget.cpp b/gfx/2d/DrawTarget.cpp
+index 14eb53a7df..67bea87b72 100644
+--- a/gfx/2d/DrawTarget.cpp
++++ b/gfx/2d/DrawTarget.cpp
+@@ -23,17 +23,10 @@ namespace gfx {
+ /**
+  * Byte offsets of channels in a native packed gfxColor or cairo image surface.
+  */
+-#ifdef IS_BIG_ENDIAN
+-#  define GFX_ARGB32_OFFSET_A 0
+-#  define GFX_ARGB32_OFFSET_R 1
+-#  define GFX_ARGB32_OFFSET_G 2
+-#  define GFX_ARGB32_OFFSET_B 3
+-#else
+-#  define GFX_ARGB32_OFFSET_A 3
+-#  define GFX_ARGB32_OFFSET_R 2
+-#  define GFX_ARGB32_OFFSET_G 1
+-#  define GFX_ARGB32_OFFSET_B 0
+-#endif
++#define GFX_ARGB32_OFFSET_A 3
++#define GFX_ARGB32_OFFSET_R 2
++#define GFX_ARGB32_OFFSET_G 1
++#define GFX_ARGB32_OFFSET_B 0
+ 
+ // c = n / 255
+ // c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)) * 255 + 0.5
+diff --git a/gfx/2d/FilterProcessing.h b/gfx/2d/FilterProcessing.h
+index 2a8219e21d..73775ae171 100644
+--- a/gfx/2d/FilterProcessing.h
++++ b/gfx/2d/FilterProcessing.h
+@@ -10,14 +10,11 @@
+ 
+ namespace mozilla::gfx {
+ 
+-const ptrdiff_t B8G8R8A8_COMPONENT_BYTEOFFSET_B =
+-    static_cast<ptrdiff_t>(mozilla::gfx::SurfaceFormatBit::OS_B) / 8;
+-const ptrdiff_t B8G8R8A8_COMPONENT_BYTEOFFSET_G =
+-    static_cast<ptrdiff_t>(mozilla::gfx::SurfaceFormatBit::OS_G) / 8;
+-const ptrdiff_t B8G8R8A8_COMPONENT_BYTEOFFSET_R =
+-    static_cast<ptrdiff_t>(mozilla::gfx::SurfaceFormatBit::OS_R) / 8;
+-const ptrdiff_t B8G8R8A8_COMPONENT_BYTEOFFSET_A =
+-    static_cast<ptrdiff_t>(mozilla::gfx::SurfaceFormatBit::OS_A) / 8;
++// Byte offsets of the channels of a B8G8R8A8 pixel in memory.
++const ptrdiff_t B8G8R8A8_COMPONENT_BYTEOFFSET_B = 0;
++const ptrdiff_t B8G8R8A8_COMPONENT_BYTEOFFSET_G = 1;
++const ptrdiff_t B8G8R8A8_COMPONENT_BYTEOFFSET_R = 2;
++const ptrdiff_t B8G8R8A8_COMPONENT_BYTEOFFSET_A = 3;
+ 
+ class FilterProcessing {
+  public:
 diff --git a/gfx/2d/Types.h b/gfx/2d/Types.h
-index c5b08fa19013..3031b8cd4f0d 100644
+index 32c1ac614d..b6eaf55387 100644
 --- a/gfx/2d/Types.h
 +++ b/gfx/2d/Types.h
 @@ -112,13 +112,12 @@ enum class SurfaceFormat : int8_t {
@@ -106,10 +189,22 @@ index c5b08fa19013..3031b8cd4f0d 100644
    // The following values are OS and endian-independent.
    //
 diff --git a/gfx/skia/skia/src/core/SkBlitRow_D32.cpp b/gfx/skia/skia/src/core/SkBlitRow_D32.cpp
-index 3a4939aaae10..2d7e8ab35fc3 100644
+index 3a4939aaae..5b076d686e 100644
 --- a/gfx/skia/skia/src/core/SkBlitRow_D32.cpp
 +++ b/gfx/skia/skia/src/core/SkBlitRow_D32.cpp
-@@ -651,8 +651,10 @@ SkBlitRow::Proc32 SkBlitRow::Factory32(unsigned flags) {
+@@ -628,7 +628,10 @@ static void blit_row_s32_opaque(SkPMColor* dst,
+     static void blit_row_s32a_blend(SkPMColor* dst, const SkPMColor* src, int count, U8CPU alpha) {
+         SkASSERT(alpha <= 255);
+         while (count --> 0) {
+-            *dst = SkBlendARGB32(*src, *dst, alpha);
++            // See blit_row_s32a_opaque: the source alpha SkBlendARGB32 reads
++            // has to come from the packed order. blit_row_s32_blend above
++            // needs no conversion because SkPMLerp reads no channel.
++            *dst = BE_CONVERT(SkBlendARGB32(BE_CONVERT(*src), BE_CONVERT(*dst), alpha));
+             src++;
+             dst++;
+         }
+@@ -651,8 +654,10 @@ SkBlitRow::Proc32 SkBlitRow::Factory32(unsigned flags) {
  
  void SkBlitRow::Color32(SkPMColor dst[], int count, SkPMColor color) {
      switch (SkGetPackedA32(color)) {
@@ -123,7 +218,7 @@ index 3a4939aaae10..2d7e8ab35fc3 100644
      return SkOpts::blit_row_color32(dst, count, color);
  }
 diff --git a/gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp b/gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp
-index a30038af03f8..889ad7e176e7 100644
+index a30038af03..c3574e57f4 100644
 --- a/gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp
 +++ b/gfx/skia/skia/src/core/SkBlitter_ARGB32.cpp
 @@ -1631,7 +1631,8 @@ static inline SkPMColor blend_lcd16_opaque(int srcR, int srcG, int srcB,
@@ -280,8 +375,61 @@ index a30038af03f8..889ad7e176e7 100644
  }
  
  ///////////////////////////////////////////////////////////////////////////////
+@@ -2184,8 +2187,8 @@ static void blend_row_lcd16(SkPMColor* dst, const void* vmask, const SkPMColor*
+             continue;
+         }
+ 
+-        SkPMColor s = src[i];
+-        SkPMColor d = dst[i];
++        SkPMColor s = BE_CONVERT(src[i]);
++        SkPMColor d = BE_CONVERT(dst[i]);
+ 
+         int srcA = SkGetPackedA32(s);
+         int srcR = SkGetPackedR32(s);
+@@ -2205,10 +2208,11 @@ static void blend_row_lcd16(SkPMColor* dst, const void* vmask, const SkPMColor*
+         maskB = upscale_31_to_255(maskB);
+ 
+         // This LCD blit routine only works if the destination is opaque.
+-        dst[i] = SkPackARGB32(0xFF,
+-                              src_alpha_blend(srcR, SkGetPackedR32(d), srcA, maskR),
+-                              src_alpha_blend(srcG, SkGetPackedG32(d), srcA, maskG),
+-                              src_alpha_blend(srcB, SkGetPackedB32(d), srcA, maskB));
++        dst[i] = BE_CONVERT(SkPackARGB32(
++                0xFF,
++                src_alpha_blend(srcR, SkGetPackedR32(d), srcA, maskR),
++                src_alpha_blend(srcG, SkGetPackedG32(d), srcA, maskG),
++                src_alpha_blend(srcB, SkGetPackedB32(d), srcA, maskB)));
+     }
+ }
+ 
+@@ -2221,8 +2225,8 @@ static void blend_row_LCD16_opaque(SkPMColor* dst, const void* vmask, const SkPM
+             continue;
+         }
+ 
+-        SkPMColor s = src[i];
+-        SkPMColor d = dst[i];
++        SkPMColor s = BE_CONVERT(src[i]);
++        SkPMColor d = BE_CONVERT(dst[i]);
+ 
+         int srcR = SkGetPackedR32(s);
+         int srcG = SkGetPackedG32(s);
+@@ -2239,10 +2243,10 @@ static void blend_row_LCD16_opaque(SkPMColor* dst, const void* vmask, const SkPM
+         maskB = upscale_31_to_32(maskB);
+ 
+         // This LCD blit routine only works if the destination is opaque.
+-        dst[i] = SkPackARGB32(0xFF,
+-                              blend_32(srcR, SkGetPackedR32(d), maskR),
+-                              blend_32(srcG, SkGetPackedG32(d), maskG),
+-                              blend_32(srcB, SkGetPackedB32(d), maskB));
++        dst[i] = BE_CONVERT(SkPackARGB32(0xFF,
++                                         blend_32(srcR, SkGetPackedR32(d), maskR),
++                                         blend_32(srcG, SkGetPackedG32(d), maskG),
++                                         blend_32(srcB, SkGetPackedB32(d), maskB)));
+     }
+ }
+ 
 diff --git a/gfx/skia/skia/src/core/SkColorData.h b/gfx/skia/skia/src/core/SkColorData.h
-index 8357089701d4..a7b8cc1632ee 100644
+index 8357089701..a7b8cc1632 100644
 --- a/gfx/skia/skia/src/core/SkColorData.h
 +++ b/gfx/skia/skia/src/core/SkColorData.h
 @@ -18,6 +18,18 @@
@@ -304,7 +452,7 @@ index 8357089701d4..a7b8cc1632ee 100644
  // Convert a 16bit pixel to a 32bit pixel
  
 diff --git a/gfx/skia/skia/src/core/SkRasterPipelineBlitter.cpp b/gfx/skia/skia/src/core/SkRasterPipelineBlitter.cpp
-index 7df8fb23a809..98b88caf75f9 100644
+index 7df8fb23a8..98b88caf75 100644
 --- a/gfx/skia/skia/src/core/SkRasterPipelineBlitter.cpp
 +++ b/gfx/skia/skia/src/core/SkRasterPipelineBlitter.cpp
 @@ -450,6 +450,14 @@ SkBlitter* SkRasterPipelineBlitter::Create(const SkPixmap& dst,
@@ -323,7 +471,7 @@ index 7df8fb23a809..98b88caf75f9 100644
              case 0: blitter->fMemset2D = [](SkPixmap* dst, int x,int y, int w,int h, uint64_t c) {
                  void* p = dst->writable_addr(x,y);
 diff --git a/gfx/skia/skia/src/opts/SkBlitMask_opts.h b/gfx/skia/skia/src/opts/SkBlitMask_opts.h
-index 6b1aa7411610..c766624fc7bf 100644
+index 6b1aa74116..c766624fc7 100644
 --- a/gfx/skia/skia/src/opts/SkBlitMask_opts.h
 +++ b/gfx/skia/skia/src/opts/SkBlitMask_opts.h
 @@ -10,6 +10,7 @@
@@ -355,10 +503,22 @@ index 6b1aa7411610..c766624fc7bf 100644
              //  = (s + d(1-sa))aa + d(1-aa)
              //  = s*aa + d(1-sa*aa)
 diff --git a/gfx/skia/skia/src/opts/SkBlitRow_opts.h b/gfx/skia/skia/src/opts/SkBlitRow_opts.h
-index 9090549ed25c..c40076b413c0 100644
+index 9090549ed2..7b271c1980 100644
 --- a/gfx/skia/skia/src/opts/SkBlitRow_opts.h
 +++ b/gfx/skia/skia/src/opts/SkBlitRow_opts.h
-@@ -306,7 +306,10 @@ inline void blit_row_color32(SkPMColor* dst, int count, SkPMColor color) {
+@@ -280,7 +280,10 @@ inline void blit_row_s32a_opaque(SkPMColor* dst, const SkPMColor* src, int len,
+ #endif
+ 
+     while (len --> 0) {
+-        *dst = SkPMSrcOver(*src, *dst);
++        // These rows are device pixels, so they are in memory order. The blend
++        // itself is per-byte-lane and so order agnostic, but the source alpha
++        // SkPMSrcOver reads is not.
++        *dst = BE_CONVERT(SkPMSrcOver(BE_CONVERT(*src), BE_CONVERT(*dst)));
+         src++;
+         dst++;
+     }
+@@ -306,7 +309,10 @@ inline void blit_row_color32(SkPMColor* dst, int count, SkPMColor color) {
          // to color to get the result.
          U8 s = sk_bit_cast<U8>(src),
             a = U8(invA);
@@ -371,7 +531,7 @@ index 9090549ed25c..c40076b413c0 100644
          return sk_bit_cast<U32>(skvx::cast<uint8_t>(r));
      };
 diff --git a/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h b/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h
-index 601c0b5e579c..cc5ddc901669 100644
+index 601c0b5e57..cc5ddc9016 100644
 --- a/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h
 +++ b/gfx/skia/skia/src/opts/SkRasterPipeline_opts.h
 @@ -2035,7 +2035,20 @@ SI void from_4444(U16 _4444, F* r, F* g, F* b, F* a) {
@@ -442,7 +602,7 @@ index 601c0b5e579c..cc5ddc901669 100644
  #endif
  }
 diff --git a/gfx/webrender_bindings/RenderCompositorSWGL.cpp b/gfx/webrender_bindings/RenderCompositorSWGL.cpp
-index d143cf92f5b5..849ffb15eca5 100644
+index d143cf92f5..849ffb15ec 100644
 --- a/gfx/webrender_bindings/RenderCompositorSWGL.cpp
 +++ b/gfx/webrender_bindings/RenderCompositorSWGL.cpp
 @@ -5,8 +5,11 @@
@@ -484,3 +644,205 @@ index d143cf92f5b5..849ffb15eca5 100644
    if (mSurface) {
      // If we're using a data surface, unmap it and draw it to the DT if there
      // are any supplied dirty rects.
+diff --git a/gfx/ycbcr/YCbCrUtils.cpp b/gfx/ycbcr/YCbCrUtils.cpp
+index 23a5d2843b..c5e967ea67 100644
+--- a/gfx/ycbcr/YCbCrUtils.cpp
++++ b/gfx/ycbcr/YCbCrUtils.cpp
+@@ -321,16 +321,6 @@ nsresult ConvertYCbCrToRGB(const layers::PlanarYCbCrData& aData,
+     return result;
+   }
+ 
+-  if constexpr (std::endian::native == std::endian::big) {
+-    // libyuv makes endian-correct result, which needs to be swapped to BGRX
+-    if (aDestFormat != SurfaceFormat::R5G6B5_UINT16) {
+-      if (!gfx::SwizzleData(aDestBuffer, aStride, gfx::SurfaceFormat::X8R8G8B8,
+-                            aDestBuffer, aStride, gfx::SurfaceFormat::B8G8R8X8,
+-                            aDestSize)) {
+-        return NS_ERROR_UNEXPECTED;
+-      }
+-    }
+-  }
+   return NS_OK;
+ }
+ 
+@@ -338,7 +328,6 @@ void FillAlphaToRGBA(const uint8_t* aAlpha, const int32_t aAlphaStride,
+                      uint8_t* aBuffer, const int32_t aWidth,
+                      const int32_t aHeight, const gfx::SurfaceFormat& aFormat) {
+   MOZ_ASSERT(aAlphaStride >= aWidth);
+-  // required for SurfaceFormatBit::OS_A
+   MOZ_ASSERT(aFormat == SurfaceFormat::B8G8R8A8 ||
+              aFormat == SurfaceFormat::R8G8B8A8);
+ 
+@@ -346,7 +335,8 @@ void FillAlphaToRGBA(const uint8_t* aAlpha, const int32_t aAlphaStride,
+   const size_t rgbaStride = aWidth * bpp;
+   const uint8_t* src = aAlpha;
+   for (int32_t h = 0; h < aHeight; ++h) {
+-    size_t offset = static_cast<size_t>(SurfaceFormatBit::OS_A) / 8;
++    // Alpha is the last byte of both formats in memory.
++    size_t offset = 3;
+     for (int32_t w = 0; w < aWidth; ++w) {
+       aBuffer[offset] = src[w];
+       offset += bpp;
+@@ -405,15 +395,6 @@ nsresult ConvertYCbCrToRGB32(const layers::PlanarYCbCrData& aData,
+     }
+   }
+ 
+-  if constexpr (std::endian::native == std::endian::big) {
+-    // libyuv makes endian-correct result, which needs to be reversed to BGR* or
+-    // RGB*.
+-    if (!gfx::SwizzleData(aDestBuffer, aStride, gfx::SurfaceFormat::X8R8G8B8,
+-                          aDestBuffer, aStride, gfx::SurfaceFormat::B8G8R8X8,
+-                          aData.mPictureRect.Size())) {
+-      return NS_ERROR_UNEXPECTED;
+-    }
+-  }
+   return NS_OK;
+ }
+ 
+@@ -428,14 +409,6 @@ nsresult ConvertI420AlphaToARGB(const uint8_t* aSrcY, const uint8_t* aSrcU,
+   if (NS_FAILED(result)) {
+     return result;
+   }
+-  if constexpr (std::endian::native == std::endian::big) {
+-    // libyuv makes endian-correct result, which needs to be swapped to BGRA
+-    if (!gfx::SwizzleData(aDstARGB, aDstStrideARGB, gfx::SurfaceFormat::A8R8G8B8,
+-                          aDstARGB, aDstStrideARGB, gfx::SurfaceFormat::B8G8R8A8,
+-                          IntSize(aWidth, aHeight))) {
+-      return NS_ERROR_UNEXPECTED;
+-    }
+-  }
+   return NS_OK;
+ }
+ 
+diff --git a/image/encoders/bmp/nsBMPEncoder.cpp b/image/encoders/bmp/nsBMPEncoder.cpp
+index 23308ec442..c12e0c97c6 100644
+--- a/image/encoders/bmp/nsBMPEncoder.cpp
++++ b/image/encoders/bmp/nsBMPEncoder.cpp
+@@ -7,6 +7,7 @@
+ #include "BMPHeaders.h"
+ #include "mozilla/CheckedInt.h"
+ #include "mozilla/EndianUtils.h"
++#include "mozilla/gfx/Types.h"
+ #include "mozilla/UniquePtrExtensions.h"
+ #include "nsCRT.h"
+ #include "nsStreamUtils.h"
+@@ -433,19 +434,19 @@ void nsBMPEncoder::ConvertHostARGBRow(const uint8_t* aSrc,
+       const uint32_t& pixelIn = ((const uint32_t*)(aSrc))[x];
+       uint8_t* pixelOut = &aDest[x * bytes];
+ 
+-      pixelOut[0] = (pixelIn & 0x00ff0000) >> 16;
+-      pixelOut[1] = (pixelIn & 0x0000ff00) >> 8;
+-      pixelOut[2] = (pixelIn & 0x000000ff) >> 0;
+-      pixelOut[3] = (pixelIn & 0xff000000) >> 24;
++      pixelOut[0] = (pixelIn >> gfx::SurfaceFormatBit::OS_R) & 0xff;
++      pixelOut[1] = (pixelIn >> gfx::SurfaceFormatBit::OS_G) & 0xff;
++      pixelOut[2] = (pixelIn >> gfx::SurfaceFormatBit::OS_B) & 0xff;
++      pixelOut[3] = (pixelIn >> gfx::SurfaceFormatBit::OS_A) & 0xff;
+     }
+   } else {
+     for (uint32_t x = 0; x < aPixelWidth; x++) {
+       const uint32_t& pixelIn = ((const uint32_t*)(aSrc))[x];
+       uint8_t* pixelOut = &aDest[x * bytes];
+ 
+-      pixelOut[0] = (pixelIn & 0xff0000) >> 16;
+-      pixelOut[1] = (pixelIn & 0x00ff00) >> 8;
+-      pixelOut[2] = (pixelIn & 0x0000ff) >> 0;
++      pixelOut[0] = (pixelIn >> gfx::SurfaceFormatBit::OS_R) & 0xff;
++      pixelOut[1] = (pixelIn >> gfx::SurfaceFormatBit::OS_G) & 0xff;
++      pixelOut[2] = (pixelIn >> gfx::SurfaceFormatBit::OS_B) & 0xff;
+     }
+   }
+ }
+diff --git a/image/encoders/jpeg/nsJPEGEncoder.cpp b/image/encoders/jpeg/nsJPEGEncoder.cpp
+index 646b032b56..59c1361ed5 100644
+--- a/image/encoders/jpeg/nsJPEGEncoder.cpp
++++ b/image/encoders/jpeg/nsJPEGEncoder.cpp
+@@ -390,9 +390,9 @@ void nsJPEGEncoder::ConvertHostARGBRow(const uint8_t* aSrc, uint8_t* aDest,
+     const uint32_t& pixelIn = ((const uint32_t*)(aSrc))[x];
+     uint8_t* pixelOut = &aDest[x * 3];
+ 
+-    pixelOut[0] = (pixelIn & 0xff0000) >> 16;
+-    pixelOut[1] = (pixelIn & 0x00ff00) >> 8;
+-    pixelOut[2] = (pixelIn & 0x0000ff) >> 0;
++    pixelOut[0] = (pixelIn >> gfx::SurfaceFormatBit::OS_R) & 0xff;
++    pixelOut[1] = (pixelIn >> gfx::SurfaceFormatBit::OS_G) & 0xff;
++    pixelOut[2] = (pixelIn >> gfx::SurfaceFormatBit::OS_B) & 0xff;
+   }
+ }
+ 
+diff --git a/image/encoders/png/nsPNGEncoder.cpp b/image/encoders/png/nsPNGEncoder.cpp
+index df68909b40..7449104380 100644
+--- a/image/encoders/png/nsPNGEncoder.cpp
++++ b/image/encoders/png/nsPNGEncoder.cpp
+@@ -933,18 +933,21 @@ void nsPNGEncoder::ConvertHostARGBRow(const uint8_t* aSrc, uint8_t* aDest,
+     const uint32_t& pixelIn = ((const uint32_t*)(aSrc))[x];
+     uint8_t* pixelOut = &aDest[x * pixelStride];
+ 
+-    uint8_t alpha = (pixelIn & 0xff000000) >> 24;
++    uint8_t alpha = (pixelIn >> gfx::SurfaceFormatBit::OS_A) & 0xff;
++    uint8_t red = (pixelIn >> gfx::SurfaceFormatBit::OS_R) & 0xff;
++    uint8_t green = (pixelIn >> gfx::SurfaceFormatBit::OS_G) & 0xff;
++    uint8_t blue = (pixelIn >> gfx::SurfaceFormatBit::OS_B) & 0xff;
+     pixelOut[pixelStride - 1] = alpha;  // overwritten below if pixelStride == 3
+     if (alpha == 255) {
+-      pixelOut[0] = (pixelIn & 0xff0000) >> 16;
+-      pixelOut[1] = (pixelIn & 0x00ff00) >> 8;
+-      pixelOut[2] = (pixelIn & 0x0000ff);
++      pixelOut[0] = red;
++      pixelOut[1] = green;
++      pixelOut[2] = blue;
+     } else if (alpha == 0) {
+       pixelOut[0] = pixelOut[1] = pixelOut[2] = 0;
+     } else {
+-      pixelOut[0] = (((pixelIn & 0xff0000) >> 16) * 255 + alpha / 2) / alpha;
+-      pixelOut[1] = (((pixelIn & 0x00ff00) >> 8) * 255 + alpha / 2) / alpha;
+-      pixelOut[2] = (((pixelIn & 0x0000ff)) * 255 + alpha / 2) / alpha;
++      pixelOut[0] = (red * 255 + alpha / 2) / alpha;
++      pixelOut[1] = (green * 255 + alpha / 2) / alpha;
++      pixelOut[2] = (blue * 255 + alpha / 2) / alpha;
+     }
+   }
+ }
+diff --git a/image/encoders/webp/nsWebPEncoder.cpp b/image/encoders/webp/nsWebPEncoder.cpp
+index bc21857ae9..96c2355d25 100644
+--- a/image/encoders/webp/nsWebPEncoder.cpp
++++ b/image/encoders/webp/nsWebPEncoder.cpp
+@@ -5,6 +5,8 @@
+ // #include "ImageLogging.h"
+ #include "nsWebPEncoder.h"
+ 
++#include "mozilla/gfx/Types.h"
++
+ #include "mozilla/CheckedInt.h"
+ #include "mozilla/UniquePtrExtensions.h"
+ #include "nsCRT.h"
+@@ -145,19 +147,21 @@ nsWebPEncoder::InitFromData(const uint8_t* aData,
+             ((const uint32_t*)(aData))[y * aStride / 4 + x];
+         uint8_t* pixelOut = &aDest[y * aStride + x * 4];
+ 
+-        uint8_t alpha = (pixelIn & 0xff000000) >> 24;
++        uint8_t alpha = (pixelIn >> gfx::SurfaceFormatBit::OS_A) & 0xff;
++        uint8_t red = (pixelIn >> gfx::SurfaceFormatBit::OS_R) & 0xff;
++        uint8_t green = (pixelIn >> gfx::SurfaceFormatBit::OS_G) & 0xff;
++        uint8_t blue = (pixelIn >> gfx::SurfaceFormatBit::OS_B) & 0xff;
+         pixelOut[3] = alpha;
+         if (alpha == 255) {
+-          pixelOut[0] = (pixelIn & 0xff0000) >> 16;
+-          pixelOut[1] = (pixelIn & 0x00ff00) >> 8;
+-          pixelOut[2] = (pixelIn & 0x0000ff);
++          pixelOut[0] = red;
++          pixelOut[1] = green;
++          pixelOut[2] = blue;
+         } else if (alpha == 0) {
+           pixelOut[0] = pixelOut[1] = pixelOut[2] = 0;
+         } else {
+-          pixelOut[0] =
+-              (((pixelIn & 0xff0000) >> 16) * 255 + alpha / 2) / alpha;
+-          pixelOut[1] = (((pixelIn & 0x00ff00) >> 8) * 255 + alpha / 2) / alpha;
+-          pixelOut[2] = (((pixelIn & 0x0000ff)) * 255 + alpha / 2) / alpha;
++          pixelOut[0] = (red * 255 + alpha / 2) / alpha;
++          pixelOut[1] = (green * 255 + alpha / 2) / alpha;
++          pixelOut[2] = (blue * 255 + alpha / 2) / alpha;
+         }
+       }
+     }

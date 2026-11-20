@@ -1,7 +1,7 @@
-From 52ece741d7e60350a7f197a16a58822e4fa4665b Mon Sep 17 00:00:00 2001
+From 8dcfae51f7b2a65e70a47659bfee217b53a66cb3 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
 Date: Sun, 5 Jul 2026 10:54:17 +1000
-Subject: [PATCH 3/9] Add PPC64BE VSX instructions for libwebp
+Subject: [PATCH 07/30] Add PPC64BE VSX instructions for libwebp
 
 Assisted-by: Lance Albertson <lance@osuosl.org>
 Assisted-by: Thushan Fernando <thushan@thushanfernando.com>
@@ -20,7 +20,7 @@ Assisted-by: James Zern <jzern@google.com>
  10 files changed, 743 insertions(+), 315 deletions(-)
 
 diff --git a/media/libwebp/src/dsp/alpha_processing_vsx.c b/media/libwebp/src/dsp/alpha_processing_vsx.c
-index 1f0163f82dbd..a710a30a9a27 100644
+index 1f0163f82d..a710a30a9a 100644
 --- a/media/libwebp/src/dsp/alpha_processing_vsx.c
 +++ b/media/libwebp/src/dsp/alpha_processing_vsx.c
 @@ -1,4 +1,4 @@
@@ -157,7 +157,7 @@ index 1f0163f82dbd..a710a30a9a27 100644
    WebPExtractAlpha = ExtractAlpha_VSX;
    WebPExtractGreen = ExtractGreen_VSX;
 diff --git a/media/libwebp/src/dsp/cpu.h b/media/libwebp/src/dsp/cpu.h
-index 05357aff804d..9889d054042e 100644
+index 05357aff80..9889d05404 100644
 --- a/media/libwebp/src/dsp/cpu.h
 +++ b/media/libwebp/src/dsp/cpu.h
 @@ -155,13 +155,11 @@
@@ -179,7 +179,7 @@ index 05357aff804d..9889d054042e 100644
  #endif
  
 diff --git a/media/libwebp/src/dsp/dec_vsx.c b/media/libwebp/src/dsp/dec_vsx.c
-index e0c1cbc3b71b..0b22340786fa 100644
+index e0c1cbc3b7..0b22340786 100644
 --- a/media/libwebp/src/dsp/dec_vsx.c
 +++ b/media/libwebp/src/dsp/dec_vsx.c
 @@ -1,4 +1,4 @@
@@ -860,7 +860,7 @@ index e0c1cbc3b71b..0b22340786fa 100644
    int y;
    for (y = 0; y < 4; ++y) {
 diff --git a/media/libwebp/src/dsp/filters_vsx.c b/media/libwebp/src/dsp/filters_vsx.c
-index 6c875eb8893f..0501c68f40e8 100644
+index 6c875eb889..0501c68f40 100644
 --- a/media/libwebp/src/dsp/filters_vsx.c
 +++ b/media/libwebp/src/dsp/filters_vsx.c
 @@ -1,4 +1,4 @@
@@ -966,7 +966,7 @@ index 6c875eb8893f..0501c68f40e8 100644
      }
      for (; i < length; ++i) {
 diff --git a/media/libwebp/src/dsp/lossless_vsx.c b/media/libwebp/src/dsp/lossless_vsx.c
-index 89da30c9589c..3739067547d0 100644
+index 89da30c958..3739067547 100644
 --- a/media/libwebp/src/dsp/lossless_vsx.c
 +++ b/media/libwebp/src/dsp/lossless_vsx.c
 @@ -1,4 +1,4 @@
@@ -1167,10 +1167,10 @@ index 89da30c9589c..3739067547d0 100644
      diff_lo = (i16x8)SRLI((u8x16)diff_lo, 8);
      src = SRLI(src, 4);
 diff --git a/media/libwebp/src/dsp/moz.build b/media/libwebp/src/dsp/moz.build
-index d9452e2b6665..6e7435c78356 100644
+index 5be26070e1..db5f0992a0 100644
 --- a/media/libwebp/src/dsp/moz.build
 +++ b/media/libwebp/src/dsp/moz.build
-@@ -130,7 +130,7 @@ elif CONFIG['TARGET_CPU'] == 'ppc64':
+@@ -134,7 +134,7 @@ elif CONFIG['TARGET_CPU'] == 'ppc64' and CONFIG['PPC_TARGET_HAS_VSX']:
      DEFINES['WEBP_HAVE_VSX'] = 1;
      for f in SOURCES:
        if f.endswith('vsx.c'):
@@ -1180,7 +1180,7 @@ index d9452e2b6665..6e7435c78356 100644
  if CONFIG['CC_TYPE'] in ('clang', 'clang-cl'):
      CFLAGS += ['-Wno-unreachable-code']
 diff --git a/media/libwebp/src/dsp/rescaler_vsx.c b/media/libwebp/src/dsp/rescaler_vsx.c
-index 002f232d647a..ecb19c510202 100644
+index 002f232d64..ecb19c5102 100644
 --- a/media/libwebp/src/dsp/rescaler_vsx.c
 +++ b/media/libwebp/src/dsp/rescaler_vsx.c
 @@ -1,4 +1,4 @@
@@ -1246,7 +1246,7 @@ index 002f232d647a..ecb19c510202 100644
  
  // Saturated pack of two 32-bit lane vectors (8 values) into 8 bytes at dst.
 diff --git a/media/libwebp/src/dsp/upsampling_vsx.c b/media/libwebp/src/dsp/upsampling_vsx.c
-index a7191972fc6e..853115d264ed 100644
+index a7191972fc..853115d264 100644
 --- a/media/libwebp/src/dsp/upsampling_vsx.c
 +++ b/media/libwebp/src/dsp/upsampling_vsx.c
 @@ -1,4 +1,4 @@
@@ -1431,7 +1431,7 @@ index a7191972fc6e..853115d264ed 100644
    WebPUpsamplers[MODE_ARGB] = UpsampleArgbLinePair_VSX;
    WebPUpsamplers[MODE_Argb] = UpsampleArgbLinePair_VSX;
 diff --git a/media/libwebp/src/dsp/yuv.h b/media/libwebp/src/dsp/yuv.h
-index 979891d3232d..813025799861 100644
+index 979891d323..8130257998 100644
 --- a/media/libwebp/src/dsp/yuv.h
 +++ b/media/libwebp/src/dsp/yuv.h
 @@ -200,6 +200,22 @@ void VP8YuvToArgb32_VSX(const uint8_t* WEBP_RESTRICT y,
@@ -1458,7 +1458,7 @@ index 979891d3232d..813025799861 100644
  #endif    // WEBP_USE_VSX
  
 diff --git a/media/libwebp/src/dsp/yuv_vsx.c b/media/libwebp/src/dsp/yuv_vsx.c
-index 1fdc5c80ba16..f139c6314d16 100644
+index 1fdc5c80ba..f139c6314d 100644
 --- a/media/libwebp/src/dsp/yuv_vsx.c
 +++ b/media/libwebp/src/dsp/yuv_vsx.c
 @@ -1,4 +1,4 @@
