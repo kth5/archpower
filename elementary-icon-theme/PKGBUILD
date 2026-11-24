@@ -5,12 +5,12 @@
 # Contributor: Josip <josipponjavic@gmail.com>
 
 pkgname=elementary-icon-theme
-pkgver=8.2.0
-pkgrel=2
+pkgver=9.0.0
+pkgrel=1
 pkgdesc='Named, vector icons for elementary OS'
 arch=(any)
 url=https://github.com/elementary/icons
-license=(GPL3)
+license=(GPL-3.0-only)
 groups=(pantheon)
 depends=(hicolor-icon-theme)
 makedepends=(
@@ -19,14 +19,12 @@ makedepends=(
   meson
   xorg-xcursorgen
 )
-_tag=6ddbb535af70a5ceeff5e1fec05d9b0562641b2a
-source=(elementary-icon-theme::git+https://github.com/elementary/icons.git#tag=${_tag})
-sha256sums=('910e2e8cb75cc9d5a66e69fc9b2d5a40e98cdb2fd001d18b65e7b86281f07122')
+source=(elementary-icon-theme::git+https://github.com/elementary/icons.git#tag=${pkgver})
+b2sums=('51a2e90a956117314a7fb2f7e8e37aa002429c32650d7523227327cfad25b5ac529ce482c0ca8b8272c4ba924c86559659e6453c8e3c35a6f45db939dbb00ba2')
 
-pkgver() {
+prepare() {
   cd elementary-icon-theme
-
-  git describe --tags
+  git cherry-pick -n 9b9d3df4f93ee6ad33c37462f023aab3b758b4a5 # remove broken symlinks
 }
 
 build() {
