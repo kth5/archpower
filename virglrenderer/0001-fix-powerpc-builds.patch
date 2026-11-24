@@ -1,0 +1,341 @@
+diff --git a/src/drm/amdgpu/amdgpu_renderer.c b/src/drm/amdgpu/amdgpu_renderer.c
+index e7f47c34..b2aaa3d8 100644
+--- a/src/drm/amdgpu/amdgpu_renderer.c
++++ b/src/drm/amdgpu/amdgpu_renderer.c
+@@ -38,6 +38,7 @@
+ #include <stdalign.h>
+ #include <errno.h>
+ #include <fcntl.h>
++#include <inttypes.h>
+ #include <string.h>
+ #include <unistd.h>
+ #include <sys/mman.h>
+@@ -411,7 +412,7 @@ amdgpu_renderer_get_blob(struct virgl_context *vctx, uint32_t res_id, uint64_t b
+ 
+    /* If GEM_NEW fails, we can end up here without a backing obj or if it's a dumb buffer. */
+    if (!obj) {
+-      print(0, "No object with blob_id=%ld", blob_id);
++      print(0, "No object with blob_id=%" PRIu64, blob_id);
+       return -ENOENT;
+    }
+ 
+@@ -424,7 +425,7 @@ amdgpu_renderer_get_blob(struct virgl_context *vctx, uint32_t res_id, uint64_t b
+     * to the same storage.
+     */
+    if (obj->exported) {
+-      print(0, "Already exported! blob_id:%ld", blob_id);
++      print(0, "Already exported! blob_id:%" PRIu64, blob_id);
+       return -EINVAL;
+    }
+ 
+@@ -436,7 +437,8 @@ amdgpu_renderer_get_blob(struct virgl_context *vctx, uint32_t res_id, uint64_t b
+       ret = amdgpu_bo_export(obj->bo, amdgpu_bo_handle_type_dma_buf_fd, (uint32_t *)&fd);
+ 
+       if (ret) {
+-         print(0, "Export to fd failed for blob_id:%ld r=%d (%s)", blob_id, ret, strerror(errno));
++         print(0, "Export to fd failed for blob_id:%" PRIu64 " r=%d (%s)",
++               blob_id, ret, strerror(errno));
+          return ret;
+       }
+ 
+@@ -515,7 +517,7 @@ amdgpu_ccmd_gem_new(struct drm_context *dctx, struct vdrm_ccmd_req *hdr)
+       goto alloc_failed;
+    }
+    if (!drm_context_blob_id_valid(dctx, req->blob_id)) {
+-      print(0, "Invalid blob_id %ld", req->blob_id);
++      print(0, "Invalid blob_id %" PRIu64, req->blob_id);
+       ret = -EINVAL;
+       goto alloc_failed;
+    }
+@@ -553,7 +555,7 @@ amdgpu_ccmd_gem_new(struct drm_context *dctx, struct vdrm_ccmd_req *hdr)
+ 
+    drm_context_object_set_blob_id(dctx, &obj->base, req->blob_id);
+ 
+-   print(2, "new object blob_id: %ld heap: %08x flags: %lx size: %ld",
++   print(2, "new object blob_id: %" PRIu64 " heap: %08x flags: %" PRIx64 " size: %" PRIu64,
+          req->blob_id, req->r.preferred_heap, req->r.flags, req->r.alloc_size);
+ 
+    return 0;
+@@ -562,7 +564,7 @@ va_map_failed:
+    amdgpu_bo_free(bo_handle);
+ 
+ alloc_failed:
+-   print(2, "ERROR blob_id: %ld heap: %08x flags: %lx",
++   print(2, "ERROR blob_id: %" PRIu64 " heap: %08x flags: %" PRIx64,
+          req->blob_id, req->r.preferred_heap, req->r.flags);
+    if (ctx->shmem)
+       ctx->shmem->async_error++;
+@@ -593,7 +595,8 @@ amdgpu_ccmd_bo_va_op(struct drm_context *dctx, struct vdrm_ccmd_req *hdr)
+    } else {
+       obj = amdgpu_get_object_from_res_id(ctx, req->res_id, __FUNCTION__);
+       if (!obj) {
+-         print(0, "amdgpu_bo_va_op_raw failed: op: %d res_id: %d offset: 0x%lx size: 0x%lx va: %" PRIx64 " r=%d",
++         print(0, "amdgpu_bo_va_op_raw failed: op: %d res_id: %d offset: 0x%" PRIx64
++                  " size: 0x%" PRIx64 " va: %" PRIx64 " r=%d",
+             req->op, obj->base.res_id, req->offset, req->vm_map_size, req->va, rsp->ret);
+ 
+          /* This is ok. This means the guest closed the GEM already. */
+@@ -609,7 +612,8 @@ amdgpu_ccmd_bo_va_op(struct drm_context *dctx, struct vdrm_ccmd_req *hdr)
+       if (ctx->shmem)
+          ctx->shmem->async_error++;
+ 
+-      print(0, "amdgpu_bo_va_op_raw failed: op: %d res_id: %d offset: 0x%lx size: 0x%lx va: %" PRIx64 " r=%d",
++      print(0, "amdgpu_bo_va_op_raw failed: op: %d res_id: %d offset: 0x%" PRIx64
++               " size: 0x%" PRIx64 " va: %" PRIx64 " r=%d",
+          req->op, req->res_id, req->offset, req->vm_map_size, req->va, rsp->ret);
+    } else {
+       print(2, "va_op %d res_id: %u va: [0x%" PRIx64 ", 0x%" PRIx64 "] @offset 0x%" PRIx64,
+@@ -1043,7 +1047,7 @@ amdgpu_ccmd_cs_submit(struct drm_context *dctx, struct vdrm_ccmd_req *hdr)
+ 
+    drmSyncobjDestroy(amdgpu_device_get_fd(ctx->dev), syncobj_out.handle);
+ 
+-   print(3, "ctx: %d -> seqno={v=%d a=%ld} r=%d", req->ctx_id, hdr->seqno, seqno, r);
++   print(3, "ctx: %d -> seqno={v=%d a=%" PRIu64 "} r=%d", req->ctx_id, hdr->seqno, seqno, r);
+ 
+ end:
+    if (bo_list)
+@@ -1170,7 +1174,7 @@ amdgpu_renderer_submit_fence(struct virgl_context *vctx, uint32_t flags,
+       return 0;
+    }
+ 
+-   print(3, "ring_idx: %d fence_id: %lu", ring_idx, fence_id);
++   print(3, "ring_idx: %d fence_id: %" PRIu64, ring_idx, fence_id);
+    return drm_timeline_submit_fence(&ctx->timelines[ring_idx - 1], flags, fence_id);
+ }
+ 
+diff --git a/src/drm/drm_renderer.c b/src/drm/drm_renderer.c
+index 3eb33e9b..a7c7df12 100644
+--- a/src/drm/drm_renderer.c
++++ b/src/drm/drm_renderer.c
+@@ -182,7 +182,7 @@ drm_renderer_create(size_t debug_len, const char *debug_name, int drm_fd)
+       if (debug_len && debug_name) {
+          struct drm_set_client_name n = {
+             .name_len = debug_len,
+-            .name = (uint64_t) debug_name
++            .name = VOID2U64(debug_name)
+          };
+          drmIoctl(fd, DRM_IOCTL_SET_CLIENT_NAME, &n);
+       }
+diff --git a/src/drm/i915/i915_ccmd.c b/src/drm/i915/i915_ccmd.c
+index 7000984c..0438a6b6 100644
+--- a/src/drm/i915/i915_ccmd.c
++++ b/src/drm/i915/i915_ccmd.c
+@@ -3,6 +3,8 @@
+  * SPDX-License-Identifier: MIT
+  */
+ 
++#include <inttypes.h>
++
+ #include "virgl_fence.h"
+ 
+ #include "util/libsync.h"
+@@ -264,7 +266,7 @@ i915_ccmd_gem_create_ext(struct drm_context *dctx, struct vdrm_ccmd_req *hdr)
+          if (ext_size < 0)
+             break;
+ 
+-         struct drm_i915_gem_memory_class_instance *classes = (void*)mem_regions->regions;
++         struct drm_i915_gem_memory_class_instance *classes = U642VOID(mem_regions->regions);
+ 
+          for (unsigned i = 0; i < mem_regions->num_regions; i++) {
+             struct drm_i915_gem_memory_class_instance *class = classes + i;
+@@ -401,7 +403,7 @@ i915_ccmd_gem_context_create(struct drm_context *dctx, struct vdrm_ccmd_req *hdr
+          break;
+ 
+       default:
+-         drm_err("invalid param %llu", setparam->param.param);
++         drm_err("invalid param %" PRIu64, (uint64_t)setparam->param.param);
+          return -EINVAL;
+       }
+ 
+diff --git a/src/drm/panfrost/panfrost_ccmd.c b/src/drm/panfrost/panfrost_ccmd.c
+index a696810f..8b2baee1 100644
+--- a/src/drm/panfrost/panfrost_ccmd.c
++++ b/src/drm/panfrost/panfrost_ccmd.c
+@@ -6,6 +6,7 @@
+ #include <assert.h>
+ #include <xf86drm.h>
+ #include <errno.h>
++#include <inttypes.h>
+ 
+ #include "drm_context.h"
+ #include "drm_util.h"
+@@ -48,16 +49,16 @@ panfrost_ccmd_submit(struct drm_context *dctx, struct vdrm_ccmd_req *hdr)
+ 
+    struct drm_panfrost_submit submit = {
+       .jc = req->jc,
+-      .in_syncs = (__u64)(char *) &in_sync,
++      .in_syncs = VOID2U64(&in_sync),
+       .in_sync_count = !!in_sync,
+       .out_sync = pan_ctx->out_sync,
+-      .bo_handles = (uint64_t) bo_handlers,
++      .bo_handles = VOID2U64(bo_handlers),
+       .bo_handle_count = req->res_id_count,
+       .requirements = req->requirements,
+    };
+ 
+-   drm_dbg("jc=%llu, out_sync=%u, requirements=0x%X, bo_handle_count=%u",
+-           submit.jc, submit.out_sync, submit.requirements, submit.bo_handle_count);
++   drm_dbg("jc=%" PRIu64 ", out_sync=%u, requirements=0x%X, bo_handle_count=%u",
++           (uint64_t)submit.jc, submit.out_sync, submit.requirements, submit.bo_handle_count);
+ 
+    ret = drmIoctl(dctx->fd, DRM_IOCTL_PANFROST_SUBMIT, &submit);
+    if (ret)
+@@ -121,9 +122,9 @@ panfrost_ccmd_create_bo(struct drm_context *dctx, struct vdrm_ccmd_req *hdr)
+ 
+    drm_context_object_set_blob_id(dctx, &pan_obj->base, req->blob_id);
+ 
+-   drm_dbg("obj=%p, blob_id=%u, handle=%u, size=%u, offset=%llu, flags=0x%X",
++   drm_dbg("obj=%p, blob_id=%u, handle=%u, size=%u, offset=%" PRIu64 ", flags=0x%X",
+            (void*)pan_obj, pan_obj->base.blob_id, pan_obj->base.handle, req->size,
+-           create_bo.offset, pan_obj->flags);
++           (uint64_t)create_bo.offset, pan_obj->flags);
+ 
+    return 0;
+ }
+@@ -152,7 +153,7 @@ panfrost_ccmd_mmap_bo(struct drm_context *dctx, struct vdrm_ccmd_req *hdr)
+    rsp->ret = drmIoctl(dctx->fd, DRM_IOCTL_PANFROST_MMAP_BO, &mmap_bo);
+    rsp->offset = mmap_bo.offset;
+ 
+-   drm_dbg("obj=%p, res_id=%u, handle=%u, bo.offset=%lu, mmap.offset=%lu, flags=0x%X",
++   drm_dbg("obj=%p, res_id=%u, handle=%u, bo.offset=%" PRIu64 ", mmap.offset=%" PRIu64 ", flags=0x%X",
+            (void*)pan_obj, pan_obj->base.res_id, pan_obj->base.handle,
+            pan_obj->offset, rsp->offset, req->flags);
+ 
+@@ -196,7 +197,7 @@ panfrost_ccmd_get_bo_offset(struct drm_context *dctx, struct vdrm_ccmd_req *hdr)
+    rsp->ret = drmIoctl(dctx->fd, DRM_IOCTL_PANFROST_GET_BO_OFFSET, &bo_offset);
+    pan_obj->offset = rsp->offset = bo_offset.offset;
+ 
+-   drm_dbg("obj=%p, res_id=%u, handle=%u, offset=%lu", (void*)pan_obj,
++   drm_dbg("obj=%p, res_id=%u, handle=%u, offset=%" PRIu64, (void*)pan_obj,
+            pan_obj->base.res_id, pan_obj->base.handle, rsp->offset);
+ 
+    return 0;
+diff --git a/src/gallium/auxiliary/tgsi/tgsi_text.c b/src/gallium/auxiliary/tgsi/tgsi_text.c
+index db7d7b95..601efd9c 100644
+--- a/src/gallium/auxiliary/tgsi/tgsi_text.c
++++ b/src/gallium/auxiliary/tgsi/tgsi_text.c
+@@ -84,7 +84,7 @@ streq_nocase_uprcase(const char *str1,
+ static inline bool skip_n_chars(const char **pcur,
+                                    int n)
+ {
+-   char* str = memchr(*pcur, '\0', n);
++   const char *str = memchr(*pcur, '\0', n);
+    if (unlikely(str)) {
+       *pcur = str;
+       return false;
+diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
+index 4bf88e09..9a4f8de8 100644
+--- a/src/vrend/vrend_renderer.c
++++ b/src/vrend/vrend_renderer.c
+@@ -2708,9 +2708,11 @@ int vrend_create_sampler_view(struct vrend_context *ctx,
+ 
+    view->gl_id = view->texture->gl_id;
+ 
+-   if (view->target == PIPE_BUFFER) {
++   /* A zero target from older clients means to use the resource's target. */
++   if (view->target == PIPE_BUFFER)
+       view->target = view->texture->target;
+ 
++   if (res->base.target == PIPE_BUFFER) {
+       view->u.buf.first_element = val0;
+       view->u.buf.last_element = val1;
+    } else {
+@@ -2797,18 +2799,18 @@ int vrend_create_sampler_view(struct vrend_context *ctx,
+           has_bit(view->texture->storage_bits, VREND_STORAGE_GL_IMMUTABLE) &&
+           has_feature(feat_texture_view)) {
+         GLenum internalformat = tex_conv_table[format].internalformat;
+-        view->levels = (view->u.tex.last_level - view->u.tex.first_level) + 1;
+-
++        int num_levels = view->u.tex.last_level - view->u.tex.first_level + 1;
+         int num_layers = view->u.tex.last_layer - view->u.tex.first_layer + 1;
+ 
+-        if (view->levels == 0 || num_layers <= 0) {
++        if (num_levels <= 0 || num_layers <= 0) {
+             vrend_resource_reference(&view->texture, NULL);
+             FREE(view);
+-            virgl_error("%s: Invalid number of layers (%d) or zero levels requested\n",
+-                        __func__, num_layers);
++            virgl_error("%s: Invalid number of layers (%d) or levels (%d) requested\n",
++                        __func__, num_layers, num_levels);
+             return EINVAL;
+         }
+ 
++        view->levels = num_levels;
+         glGenTextures(1, &view->gl_id);
+ 
+         /* texture views for eglimage-backed bgr* resources are usually not
+@@ -2879,9 +2881,9 @@ int vrend_create_sampler_view(struct vrend_context *ctx,
+                             view->srgb_decode);
+         }
+         glBindTexture(view->target, 0);
+-      } else if (needs_view && view->u.buf.first_element < ARRAY_SIZE(res->aux_plane_egl_image) &&
+-            res->aux_plane_egl_image[view->u.buf.first_element]) {
+-        void *image = res->aux_plane_egl_image[view->u.buf.first_element];
++      } else if (needs_view && val0 < ARRAY_SIZE(res->aux_plane_egl_image) &&
++            res->aux_plane_egl_image[val0]) {
++        void *image = res->aux_plane_egl_image[val0];
+         glGenTextures(1, &view->gl_id);
+         glBindTexture(view->target, view->gl_id);
+         glEGLImageTargetTexture2DOES(view->target, (GLeglImageOES) image);
+diff --git a/tests/test_virgl_cmd.c b/tests/test_virgl_cmd.c
+index 3124e5fc..3e3da327 100644
+--- a/tests/test_virgl_cmd.c
++++ b/tests/test_virgl_cmd.c
+@@ -522,7 +522,7 @@ static void virgl_test_bind_images_shader(int first_layer, int last_layer, int e
+     struct vrend_image_view images[1] = {0};
+     images[0].u.tex.first_layer = first_layer;
+     images[0].u.tex.last_layer = last_layer;
+-    virgl_encoder_set_shader_images(&ctx, PIPE_SHADER_FRAGMENT, 1, 1, images, res.handle);
++    virgl_encoder_set_shader_images(&ctx, PIPE_SHADER_FRAGMENT, 1, 1, images, &res);
+ 
+     ret = testvirgl_ctx_send_cmdbuf(&ctx);
+     ck_assert_int_eq(ret, expected_error);
+diff --git a/tests/testvirgl_encode.c b/tests/testvirgl_encode.c
+index 96047e82..e300d1b0 100644
+--- a/tests/testvirgl_encode.c
++++ b/tests/testvirgl_encode.c
+@@ -777,8 +777,8 @@ int virgl_encoder_set_shader_images(struct virgl_context *ctx,
+                                      uint32_t shader_type,
+                                      uint32_t start_slot,
+                                      uint32_t num_images,
+-                                    struct vrend_image_view *images,
+-                                    uint32_t handle)
++                                    const struct vrend_image_view *images,
++                                    const struct virgl_resource *res)
+ {
+    virgl_encoder_write_cmd_dword(ctx, VIRGL_CMD0(VIRGL_CCMD_SET_SHADER_IMAGES, 0, VIRGL_SET_SHADER_IMAGE_SIZE(num_images)));
+    virgl_encoder_write_dword(ctx->cbuf, shader_type);
+@@ -787,10 +787,15 @@ int virgl_encoder_set_shader_images(struct virgl_context *ctx,
+    for (uint32_t i = 0; i < num_images; i++) {
+       virgl_encoder_write_dword(ctx->cbuf, images[i].format);
+       virgl_encoder_write_dword(ctx->cbuf, images[i].access);
+-      virgl_encoder_write_dword(ctx->cbuf, images[i].u.buf.offset);
+-      virgl_encoder_write_dword(ctx->cbuf, images[i].u.buf.size);
+-
+-      virgl_encoder_write_dword(ctx->cbuf, handle);
++      if (res->base.target == PIPE_BUFFER) {
++         virgl_encoder_write_dword(ctx->cbuf, images[i].u.buf.offset);
++         virgl_encoder_write_dword(ctx->cbuf, images[i].u.buf.size);
++      } else {
++         virgl_encoder_write_dword(ctx->cbuf, images[i].u.tex.first_layer |
++                                             (uint32_t)images[i].u.tex.last_layer << 16);
++         virgl_encoder_write_dword(ctx->cbuf, images[i].u.tex.level);
++      }
++      virgl_encoder_write_dword(ctx->cbuf, res->handle);
+    }
+ 
+    return 0;
+diff --git a/tests/testvirgl_encode.h b/tests/testvirgl_encode.h
+index f53b4ea4..0d9aab42 100644
+--- a/tests/testvirgl_encode.h
++++ b/tests/testvirgl_encode.h
+@@ -267,7 +267,8 @@ int virgl_encoder_set_shader_images(struct virgl_context *ctx,
+                                     uint32_t shader_type,
+                                     uint32_t start_slot,
+                                     uint32_t num_images,
+-                                    struct vrend_image_view *images, uint32_t handle);
++                                    const struct vrend_image_view *images,
++                                    const struct virgl_resource *res);
+ int virgl_encode_dsa_state(struct virgl_context *ctx,
+                           uint32_t handle,
+                           const struct pipe_depth_stencil_alpha_state *dsa_state);
