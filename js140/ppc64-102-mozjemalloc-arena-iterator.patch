@@ -1,0 +1,35 @@
+From f97a1e6d852a9ccb787492d57ccb6394c2d29072 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
+Date: Sun, 22 Nov 2026 02:15:38 +1100
+Subject: [PATCH 3/3] Do not rebuild the ArenaCollection iterator in place
+
+ArenaCollection::Iterator::Next() moved on to the next tree by
+constructing a new iterator over itself with its own members as the
+constructor arguments. Built with GCC 16 for big-endian PPC64 the
+iterator restarted the same tree forever, so MayPurgeAll() never
+returned and the JS shell hung at exit.
+
+Assign the base iterator and advance the tree pointers instead, and
+keep going past an empty tree. Upstream rewrote the iterator in bug
+1977533.
+---
+ memory/build/mozjemalloc.cpp | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/memory/build/mozjemalloc.cpp b/memory/build/mozjemalloc.cpp
+index ecd203a23d6c..c2b132299e6e 100644
+--- a/memory/build/mozjemalloc.cpp
++++ b/memory/build/mozjemalloc.cpp
+@@ -1687,8 +1687,10 @@ class ArenaCollection {
+ 
+     arena_t* Next() {
+       arena_t* result = Tree::Iterator::Next();
+-      if (!result && mSecondTree) {
+-        new (this) Iterator(mSecondTree, mThirdTree);
++      while (!result && mSecondTree) {
++        Tree::Iterator::operator=(Tree::Iterator(mSecondTree));
++        mSecondTree = mThirdTree;
++        mThirdTree = nullptr;
+         result = *Tree::Iterator::begin();
+       }
+       return result;
