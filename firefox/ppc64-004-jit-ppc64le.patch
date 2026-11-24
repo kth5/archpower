@@ -1,4 +1,4 @@
-From beb9f27f70b0fae5331b4708921e46663bd2b42d Mon Sep 17 00:00:00 2001
+From f8f2d882a883e56b0d087bd3715d1358a7f606bb Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
 Date: Fri, 12 Jun 2026 16:02:28 +1000
 Subject: [PATCH 04/30] Add PPC64LE JIT backend
@@ -83,16 +83,16 @@ Assisted-by: Claude Fable 5 <noreply@anthropic.com>
  js/src/jit/moz.build                          |   12 +
  js/src/jit/ppc64/Architecture-ppc64.cpp       |  247 +
  js/src/jit/ppc64/Architecture-ppc64.h         |  588 ++
- js/src/jit/ppc64/Assembler-ppc64.cpp          | 3201 +++++++
+ js/src/jit/ppc64/Assembler-ppc64.cpp          | 3200 +++++++
  js/src/jit/ppc64/Assembler-ppc64.h            | 2108 +++++
- js/src/jit/ppc64/CodeGenerator-ppc64.cpp      | 3940 +++++++++
+ js/src/jit/ppc64/CodeGenerator-ppc64.cpp      | 3938 +++++++++
  js/src/jit/ppc64/CodeGenerator-ppc64.h        |   74 +
  js/src/jit/ppc64/LIR-ppc64.h                  |  135 +
  js/src/jit/ppc64/Lowering-ppc64.cpp           | 1297 +++
  js/src/jit/ppc64/Lowering-ppc64.h             |  105 +
- js/src/jit/ppc64/MacroAssembler-ppc64-inl.h   | 6264 +++++++++++++
+ js/src/jit/ppc64/MacroAssembler-ppc64-inl.h   | 6295 ++++++++++++++
  js/src/jit/ppc64/MacroAssembler-ppc64.cpp     | 3437 ++++++++
- js/src/jit/ppc64/MacroAssembler-ppc64.h       | 2145 +++++
+ js/src/jit/ppc64/MacroAssembler-ppc64.h       | 2147 +++++
  js/src/jit/ppc64/MoveEmitter-ppc64.cpp        |  355 +
  js/src/jit/ppc64/MoveEmitter-ppc64.h          |   59 +
  js/src/jit/ppc64/SharedICHelpers-ppc64-inl.h  |   83 +
@@ -100,7 +100,7 @@ Assisted-by: Claude Fable 5 <noreply@anthropic.com>
  js/src/jit/ppc64/SharedICRegisters-ppc64.h    |   46 +
  js/src/jit/ppc64/Simulator-ppc64.cpp          | 7746 +++++++++++++++++
  js/src/jit/ppc64/Simulator-ppc64.h            |  590 ++
- js/src/jit/ppc64/Trampoline-ppc64.cpp         |  657 ++
+ js/src/jit/ppc64/Trampoline-ppc64.cpp         |  658 ++
  js/src/jit/shared/Assembler-shared.h          |    5 +-
  .../AtomicOperations-feeling-lucky-gcc.h      |    3 +-
  js/src/jit/shared/CodeGenerator-shared.cpp    |    9 +-
@@ -123,10 +123,10 @@ Assisted-by: Claude Fable 5 <noreply@anthropic.com>
  js/src/wasm/WasmBaselineCompile.cpp           |  144 +-
  js/src/wasm/WasmCodegenConstants.h            |    3 +-
  js/src/wasm/WasmCodegenTypes.cpp              |    2 +-
- js/src/wasm/WasmCodegenTypes.h                |    5 +-
+ js/src/wasm/WasmCodegenTypes.h                |   15 +-
  js/src/wasm/WasmCompile.cpp                   |    6 +-
  js/src/wasm/WasmFrameIter.cpp                 |  115 +
- js/src/wasm/WasmGC.cpp                        |   10 +
+ js/src/wasm/WasmGC.cpp                        |   13 +
  js/src/wasm/WasmGenerator.cpp                 |   18 +-
  js/src/wasm/WasmIonCompile.cpp                |    2 +-
  js/src/wasm/WasmMemory.cpp                    |    7 +-
@@ -140,7 +140,7 @@ Assisted-by: Claude Fable 5 <noreply@anthropic.com>
  memory/gtest/TestJemalloc.cpp                 |   18 +
  mfbt/Assertions.h                             |    5 +
  .../check_macroassembler_style.py             |    2 +
- 122 files changed, 35869 insertions(+), 443 deletions(-)
+ 122 files changed, 35912 insertions(+), 444 deletions(-)
  create mode 100644 js/src/jit-test/tests/baseline/branch8-16-immediate-width.js
  create mode 100644 js/src/jit-test/tests/ion/div-mod-by-constant-values.js
  create mode 100644 js/src/jit-test/tests/ion/math-round-small-positive-stays-in-ion.js
@@ -329,10 +329,10 @@ index c7778eed94..f19fddc600 100644
  
  
 diff --git a/js/src/builtin/TestingFunctions.cpp b/js/src/builtin/TestingFunctions.cpp
-index 7514a82579..70d077a88f 100644
+index 6f275cb5b0..23f4252ca2 100644
 --- a/js/src/builtin/TestingFunctions.cpp
 +++ b/js/src/builtin/TestingFunctions.cpp
-@@ -448,6 +448,15 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
+@@ -440,6 +440,15 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
      return false;
    }
  
@@ -348,7 +348,7 @@ index 7514a82579..70d077a88f 100644
  #ifdef JS_CODEGEN_LOONG64
    value = BooleanValue(true);
  #else
-@@ -484,6 +493,15 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
+@@ -476,6 +485,15 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
      return false;
    }
  
@@ -381,10 +381,10 @@ index a42e53cf2f..aeef14351a 100644
  #else
    // Use a slightly larger padding for debug and code coverage builds.
 diff --git a/js/src/irregexp/RegExpNativeMacroAssembler.cpp b/js/src/irregexp/RegExpNativeMacroAssembler.cpp
-index 81a041194a..092237f90b 100644
+index a9852f1a88..8ff991afc7 100644
 --- a/js/src/irregexp/RegExpNativeMacroAssembler.cpp
 +++ b/js/src/irregexp/RegExpNativeMacroAssembler.cpp
-@@ -479,6 +479,10 @@ void SMRegExpMacroAssembler::EmitSkipUntilBitInTableSimd(
+@@ -487,6 +487,10 @@ void SMRegExpMacroAssembler::EmitSkipUntilBitInTableSimd(
    masm_.branchTestPtr(Assembler::Zero, temp1_, temp1_, &advanceVector);
    masm_.ctz64(js::jit::Register64(temp1_), js::jit::Register64(temp0_));
    masm_.rshiftPtr(Imm32(2), temp0_);
@@ -395,7 +395,7 @@ index 81a041194a..092237f90b 100644
  #  elif defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64) || \
        defined(JS_CODEGEN_LOONG64)
    masm_.bitmaskInt8x16(result, temp1_);
-@@ -1088,8 +1092,21 @@ void SMRegExpMacroAssembler::CheckBacktrackStackLimit() {
+@@ -1096,8 +1100,21 @@ void SMRegExpMacroAssembler::CheckBacktrackStackLimit() {
          backtrack_stack_pointer_, &no_stack_overflow);
    }
  
@@ -417,7 +417,7 @@ index 81a041194a..092237f90b 100644
    // Exit with an exception if the call failed
    masm_.branchTest32(Assembler::Zero, temp0_, temp0_,
                       &exit_with_exception_label_);
-@@ -1178,6 +1195,13 @@ void SMRegExpMacroAssembler::createStackFrame() {
+@@ -1186,6 +1203,13 @@ void SMRegExpMacroAssembler::createStackFrame() {
    masm_.initPseudoStackPtr();
  #endif
  
@@ -431,7 +431,7 @@ index 81a041194a..092237f90b 100644
    masm_.Push(js::jit::FramePointer);
    masm_.moveStackPtrTo(js::jit::FramePointer);
  
-@@ -1442,6 +1466,9 @@ void SMRegExpMacroAssembler::exitHandler() {
+@@ -1450,6 +1474,9 @@ void SMRegExpMacroAssembler::exitHandler() {
    // Perform a plain Ret(), as abiret() will move SP <- PSP and that is wrong.
    masm_.Ret(vixl::lr);
  #else
@@ -441,7 +441,7 @@ index 81a041194a..092237f90b 100644
    masm_.abiret();
  #endif
  
-@@ -1570,6 +1597,11 @@ void SMRegExpMacroAssembler::stackOverflowHandler() {
+@@ -1578,6 +1605,11 @@ void SMRegExpMacroAssembler::stackOverflowHandler() {
  
    // Adjust for the return address on the stack.
    size_t frameOffset = sizeof(void*);
@@ -1814,7 +1814,7 @@ index 97c2e33762..cb72447766 100644
  #  include "jit/wasm32/Assembler-wasm32.h"
  #elif defined(JS_CODEGEN_NONE)
 diff --git a/js/src/jit/BaselineIC.cpp b/js/src/jit/BaselineIC.cpp
-index 9915a5dc35..2ed3e3fdc1 100644
+index 8da141e8ac..965bfcc542 100644
 --- a/js/src/jit/BaselineIC.cpp
 +++ b/js/src/jit/BaselineIC.cpp
 @@ -121,6 +121,8 @@ AllocatableGeneralRegisterSet BaselineICAvailableGeneralRegs(size_t numInputs) {
@@ -1827,10 +1827,10 @@ index 9915a5dc35..2ed3e3fdc1 100644
    regs.take(ICStubReg);
  
 diff --git a/js/src/jit/CacheIRCompiler.cpp b/js/src/jit/CacheIRCompiler.cpp
-index 969e69087f..d6cef35700 100644
+index 3d7fab5dc8..3e3b794660 100644
 --- a/js/src/jit/CacheIRCompiler.cpp
 +++ b/js/src/jit/CacheIRCompiler.cpp
-@@ -10334,6 +10334,14 @@ bool CacheIRCompiler::emitConcatStringsResult(StringOperandId lhsId,
+@@ -10320,6 +10320,14 @@ bool CacheIRCompiler::emitConcatStringsResult(StringOperandId lhsId,
      liveRegs.add(ICTailCallReg);
  #endif
      liveRegs.takeUnchecked(output.valueReg());
@@ -1845,7 +1845,7 @@ index 969e69087f..d6cef35700 100644
      masm.PushRegsInMask(liveRegs);
  
      // The stub expects lhs in CallTempReg0 and rhs in CallTempReg1.
-@@ -10354,11 +10362,19 @@ bool CacheIRCompiler::emitConcatStringsResult(StringOperandId lhsId,
+@@ -10340,11 +10348,19 @@ bool CacheIRCompiler::emitConcatStringsResult(StringOperandId lhsId,
      masm.branchTestPtr(Assembler::Zero, CallTempReg5, CallTempReg5, &vmCall);
      masm.tagValue(JSVAL_TYPE_STRING, CallTempReg5, output.valueReg());
      masm.PopRegsInMask(liveRegs);
@@ -1866,10 +1866,10 @@ index 969e69087f..d6cef35700 100644
  
    {
 diff --git a/js/src/jit/CodeGenerator.cpp b/js/src/jit/CodeGenerator.cpp
-index 87cfcffb6a..373220db73 100644
+index 99401f04bf..aecce64861 100644
 --- a/js/src/jit/CodeGenerator.cpp
 +++ b/js/src/jit/CodeGenerator.cpp
-@@ -2611,6 +2611,12 @@ static bool PrepareAndExecuteRegExp(MacroAssembler& masm, Register regexp,
+@@ -2615,6 +2615,12 @@ static bool PrepareAndExecuteRegExp(MacroAssembler& masm, Register regexp,
    masm.computeEffectiveAddress(Address(FramePointer, ioOffset), temp2);
    masm.PushRegsInMask(volatileRegs);
    masm.setupUnalignedABICall(temp3);
@@ -1883,7 +1883,7 @@ index 87cfcffb6a..373220db73 100644
    masm.callWithABI(codePointer);
    masm.storeCallInt32Result(temp1);
 diff --git a/js/src/jit/CodeGenerator.h b/js/src/jit/CodeGenerator.h
-index 59198885c3..c4c50040eb 100644
+index 02bac6088a..bffe1f1345 100644
 --- a/js/src/jit/CodeGenerator.h
 +++ b/js/src/jit/CodeGenerator.h
 @@ -23,6 +23,8 @@
@@ -2117,10 +2117,10 @@ index 53c41a32c0..fa41babc58 100644
    MOZ_ASSERT(js::jit::CPUFlagsHaveBeenComputed());
  #endif
 diff --git a/js/src/jit/JitFrames.cpp b/js/src/jit/JitFrames.cpp
-index 684b13c6e4..8ea8542995 100644
+index 8ab99ae1c7..1837ca043c 100644
 --- a/js/src/jit/JitFrames.cpp
 +++ b/js/src/jit/JitFrames.cpp
-@@ -1914,7 +1914,11 @@ Value SnapshotIterator::allocationValue(const RValueAllocation& alloc,
+@@ -1922,7 +1922,11 @@ Value SnapshotIterator::allocationValue(const RValueAllocation& alloc,
        return DoubleValue(fromRegister<double>(alloc.fpuReg()));
  
      case RValueAllocation::FLOAT32_REG:
@@ -2132,7 +2132,7 @@ index 684b13c6e4..8ea8542995 100644
  
      case RValueAllocation::FLOAT32_STACK:
        return DoubleValue(ReadFrameFloat32Slot(fp_, alloc.stackOffset()));
-@@ -2721,7 +2725,12 @@ uintptr_t MachineState::read(Register reg) const {
+@@ -2729,7 +2733,12 @@ uintptr_t MachineState::read(Register reg) const {
  
  template <typename T>
  T MachineState::read(FloatRegister reg) const {
@@ -2176,10 +2176,10 @@ index 1373380d56..90c5cf080f 100644
                "ResumeFromException should be aligned");
  #endif
 diff --git a/js/src/jit/LIR.cpp b/js/src/jit/LIR.cpp
-index b7b1d6ebd4..f52e4ace76 100644
+index a0359ce290..83315d9139 100644
 --- a/js/src/jit/LIR.cpp
 +++ b/js/src/jit/LIR.cpp
-@@ -778,8 +778,9 @@ bool LMoveGroup::add(LAllocation from, LAllocation to, LDefinition::Type type) {
+@@ -803,8 +803,9 @@ bool LMoveGroup::add(LAllocation from, LAllocation to, LDefinition::Type type) {
      // CodeGeneratorShared::CodeGeneratorShared and in general everywhere
      // SimdMemoryAignment is used.  Likely, alignment requirements will return.
  #   if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64) || \
@@ -2192,7 +2192,7 @@ index b7b1d6ebd4..f52e4ace76 100644
  #     error "Need to consider SIMD alignment on this target."
        // The following code may be of use if we need alignment checks on
 diff --git a/js/src/jit/LIR.h b/js/src/jit/LIR.h
-index 08b5ac5aa5..4c3c1f04a5 100644
+index 2960eaf666..8d1e3ee7c7 100644
 --- a/js/src/jit/LIR.h
 +++ b/js/src/jit/LIR.h
 @@ -194,7 +194,8 @@ class LUse : public LAllocation {
@@ -2224,7 +2224,7 @@ index 08b5ac5aa5..4c3c1f04a5 100644
      MOZ_ASSERT(type == SIMD128);
      return reg.isSimd128();
    }
-@@ -2303,6 +2310,8 @@ AnyRegister LAllocation::toAnyRegister() const {
+@@ -2318,6 +2325,8 @@ AnyRegister LAllocation::toAnyRegister() const {
  #  include "jit/loong64/LIR-loong64.h"
  #elif defined(JS_CODEGEN_RISCV64)
  #  include "jit/riscv64/LIR-riscv64.h"
@@ -2495,10 +2495,10 @@ index 061bf978d2..2a49ded9c9 100644
  #endif
    static const uint32_t INVALID_OFFSET = 0x7fffffff;  // UINT31_MAX.
 diff --git a/js/src/jit/Lowering.cpp b/js/src/jit/Lowering.cpp
-index 4d590ffe7d..d37c8a4477 100644
+index f5cb73fc4a..a574e49cb6 100644
 --- a/js/src/jit/Lowering.cpp
 +++ b/js/src/jit/Lowering.cpp
-@@ -1191,7 +1191,8 @@ void LIRGenerator::visitTest(MTest* test) {
+@@ -1197,7 +1197,8 @@ void LIRGenerator::visitTest(MTest* test) {
  
  #if defined(ENABLE_JIT_SIMD) &&                            \
      (defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64) || \
@@ -2522,7 +2522,7 @@ index 8ff566d433..db178e5575 100644
  #  include "jit/wasm32/Lowering-wasm32.h"
  #elif defined(JS_CODEGEN_NONE)
 diff --git a/js/src/jit/MacroAssembler-inl.h b/js/src/jit/MacroAssembler-inl.h
-index 609405702b..d18ed1a715 100644
+index b6aafddf13..7619d26080 100644
 --- a/js/src/jit/MacroAssembler-inl.h
 +++ b/js/src/jit/MacroAssembler-inl.h
 @@ -41,6 +41,8 @@
@@ -2535,10 +2535,10 @@ index 609405702b..d18ed1a715 100644
  #  include "jit/wasm32/MacroAssembler-wasm32-inl.h"
  #elif !defined(JS_CODEGEN_NONE)
 diff --git a/js/src/jit/MacroAssembler.cpp b/js/src/jit/MacroAssembler.cpp
-index 7e899bda03..5aa7f4bb1b 100644
+index 2afd0b0e6f..a4448072b4 100644
 --- a/js/src/jit/MacroAssembler.cpp
 +++ b/js/src/jit/MacroAssembler.cpp
-@@ -6277,6 +6277,11 @@ uint8_t MacroAssembler::getByteAtOffset(size_t offset) const {
+@@ -6294,6 +6294,11 @@ uint8_t MacroAssembler::getByteAtOffset(size_t offset) const {
    Instruction* ii = const_cast<MacroAssembler&>(*this).editSrc(
        BufferOffset(offset & ~size_t(3)));
    return ((uint8_t*)ii)[offset & 3];
@@ -2550,7 +2550,7 @@ index 7e899bda03..5aa7f4bb1b 100644
  #elif defined(JS_CODEGEN_NONE)
    MOZ_CRASH();
  #else
-@@ -6378,7 +6383,7 @@ static void MoveDataBlock(MacroAssembler& masm, Register base, int32_t from,
+@@ -6395,7 +6400,7 @@ static void MoveDataBlock(MacroAssembler& masm, Register base, int32_t from,
    static constexpr Register scratch = ABINonArgReg0;
    masm.push(scratch);
  #elif defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || \
@@ -2559,7 +2559,7 @@ index 7e899bda03..5aa7f4bb1b 100644
    UseScratchRegisterScope temps(masm);
    Register scratch = temps.Acquire();
  #elif !defined(JS_CODEGEN_NONE)
-@@ -6577,6 +6582,12 @@ static void CollapseWasmFrameFast(MacroAssembler& masm,
+@@ -6594,6 +6599,12 @@ static void CollapseWasmFrameFast(MacroAssembler& masm,
  
  #ifdef JS_USE_LINK_REGISTER
    // RA is already in its place, just move stack.
@@ -2572,7 +2572,7 @@ index 7e899bda03..5aa7f4bb1b 100644
    masm.addToStackPtr(Imm32(framePushedAtStart + newArgDest));
  #else
    // Push RA to new frame: store RA, restore temp, and move stack.
-@@ -6725,6 +6736,12 @@ static void CollapseWasmFrameSlow(MacroAssembler& masm,
+@@ -6742,6 +6753,12 @@ static void CollapseWasmFrameSlow(MacroAssembler& masm,
  #ifdef JS_USE_LINK_REGISTER
    masm.freeStack(reserved);
    // RA is already in its place, just move stack.
@@ -2585,7 +2585,7 @@ index 7e899bda03..5aa7f4bb1b 100644
    masm.addToStackPtr(Imm32(framePushedAtStart + newArgDest));
  #else
    // Push RA to new frame: store RA, restore temp, and move stack.
-@@ -8800,7 +8817,7 @@ void MacroAssembler::debugAssertCanonicalInt32(Register r) {
+@@ -8817,7 +8834,7 @@ void MacroAssembler::debugAssertCanonicalInt32(Register r) {
      breakpoint();
      bind(&ok);
  #    elif defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || \
@@ -2594,7 +2594,7 @@ index 7e899bda03..5aa7f4bb1b 100644
      Label ok;
      UseScratchRegisterScope temps(*this);
      Register scratch = temps.Acquire();
-@@ -10836,6 +10853,15 @@ void MacroAssembler::orderedHashTableLookup(Register setOrMapObj,
+@@ -10853,6 +10870,15 @@ void MacroAssembler::orderedHashTableLookup(Register setOrMapObj,
    unboxInt32(Address(setOrMapObj, TableObject::offsetOfLiveCount()), temp1);
    branchTest32(Assembler::Zero, temp1, temp1, &notFound);
  
@@ -2611,7 +2611,7 @@ index 7e899bda03..5aa7f4bb1b 100644
    PushRegsInMask(LiveRegisterSet(RegisterSet::Volatile()));
  
 diff --git a/js/src/jit/MacroAssembler.h b/js/src/jit/MacroAssembler.h
-index 0208852b76..03b8d322d9 100644
+index 1c3e79e771..f10ac96cae 100644
 --- a/js/src/jit/MacroAssembler.h
 +++ b/js/src/jit/MacroAssembler.h
 @@ -23,6 +23,8 @@
@@ -2684,7 +2684,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Push |regs| in argument order, storing the first at the highest address.
    // Some backends may optimize this to use a single stack adjustment.
-@@ -629,9 +640,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -640,9 +651,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    // These do not adjust framePushed().
    void pushReturnAddress()
@@ -2696,7 +2696,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Useful for dealing with two-valued returns.
    void moveRegPair(Register src0, Register src1, Register dst0, Register dst1,
-@@ -650,7 +661,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -661,7 +672,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
    CodeOffset farJumpWithPatch() PER_SHARED_ARCH;
    void patchFarJump(CodeOffset farJump, uint32_t targetOffset) PER_SHARED_ARCH;
    static void patchFarJump(uint8_t* farJump, uint8_t* target)
@@ -2705,7 +2705,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Emit a nop that can be patched to and from a nop and a call with int32
    // relative displacement.
-@@ -676,9 +687,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -687,9 +698,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // target behaviour is only provided for `n` in the range 0 .. 2^31-1
    // inclusive.
    CodeOffset move32WithPatch(Register dest)
@@ -2717,7 +2717,7 @@ index 0208852b76..03b8d322d9 100644
  
   public:
    // ===============================================================
-@@ -1200,13 +1211,13 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -1211,13 +1222,13 @@ class MacroAssembler : public MacroAssemblerSpecific {
    inline void mulPtr(ImmWord rhs, Register srcDest) PER_ARCH;
  
    inline void mul64(const Register64& rhs, const Register64& srcDest)
@@ -2733,7 +2733,7 @@ index 0208852b76..03b8d322d9 100644
    inline void mul64(const Register64& src, const Register64& dest,
                      const Register temp) PER_ARCH;
    inline void mul64(const Register64& src1, const Register64& src2,
-@@ -1228,11 +1239,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -1239,11 +1250,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // On ARM, the chip must have hardware division instructions.
    inline void quotient32(Register lhs, Register rhs, Register dest,
                           bool isUnsigned)
@@ -2747,7 +2747,7 @@ index 0208852b76..03b8d322d9 100644
  
    // As above, but lhs and dest must be eax and tempEdx must be edx.
    inline void quotient32(Register lhs, Register rhs, Register dest,
-@@ -1245,11 +1256,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -1256,11 +1267,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // On ARM, the chip must have hardware division instructions.
    inline void remainder32(Register lhs, Register rhs, Register dest,
                            bool isUnsigned)
@@ -2761,7 +2761,7 @@ index 0208852b76..03b8d322d9 100644
  
    // As above, but lhs and dest must be eax and tempEdx must be edx.
    inline void remainder32(Register lhs, Register rhs, Register dest,
-@@ -2149,7 +2160,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2169,7 +2180,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
    template <typename T>
    void branchValueIsNurseryCellImpl(Condition cond, const T& value,
                                      Register temp, Label* label)
@@ -2770,7 +2770,7 @@ index 0208852b76..03b8d322d9 100644
  
    template <typename T>
    inline void branchTestUndefinedImpl(Condition cond, const T& t, Label* label)
-@@ -2317,7 +2328,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2337,7 +2348,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // from all the other registers, on all supported targets.
    inline void wasmAddSubI128HI64(Register lhsLo, Register lhsHi, Register rhsLo,
                                   Register rhsHi, Register output, bool isAdd)
@@ -2779,7 +2779,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Produces the top 64 bits of the 128-bit value `lhs *widen rhs`.  Only used
    // on 64-bit targets.  On x64, `lhs` must be RAX, `rhs` must be RDX, and all
-@@ -2330,7 +2341,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2350,7 +2361,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // what the registers may be.
    inline void wasmMulI64WideHI64(Register lhs, Register rhs, Register output,
                                   bool isSigned)
@@ -2788,7 +2788,7 @@ index 0208852b76..03b8d322d9 100644
  
    // ========================================================================
    // Canonicalization primitives.
-@@ -2429,72 +2440,72 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2449,72 +2460,72 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // Moves
  
    inline void moveSimd128(FloatRegister src, FloatRegister dest)
@@ -2877,7 +2877,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Replace lane value
  
-@@ -2503,21 +2514,21 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2523,21 +2534,21 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void replaceLaneInt8x16(unsigned lane, Register rhs,
                                   FloatRegister lhsDest)
@@ -2902,7 +2902,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void replaceLaneInt64x2(unsigned lane, FloatRegister lhs,
                                   Register64 rhs, FloatRegister dest)
-@@ -2525,7 +2536,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2545,7 +2556,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void replaceLaneInt64x2(unsigned lane, Register64 rhs,
                                   FloatRegister lhsDest)
@@ -2911,7 +2911,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void replaceLaneFloat32x4(unsigned lane, FloatRegister lhs,
                                     FloatRegister rhs, FloatRegister dest)
-@@ -2533,7 +2544,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2553,7 +2564,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void replaceLaneFloat32x4(unsigned lane, FloatRegister rhs,
                                     FloatRegister lhsDest)
@@ -2920,7 +2920,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void replaceLaneFloat64x2(unsigned lane, FloatRegister lhs,
                                     FloatRegister rhs, FloatRegister dest)
-@@ -2541,7 +2552,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2561,7 +2572,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void replaceLaneFloat64x2(unsigned lane, FloatRegister rhs,
                                     FloatRegister lhsDest)
@@ -2929,7 +2929,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Shuffle - blend and permute with immediate indices, and its many
    // specializations.  Lane values other than those mentioned are illegal.
-@@ -2549,11 +2560,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2569,11 +2580,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // lane values 0..31
    inline void shuffleInt8x16(const uint8_t lanes[16], FloatRegister rhs,
                               FloatRegister lhsDest)
@@ -2943,7 +2943,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Lane values must be 0 (select from lhs) or FF (select from rhs).
    // The behavior is undefined for lane values that are neither 0 nor FF.
-@@ -2580,39 +2591,39 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2600,39 +2611,39 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // The implementation works effectively for I8x16, I16x8, I32x4, and I64x2.
    inline void laneSelectSimd128(FloatRegister mask, FloatRegister lhs,
                                  FloatRegister rhs, FloatRegister dest)
@@ -2992,7 +2992,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Permute - permute with immediate indices.
  
-@@ -2623,7 +2634,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2643,7 +2654,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    // lane values 0..7
    inline void permuteInt16x8(const uint16_t lanes[8], FloatRegister src,
@@ -3001,7 +3001,7 @@ index 0208852b76..03b8d322d9 100644
  
    // lane values 0..3 [sic].
    inline void permuteHighInt16x8(const uint16_t lanes[4], FloatRegister src,
-@@ -2642,85 +2653,85 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2662,85 +2673,85 @@ class MacroAssembler : public MacroAssemblerSpecific {
    //   low_16_bytes_of((lhs ++ rhs) >> shift*8), shift must be < 16
    inline void concatAndRightShiftSimd128(FloatRegister lhs, FloatRegister rhs,
                                           FloatRegister dest, uint32_t shift)
@@ -3106,7 +3106,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void addInt64x2(FloatRegister lhs, const SimdConstant& rhs,
                           FloatRegister dest) DEFINED_ON(x86_shared);
-@@ -2729,14 +2740,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2749,14 +2760,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void subInt8x16(FloatRegister lhs, FloatRegister rhs,
                           FloatRegister dest)
@@ -3123,7 +3123,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void subInt16x8(FloatRegister lhs, const SimdConstant& rhs,
                           FloatRegister dest) DEFINED_ON(x86_shared);
-@@ -2746,27 +2757,27 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2766,27 +2777,27 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void subInt32x4(FloatRegister lhs, FloatRegister rhs,
                           FloatRegister dest)
@@ -3155,7 +3155,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void mulInt32x4(FloatRegister lhs, const SimdConstant& rhs,
                           FloatRegister dest) DEFINED_ON(x86_shared);
-@@ -2782,7 +2793,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2802,7 +2813,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void mulInt64x2(FloatRegister lhs, FloatRegister rhs,
                           FloatRegister dest, FloatRegister temp1,
@@ -3164,7 +3164,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void mulInt64x2(FloatRegister lhs, FloatRegister rhs,
                           FloatRegister dest) DEFINED_ON(loong64);
-@@ -2791,96 +2802,96 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2811,96 +2822,96 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // the output lanes are twice as wide.
    inline void extMulLowInt8x16(FloatRegister lhs, FloatRegister rhs,
                                 FloatRegister dest)
@@ -3282,7 +3282,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void unsignedAddSatInt16x8(FloatRegister lhs, const SimdConstant& rhs,
                                      FloatRegister dest) DEFINED_ON(x86_shared);
-@@ -2889,28 +2900,28 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2909,28 +2920,28 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void subSatInt8x16(FloatRegister lhs, FloatRegister rhs,
                              FloatRegister dest)
@@ -3315,7 +3315,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void unsignedSubSatInt16x8(FloatRegister lhs, const SimdConstant& rhs,
                                      FloatRegister dest) DEFINED_ON(x86_shared);
-@@ -2919,42 +2930,42 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2939,42 +2950,42 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void minInt8x16(FloatRegister lhs, FloatRegister rhs,
                           FloatRegister dest)
@@ -3364,7 +3364,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void unsignedMinInt32x4(FloatRegister lhs, const SimdConstant& rhs,
                                   FloatRegister dest) DEFINED_ON(x86_shared);
-@@ -2963,42 +2974,42 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -2983,42 +2994,42 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void maxInt8x16(FloatRegister lhs, FloatRegister rhs,
                           FloatRegister dest)
@@ -3413,7 +3413,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void unsignedMaxInt32x4(FloatRegister lhs, const SimdConstant& rhs,
                                   FloatRegister dest) DEFINED_ON(x86_shared);
-@@ -3007,25 +3018,25 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3027,25 +3038,25 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void unsignedAverageInt8x16(FloatRegister lhs, FloatRegister rhs,
                                       FloatRegister dest)
@@ -3445,7 +3445,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Left shift by scalar. Immediates and variable shifts must have been
    // masked; shifts of zero will work but may or may not generate code.
-@@ -3034,41 +3045,41 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3054,41 +3065,41 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                 FloatRegister temp) DEFINED_ON(x86_shared);
  
    inline void leftShiftInt8x16(FloatRegister lhs, Register rhs,
@@ -3495,7 +3495,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Right shift by scalar. Immediates and variable shifts must have been
    // masked; shifts of zero will work but may or may not generate code.
-@@ -3077,11 +3088,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3097,11 +3108,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                  FloatRegister temp) DEFINED_ON(x86_shared);
  
    inline void rightShiftInt8x16(FloatRegister lhs, Register rhs,
@@ -3509,7 +3509,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void unsignedRightShiftInt8x16(Register rhs, FloatRegister lhsDest,
                                          FloatRegister temp)
-@@ -3089,74 +3100,74 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3109,74 +3120,74 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void unsignedRightShiftInt8x16(FloatRegister lhs, Register rhs,
                                          FloatRegister dest)
@@ -3598,7 +3598,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Sign replication operation
  
-@@ -3175,48 +3186,48 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3195,48 +3206,48 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // Bitwise and, or, xor, not
  
    inline void bitwiseAndSimd128(FloatRegister rhs, FloatRegister lhsDest)
@@ -3656,7 +3656,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void bitwiseNotAndSimd128(FloatRegister lhs, FloatRegister rhs,
                                     FloatRegister lhsDest)
-@@ -3230,34 +3241,34 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3250,34 +3261,34 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void bitwiseSelectSimd128(FloatRegister onTrue, FloatRegister onFalse,
                                     FloatRegister maskDest)
@@ -3699,7 +3699,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Bitmask, ie extract and compress high bits of all lanes
  
-@@ -3265,31 +3276,31 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3285,31 +3296,31 @@ class MacroAssembler : public MacroAssemblerSpecific {
        DEFINED_ON(x86_shared, loong64);
  
    inline void bitmaskInt8x16(FloatRegister src, Register dest,
@@ -3736,7 +3736,7 @@ index 0208852b76..03b8d322d9 100644
  
    // On x86_shared, limited to !=, ==, <=, >
    inline void compareInt8x16(Assembler::Condition cond, FloatRegister lhs,
-@@ -3299,15 +3310,15 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3319,15 +3330,15 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // On arm64, use any integer comparison condition.
    inline void compareInt8x16(Assembler::Condition cond, FloatRegister lhs,
                               FloatRegister rhs, FloatRegister dest)
@@ -3755,7 +3755,7 @@ index 0208852b76..03b8d322d9 100644
  
    // On x86_shared, limited to !=, ==, <=, >
    inline void compareInt16x8(Assembler::Condition cond, FloatRegister lhs,
-@@ -3317,7 +3328,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3337,7 +3348,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // On x86_shared, limited to !=, ==, <=, >
    inline void compareInt32x4(Assembler::Condition cond, FloatRegister rhs,
                               FloatRegister lhsDest)
@@ -3764,7 +3764,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void compareInt32x4(Assembler::Condition cond, FloatRegister lhs,
                               const SimdConstant& rhs, FloatRegister dest)
-@@ -3326,7 +3337,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3346,7 +3357,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // On arm64, use any integer comparison condition.
    inline void compareInt32x4(Assembler::Condition cond, FloatRegister lhs,
                               FloatRegister rhs, FloatRegister dest)
@@ -3773,7 +3773,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void compareForEqualityInt64x2(Assembler::Condition cond,
                                          FloatRegister lhs, FloatRegister rhs,
-@@ -3340,11 +3351,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3360,11 +3371,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
        DEFINED_ON(x86_shared);
  
    inline void compareInt64x2(Assembler::Condition cond, FloatRegister rhs,
@@ -3787,7 +3787,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void compareInt64x2(Assembler::Condition cond, FloatRegister lhs,
                               const SimdConstant& rhs, FloatRegister dest)
-@@ -3365,7 +3376,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3385,7 +3396,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void compareFloat32x4(Assembler::Condition cond, FloatRegister rhs,
                                 FloatRegister lhsDest)
@@ -3796,7 +3796,7 @@ index 0208852b76..03b8d322d9 100644
  
    // On x86_shared, limited to ==, !=, <, <=
    inline void compareFloat32x4(Assembler::Condition cond, FloatRegister lhs,
-@@ -3376,11 +3387,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3396,11 +3407,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // On arm64, use any float-point comparison condition.
    inline void compareFloat32x4(Assembler::Condition cond, FloatRegister lhs,
                                 FloatRegister rhs, FloatRegister dest)
@@ -3810,7 +3810,7 @@ index 0208852b76..03b8d322d9 100644
  
    // On x86_shared, limited to ==, !=, <, <=
    inline void compareFloat64x2(Assembler::Condition cond, FloatRegister lhs,
-@@ -3391,7 +3402,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3411,7 +3422,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // On arm64, use any float-point comparison condition.
    inline void compareFloat64x2(Assembler::Condition cond, FloatRegister lhs,
                                 FloatRegister rhs, FloatRegister dest)
@@ -3819,7 +3819,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Load
  
-@@ -3400,94 +3411,94 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3420,94 +3431,94 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline FaultingCodeRange loadUnalignedSimd128(const Address& src,
                                                  FloatRegister dest)
@@ -3936,7 +3936,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void addFloat64x2(FloatRegister lhs, const SimdConstant& rhs,
                             FloatRegister dest) DEFINED_ON(x86_shared);
-@@ -3496,14 +3507,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3516,14 +3527,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void subFloat32x4(FloatRegister lhs, FloatRegister rhs,
                             FloatRegister dest)
@@ -3953,7 +3953,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void subFloat64x2(FloatRegister lhs, const SimdConstant& rhs,
                             FloatRegister dest) DEFINED_ON(x86_shared);
-@@ -3512,14 +3523,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3532,14 +3543,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void divFloat32x4(FloatRegister lhs, FloatRegister rhs,
                             FloatRegister dest)
@@ -3970,7 +3970,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void divFloat64x2(FloatRegister lhs, const SimdConstant& rhs,
                             FloatRegister dest) DEFINED_ON(x86_shared);
-@@ -3528,14 +3539,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3548,14 +3559,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void mulFloat32x4(FloatRegister lhs, FloatRegister rhs,
                             FloatRegister dest)
@@ -3987,7 +3987,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void mulFloat64x2(FloatRegister lhs, const SimdConstant& rhs,
                             FloatRegister dest) DEFINED_ON(x86_shared);
-@@ -3543,47 +3554,47 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3563,47 +3574,47 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // Pairwise add
  
    inline void extAddPairwiseInt8x16(FloatRegister src, FloatRegister dest)
@@ -4046,7 +4046,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void truncSatFloat32x4ToInt32x4(FloatRegister src, FloatRegister dest,
                                           FloatRegister temp)
-@@ -3592,46 +3603,46 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3612,46 +3623,46 @@ class MacroAssembler : public MacroAssemblerSpecific {
    inline void unsignedTruncSatFloat32x4ToInt32x4(FloatRegister src,
                                                   FloatRegister dest,
                                                   FloatRegister temp)
@@ -4103,7 +4103,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Integer to integer narrowing
  
-@@ -3640,66 +3651,66 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3660,66 +3671,66 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void narrowInt16x8(FloatRegister lhs, FloatRegister rhs,
                              FloatRegister dest)
@@ -4186,7 +4186,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Compare-based minimum/maximum
    //
-@@ -3711,48 +3722,48 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3731,48 +3742,48 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void pseudoMinFloat32x4(FloatRegister rhsOrRhsDest,
                                   FloatRegister lhsOrLhsDest)
@@ -4245,7 +4245,7 @@ index 0208852b76..03b8d322d9 100644
  
    inline void dotInt8x16Int7x16ThenAdd(FloatRegister lhs, FloatRegister rhs,
                                         FloatRegister dest)
-@@ -3760,83 +3771,83 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3780,83 +3791,83 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    inline void dotInt8x16Int7x16ThenAdd(FloatRegister lhs, FloatRegister rhs,
                                         FloatRegister dest, FloatRegister temp)
@@ -4351,7 +4351,7 @@ index 0208852b76..03b8d322d9 100644
  
   public:
    // ========================================================================
-@@ -3861,10 +3872,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3881,10 +3892,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    // temp required on x86 and x64; must be undefined on mips64 and loong64.
    void convertUInt64ToFloat32(Register64 src, FloatRegister dest, Register temp)
@@ -4364,7 +4364,7 @@ index 0208852b76..03b8d322d9 100644
  
    bool convertUInt64ToDoubleNeedsTemp() PER_ARCH;
  
-@@ -3973,7 +3984,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -3993,7 +4004,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
    FaultingCodeRange wasmLoad(const wasm::MemoryAccessDesc& access,
                               Register memoryBase, Register ptr,
                               Register ptrScratch, AnyRegister output)
@@ -4373,7 +4373,7 @@ index 0208852b76..03b8d322d9 100644
  
    FaultingCodeRangePair wasmLoadI32x2(const wasm::MemoryAccessDesc& access,
                                        Register memoryBase, Register ptr,
-@@ -3982,12 +3993,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4002,12 +4013,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
    FaultingCodeRange wasmLoadI64(const wasm::MemoryAccessDesc& access,
                                  Register memoryBase, Register ptr,
                                  Register ptrScratch, Register64 output)
@@ -4388,7 +4388,7 @@ index 0208852b76..03b8d322d9 100644
  
    FaultingCodeRangePair wasmStoreI32x2(const wasm::MemoryAccessDesc& access,
                                         Register64 value, Register memoryBase,
-@@ -3996,7 +4007,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4016,7 +4027,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
    FaultingCodeRange wasmStoreI64(const wasm::MemoryAccessDesc& access,
                                   Register64 value, Register memoryBase,
                                   Register ptr, Register ptrScratch)
@@ -4397,7 +4397,7 @@ index 0208852b76..03b8d322d9 100644
  
    // These accept general memoryBase + ptr + offset (in `access`); the offset is
    // always smaller than the guard region.  They will insert an additional add
-@@ -4106,11 +4117,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4126,11 +4137,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
    void wasmTruncateDoubleToInt64(FloatRegister input, Register64 output,
                                   bool isSaturating, Label* oolEntry,
                                   Label* oolRejoin, FloatRegister tempDouble)
@@ -4411,7 +4411,7 @@ index 0208852b76..03b8d322d9 100644
    void oolWasmTruncateCheckF64ToI64(
        FloatRegister input, Register64 output, TruncFlags flags,
        const wasm::TrapSiteDesc& trapSiteDesc, Label* rejoin,
-@@ -4120,11 +4131,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4140,11 +4151,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
    void wasmTruncateFloat32ToInt64(FloatRegister input, Register64 output,
                                    bool isSaturating, Label* oolEntry,
                                    Label* oolRejoin, FloatRegister tempDouble)
@@ -4425,7 +4425,7 @@ index 0208852b76..03b8d322d9 100644
    void oolWasmTruncateCheckF32ToI64(
        FloatRegister input, Register64 output, TruncFlags flags,
        const wasm::TrapSiteDesc& trapSiteDesc, Label* rejoin,
-@@ -4449,7 +4460,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4469,7 +4480,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
    // convention, which requires predictable high bits.  In practice, this means
    // that the 32-bit value will be zero-extended or sign-extended to 64 bits as
    // appropriate for the platform.
@@ -4435,7 +4435,7 @@ index 0208852b76..03b8d322d9 100644
  
    // As enterFakeExitFrame(), but using register conventions appropriate for
    // wasm stubs.
-@@ -4512,13 +4524,13 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4532,13 +4544,13 @@ class MacroAssembler : public MacroAssemblerSpecific {
                         const Address& mem, Register expected,
                         Register replacement, Register valueTemp,
                         Register offsetTemp, Register maskTemp, Register output)
@@ -4451,7 +4451,7 @@ index 0208852b76..03b8d322d9 100644
  
    // x86: `expected` and `output` must be edx:eax; `replacement` is ecx:ebx.
    // x64: `output` must be rax.
-@@ -4528,12 +4540,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4548,12 +4560,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
    void compareExchange64(Synchronization sync, const Address& mem,
                           Register64 expected, Register64 replacement,
                           Register64 output)
@@ -4466,7 +4466,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Exchange with memory.  Return the value initially in memory.
    // MIPS: `valueTemp`, `offsetTemp` and `maskTemp` must be defined for 8-bit
-@@ -4550,12 +4562,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4570,12 +4582,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
    void atomicExchange(Scalar::Type type, Synchronization sync,
                        const Address& mem, Register value, Register valueTemp,
                        Register offsetTemp, Register maskTemp, Register output)
@@ -4481,7 +4481,7 @@ index 0208852b76..03b8d322d9 100644
  
    // x86: `value` must be ecx:ebx; `output` must be edx:eax.
    // ARM: `value` and `output` must be distinct and (even,odd) pairs.
-@@ -4563,11 +4575,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4583,11 +4595,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    void atomicExchange64(Synchronization sync, const Address& mem,
                          Register64 value, Register64 output)
@@ -4495,7 +4495,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Read-modify-write with memory.  Return the value in memory before the
    // operation.
-@@ -4601,12 +4613,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4621,12 +4633,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
    void atomicFetchOp(Scalar::Type type, Synchronization sync, AtomicOp op,
                       Register value, const Address& mem, Register valueTemp,
                       Register offsetTemp, Register maskTemp, Register output)
@@ -4510,7 +4510,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Read-modify-write with memory.  Return no value.
  
-@@ -4629,12 +4641,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4649,12 +4661,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
    void atomicEffectOp(Scalar::Type arrayType, Synchronization sync, AtomicOp op,
                        Register value, const Address& mem, Register valueTemp,
                        Register offsetTemp, Register maskTemp)
@@ -4525,7 +4525,7 @@ index 0208852b76..03b8d322d9 100644
  
    // x86:
    //   `temp` must be ecx:ebx; `output` must be edx:eax.
-@@ -4648,7 +4660,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4668,7 +4680,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    void atomicFetchOp64(Synchronization sync, AtomicOp op, Register64 value,
                         const Address& mem, Register64 temp, Register64 output)
@@ -4534,7 +4534,7 @@ index 0208852b76..03b8d322d9 100644
  
    void atomicFetchOp64(Synchronization sync, AtomicOp op, const Address& value,
                         const Address& mem, Register64 temp, Register64 output)
-@@ -4656,7 +4668,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4676,7 +4688,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    void atomicFetchOp64(Synchronization sync, AtomicOp op, Register64 value,
                         const BaseIndex& mem, Register64 temp, Register64 output)
@@ -4543,7 +4543,7 @@ index 0208852b76..03b8d322d9 100644
  
    void atomicFetchOp64(Synchronization sync, AtomicOp op, const Address& value,
                         const BaseIndex& mem, Register64 temp, Register64 output)
-@@ -4674,14 +4686,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4694,14 +4706,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
  
    void atomicEffectOp64(Synchronization sync, AtomicOp op, Register64 value,
                          const Address& mem, Register64 temp)
@@ -4560,7 +4560,7 @@ index 0208852b76..03b8d322d9 100644
  
    // 64-bit atomic load. On 64-bit systems, use regular load with
    // Synchronization::Load, not this method.
-@@ -4734,14 +4746,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4754,14 +4766,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                          Register replacement,
                                          Register valueTemp, Register offsetTemp,
                                          Register maskTemp, Register output)
@@ -4577,7 +4577,7 @@ index 0208852b76..03b8d322d9 100644
  
    FaultingCodeRange wasmCompareExchange(const wasm::MemoryAccessDesc& access,
                                          const BaseIndex& mem, Register expected,
-@@ -4749,7 +4761,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4769,7 +4781,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                          Register valueTemp, Register offsetTemp,
                                          Register maskTemp, Register output,
                                          wasm::ZeroExtendIndex zeroExtend)
@@ -4586,7 +4586,7 @@ index 0208852b76..03b8d322d9 100644
  
    FaultingCodeRange wasmAtomicExchange(const wasm::MemoryAccessDesc& access,
                                         const Address& mem, Register value,
-@@ -4765,20 +4777,20 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4785,20 +4797,20 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                         const Address& mem, Register value,
                                         Register valueTemp, Register offsetTemp,
                                         Register maskTemp, Register output)
@@ -4610,7 +4610,7 @@ index 0208852b76..03b8d322d9 100644
  
    FaultingCodeRange wasmAtomicFetchOp(const wasm::MemoryAccessDesc& access,
                                        AtomicOp op, Register value,
-@@ -4807,20 +4819,20 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4827,20 +4839,20 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                        const Address& mem, Register valueTemp,
                                        Register offsetTemp, Register maskTemp,
                                        Register output)
@@ -4634,7 +4634,7 @@ index 0208852b76..03b8d322d9 100644
  
    // Read-modify-write with memory.  Return no value.
    //
-@@ -4847,19 +4859,19 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4867,19 +4879,19 @@ class MacroAssembler : public MacroAssemblerSpecific {
                            Register value, const Address& mem,
                            Register valueTemp, Register offsetTemp,
                            Register maskTemp)
@@ -4657,7 +4657,7 @@ index 0208852b76..03b8d322d9 100644
  
    // 64-bit wide operations.
  
-@@ -4903,7 +4915,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4923,7 +4935,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
                               const BaseIndex& mem, Register64 expected,
                               Register64 replacement, Register64 output,
                               wasm::ZeroExtendIndex zeroExtend)
@@ -4666,7 +4666,7 @@ index 0208852b76..03b8d322d9 100644
  
    // x86: `value` must be ecx:ebx; `output` must be edx:eax.
    // ARM: Registers must be distinct; `value` and `output` must be (even,odd)
-@@ -4921,7 +4933,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4941,7 +4953,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
    void wasmAtomicExchange64(const wasm::MemoryAccessDesc& access,
                              const BaseIndex& mem, Register64 value,
                              Register64 output, wasm::ZeroExtendIndex zeroExtend)
@@ -4675,7 +4675,7 @@ index 0208852b76..03b8d322d9 100644
  
    // x86: `output` must be edx:eax, `temp` must be ecx:ebx.
    // x64: For And, Or, and Xor `output` must be rax.
-@@ -4933,19 +4945,19 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -4953,19 +4965,19 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                          AtomicOp op, Register64 value,
                                          const Address& mem, Register64 temp,
                                          Register64 output)
@@ -4698,7 +4698,7 @@ index 0208852b76..03b8d322d9 100644
  
    FaultingCodeRangePair wasmAtomicFetchOp32x2(
        const wasm::MemoryAccessDesc& access, AtomicOp op, const Address& value,
-@@ -6132,7 +6144,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -6157,7 +6169,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
    inline void addStackPtrTo(T t);
  
    void subFromStackPtr(Imm32 imm32)
@@ -5747,10 +5747,10 @@ index 0000000000..88e3063fed
 +#endif /* jit_ppc64_Architecture_ppc64_h */
 diff --git a/js/src/jit/ppc64/Assembler-ppc64.cpp b/js/src/jit/ppc64/Assembler-ppc64.cpp
 new file mode 100644
-index 0000000000..f397be94d4
+index 0000000000..023155cd2e
 --- /dev/null
 +++ b/js/src/jit/ppc64/Assembler-ppc64.cpp
-@@ -0,0 +1,3201 @@
+@@ -0,0 +1,3200 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 + * vim: set ts=8 sts=2 et sw=2 tw=80:
 + * This Source Code Form is subject to the terms of the Mozilla Public
@@ -8715,22 +8715,21 @@ index 0000000000..f397be94d4
 +// ========================================================================
 +
 +/* static */
-+uint32_t Assembler::PatchWrite_NearCallSize() {
-+  // 8 instructions for Load64 + mtctr + bctrl = 10 instructions.
-+  return 10 * sizeof(uint32_t);
-+}
++uint32_t Assembler::PatchWrite_NearCallSize() { return sizeof(uint32_t); }
 +
++// Invalidation patches each OSI point to call the invalidation epilogue of
++// the same IonScript, so the target is always within bl range. The patch
++// must stay a single instruction: the bytes after an OSI point may hold a
++// constant pool that frames resuming from their calls still read.
 +/* static */
 +void Assembler::PatchWrite_NearCall(CodeLocationLabel start,
 +                                    CodeLocationLabel toCall) {
 +  Instruction* inst = (Instruction*)start.raw();
-+  uint8_t* dest = toCall.raw();
-+
-+  Assembler::WriteLoad64Instructions(inst, SavedScratchRegister,
-+                                     (uint64_t)dest);
-+  inst[8].makeOp_mtctr(SavedScratchRegister);
-+  inst[9].makeOp_bctr(LinkB);
-+  FlushICache(inst, 10 * sizeof(Instruction));
++  ptrdiff_t offset = toCall.raw() - start.raw();
++  MOZ_RELEASE_ASSERT((offset & 0x3) == 0);
++  MOZ_RELEASE_ASSERT(JOffImm26::IsInRange(offset));
++  inst->setData(PPC_b | JOffImm26(int32_t(offset)).encode() | LinkB);
++  FlushICache(inst, sizeof(Instruction));
 +}
 +
 +/* static */
@@ -11068,10 +11067,10 @@ index 0000000000..adbd2704a6
 +#endif /* jit_ppc64_Assembler_ppc64_h */
 diff --git a/js/src/jit/ppc64/CodeGenerator-ppc64.cpp b/js/src/jit/ppc64/CodeGenerator-ppc64.cpp
 new file mode 100644
-index 0000000000..e518abe87b
+index 0000000000..827774d12f
 --- /dev/null
 +++ b/js/src/jit/ppc64/CodeGenerator-ppc64.cpp
-@@ -0,0 +1,3940 @@
+@@ -0,0 +1,3938 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 + * vim: set ts=8 sts=2 et sw=2 tw=80:
 + * This Source Code Form is subject to the terms of the Mozilla Public
@@ -11219,9 +11218,7 @@ index 0000000000..e518abe87b
 +
 +void CodeGeneratorPPC64::generateInvalidateEpilogue() {
 +  // Pad with enough nops so that PatchWrite_NearCall on the last OSI point
-+  // cannot overlap the invalidation epilogue. The patch area is
-+  // PatchWrite_NearCallSize (40) bytes; the last OSI point could be right
-+  // before this epilogue.
++  // cannot overlap the invalidation epilogue.
 +  masm.emitNopStanza(Assembler::PatchWrite_NearCallSize() /
 +                     Assembler::NopSize());
 +
@@ -16649,10 +16646,10 @@ index 0000000000..5b79931f2b
 +#endif /* jit_ppc64_Lowering_ppc64_h */
 diff --git a/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h b/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
 new file mode 100644
-index 0000000000..4165be132f
+index 0000000000..dbb341eebb
 --- /dev/null
 +++ b/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
-@@ -0,0 +1,6264 @@
+@@ -0,0 +1,6295 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 + * vim: set ts=8 sts=2 et sw=2 tw=80:
 + * This Source Code Form is subject to the terms of the Mozilla Public
@@ -19386,6 +19383,32 @@ index 0000000000..4165be132f
 +  branchTestTag(cond, scratch, ImmTag(JSVAL_TAG_NULL), label);
 +}
 +
++void MacroAssembler::branchTestNullOrUndefined(Condition cond, Register tag,
++                                               Label* label) {
++  MOZ_ASSERT(cond == Equal || cond == NotEqual);
++  if (cond == Equal) {
++    branchTestNull(Equal, tag, label);
++    branchTestUndefined(Equal, tag, label);
++    return;
++  }
++  Label done;
++  branchTestNull(Equal, tag, &done);
++  branchTestUndefined(NotEqual, tag, label);
++  bind(&done);
++}
++
++void MacroAssembler::branchTestNullOrUndefined(Condition cond,
++                                               const ValueOperand& value,
++                                               Label* label) {
++  MOZ_ASSERT(cond == Equal || cond == NotEqual);
++  static_assert(JS::detail::ValueNullOrUndefinedBits <= INT16_MAX);
++  UseScratchRegisterScope temps(asMasm());
++  Register scratch = temps.Acquire();
++  x_srdi(scratch, value.valueReg(), JS::detail::ValueNullOrUndefinedShift);
++  as_cmpldi(scratch, int16_t(JS::detail::ValueNullOrUndefinedBits));
++  ma_b(cond, label);
++}
++
 +void MacroAssembler::branchTestNull(Condition cond, const Address& address,
 +                                    Label* label) {
 +  UseScratchRegisterScope temps(asMasm());
@@ -19456,6 +19479,14 @@ index 0000000000..4165be132f
 +                                       const ValueOperand& address,
 +                                       Label* label) {
 +  branchTestGCThingImpl(cond, address, label);
++}
++
++void MacroAssembler::branchTestGCThing(Condition cond, Register tag,
++                                       Label* label) {
++  MOZ_ASSERT(cond == Equal || cond == NotEqual);
++  Condition c = ma_cmp(tag, Imm32(JS::detail::ValueLowerInclGCThingTag),
++                       (cond == Equal) ? AboveOrEqual : Below);
++  ma_b(c, label);
 +}
 +
 +template <typename T>
@@ -19825,9 +19856,8 @@ index 0000000000..4165be132f
 +    return FaultingCodeRange(as_stfs(src, addr.base, addr.offset).getOffset());
 +  }
 +  if (HasPOWER10() && is_intN((intptr_t)addr.offset, 34)) {
-+    return FaultingCodeRange(
-+        as_pstfs(src, addr.base, (int64_t)addr.offset, /*R=*/false)
-+            .getOffset());
++    return PrefixedFaultingCodeRange(
++        as_pstfs(src, addr.base, (int64_t)addr.offset, /*R=*/false));
 +  }
 +  UseScratchRegisterScope temps(asMasm());
 +  Register scratch = temps.Acquire();
@@ -19850,9 +19880,8 @@ index 0000000000..4165be132f
 +    return FaultingCodeRange(as_stfd(src, addr.base, addr.offset).getOffset());
 +  }
 +  if (HasPOWER10() && is_intN((intptr_t)addr.offset, 34)) {
-+    return FaultingCodeRange(
-+        as_pstfd(src, addr.base, (int64_t)addr.offset, /*R=*/false)
-+            .getOffset());
++    return PrefixedFaultingCodeRange(
++        as_pstfd(src, addr.base, (int64_t)addr.offset, /*R=*/false));
 +  }
 +  UseScratchRegisterScope temps(asMasm());
 +  Register scratch = temps.Acquire();
@@ -20064,9 +20093,8 @@ index 0000000000..4165be132f
 +  UseScratchRegisterScope temps(asMasm());
 +  if (HasPOWER10() && is_intN((intptr_t)src.offset, 34)) {
 +    // POWER10 prefixed load — natural-LE byte order, no GPR scratch.
-+    return FaultingCodeRange(
-+        as_plxv(dest.encoding(), src.base, (int64_t)src.offset, /*R=*/false)
-+            .getOffset());
++    return PrefixedFaultingCodeRange(
++        as_plxv(dest.encoding(), src.base, (int64_t)src.offset, /*R=*/false));
 +  }
 +  if (HasPOWER9()) {
 +    // POWER9: lxvx (X-form, indexed) loads 128 bits in correct LE order.
@@ -20120,9 +20148,9 @@ index 0000000000..4165be132f
 +  UseScratchRegisterScope temps(asMasm());
 +  if (HasPOWER10() && is_intN((intptr_t)dest.offset, 34)) {
 +    // POWER10 prefixed store — natural-LE byte order, no GPR scratch.
-+    return FaultingCodeRange(
-+        as_pstxv(src.encoding(), dest.base, (int64_t)dest.offset, /*R=*/false)
-+            .getOffset());
++    return PrefixedFaultingCodeRange(
++        as_pstxv(src.encoding(), dest.base, (int64_t)dest.offset,
++                 /*R=*/false));
 +  }
 +  if (HasPOWER9()) {
 +    if (dest.offset == 0) {
@@ -26362,10 +26390,10 @@ index 0000000000..ef25a99034
 +#endif
 diff --git a/js/src/jit/ppc64/MacroAssembler-ppc64.h b/js/src/jit/ppc64/MacroAssembler-ppc64.h
 new file mode 100644
-index 0000000000..3f790af45c
+index 0000000000..ee31ad77e1
 --- /dev/null
 +++ b/js/src/jit/ppc64/MacroAssembler-ppc64.h
-@@ -0,0 +1,2145 @@
+@@ -0,0 +1,2147 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 + * vim: set ts=8 sts=2 et sw=2 tw=80:
 + * This Source Code Form is subject to the terms of the Mozilla Public
@@ -26384,6 +26412,12 @@ index 0000000000..3f790af45c
 +
 +namespace js {
 +namespace jit {
++
++// The trapping range of a POWER10 prefixed load or store, whose offset is that
++// of the prefix word.
++inline FaultingCodeRange PrefixedFaultingCodeRange(BufferOffset prefix) {
++  return FaultingCodeRange(prefix.getOffset(), prefix.getOffset() + 8);
++}
 +
 +inline bool is_intN(int64_t x, unsigned n) {
 +  MOZ_ASSERT((0 < n) && (n < 64));
@@ -27910,9 +27944,8 @@ index 0000000000..3f790af45c
 +          as_ld(dest, address.base, address.offset).getOffset());
 +    }
 +    if (HasPOWER10() && is_intN((intptr_t)address.offset, 34)) {
-+      return FaultingCodeRange(
-+          as_pld(dest, address.base, (int64_t)address.offset, /*R=*/false)
-+              .getOffset());
++      return PrefixedFaultingCodeRange(
++          as_pld(dest, address.base, (int64_t)address.offset, /*R=*/false));
 +    }
 +    UseScratchRegisterScope temps(*this);
 +    Register scratch = temps.Acquire();
@@ -27950,9 +27983,8 @@ index 0000000000..3f790af45c
 +          as_lfd(dest, addr.base, addr.offset).getOffset());
 +    }
 +    if (HasPOWER10() && is_intN((intptr_t)addr.offset, 34)) {
-+      return FaultingCodeRange(
-+          as_plfd(dest, addr.base, (int64_t)addr.offset, /*R=*/false)
-+              .getOffset());
++      return PrefixedFaultingCodeRange(
++          as_plfd(dest, addr.base, (int64_t)addr.offset, /*R=*/false));
 +    }
 +    UseScratchRegisterScope temps(*this);
 +    Register scratch = temps.Acquire();
@@ -27976,9 +28008,8 @@ index 0000000000..3f790af45c
 +          as_lfs(dest, addr.base, addr.offset).getOffset());
 +    }
 +    if (HasPOWER10() && is_intN((intptr_t)addr.offset, 34)) {
-+      return FaultingCodeRange(
-+          as_plfs(dest, addr.base, (int64_t)addr.offset, /*R=*/false)
-+              .getOffset());
++      return PrefixedFaultingCodeRange(
++          as_plfs(dest, addr.base, (int64_t)addr.offset, /*R=*/false));
 +    }
 +    UseScratchRegisterScope temps(*this);
 +    Register scratch = temps.Acquire();
@@ -28212,11 +28243,11 @@ index 0000000000..3f790af45c
 +    movePtr(ImmWord(address.offset), scratch2);
 +    return FaultingCodeRange(as_stbx(src, scratch, scratch2).getOffset());
 +  }
-+  void store8(Imm32 imm, const Address& address) {
++  FaultingCodeRange store8(Imm32 imm, const Address& address) {
 +    UseScratchRegisterScope temps(*this);
 +    Register scratch = temps.Acquire();
 +    move32(imm, scratch);
-+    store8(scratch, address);
++    return store8(scratch, address);
 +  }
 +  void store8(Imm32 imm, const BaseIndex& address) {
 +    UseScratchRegisterScope temps(*this);
@@ -28247,11 +28278,11 @@ index 0000000000..3f790af45c
 +    movePtr(ImmWord(address.offset), scratch2);
 +    return FaultingCodeRange(as_sthx(src, scratch, scratch2).getOffset());
 +  }
-+  void store16(Imm32 imm, const Address& address) {
++  FaultingCodeRange store16(Imm32 imm, const Address& address) {
 +    UseScratchRegisterScope temps(*this);
 +    Register scratch = temps.Acquire();
 +    move32(imm, scratch);
-+    store16(scratch, address);
++    return store16(scratch, address);
 +  }
 +  void store16(Imm32 imm, const BaseIndex& address) {
 +    UseScratchRegisterScope temps(*this);
@@ -28292,11 +28323,11 @@ index 0000000000..3f790af45c
 +    movePtr(ImmWord((uintptr_t)address.addr), scratch);
 +    as_stw(src, scratch, 0);
 +  }
-+  void store32(Imm32 src, const Address& address) {
++  FaultingCodeRange store32(Imm32 src, const Address& address) {
 +    UseScratchRegisterScope temps(*this);
 +    Register scratch = temps.Acquire();
 +    move32(src, scratch);
-+    store32(scratch, address);
++    return store32(scratch, address);
 +  }
 +  void store32(Imm32 src, const BaseIndex& address) {
 +    UseScratchRegisterScope temps(*this);
@@ -28363,9 +28394,8 @@ index 0000000000..3f790af45c
 +          as_std(src, address.base, address.offset).getOffset());
 +    }
 +    if (HasPOWER10() && is_intN((intptr_t)address.offset, 34)) {
-+      return FaultingCodeRange(
-+          as_pstd(src, address.base, (int64_t)address.offset, /*R=*/false)
-+              .getOffset());
++      return PrefixedFaultingCodeRange(
++          as_pstd(src, address.base, (int64_t)address.offset, /*R=*/false));
 +    }
 +    UseScratchRegisterScope temps(*this);
 +    Register scratch = temps.Acquire();
@@ -37531,10 +37561,10 @@ index 0000000000..cf5286c0d7
 +#endif /* jit_ppc64_Simulator_ppc64_h */
 diff --git a/js/src/jit/ppc64/Trampoline-ppc64.cpp b/js/src/jit/ppc64/Trampoline-ppc64.cpp
 new file mode 100644
-index 0000000000..08fa986994
+index 0000000000..57f3da02f1
 --- /dev/null
 +++ b/js/src/jit/ppc64/Trampoline-ppc64.cpp
-@@ -0,0 +1,657 @@
+@@ -0,0 +1,658 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 + * vim: set ts=8 sts=2 et sw=2 tw=80:
 + * This Source Code Form is subject to the terms of the Mozilla Public
@@ -37787,9 +37817,10 @@ index 0000000000..08fa986994
 +  AutoCreatedBy acb(masm, "JitRuntime::generateEnterJIT");
 +
 +  if (mode == EnterJitMode::GeneratorResume) {
-+    enterJITGeneratorResumeOffset_ = startTrampolineCode(masm);
++    enterJITGeneratorResumeOffset_ =
++        startTrampolineCode(masm, TargetKind::Call);
 +  } else {
-+    enterJITOffset_ = startTrampolineCode(masm);
++    enterJITOffset_ = startTrampolineCode(masm, TargetKind::Call);
 +  }
 +
 +  // EnterJitCode signature: (void* code, unsigned argc, Value* argv,
@@ -37949,7 +37980,7 @@ index 0000000000..08fa986994
 +void JitRuntime::generateInvalidator(MacroAssembler& masm, Label* bailoutTail) {
 +  AutoCreatedBy acb(masm, "JitRuntime::generateInvalidator");
 +
-+  invalidatorOffset_ = startTrampolineCode(masm);
++  invalidatorOffset_ = startTrampolineCode(masm, TargetKind::Jump);
 +
 +  masm.checkStackAlignment();
 +
@@ -38027,7 +38058,7 @@ index 0000000000..08fa986994
 +                                        Label* bailoutTail) {
 +  AutoCreatedBy acb(masm, "JitRuntime::generateBailoutHandler");
 +
-+  bailoutHandlerOffset_ = startTrampolineCode(masm);
++  bailoutHandlerOffset_ = startTrampolineCode(masm, TargetKind::Jump);
 +
 +  GenerateBailoutThunk(masm, bailoutTail);
 +}
@@ -38037,7 +38068,7 @@ index 0000000000..08fa986994
 +                                   DynFn nativeFun, uint32_t* wrapperOffset) {
 +  AutoCreatedBy acb(masm, "JitRuntime::generateVMWrapper");
 +
-+  *wrapperOffset = startTrampolineCode(masm);
++  *wrapperOffset = startTrampolineCode(masm, TargetKind::Call);
 +
 +  // Avoid conflicts with argument registers while discarding the result after
 +  // the function call.
@@ -38141,7 +38172,7 @@ index 0000000000..08fa986994
 +                                        MIRType type) {
 +  AutoCreatedBy acb(masm, "JitRuntime::generatePreBarrier");
 +
-+  uint32_t offset = startTrampolineCode(masm);
++  uint32_t offset = startTrampolineCode(masm, TargetKind::Call);
 +
 +  MOZ_ASSERT(PreBarrierReg == IntArgReg1);  // r4
 +  Register temp1 = IntArgReg0;              // r3
@@ -38193,7 +38224,7 @@ index 0000000000..08fa986994
 +  masm.generateBailoutTail(IntArgReg1, IntArgReg2);
 +}
 diff --git a/js/src/jit/shared/Assembler-shared.h b/js/src/jit/shared/Assembler-shared.h
-index 83cc605e4d..0027f069f0 100644
+index 041746095b..fd00f6af7e 100644
 --- a/js/src/jit/shared/Assembler-shared.h
 +++ b/js/src/jit/shared/Assembler-shared.h
 @@ -30,14 +30,15 @@
@@ -38229,7 +38260,7 @@ index a6909e560b..d886cba2c7 100644
  // open-code 64-bit atomics.  If so, try linking with -latomic.  If that doesn't
  // work, you're mostly on your own.
 diff --git a/js/src/jit/shared/CodeGenerator-shared.cpp b/js/src/jit/shared/CodeGenerator-shared.cpp
-index 6fd914bd0c..b9b9f166c0 100644
+index 122df786c3..559e10f6e0 100644
 --- a/js/src/jit/shared/CodeGenerator-shared.cpp
 +++ b/js/src/jit/shared/CodeGenerator-shared.cpp
 @@ -86,9 +86,10 @@ CodeGeneratorShared::CodeGeneratorShared(MIRGenerator* gen, LIRGraph* graph,
@@ -38246,7 +38277,7 @@ index 6fd914bd0c..b9b9f166c0 100644
  #  else
  #    error \
          "we may need padding so that local slots are SIMD-aligned and the stack must be kept SIMD-aligned too."
-@@ -1144,7 +1145,7 @@ Label* CodeGeneratorShared::getJumpLabelForBranch(MBasicBlock* block) {
+@@ -1137,7 +1138,7 @@ Label* CodeGeneratorShared::getJumpLabelForBranch(MBasicBlock* block) {
  // This function is not used for MIPS64/LOONG64/RISCV64. They have
  // branchToBlock.
  #if !defined(JS_CODEGEN_MIPS64) && !defined(JS_CODEGEN_LOONG64) && \
@@ -38256,10 +38287,10 @@ index 6fd914bd0c..b9b9f166c0 100644
                                        Assembler::Condition cond) {
    // Skip past trivial blocks.
 diff --git a/js/src/jit/shared/IonAssemblerBufferWithConstantPools.h b/js/src/jit/shared/IonAssemblerBufferWithConstantPools.h
-index 3b75cc7219..299b3823e0 100644
+index 75251d2972..5189b22c3d 100644
 --- a/js/src/jit/shared/IonAssemblerBufferWithConstantPools.h
 +++ b/js/src/jit/shared/IonAssemblerBufferWithConstantPools.h
-@@ -105,7 +105,8 @@
+@@ -114,7 +114,8 @@
  //
  //   Write out the pool header which follows the guard branch.
  //
@@ -38269,7 +38300,7 @@ index 3b75cc7219..299b3823e0 100644
  //
  //   Re-encode a load of a constant pool entry after the location of the
  //   constant pool is known.
-@@ -1073,7 +1074,8 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<Inst> {
+@@ -1146,7 +1147,8 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<Inst> {
          // actually reside there in memory.
          JitSpew(JitSpew_Pools, "Fixing entry %d offset to %zu", idx,
                  codeOffset);
@@ -38279,7 +38310,7 @@ index 3b75cc7219..299b3823e0 100644
        }
  
        // Reset everything to the state that it was in when we started.
-@@ -1090,6 +1092,10 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<Inst> {
+@@ -1163,6 +1165,10 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<Inst> {
      finishPool(SIZE_MAX);
    }
  
@@ -38316,10 +38347,10 @@ index 80bdd69cf7..2c378db838 100644
      DEFINES["WASM_SUPPORTS_HUGE_MEMORY"] = True
  
 diff --git a/js/src/jsapi-tests/testAssemblerBuffer.cpp b/js/src/jsapi-tests/testAssemblerBuffer.cpp
-index e093169180..7246a8b151 100644
+index 5bd6b49f21..b47ad3af90 100644
 --- a/js/src/jsapi-tests/testAssemblerBuffer.cpp
 +++ b/js/src/jsapi-tests/testAssemblerBuffer.cpp
-@@ -440,7 +440,8 @@ struct TestAssembler {
+@@ -441,7 +441,8 @@ struct TestAssembler {
      *load = Instr::PoolLoadIndex(index);
    }
  
@@ -38329,7 +38360,7 @@ index e093169180..7246a8b151 100644
      uint32_t* load = reinterpret_cast<uint32_t*>(loadAddr);
      uint32_t index = *load & 0xffff;
      MOZ_ASSERT(*load == Instr::PoolLoadIndex(index),
-@@ -1018,7 +1019,8 @@ struct LongVeneerTestAssembler {
+@@ -1079,7 +1080,8 @@ struct LongVeneerTestAssembler {
      MOZ_CRASH("constant pool not used");
    }
  
@@ -38429,10 +38460,10 @@ index a2dfe5d019..7f3dcca895 100644
    // Exit the JIT-ed code using the ABI return style.
    masm.abiret();
 diff --git a/js/src/shell/js.cpp b/js/src/shell/js.cpp
-index 2fc532c208..4f894962db 100644
+index b4e3187500..7653697de7 100644
 --- a/js/src/shell/js.cpp
 +++ b/js/src/shell/js.cpp
-@@ -8053,6 +8053,13 @@ static void SingleStepCallback(void* arg, jit::Simulator* sim, void* pc) {
+@@ -8061,6 +8061,13 @@ static void SingleStepCallback(void* arg, jit::Simulator* sim, void* pc) {
    state.fp = (void*)sim->getRegister(jit::Simulator::fp);
    // see WasmTailCallFPScratchReg and CollapseWasmFrameFast
    state.tempFP = (void*)sim->getRegister(jit::Simulator::t3);
@@ -38446,7 +38477,7 @@ index 2fc532c208..4f894962db 100644
  #  else
  #    error "NYI: Single-step profiling support"
  #  endif
-@@ -13552,6 +13559,15 @@ bool InitOptionParser(OptionParser& op) {
+@@ -13581,6 +13588,15 @@ bool InitOptionParser(OptionParser& op) {
                         "Stop the RISC-V simulator after the given "
                         "NUMBER of instructions.",
                         -1) ||
@@ -38462,7 +38493,7 @@ index 2fc532c208..4f894962db 100644
  #endif
        !op.addIntOption('\0', "nursery-size", "SIZE-MB",
                         "Set the maximum nursery size in MB",
-@@ -14633,6 +14649,15 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
+@@ -14662,6 +14678,15 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
    if (stopAt >= 0) {
      jit::Simulator::StopSimAt = stopAt;
    }
@@ -38479,7 +38510,7 @@ index 2fc532c208..4f894962db 100644
  
  #ifdef DEBUG
 diff --git a/js/src/shell/jsshell.h b/js/src/shell/jsshell.h
-index 9ce1b499a2..9751cdb81e 100644
+index ee7a29fe8a..2507a6105d 100644
 --- a/js/src/shell/jsshell.h
 +++ b/js/src/shell/jsshell.h
 @@ -21,9 +21,9 @@
@@ -38496,7 +38527,7 @@ index 9ce1b499a2..9751cdb81e 100644
  #endif
  
 diff --git a/js/src/tests/jstests.py b/js/src/tests/jstests.py
-index 5acb4ab75a..9149454816 100755
+index 90d1b13718..fb1a504ab4 100755
 --- a/js/src/tests/jstests.py
 +++ b/js/src/tests/jstests.py
 @@ -512,9 +512,13 @@ def load_wpt_tests(xul_tester, requested_paths, excluded_paths, update_manifest=
@@ -38793,7 +38824,7 @@ index 990db9351d..230eab2d89 100644
    // Required by gcc.
    SpecificRegs() {}
 diff --git a/js/src/wasm/WasmBaselineCompile.cpp b/js/src/wasm/WasmBaselineCompile.cpp
-index 0ad5f35cd8..99a2e1ac39 100644
+index 5adc7b9f2f..7f968735f3 100644
 --- a/js/src/wasm/WasmBaselineCompile.cpp
 +++ b/js/src/wasm/WasmBaselineCompile.cpp
 @@ -410,11 +410,15 @@ void BaseCompiler::tableSwitch(Label* theTable, RegI32 switchValue,
@@ -38813,16 +38844,16 @@ index 0ad5f35cd8..99a2e1ac39 100644
  
    tableCl.target()->bind(theTable->offset());
    masm.addCodeLabel(tableCl);
-@@ -936,7 +940,7 @@ void BaseCompiler::insertBreakablePoint(CallSiteKind kind) {
-   masm.append(CallSiteDesc(iter_.lastOpcodeOffset(), kind),
-               CodeOffset(masm.currentOffset()));
+@@ -992,7 +996,7 @@ CodeOffset BaseCompiler::insertBreakablePoint(CallSiteKind kind) {
+   resumeOffset = CodeOffset(masm.currentOffset());
+   masm.append(CallSiteDesc(iter_.lastOpcodeOffset(), kind), resumeOffset);
  #elif defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_MIPS64) || \
 -    defined(JS_CODEGEN_RISCV64)
 +    defined(JS_CODEGEN_RISCV64) || defined(JS_CODEGEN_PPC64)
    ScratchPtr scratch(*this);
    Label L;
    masm.loadPtr(Address(InstanceReg, Instance::offsetOfDebugStub()), scratch);
-@@ -1012,7 +1016,7 @@ void BaseCompiler::insertPerFunctionDebugStub() {
+@@ -1070,7 +1074,7 @@ void BaseCompiler::insertPerFunctionDebugStub() {
      masm.ma_bx(lr, Assembler::Zero);
    }
  #elif defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_MIPS64) || \
@@ -38831,7 +38862,7 @@ index 0ad5f35cd8..99a2e1ac39 100644
    {
      ScratchPtr scratch(*this);
  
-@@ -1444,7 +1448,7 @@ void BaseCompiler::popStackResults(ABIResultIter& iter, StackHeight stackBase) {
+@@ -1502,7 +1506,7 @@ void BaseCompiler::popStackResults(ABIResultIter& iter, StackHeight stackBase) {
      switch (v.kind()) {
        case Stk::ConstI32:
  #if defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || \
@@ -38840,7 +38871,7 @@ index 0ad5f35cd8..99a2e1ac39 100644
          fr.storeImmediatePtrToStack(v.i32val_, resultHeight, temp);
  #else
          fr.storeImmediatePtrToStack(uint32_t(v.i32val_), resultHeight, temp);
-@@ -1765,6 +1769,13 @@ void BaseCompiler::passArg(ValType type, const Stk& arg, FunctionCall* call) {
+@@ -1823,6 +1827,13 @@ void BaseCompiler::passArg(ValType type, const Stk& arg, FunctionCall* call) {
                                        argLoc.offsetFromArgBase()));
        } else {
          loadI32(arg, RegI32(argLoc.gpr()));
@@ -38854,7 +38885,7 @@ index 0ad5f35cd8..99a2e1ac39 100644
        }
        break;
      }
-@@ -2443,9 +2454,10 @@ void BaseCompiler::finishTryNote(size_t tryNoteIndex) {
+@@ -2501,9 +2512,10 @@ void BaseCompiler::finishTryNote(size_t tryNoteIndex) {
  RegI32 BaseCompiler::needRotate64Temp() {
  #if defined(JS_CODEGEN_X86)
    return needI32();
@@ -38868,7 +38899,7 @@ index 0ad5f35cd8..99a2e1ac39 100644
    return RegI32::Invalid();
  #else
    MOZ_CRASH("BaseCompiler platform hook: needRotate64Temp");
-@@ -2504,6 +2516,8 @@ void BaseCompiler::popAndAllocateForMulI64(RegI64* r0, RegI64* r1,
+@@ -2562,6 +2574,8 @@ void BaseCompiler::popAndAllocateForMulI64(RegI64* r0, RegI64* r1,
    pop2xI64(r0, r1);
  #elif defined(JS_CODEGEN_RISCV64)
    pop2xI64(r0, r1);
@@ -38877,7 +38908,7 @@ index 0ad5f35cd8..99a2e1ac39 100644
  #else
    MOZ_CRASH("BaseCompiler porting interface: popAndAllocateForMulI64");
  #endif
-@@ -3029,6 +3043,9 @@ static RegI32 PopcntTemp(BaseCompiler& bc) {
+@@ -3087,6 +3101,9 @@ static RegI32 PopcntTemp(BaseCompiler& bc) {
      defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || \
      defined(JS_CODEGEN_RISCV64)
    return bc.needI32();
@@ -38887,7 +38918,7 @@ index 0ad5f35cd8..99a2e1ac39 100644
  #else
    MOZ_CRASH("BaseCompiler platform hook: PopcntTemp");
  #endif
-@@ -9683,6 +9700,11 @@ static void MulI64x2(MacroAssembler& masm, RegV128 rs, RegV128 rsd,
+@@ -9741,6 +9758,11 @@ static void MulI64x2(MacroAssembler& masm, RegV128 rs, RegV128 rsd,
  static void MulI64x2(MacroAssembler& masm, RegV128 rs, RegV128 rsd) {
    masm.mulInt64x2(rsd, rs, rsd);
  }
@@ -38899,7 +38930,7 @@ index 0ad5f35cd8..99a2e1ac39 100644
  #  endif
  
  static void MulF64x2(MacroAssembler& masm, RegV128 rs, RegV128 rsd) {
-@@ -9697,7 +9719,8 @@ static void DivF64x2(MacroAssembler& masm, RegV128 rs, RegV128 rsd) {
+@@ -9755,7 +9777,8 @@ static void DivF64x2(MacroAssembler& masm, RegV128 rs, RegV128 rsd) {
    masm.divFloat64x2(rsd, rs, rsd);
  }
  
@@ -38909,7 +38940,7 @@ index 0ad5f35cd8..99a2e1ac39 100644
  static void MinF32x4(MacroAssembler& masm, RegV128 rs, RegV128 rsd,
                       RegV128 temp1, RegV128 temp2) {
    masm.minFloat32x4(rsd, rs, rsd, temp1, temp2);
-@@ -9718,6 +9741,22 @@ static void MaxF64x2(MacroAssembler& masm, RegV128 rs, RegV128 rsd,
+@@ -9776,6 +9799,22 @@ static void MaxF64x2(MacroAssembler& masm, RegV128 rs, RegV128 rsd,
    masm.maxFloat64x2(rsd, rs, rsd, temp1, temp2);
  }
  
@@ -38932,7 +38963,7 @@ index 0ad5f35cd8..99a2e1ac39 100644
  static void PMinF32x4(MacroAssembler& masm, RegV128 rsd, RegV128 rs,
                        RhsDestOp) {
    masm.pseudoMinFloat32x4(rsd, rs);
-@@ -9737,6 +9776,7 @@ static void PMaxF64x2(MacroAssembler& masm, RegV128 rsd, RegV128 rs,
+@@ -9795,6 +9834,7 @@ static void PMaxF64x2(MacroAssembler& masm, RegV128 rsd, RegV128 rs,
                        RhsDestOp) {
    masm.pseudoMaxFloat64x2(rsd, rs);
  }
@@ -38940,7 +38971,7 @@ index 0ad5f35cd8..99a2e1ac39 100644
  #  elif defined(JS_CODEGEN_ARM64)
  static void MinF32x4(MacroAssembler& masm, RegV128 rs, RegV128 rsd) {
    masm.minFloat32x4(rs, rsd);
-@@ -10169,6 +10209,68 @@ static void ShiftRightI64x2(MacroAssembler& masm, RegI32 rs, RegV128 rsd,
+@@ -10227,6 +10267,68 @@ static void ShiftRightI64x2(MacroAssembler& masm, RegI32 rs, RegV128 rsd,
    masm.rightShiftInt64x2(rsd, temp, rsd);
  }
  
@@ -39009,7 +39040,7 @@ index 0ad5f35cd8..99a2e1ac39 100644
  static void ShiftRightUI64x2(MacroAssembler& masm, RegI32 rs, RegV128 rsd,
                               RegI32 temp) {
    ShiftOpMask(masm, SimdOp::I64x2ShrU, rs, temp);
-@@ -10494,6 +10596,24 @@ static void BitmaskI32x4(MacroAssembler& masm, RegV128 rs, RegI32 rd) {
+@@ -10552,6 +10654,24 @@ static void BitmaskI32x4(MacroAssembler& masm, RegV128 rs, RegI32 rd) {
  static void BitmaskI64x2(MacroAssembler& masm, RegV128 rs, RegI32 rd) {
    masm.bitmaskInt64x2(rs, rd);
  }
@@ -39034,7 +39065,7 @@ index 0ad5f35cd8..99a2e1ac39 100644
  #  endif
  
  static void Swizzle(MacroAssembler& masm, RegV128 rs, RegV128 rsd) {
-@@ -10576,7 +10696,7 @@ static void BitselectV128(MacroAssembler& masm, RegV128 rhs, RegV128 control,
+@@ -10634,7 +10754,7 @@ static void BitselectV128(MacroAssembler& masm, RegV128 rhs, RegV128 control,
    masm.bitwiseSelectSimd128(lhsDest, rhs, temp);
    masm.moveSimd128(temp, lhsDest);
  }
@@ -39043,7 +39074,7 @@ index 0ad5f35cd8..99a2e1ac39 100644
  static void BitselectV128(MacroAssembler& masm, RegV128 rhs, RegV128 control,
                            RegV128 lhsDest, RegV128 temp) {
    masm.moveSimd128(control, temp);
-@@ -10658,7 +10778,7 @@ void BaseCompiler::emitDotI8x16I7x16AddS() {
+@@ -10716,7 +10836,7 @@ void BaseCompiler::emitDotI8x16I7x16AddS() {
    RegV128 rsd = popV128();
    RegV128 rs0, rs1;
    pop2xV128(&rs0, &rs1);
@@ -39052,7 +39083,7 @@ index 0ad5f35cd8..99a2e1ac39 100644
    RegV128 temp = needV128();
    masm.dotInt8x16Int7x16ThenAdd(rs0, rs1, rsd, temp);
    freeV128(temp);
-@@ -10868,7 +10988,7 @@ bool BaseCompiler::emitVectorLaneSelect() {
+@@ -10926,7 +11046,7 @@ bool BaseCompiler::emitVectorLaneSelect() {
    freeV128(lhs);
    freeV128(mask);
    pushV128(rhsDest);
@@ -39061,7 +39092,7 @@ index 0ad5f35cd8..99a2e1ac39 100644
    RegV128 maskDest = popV128();
    RegV128 rhs = popV128();
    RegV128 lhs = popV128();
-@@ -13038,7 +13158,7 @@ bool js::wasm::BaselinePlatformSupport() {
+@@ -13098,7 +13218,7 @@ bool js::wasm::BaselinePlatformSupport() {
  #if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86) ||        \
      defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) ||      \
      defined(JS_CODEGEN_MIPS64) || defined(JS_CODEGEN_LOONG64) || \
@@ -39098,23 +39129,49 @@ index 6678a14363..391d7286b0 100644
    // SummarizeTrapInstruction can identify and can determine the length of.
    // The required instruction kind depends on the trapsite kind.
 diff --git a/js/src/wasm/WasmCodegenTypes.h b/js/src/wasm/WasmCodegenTypes.h
-index 669f422e07..dfb5904c2c 100644
+index 669f422e07..e549e5a34e 100644
 --- a/js/src/wasm/WasmCodegenTypes.h
 +++ b/js/src/wasm/WasmCodegenTypes.h
-@@ -267,10 +267,11 @@ class FaultingCodeRange {
-   static constexpr uint32_t kMaxInsnLength = 15;
- #elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) ||    \
-     defined(JS_CODEGEN_RISCV64) || defined(JS_CODEGEN_MIPS64) || \
--    defined(JS_CODEGEN_LOONG64)
-+    defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_PPC64)
-   // These are fixed-length-insn targets, at least for the code we generate.  In
-   // particular, ARM-Thumb2 has both insn lengths 2 and 4, but we don't generate
--  // that.  Same for the RiscV compressed-instruction extension.
-+  // that.  Same for the RiscV compressed-instruction extension.  PPC64
-+  // prefixed (8-byte) instructions are never emitted at trapping sites.
+@@ -273,6 +273,11 @@ class FaultingCodeRange {
+   // that.  Same for the RiscV compressed-instruction extension.
    static constexpr uint32_t kMinInsnLength = 4;
    static constexpr uint32_t kMaxInsnLength = 4;
++#elif defined(JS_CODEGEN_PPC64)
++  // Instructions are 4 bytes, except POWER10 prefixed loads and stores, which
++  // are 8 bytes and can be trapping sites.
++  static constexpr uint32_t kMinInsnLength = 4;
++  static constexpr uint32_t kMaxInsnLength = 8;
  #elif defined(JS_CODEGEN_NONE)
+   // Bogus, but it doesn't matter.
+   static constexpr uint32_t kMinInsnLength = 1;
+@@ -310,7 +315,8 @@ class FaultingCodeRange {
+   // Constructors.
+   inline FaultingCodeRange() { MOZ_ASSERT(!isValid()); }
+ 
+-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
++#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64) || \
++    defined(JS_CODEGEN_PPC64)
+   // Make a FaultingCodeRange from two offsets.  This is only valid on targets
+   // with variable-length instructions.
+   inline FaultingCodeRange(uint32_t startOffset, uint32_t endOffset)
+@@ -322,12 +328,15 @@ class FaultingCodeRange {
+     // tolerate that and later throw out any attempt to query the resulting
+     // FaultingCodeRange.
+   }
+-#else
++#endif
++#if !defined(JS_CODEGEN_X86) && !defined(JS_CODEGEN_X64)
+   // Make a FaultingCodeRange from one offset.  This is only valid on targets
+-  // with fixed-length instructions.
++  // with fixed-length instructions, and for PPC64's 4-byte instructions.
+   inline explicit FaultingCodeRange(uint32_t startOffset)
+       : startOffset_(startOffset), endOffset_(startOffset + kMinInsnLength) {
++#  if !defined(JS_CODEGEN_PPC64)
+     static_assert(kMinInsnLength == kMaxInsnLength);
++#  endif
+     // Requirement on the caller
+     MOZ_ASSERT(startOffset != INVALID_OFFSET);
+   }
 diff --git a/js/src/wasm/WasmCompile.cpp b/js/src/wasm/WasmCompile.cpp
 index 3a35c989f8..9e00d5c838 100644
 --- a/js/src/wasm/WasmCompile.cpp
@@ -39141,10 +39198,10 @@ index 3a35c989f8..9e00d5c838 100644
    return 0;
  #else
 diff --git a/js/src/wasm/WasmFrameIter.cpp b/js/src/wasm/WasmFrameIter.cpp
-index 66b1c06f61..9c7d577d44 100644
+index b5ee666c69..edcb07c01b 100644
 --- a/js/src/wasm/WasmFrameIter.cpp
 +++ b/js/src/wasm/WasmFrameIter.cpp
-@@ -642,6 +642,19 @@ static const unsigned PushedFP = 12;
+@@ -653,6 +653,19 @@ static const unsigned PushedFP = 12;
  static const unsigned SetFP = 16;
  static const unsigned PoppedFP = 4;
  static const unsigned PoppedFPJitEntry = 8;
@@ -39164,7 +39221,7 @@ index 66b1c06f61..9c7d577d44 100644
  #elif defined(JS_CODEGEN_NONE) || defined(JS_CODEGEN_WASM32)
  // Synthetic values to satisfy asserts and avoid compiler warnings.
  static const unsigned PushedRetAddr = 0;
-@@ -783,6 +796,17 @@ static void GenerateCommonPrologue(MacroAssembler& masm, uint32_t* entry) {
+@@ -794,6 +807,17 @@ static void GenerateCommonPrologue(MacroAssembler& masm, uint32_t* entry) {
    masm.ma_push(FramePointer);
    MOZ_ASSERT_IF(!masm.oom(), PushedFP == masm.currentOffset() - *entry);
  
@@ -39182,7 +39239,7 @@ index 66b1c06f61..9c7d577d44 100644
    masm.moveStackPtrTo(FramePointer);
    MOZ_ASSERT_IF(!masm.oom(), SetFP == masm.currentOffset() - *entry);
  #  elif defined(JS_CODEGEN_RISCV64)
-@@ -894,6 +918,38 @@ static void GenerateCallableEpilogue(MacroAssembler& masm, unsigned framePushed,
+@@ -905,6 +929,38 @@ static void GenerateCallableEpilogue(MacroAssembler& masm, unsigned framePushed,
      *ret = masm.currentOffset();
      masm.jalr(zero, ra, 0);
    }
@@ -39221,7 +39278,7 @@ index 66b1c06f61..9c7d577d44 100644
  #elif defined(JS_CODEGEN_ARM64)
  
    // See comment at equivalent place in |GenerateCallablePrologue| above.
-@@ -1619,6 +1675,20 @@ void wasm::GenerateJitEntryEpilogue(MacroAssembler& masm,
+@@ -1639,6 +1695,20 @@ void wasm::GenerateJitEntryEpilogue(MacroAssembler& masm,
      masm.Ret(ARMRegister(lr, 64));
      masm.setFramePushed(0);
    }
@@ -39242,7 +39299,7 @@ index 66b1c06f61..9c7d577d44 100644
  #else
    // Forbid pools for the same reason as described in GenerateCallablePrologue.
  #  if defined(JS_CODEGEN_ARM)
-@@ -2010,6 +2080,22 @@ bool js::wasm::StartUnwinding(const RegisterState& registers,
+@@ -2030,6 +2100,22 @@ bool js::wasm::StartUnwinding(const RegisterState& registers,
          fixedFP = fp;
          AssertMatchesCallSite(fixedPC, fixedFP);
        } else
@@ -39265,7 +39322,7 @@ index 66b1c06f61..9c7d577d44 100644
  #elif defined(JS_CODEGEN_ARM64)
        if (offsetFromEntry < SetFP || codeRange->isThunk()) {
          // On ARM64 we rely on register state instead of state saved on
-@@ -2051,6 +2137,35 @@ bool js::wasm::StartUnwinding(const RegisterState& registers,
+@@ -2071,6 +2157,35 @@ bool js::wasm::StartUnwinding(const RegisterState& registers,
          fixedPC = Frame::fromUntaggedWasmExitFP(sp)->returnAddress();
          fixedFP = fp;
          AssertMatchesCallSite(fixedPC, fixedFP);
@@ -39302,7 +39359,7 @@ index 66b1c06f61..9c7d577d44 100644
      defined(JS_CODEGEN_RISCV64)
          // The stack pointer does not move until all values have
 diff --git a/js/src/wasm/WasmGC.cpp b/js/src/wasm/WasmGC.cpp
-index 059136d9f8..93e95d282f 100644
+index 059136d9f8..c1e1875498 100644
 --- a/js/src/wasm/WasmGC.cpp
 +++ b/js/src/wasm/WasmGC.cpp
 @@ -503,6 +503,16 @@ bool wasm::IsPlausibleStackMapKey(const uint8_t* base,
@@ -39322,6 +39379,16 @@ index 059136d9f8..93e95d282f 100644
  #  else
    MOZ_CRASH(
        "IsValidStackMapKey: call-instruction identification "
+@@ -532,6 +542,9 @@ bool wasm::IsPlausibleStackMapKey(const uint8_t* base,
+   // Inspect instructions in `nextPC -minLen, -(minLen+1), .. -maxLen`, to see
+   // if any of them are a trapping instruction of the right kind.
+   for (len = minLen; len <= maxLen; len++) {
++    if (len % FaultingCodeRange::minInsnLength() != 0) {
++      continue;
++    }
+     const uint8_t* maybeTrappingInsn = (uint8_t*)nextPC - len;
+     summary = SummarizeTrapInstruction(maybeTrappingInsn);
+     if (!summary.identified()) {
 diff --git a/js/src/wasm/WasmGenerator.cpp b/js/src/wasm/WasmGenerator.cpp
 index 1bee15982b..e18ee1946c 100644
 --- a/js/src/wasm/WasmGenerator.cpp
@@ -39467,7 +39534,7 @@ index c06cefcce0..28cf573ae3 100644
  static const uint32_t kWasmTrapSignal = SIGILL;
  #    endif
 diff --git a/js/src/wasm/WasmStacks.cpp b/js/src/wasm/WasmStacks.cpp
-index 66568f04b1..a439e4a313 100644
+index 25b9c344b3..a55548bc48 100644
 --- a/js/src/wasm/WasmStacks.cpp
 +++ b/js/src/wasm/WasmStacks.cpp
 @@ -467,6 +467,30 @@ static constexpr size_t ContStackMaxJitStackSize = 10 * 1024 * 1024;
@@ -39837,10 +39904,10 @@ index d3f00107b2..9970e6d547 100644
  const size_t kAutomationPageSize = 4096;
  #endif
 diff --git a/memory/gtest/TestJemalloc.cpp b/memory/gtest/TestJemalloc.cpp
-index 60f45d90bd..23c7445dcf 100644
+index bdcdfb4507..68bb332dc3 100644
 --- a/memory/gtest/TestJemalloc.cpp
 +++ b/memory/gtest/TestJemalloc.cpp
-@@ -944,7 +944,25 @@ TEST(Jemalloc, BaseAllocMergeSplit)
+@@ -945,7 +945,25 @@ TEST(Jemalloc, BaseAllocMergeSplit)
  {
    // Test merging and splitting together, start with a large allocation then
    // free it, ensuring it lands in the free lists.

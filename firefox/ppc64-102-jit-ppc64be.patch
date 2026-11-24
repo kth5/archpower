@@ -1,4 +1,4 @@
-From af290a9a8b9bf63cf5cfed0dbcb46dbe8b56764b Mon Sep 17 00:00:00 2001
+From af4b61cc7236390213e6d19bc62860c4875c48d6 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
 Date: Sat, 4 Jul 2026 10:46:27 +1000
 Subject: [PATCH 08/30] Add PPC64BE JIT backend
@@ -60,6 +60,7 @@ Assisted-by: Alexander Baldeck <alex.bldck@gmail.com>
  .../tests/large-arraybuffers/basic.js         |   6 +
  .../tests/structured-clone/allobjs.js         |   3 +
  .../tests/structured-clone/array-buffers.js   |   4 +
+ .../saved-frame-bad-column.js                 |   8 +-
  .../tests/wasm/arraybuffer-transfer.js        |  11 +-
  js/src/jit-test/tests/wasm/atomic.js          |  31 +-
  .../jit-test/tests/wasm/bench/wasm_box2d.js   |   4 +
@@ -74,6 +75,7 @@ Assisted-by: Alexander Baldeck <alex.bldck@gmail.com>
  js/src/jit-test/tests/wasm/simd/ad-hack.js    | 166 +++----
  .../tests/wasm/simd/baseline-bug1636235.js    |   6 +-
  .../jit-test/tests/wasm/simd/cmp-bitselect.js |   8 +-
+ js/src/jit-test/tests/wasm/simd/move-cycle.js |   9 +-
  .../wasm/simd/pmaddubsw-x64-ion-codegen.js    |   2 +-
  .../jit-test/tests/wasm/simd/relaxed-fma.js   |  30 +-
  .../wasm/simd/volatile-high-bits-arm64.js     |   2 +-
@@ -98,8 +100,8 @@ Assisted-by: Alexander Baldeck <alex.bldck@gmail.com>
  js/src/jit/JitFrames.cpp                      |   4 +-
  js/src/jit/JitFrames.h                        |  10 +-
  js/src/jit/MIR-wasm.cpp                       | 117 +++--
- js/src/jit/MacroAssembler-inl.h               |   4 +-
- js/src/jit/MacroAssembler.cpp                 |  70 ++-
+ js/src/jit/MacroAssembler-inl.h               |   9 +-
+ js/src/jit/MacroAssembler.cpp                 |  83 +++-
  js/src/jit/MacroAssembler.h                   |   1 -
  js/src/jit/ppc64/Architecture-ppc64.h         |   4 +
  js/src/jit/ppc64/Assembler-ppc64.cpp          |  60 ++-
@@ -134,7 +136,7 @@ Assisted-by: Alexander Baldeck <alex.bldck@gmail.com>
  media/libnestegg/src/nestegg.c                |   5 +-
  mfbt/Result.h                                 |  15 +-
  mfbt/Variant.h                                |   6 +-
- 104 files changed, 2388 insertions(+), 527 deletions(-)
+ 106 files changed, 2413 insertions(+), 537 deletions(-)
  create mode 100644 browser/actors/BigEndianWarningChild.sys.mjs
  create mode 100644 browser/actors/BigEndianWarningParent.sys.mjs
  create mode 100644 browser/actors/test/browser/big_endian_warning.html
@@ -433,10 +435,10 @@ index 52cfb16684..0dd7774be8 100644
      parent: {
        esModuleURI: "resource:///actors/BlockedSiteParent.sys.mjs",
 diff --git a/browser/locales/en-US/browser/browser.ftl b/browser/locales/en-US/browser/browser.ftl
-index bf5b32798c..b728294c60 100644
+index 5fad9ab8d3..6cc465be4c 100644
 --- a/browser/locales/en-US/browser/browser.ftl
 +++ b/browser/locales/en-US/browser/browser.ftl
-@@ -1824,3 +1824,10 @@ reduced-protection-infobar-reload-button = Reload
+@@ -1847,3 +1847,10 @@ reduced-protection-infobar-reload-button = Reload
    .accesskey = R
  reduced-protection-infobar-never-show-button = Don’t show again
    .accesskey = D
@@ -475,7 +477,7 @@ index d1cf4b188f..45393b9a3d 100644
  
  void AutoJSAPI::ReportException() {
 diff --git a/dom/serviceworkers/ServiceWorkerManager.cpp b/dom/serviceworkers/ServiceWorkerManager.cpp
-index 2e0b7d970b..b337a04e45 100644
+index b2d38ee8bc..93ac0753e8 100644
 --- a/dom/serviceworkers/ServiceWorkerManager.cpp
 +++ b/dom/serviceworkers/ServiceWorkerManager.cpp
 @@ -37,6 +37,8 @@
@@ -506,7 +508,7 @@ index 2e0b7d970b..b337a04e45 100644
  #include "mozilla/dom/WorkerPrivate.h"
  #include "mozilla/dom/WorkerRunnable.h"
  #include "mozilla/dom/WorkerScope.h"
-@@ -1600,6 +1605,56 @@ void ServiceWorkerManager::ReportToAllClients(
+@@ -1601,6 +1606,56 @@ void ServiceWorkerManager::ReportToAllClients(
        aColumnNumber, ConsoleUtils::eError);
  }
  
@@ -582,7 +584,7 @@ index 7230e7742d..718795ba85 100644
     * Report a localized error for the given scope to any window we think might
     * be interested.
 diff --git a/dom/serviceworkers/ServiceWorkerPrivate.cpp b/dom/serviceworkers/ServiceWorkerPrivate.cpp
-index cc6ab40b50..d7771ad74e 100644
+index 9ed921283e..0115ba610c 100644
 --- a/dom/serviceworkers/ServiceWorkerPrivate.cpp
 +++ b/dom/serviceworkers/ServiceWorkerPrivate.cpp
 @@ -11,6 +11,7 @@
@@ -674,7 +676,7 @@ index 47639b9c33..5ac105cbea 100644
        CreateScriptError(nullptr, JS::NothingHandleValue, aStack, aStackGlobal);
  
 diff --git a/dom/workers/remoteworkers/RemoteWorkerChild.cpp b/dom/workers/remoteworkers/RemoteWorkerChild.cpp
-index 8993a62768..df04bc4034 100644
+index 4308545a47..6ac237fe89 100644
 --- a/dom/workers/remoteworkers/RemoteWorkerChild.cpp
 +++ b/dom/workers/remoteworkers/RemoteWorkerChild.cpp
 @@ -643,10 +643,13 @@ void RemoteWorkerChild::ErrorPropagationOnMainThread(
@@ -708,7 +710,7 @@ index d4484c8300..a58aec271c 100644
  
  struct CSPViolation {
 diff --git a/js/public/friend/ErrorNumbers.msg b/js/public/friend/ErrorNumbers.msg
-index 76a0f79c8b..082417f890 100644
+index 49c86bad0a..a514ef19f2 100644
 --- a/js/public/friend/ErrorNumbers.msg
 +++ b/js/public/friend/ErrorNumbers.msg
 @@ -156,6 +156,7 @@ MSG_DEF(JSMSG_TOO_MANY_FUN_SPREADARGS, 0, JSEXN_RANGEERR, "too many function arg
@@ -720,7 +722,7 @@ index 76a0f79c8b..082417f890 100644
  // Date
  MSG_DEF(JSMSG_INVALID_DATE,            0, JSEXN_RANGEERR, "invalid date")
 diff --git a/js/src/builtin/TestingFunctions.cpp b/js/src/builtin/TestingFunctions.cpp
-index 70d077a88f..ab49c93a78 100644
+index 23f4252ca2..daa1590071 100644
 --- a/js/src/builtin/TestingFunctions.cpp
 +++ b/js/src/builtin/TestingFunctions.cpp
 @@ -21,6 +21,7 @@
@@ -731,7 +733,7 @@ index 70d077a88f..ab49c93a78 100644
  #include <cfloat>
  #include <cinttypes>
  #include <cmath>
-@@ -588,6 +589,11 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
+@@ -580,6 +581,11 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
      return false;
    }
  
@@ -743,7 +745,7 @@ index 70d077a88f..ab49c93a78 100644
  #ifdef ENABLE_DECORATORS
    value = BooleanValue(true);
  #else
-@@ -1314,9 +1320,18 @@ static bool WasmGlobalFromArrayBuffer(JSContext* cx, unsigned argc, Value* vp) {
+@@ -1306,9 +1312,18 @@ static bool WasmGlobalFromArrayBuffer(JSContext* cx, unsigned argc, Value* vp) {
      return false;
    }
  
@@ -854,10 +856,10 @@ index 5c5f0b4ec7..bb5ad03d67 100644
  
    // Reads a string from our buffer into the stringBuffer. Converts everything
 diff --git a/js/src/irregexp/RegExpNativeMacroAssembler.cpp b/js/src/irregexp/RegExpNativeMacroAssembler.cpp
-index 092237f90b..0c1d1f74e6 100644
+index 8ff991afc7..b7a8ea595a 100644
 --- a/js/src/irregexp/RegExpNativeMacroAssembler.cpp
 +++ b/js/src/irregexp/RegExpNativeMacroAssembler.cpp
-@@ -425,6 +425,13 @@ void SMRegExpMacroAssembler::EmitSkipUntilBitInTableSimd(
+@@ -433,6 +433,13 @@ void SMRegExpMacroAssembler::EmitSkipUntilBitInTableSimd(
    // nibbleTable: 16-byte Boyer-Moore nibble table from regexp data.
    masm_.movePtr(ImmPtr(nibble_table->data()), temp0_);
    masm_.loadUnalignedSimd128(Address(temp0_, 0), nibbleTable);
@@ -871,7 +873,7 @@ index 092237f90b..0c1d1f74e6 100644
    // nibbleMask: 0x0f repeated 16 times.
    masm_.loadConstantSimd128(SimdConstant::SplatX16(int8_t(0x0f)), nibbleMask);
    // hiLookup: bit-position table {0x01,0x02,0x04,...,0x80} repeated twice.
-@@ -449,6 +456,10 @@ void SMRegExpMacroAssembler::EmitSkipUntilBitInTableSimd(
+@@ -457,6 +464,10 @@ void SMRegExpMacroAssembler::EmitSkipUntilBitInTableSimd(
    BaseIndex inputAddr(input_end_pointer_, current_position_, js::jit::TimesOne,
                        cp_offset);
    masm_.loadUnalignedSimd128(inputAddr, inputVec);
@@ -882,7 +884,7 @@ index 092237f90b..0c1d1f74e6 100644
  
    // loNibbles = inputVec & 0x0f
    masm_.bitwiseAndSimd128(nibbleMask, inputVec, loNibbles);
-@@ -931,11 +942,25 @@ void SMRegExpMacroAssembler::LoadCurrentCharacterUnchecked(int cp_offset,
+@@ -939,11 +950,25 @@ void SMRegExpMacroAssembler::LoadCurrentCharacterUnchecked(int cp_offset,
                                                             int characters) {
    BaseIndex address(input_end_pointer_, current_position_, js::jit::TimesOne,
                      cp_offset * char_size());
@@ -908,7 +910,7 @@ index 092237f90b..0c1d1f74e6 100644
      } else {
        MOZ_ASSERT(characters == 1);
        masm_.load8ZeroExtend(address, current_character_);
-@@ -944,6 +969,11 @@ void SMRegExpMacroAssembler::LoadCurrentCharacterUnchecked(int cp_offset,
+@@ -952,6 +977,11 @@ void SMRegExpMacroAssembler::LoadCurrentCharacterUnchecked(int cp_offset,
      MOZ_ASSERT(mode_ == UC16);
      if (characters == 2) {
        masm_.load32(address, current_character_);
@@ -1115,6 +1117,32 @@ index fcb61f6eca..e8eed9813c 100644
  // Tests for ArrayBuffer, TypedArray, and DataView encoding/decoding. 
  
  var clonebuffer = serialize("dummy");
+diff --git a/js/src/jit-test/tests/structured-clone/saved-frame-bad-column.js b/js/src/jit-test/tests/structured-clone/saved-frame-bad-column.js
+index 2ab1d43ccf..1776e86bdf 100644
+--- a/js/src/jit-test/tests/structured-clone/saved-frame-bad-column.js
++++ b/js/src/jit-test/tests/structured-clone/saved-frame-bad-column.js
+@@ -1,7 +1,8 @@
+ function savedFrameWithColumn(column) {
+   const scope = {scope: "DifferentProcess"};
+   const clone = serialize(null, undefined, scope);
+-  clone.clonebuffer = new BigUint64Array([
++  // The clone buffer is a sequence of little-endian 64-bit words.
++  const words = [
+     0xfff1000000000002n,
+     0xffff0016ffff0018n,
+     0xffff000200000000n,
+@@ -12,7 +13,10 @@ function savedFrameWithColumn(column) {
+     0xffff000000000000n,
+     0xffff000000000000n,
+     0xffff001300000000n
+-  ]).buffer;
++  ];
++  const view = new DataView(new ArrayBuffer(words.length * 8));
++  words.forEach((word, i) => view.setBigUint64(i * 8, word, true));
++  clone.clonebuffer = view.buffer;
+   return deserialize(clone, scope);
+ }
+ 
 diff --git a/js/src/jit-test/tests/wasm/arraybuffer-transfer.js b/js/src/jit-test/tests/wasm/arraybuffer-transfer.js
 index d82c305f2d..1e815471dc 100644
 --- a/js/src/jit-test/tests/wasm/arraybuffer-transfer.js
@@ -2347,6 +2375,26 @@ index 8d50cd275e..0bd02a807b 100644
          memI8.subarray(64, 96).set(checkPattern);
          verifyCodegen(ins.exports.run);        
          for (let i = 0; i < testData.length; i++) {
+diff --git a/js/src/jit-test/tests/wasm/simd/move-cycle.js b/js/src/jit-test/tests/wasm/simd/move-cycle.js
+index 78352657af..f725dd4216 100644
+--- a/js/src/jit-test/tests/wasm/simd/move-cycle.js
++++ b/js/src/jit-test/tests/wasm/simd/move-cycle.js
+@@ -36,10 +36,11 @@ const { mem, f } = wasmEvalText(`(module
+     (i32x4.extract_lane 0 (i32x4.add (local.get $v0) (local.get $v5)))))`)
+   .exports;
+ 
+-const words = new Uint32Array(mem.buffer);
+-for (let i = 0; i < words.length; i += 2) {
+-  words[i] = lo;
+-  words[i + 1] = hi;
++// Wasm memory is little-endian whatever the host byte order.
++const view = new DataView(mem.buffer);
++for (let i = 0; i < view.byteLength; i += 8) {
++  view.setUint32(i, lo, true);
++  view.setUint32(i + 4, hi, true);
+ }
+ 
+ assertEq(f(0), (lo + lo) | 0);
 diff --git a/js/src/jit-test/tests/wasm/simd/pmaddubsw-x64-ion-codegen.js b/js/src/jit-test/tests/wasm/simd/pmaddubsw-x64-ion-codegen.js
 index 6ca54b613c..16412f2cb9 100644
 --- a/js/src/jit-test/tests/wasm/simd/pmaddubsw-x64-ion-codegen.js
@@ -2785,7 +2833,7 @@ index 03b8b30406..24db77f1d4 100644
  }
  
 diff --git a/js/src/jit/BaselineCacheIRCompiler.cpp b/js/src/jit/BaselineCacheIRCompiler.cpp
-index bd11ae2028..1b73aa118f 100644
+index d79015bbd4..cb3d14e6f5 100644
 --- a/js/src/jit/BaselineCacheIRCompiler.cpp
 +++ b/js/src/jit/BaselineCacheIRCompiler.cpp
 @@ -188,6 +188,16 @@ Address BaselineCacheIRCompiler::stubAddress(uint32_t offset) const {
@@ -2805,7 +2853,7 @@ index bd11ae2028..1b73aa118f 100644
  template <typename Fn, Fn fn>
  void BaselineCacheIRCompiler::callVM(MacroAssembler& masm) {
    VMFunctionId id = VMFunctionToId<Fn, fn>::id;
-@@ -561,7 +571,7 @@ bool BaselineCacheIRCompiler::emitLoadFixedSlotResult(ObjOperandId objId,
+@@ -562,7 +572,7 @@ bool BaselineCacheIRCompiler::emitLoadFixedSlotResult(ObjOperandId objId,
    Register obj = allocator.useRegister(masm, objId);
    AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
  
@@ -2814,7 +2862,7 @@ index bd11ae2028..1b73aa118f 100644
    masm.loadValue(BaseIndex(obj, scratch, TimesOne), output.valueReg());
    return true;
  }
-@@ -580,7 +590,7 @@ bool BaselineCacheIRCompiler::emitLoadDynamicSlotResult(ObjOperandId objId,
+@@ -586,7 +596,7 @@ bool BaselineCacheIRCompiler::emitLoadDynamicSlotResult(ObjOperandId objId,
    AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
    AutoScratchRegister scratch2(allocator, masm);
  
@@ -2823,7 +2871,7 @@ index bd11ae2028..1b73aa118f 100644
    masm.loadPtr(Address(obj, NativeObject::offsetOfSlots()), scratch2);
    masm.loadValue(BaseIndex(scratch2, scratch, TimesOne), output.valueReg());
    return true;
-@@ -897,7 +907,7 @@ bool BaselineCacheIRCompiler::emitStoreSlotShared(bool isFixed,
+@@ -903,7 +913,7 @@ bool BaselineCacheIRCompiler::emitStoreSlotShared(bool isFixed,
    }
  
    Address offsetAddr = stubAddress(offsetOffset);
@@ -2832,7 +2880,7 @@ index bd11ae2028..1b73aa118f 100644
  
    if (isFixed) {
      BaseIndex slot(obj, scratch1, TimesOne);
-@@ -971,7 +981,7 @@ bool BaselineCacheIRCompiler::emitAddAndStoreSlotShared(
+@@ -977,7 +987,7 @@ bool BaselineCacheIRCompiler::emitAddAndStoreSlotShared(
      masm.loadJSContext(scratch1);
      masm.passABIArg(scratch1);
      masm.passABIArg(obj);
@@ -2841,7 +2889,7 @@ index bd11ae2028..1b73aa118f 100644
      masm.passABIArg(scratch2);
      masm.callWithABI<Fn, NativeObject::growSlotsPure>();
      masm.storeCallPointerResult(scratch1);
-@@ -992,7 +1002,7 @@ bool BaselineCacheIRCompiler::emitAddAndStoreSlotShared(
+@@ -998,7 +1008,7 @@ bool BaselineCacheIRCompiler::emitAddAndStoreSlotShared(
  
    // Perform the store. No pre-barrier required since this is a new
    // initialization.
@@ -2851,10 +2899,10 @@ index bd11ae2028..1b73aa118f 100644
      BaseIndex slot(obj, scratch1, TimesOne);
      masm.storeValue(val, slot);
 diff --git a/js/src/jit/BaselineCodeGen.cpp b/js/src/jit/BaselineCodeGen.cpp
-index 2919268ae9..701a199ed1 100644
+index 5889eac55f..7772745051 100644
 --- a/js/src/jit/BaselineCodeGen.cpp
 +++ b/js/src/jit/BaselineCodeGen.cpp
-@@ -493,6 +493,20 @@ static Register LoadBytecodePC(MacroAssembler& masm, Register scratch) {
+@@ -505,6 +505,20 @@ static Register LoadBytecodePC(MacroAssembler& masm, Register scratch) {
    return scratch;
  }
  
@@ -2875,7 +2923,7 @@ index 2919268ae9..701a199ed1 100644
  static void LoadInt8Operand(MacroAssembler& masm, Register dest) {
    Register pc = LoadBytecodePC(masm, dest);
    masm.load8SignExtend(Address(pc, sizeof(jsbytecode)), dest);
-@@ -506,6 +520,7 @@ static void LoadUint8Operand(MacroAssembler& masm, Register dest) {
+@@ -518,6 +532,7 @@ static void LoadUint8Operand(MacroAssembler& masm, Register dest) {
  static void LoadUint16Operand(MacroAssembler& masm, Register dest) {
    Register pc = LoadBytecodePC(masm, dest);
    masm.load16ZeroExtend(Address(pc, sizeof(jsbytecode)), dest);
@@ -2883,7 +2931,7 @@ index 2919268ae9..701a199ed1 100644
  }
  
  static void LoadConstantCompareOperand(MacroAssembler& masm,
-@@ -524,11 +539,19 @@ static void LoadConstantCompareOperand(MacroAssembler& masm,
+@@ -536,11 +551,19 @@ static void LoadConstantCompareOperand(MacroAssembler& masm,
  static void LoadInt32Operand(MacroAssembler& masm, Register dest) {
    Register pc = LoadBytecodePC(masm, dest);
    masm.load32(Address(pc, sizeof(jsbytecode)), dest);
@@ -2903,7 +2951,7 @@ index 2919268ae9..701a199ed1 100644
  }
  
  static void LoadUint24Operand(MacroAssembler& masm, size_t offset,
-@@ -536,6 +559,9 @@ static void LoadUint24Operand(MacroAssembler& masm, size_t offset,
+@@ -548,6 +571,9 @@ static void LoadUint24Operand(MacroAssembler& masm, size_t offset,
    // Load the opcode and operand, then left shift to discard the opcode.
    Register pc = LoadBytecodePC(masm, dest);
    masm.load32(Address(pc, offset), dest);
@@ -2913,7 +2961,7 @@ index 2919268ae9..701a199ed1 100644
    masm.rshift32(Imm32(8), dest);
  }
  
-@@ -545,6 +571,12 @@ static void LoadInlineValueOperand(MacroAssembler& masm, ValueOperand dest) {
+@@ -557,6 +583,12 @@ static void LoadInlineValueOperand(MacroAssembler& masm, ValueOperand dest) {
    // floating point instructions on ARM).
    Register pc = LoadBytecodePC(masm, dest.scratchReg());
    masm.loadUnalignedValue(Address(pc, sizeof(jsbytecode)), dest);
@@ -2926,7 +2974,7 @@ index 2919268ae9..701a199ed1 100644
  }
  
  template <typename Handler>
-@@ -1390,8 +1422,8 @@ void BaselineCompilerCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
+@@ -1404,8 +1436,8 @@ void BaselineCompilerCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
    // If the HasInlinedICScript flag is set in the frame descriptor, then load
    // the inlined ICScript from our caller's frame and store it in our own frame.
    Label notInlined, done;
@@ -2937,7 +2985,7 @@ index 2919268ae9..701a199ed1 100644
    masm.loadPtr(Address(FramePointer, 0), scratch);
    masm.loadPtr(
        Address(scratch, BaselineStubFrameLayout::InlinedICScriptOffsetFromFP),
-@@ -1456,8 +1488,8 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
+@@ -1470,8 +1502,8 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
  
    // Load the ICScript in scratch2..
    Label inlined, haveICScript;
@@ -2948,7 +2996,7 @@ index 2919268ae9..701a199ed1 100644
    masm.loadJitScript(scratch1, scratch2);
    masm.computeEffectiveAddress(Address(scratch2, JitScript::offsetOfICScript()),
                                 scratch2);
-@@ -5915,11 +5947,19 @@ void BaselineInterpreterCodeGen::emitGetTableSwitchIndex(ValueOperand val,
+@@ -5916,11 +5948,19 @@ void BaselineInterpreterCodeGen::emitGetTableSwitchIndex(ValueOperand val,
    Address lowAddr(pcReg, sizeof(jsbytecode) + TableSwitchOpLowOffset);
    Address highAddr(pcReg, sizeof(jsbytecode) + TableSwitchOpHighOffset);
  
@@ -2969,7 +3017,7 @@ index 2919268ae9..701a199ed1 100644
    masm.branch32(Assembler::GreaterThan, scratch2, dest, &jumpToDefault);
  
    // index := val - low.
-@@ -6637,8 +6677,8 @@ bool BaselineCompilerCodeGen::emitGeneratorResumePrologue() {
+@@ -6636,8 +6676,8 @@ bool BaselineCompilerCodeGen::emitGeneratorResumePrologue() {
    // Keep the resume path as the fall-through and let the initial call take the
    // branch.
    Label notResume;
@@ -2980,7 +3028,7 @@ index 2919268ae9..701a199ed1 100644
    if (!emitGeneratorResumePrologueBody()) {
      return false;
    }
-@@ -6650,9 +6690,9 @@ template <>
+@@ -6649,9 +6689,9 @@ template <>
  bool BaselineInterpreterCodeGen::emitGeneratorResumePrologue() {
    // The interpreter's prologue is shared by all scripts, so almost no frame
    // entering here is resuming. Keep the body out of line.
@@ -2994,10 +3042,10 @@ index 2919268ae9..701a199ed1 100644
  }
  
 diff --git a/js/src/jit/CacheIR.cpp b/js/src/jit/CacheIR.cpp
-index 673280088d..225b2d3669 100644
+index 40c5da5b2e..6404f760e8 100644
 --- a/js/src/jit/CacheIR.cpp
 +++ b/js/src/jit/CacheIR.cpp
-@@ -12845,7 +12845,7 @@ AttachDecision InlinableNativeIRGenerator::tryAttachSpecializedFunctionBind(
+@@ -12892,7 +12892,7 @@ AttachDecision InlinableNativeIRGenerator::tryAttachSpecializedFunctionBind(
        writer.guardFunctionScript(targetId, fun->baseScript());
      }
      writer.guardFixedSlotValue(
@@ -3007,10 +3055,10 @@ index 673280088d..225b2d3669 100644
      writer.guardFixedSlotValue(targetId, JSFunction::offsetOfAtom(),
                                 fun->getReservedSlot(JSFunction::AtomSlot));
 diff --git a/js/src/jit/CacheIRCompiler.cpp b/js/src/jit/CacheIRCompiler.cpp
-index d6cef35700..f4e4a7dc18 100644
+index 3e3b794660..b6de631634 100644
 --- a/js/src/jit/CacheIRCompiler.cpp
 +++ b/js/src/jit/CacheIRCompiler.cpp
-@@ -6453,7 +6453,8 @@ void CacheIRCompiler::emitActivateIterator(Register objBeingIterated,
+@@ -6446,7 +6446,8 @@ void CacheIRCompiler::emitActivateIterator(Register objBeingIterated,
    // Mark iterator as active.
    Address iterFlagsAddr(nativeIter, NativeIterator::offsetOfFlags());
    masm.storePtr(objBeingIterated, iterObjAddr);
@@ -3020,7 +3068,7 @@ index d6cef35700..f4e4a7dc18 100644
  
    // Post-write barrier for stores to 'objectBeingIterated_'.
    emitPostBarrierSlot(
-@@ -9653,7 +9654,14 @@ void CacheIRCompiler::emitLoadStubField(StubFieldOffset val, Register dest) {
+@@ -9639,7 +9640,14 @@ void CacheIRCompiler::emitLoadStubField(StubFieldOffset val, Register dest) {
          masm.loadPtr(load, dest);
          break;
        case StubField::Type::RawInt32:
@@ -3056,10 +3104,10 @@ index 9dee04cabe..e399210155 100644
  
    int32_t getStubRawInt32(ICCacheIRStub* stub, uint32_t offset) const {
 diff --git a/js/src/jit/CodeGenerator.cpp b/js/src/jit/CodeGenerator.cpp
-index 373220db73..ac465ef7a1 100644
+index aecce64861..f2cd92db24 100644
 --- a/js/src/jit/CodeGenerator.cpp
 +++ b/js/src/jit/CodeGenerator.cpp
-@@ -2993,7 +2993,9 @@ static JitCode* GenerateRegExpMatchStubShared(JSContext* cx,
+@@ -2997,7 +2997,9 @@ static JitCode* GenerateRegExpMatchStubShared(JSContext* cx,
      maybeTemp5 = regs.takeAny();
    }
  
@@ -3070,7 +3118,7 @@ index 373220db73..ac465ef7a1 100644
    Address lastIndexSlot(regexp, RegExpObject::offsetOfLastIndex());
  
    TempAllocator temp(&cx->tempLifoAlloc());
-@@ -3031,8 +3033,10 @@ static JitCode* GenerateRegExpMatchStubShared(JSContext* cx,
+@@ -3037,8 +3039,10 @@ static JitCode* GenerateRegExpMatchStubShared(JSContext* cx,
                   ImmWord(0), &oolEntry);
  
    // Similarly, if the |hasIndices| flag is set, fall back to the OOL stub.
@@ -3094,7 +3142,7 @@ index 373220db73..ac465ef7a1 100644
    Address lastIndexSlot(regexp, RegExpObject::offsetOfLastIndex());
  
    // Load lastIndex and skip RegExp execution if needed.
-@@ -6519,8 +6525,16 @@ void CodeGenerator::visitCallDOMNative(LCallDOMNative* call) {
+@@ -6524,8 +6530,16 @@ void CodeGenerator::visitCallDOMNative(LCallDOMNative* call) {
    LoadDOMPrivate(masm, obj, argPrivate,
                   static_cast<MCallDOMNative*>(call->mir())->objectKind());
  
@@ -3112,7 +3160,7 @@ index 373220db73..ac465ef7a1 100644
  
    // Push our argv onto the stack
    masm.Push(argArgs);
-@@ -10342,8 +10356,15 @@ static void TableIteratorAdvance(MacroAssembler& masm, Register iter,
+@@ -10347,8 +10361,15 @@ static void TableIteratorAdvance(MacroAssembler& masm, Register iter,
    Register i = temp;
  
    // Note: |count| and |index| are stored as PrivateUint32Value. We use add32
@@ -3130,7 +3178,7 @@ index 373220db73..ac465ef7a1 100644
  
    masm.unboxInt32(Address(iter, TableIteratorObject::offsetOfIndex()), i);
  
-@@ -10363,7 +10384,8 @@ static void TableIteratorAdvance(MacroAssembler& masm, Register iter,
+@@ -10368,7 +10389,8 @@ static void TableIteratorAdvance(MacroAssembler& masm, Register iter,
                         JS_HASH_KEY_EMPTY, &seek);
  
    masm.bind(&done);
@@ -3140,7 +3188,7 @@ index 373220db73..ac465ef7a1 100644
  }
  
  // Corresponds to TableIteratorObject::finish.
-@@ -11095,6 +11117,12 @@ void CodeGenerator::visitWasmLoadSlot(LWasmLoadSlot* ins) {
+@@ -11101,6 +11123,12 @@ void CodeGenerator::visitWasmLoadSlot(LWasmLoadSlot* ins) {
    if (type == MIRType::Simd128) {
      MOZ_ASSERT(wideningOp == MWideningOp::None);
      FaultingCodeRange fcr = masm.loadUnalignedSimd128(addr, dst.fpu());
@@ -3153,7 +3201,7 @@ index 373220db73..ac465ef7a1 100644
      EmitSignalNullCheckTrapSite(masm, ins, fcr, wasm::TrapMachineInsn::Load128);
      return;
    }
-@@ -11137,7 +11165,16 @@ void CodeGenerator::visitWasmStoreSlot(LWasmStoreSlot* ins) {
+@@ -11170,7 +11198,16 @@ void CodeGenerator::visitWasmStoreSlot(LWasmStoreSlot* ins) {
  
  #ifdef ENABLE_JIT_SIMD
    if (type == MIRType::Simd128) {
@@ -3171,7 +3219,7 @@ index 373220db73..ac465ef7a1 100644
      EmitSignalNullCheckTrapSite(masm, ins, fcr,
                                  wasm::TrapMachineInsn::Store128);
      return;
-@@ -18770,14 +18807,17 @@ void CodeGenerator::visitObjectToIterator(LObjectToIterator* lir) {
+@@ -18806,14 +18843,17 @@ void CodeGenerator::visitObjectToIterator(LObjectToIterator* lir) {
      // do a VM call to replace the cached iterator with a fresh iterator
      // including indices.
      masm.branchTest32(Assembler::NonZero, iterFlagsAddr,
@@ -3191,7 +3239,7 @@ index 373220db73..ac465ef7a1 100644
  
      Register enumeratorsAddr = temp2;
      masm.movePtr(ImmPtr(lir->mir()->enumeratorsAddr()), enumeratorsAddr);
-@@ -18825,7 +18865,9 @@ void CodeGenerator::emitIteratorHasIndicesAndBranch(Register iterator,
+@@ -18861,7 +18901,9 @@ void CodeGenerator::emitIteratorHasIndicesAndBranch(Register iterator,
    masm.loadPrivate(nativeIterAddr, temp);
    masm.branchTest32(Assembler::Zero,
                      Address(temp, NativeIterator::offsetOfFlags()),
@@ -3202,7 +3250,7 @@ index 373220db73..ac465ef7a1 100644
  
    // Guard that the first shape stored in the iterator matches the current
    // shape of the iterated object.
-@@ -22070,8 +22112,8 @@ void CodeGenerator::visitResumeFrameArg(LResumeFrameArg* lir) {
+@@ -22104,8 +22146,8 @@ void CodeGenerator::visitResumeFrameArg(LResumeFrameArg* lir) {
  #ifdef DEBUG
    // The slots are only valid and traced on GC while this frame is mid-resume.
    Label ok;
@@ -3213,7 +3261,7 @@ index 373220db73..ac465ef7a1 100644
    masm.assumeUnreachable("ResumeFrameArgs read outside a generator resume");
    masm.bind(&ok);
  #endif
-@@ -22084,8 +22126,8 @@ void CodeGenerator::visitResumeFrameArg(LResumeFrameArg* lir) {
+@@ -22118,8 +22160,8 @@ void CodeGenerator::visitResumeFrameArg(LResumeFrameArg* lir) {
  void CodeGenerator::visitIsResumingGenerator(LIsResumingGenerator* lir) {
    Register output = ToRegister(lir->output());
    Label isResuming, done;
@@ -3224,7 +3272,7 @@ index 373220db73..ac465ef7a1 100644
    masm.move32(Imm32(0), output);
    masm.jump(&done);
    masm.bind(&isResuming);
-@@ -22097,8 +22139,8 @@ void CodeGenerator::visitIsResumingGeneratorAndBranch(
+@@ -22131,8 +22173,8 @@ void CodeGenerator::visitIsResumingGeneratorAndBranch(
      LIsResumingGeneratorAndBranch* lir) {
    Label* ifTrue = getJumpLabelForBranch(lir->ifTrue());
    Label* ifFalse = getJumpLabelForBranch(lir->ifFalse());
@@ -3236,10 +3284,10 @@ index 373220db73..ac465ef7a1 100644
      masm.jump(ifFalse);
    }
 diff --git a/js/src/jit/InterpreterEntryTrampoline.cpp b/js/src/jit/InterpreterEntryTrampoline.cpp
-index 0f6e056014..a9aa53d846 100644
+index 7b1f3002e8..e1946229fe 100644
 --- a/js/src/jit/InterpreterEntryTrampoline.cpp
 +++ b/js/src/jit/InterpreterEntryTrampoline.cpp
-@@ -56,8 +56,8 @@ void JitRuntime::generateBaselineInterpreterEntryTrampoline(
+@@ -58,8 +58,8 @@ void JitRuntime::generateBaselineInterpreterEntryTrampoline(
    // Compute in |nargs| the number of Values the caller pushed above ThisV. The
    // loop below then copies ThisV and these Values.
    Label resuming, argsCounted, argsPushed;
@@ -3250,7 +3298,7 @@ index 0f6e056014..a9aa53d846 100644
  
    Label notFunction;
    {
-@@ -161,8 +161,8 @@ void JitRuntime::generateBaselineInterpreterEntryTrampoline(
+@@ -163,8 +163,8 @@ void JitRuntime::generateBaselineInterpreterEntryTrampoline(
    // resuming a generator we have to propagate the IsResumingGenerator bit so
    // that the callee's prologue dispatches to the resume point.
    Label descriptorPushed, notResuming;
@@ -3324,7 +3372,7 @@ index 6028426cfd..62a3918c55 100644
      return cst;
    }
 diff --git a/js/src/jit/JitFrames.cpp b/js/src/jit/JitFrames.cpp
-index 8ea8542995..96c1961419 100644
+index 1837ca043c..2d8e578d10 100644
 --- a/js/src/jit/JitFrames.cpp
 +++ b/js/src/jit/JitFrames.cpp
 @@ -76,7 +76,9 @@ static inline int32_t ReadFrameInt32Slot(JitFrameLayout* fp, int32_t slot) {
@@ -3527,10 +3575,10 @@ index 7466e703ea..2941620c81 100644
  #  ifdef DEBUG
          logging.release();
 diff --git a/js/src/jit/MacroAssembler-inl.h b/js/src/jit/MacroAssembler-inl.h
-index d18ed1a715..4416298fdd 100644
+index 7619d26080..4c4ccb530d 100644
 --- a/js/src/jit/MacroAssembler-inl.h
 +++ b/js/src/jit/MacroAssembler-inl.h
-@@ -316,8 +316,8 @@ void MacroAssembler::PushFrameDescriptorForJitCall(FrameType type,
+@@ -333,8 +333,8 @@ void MacroAssembler::PushFrameDescriptorForJitCall(FrameType type,
  
  void MacroAssembler::branchIfNotActivationEntryFrame(Register scratch,
                                                       Label* notEntryFrame) {
@@ -3539,13 +3587,26 @@ index d18ed1a715..4416298fdd 100644
 +  loadPtr(Address(FramePointer, CommonFrameLayout::offsetOfDescriptor()),
 +          scratch);
    and32(Imm32(FrameDescriptor::TypeMask), scratch);
-   branch32(Assembler::NotEqual, scratch, Imm32(uint32_t(FrameType::CppToJSJit)),
-            notEntryFrame);
+   if (JitOptions.emitInterpreterEntryTrampoline) {
+     // A frame entered through a per-script entry trampoline is still the
+@@ -347,7 +347,12 @@ void MacroAssembler::branchIfNotActivationEntryFrame(Register scratch,
+              notEntryFrame);
+     loadPtr(Address(FramePointer, CommonFrameLayout::offsetOfCallerFramePtr()),
+             scratch);
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++    // The descriptor is pointer-sized; its low word is at +4 on big-endian.
++    loadPtr(Address(scratch, CommonFrameLayout::offsetOfDescriptor()), scratch);
++#else
+     load32(Address(scratch, CommonFrameLayout::offsetOfDescriptor()), scratch);
++#endif
+     and32(Imm32(FrameDescriptor::TypeMask), scratch);
+     branch32(Assembler::NotEqual, scratch,
+              Imm32(uint32_t(FrameType::CppToJSJit)), notEntryFrame);
 diff --git a/js/src/jit/MacroAssembler.cpp b/js/src/jit/MacroAssembler.cpp
-index 5aa7f4bb1b..76b2f87a4b 100644
+index a4448072b4..53140eea07 100644
 --- a/js/src/jit/MacroAssembler.cpp
 +++ b/js/src/jit/MacroAssembler.cpp
-@@ -569,8 +569,8 @@ void MacroAssembler::createFunctionClone(Register result, Register canonical,
+@@ -564,8 +564,8 @@ void MacroAssembler::createFunctionClone(Register result, Register canonical,
             Address(result, NativeObject::offsetOfElements()));
  
    // Initialize FlagsAndArgCountSlot.
@@ -3556,7 +3617,33 @@ index 5aa7f4bb1b..76b2f87a4b 100644
  
    // Initialize NativeFuncOrInterpretedEnvSlot.
    storeValue(JSVAL_TYPE_OBJECT, envChain,
-@@ -3248,7 +3248,8 @@ void MacroAssembler::extractCurrentIndexAndKindFromIterator(Register iterator,
+@@ -903,16 +903,21 @@ void MacroAssembler::fillSlotsWithUninitialized(Address base, Register temp,
+ void MacroAssembler::storeElementsHeader(const Address& header, uint32_t flags,
+                                          uint32_t initializedLength,
+                                          uint32_t capacity, uint32_t length) {
+-  // The four uint32_t fields are stored as two 64-bit words. All JIT targets
+-  // are little-endian, so the first field of each pair is the low word.
++  // The four uint32_t fields are stored as two 64-bit words. The first field
++  // of each pair is the low word on little-endian and the high word on
++  // big-endian.
+   static_assert(ObjectElements::offsetOfInitializedLength() ==
+                 ObjectElements::offsetOfFlags() + 4);
+   static_assert(ObjectElements::offsetOfCapacity() ==
+                 ObjectElements::offsetOfFlags() + 8);
+   static_assert(ObjectElements::offsetOfLength() ==
+                 ObjectElements::offsetOfFlags() + 12);
+-  auto pair = [](uint32_t low, uint32_t high) {
+-    return Imm64(uint64_t(high) << 32 | low);
++  auto pair = [](uint32_t first, uint32_t second) {
++#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++    return Imm64(uint64_t(first) << 32 | second);
++#else
++    return Imm64(uint64_t(second) << 32 | first);
++#endif
+   };
+   store64(pair(flags, initializedLength), header);
+   store64(pair(capacity, length), Address(header.base, header.offset + 8));
+@@ -3261,7 +3266,8 @@ void MacroAssembler::extractCurrentIndexAndKindFromIterator(Register iterator,
    Label iterActive;
    branchTest32(Assembler::NonZero,
                 Address(outIndex, NativeIterator::offsetOfFlags()),
@@ -3566,7 +3653,7 @@ index 5aa7f4bb1b..76b2f87a4b 100644
    assumeUnreachable("iterator-index fast path on an inactive iterator");
    bind(&iterActive);
  #endif
-@@ -5893,7 +5894,9 @@ void MacroAssembler::minMaxArrayNumber(Register array, FloatRegister result,
+@@ -5910,7 +5916,9 @@ void MacroAssembler::minMaxArrayNumber(Register array, FloatRegister result,
  void MacroAssembler::loadRegExpLastIndex(Register regexp, Register string,
                                           Register lastIndex,
                                           Label* notFoundZeroLastIndex) {
@@ -3577,7 +3664,7 @@ index 5aa7f4bb1b..76b2f87a4b 100644
    Address lastIndexSlot(regexp, RegExpObject::offsetOfLastIndex());
    Address stringLength(string, JSString::offsetOfLength());
  
-@@ -6157,8 +6160,14 @@ void MacroAssembler::branchTestObjShapeListSetOffset(
+@@ -6174,8 +6182,14 @@ void MacroAssembler::branchTestObjShapeListSetOffset(
                               shapeScratch, endScratch, spectreScratch, fail);
  
    // The shapeElements register points to the matched shape (if found).
@@ -3593,7 +3680,7 @@ index 5aa7f4bb1b..76b2f87a4b 100644
  }
  
  void MacroAssembler::branchTestObjCompartment(Condition cond, Register obj,
-@@ -10009,7 +10018,9 @@ void MacroAssembler::branchIfNativeIteratorNotReusable(Register ni,
+@@ -10026,7 +10040,9 @@ void MacroAssembler::branchIfNativeIteratorNotReusable(Register ni,
  #ifdef DEBUG
    Label niIsInitialized;
    branchTest32(Assembler::NonZero, flagsAddr,
@@ -3604,7 +3691,7 @@ index 5aa7f4bb1b..76b2f87a4b 100644
    assumeUnreachable(
        "Expected a NativeIterator that's been completely "
        "initialized");
-@@ -10017,7 +10028,9 @@ void MacroAssembler::branchIfNativeIteratorNotReusable(Register ni,
+@@ -10034,7 +10050,9 @@ void MacroAssembler::branchIfNativeIteratorNotReusable(Register ni,
  #endif
  
    branchTest32(Assembler::NonZero, flagsAddr,
@@ -3615,7 +3702,7 @@ index 5aa7f4bb1b..76b2f87a4b 100644
  }
  
  static void LoadNativeIterator(MacroAssembler& masm, Register obj,
-@@ -10096,7 +10109,9 @@ void MacroAssembler::maybeLoadIteratorFromShape(Register obj, Register dest,
+@@ -10113,7 +10131,9 @@ void MacroAssembler::maybeLoadIteratorFromShape(Register obj, Register dest,
           temp3);
    branchTest32(Assembler::Zero,
                 Address(nativeIterator, NativeIterator::offsetOfFlags()),
@@ -3626,7 +3713,7 @@ index 5aa7f4bb1b..76b2f87a4b 100644
  
    computeEffectiveAddress(BaseIndex(nativeIterator, temp3, Scale::TimesFour),
                            nativeIterator);
-@@ -10177,7 +10192,14 @@ void MacroAssembler::iteratorMore(Register obj, ValueOperand output,
+@@ -10194,7 +10214,14 @@ void MacroAssembler::iteratorMore(Register obj, ValueOperand output,
    loadPtr(propAddr, temp);
  
    // Increase the cursor.
@@ -3641,7 +3728,7 @@ index 5aa7f4bb1b..76b2f87a4b 100644
  
    // Check if the property has been deleted while iterating. Skip it if so.
    branchTestPtr(Assembler::NonZero, temp,
-@@ -10225,7 +10247,9 @@ void MacroAssembler::iteratorClose(Register obj, Register temp1, Register temp2,
+@@ -10242,7 +10269,9 @@ void MacroAssembler::iteratorClose(Register obj, Register temp1, Register temp2,
    // unlinked. See NativeIterator::isEmptyIteratorSingleton.
    Label done;
    branchTest32(Assembler::NonZero, flagsAddr,
@@ -3652,7 +3739,7 @@ index 5aa7f4bb1b..76b2f87a4b 100644
  
    // Clear objectBeingIterated.
    Address iterObjAddr(temp1, NativeIterator::offsetOfObjectBeingIterated());
-@@ -10238,7 +10262,8 @@ void MacroAssembler::iteratorClose(Register obj, Register temp1, Register temp2,
+@@ -10255,7 +10284,8 @@ void MacroAssembler::iteratorClose(Register obj, Register temp1, Register temp2,
    // Clear deleted bits (only if we have unvisited deletions)
    Label clearDeletedLoopStart, clearDeletedLoopEnd;
    branchTest32(Assembler::Zero, flagsAddr,
@@ -3662,7 +3749,7 @@ index 5aa7f4bb1b..76b2f87a4b 100644
                 &clearDeletedLoopEnd);
  
    load32(Address(temp1, NativeIterator::offsetOfPropertyCount()), temp3);
-@@ -10250,15 +10275,25 @@ void MacroAssembler::iteratorClose(Register obj, Register temp1, Register temp2,
+@@ -10267,15 +10297,25 @@ void MacroAssembler::iteratorClose(Register obj, Register temp1, Register temp2,
        Address(temp1, NativeIterator::offsetOfFirstProperty()), temp2);
  
    bind(&clearDeletedLoopStart);
@@ -3691,7 +3778,7 @@ index 5aa7f4bb1b..76b2f87a4b 100644
          flagsAddr);
  
    // Unlink from the iterator list.
-@@ -10613,11 +10648,14 @@ void MacroAssembler::prepareHashBigInt(Register bigInt, Register result,
+@@ -10630,11 +10670,14 @@ void MacroAssembler::prepareHashBigInt(Register bigInt, Register result,
  
    {
      // Compute |AddToHash(AddToHash(hash, data), sizeof(Digit))|.
@@ -3710,10 +3797,10 @@ index 5aa7f4bb1b..76b2f87a4b 100644
  #elif JS_PUNBOX64
      // Use a single 64-bit load on non-MIPS64 platforms.
 diff --git a/js/src/jit/MacroAssembler.h b/js/src/jit/MacroAssembler.h
-index 03b8d322d9..31b74ffdd4 100644
+index f10ac96cae..ecc182854f 100644
 --- a/js/src/jit/MacroAssembler.h
 +++ b/js/src/jit/MacroAssembler.h
-@@ -821,7 +821,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
+@@ -832,7 +832,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
    inline void callWithABI(Register fun, ABIType result = ABIType::General);
    inline void callWithABI(const Address& fun,
                            ABIType result = ABIType::General);
@@ -3737,7 +3824,7 @@ index 88e3063fed..7b6332e8a1 100644
  namespace jit {
  
 diff --git a/js/src/jit/ppc64/Assembler-ppc64.cpp b/js/src/jit/ppc64/Assembler-ppc64.cpp
-index f397be94d4..f93df6d3ac 100644
+index 023155cd2e..b8f27771ff 100644
 --- a/js/src/jit/ppc64/Assembler-ppc64.cpp
 +++ b/js/src/jit/ppc64/Assembler-ppc64.cpp
 @@ -1151,7 +1151,8 @@ DEF_MEMx(lbzx) DEF_MEMx(lhax) DEF_MEMx(lhzx) DEF_MEMx(lwax)
@@ -3909,10 +3996,10 @@ index adbd2704a6..9558286931 100644
    // ECMA-262 Math.max / Math.min). Operate on FPR-space (encoding 0..31).
    BufferOffset as_xsmaxjdp(FloatRegister xt, FloatRegister xa,
 diff --git a/js/src/jit/ppc64/CodeGenerator-ppc64.cpp b/js/src/jit/ppc64/CodeGenerator-ppc64.cpp
-index e518abe87b..3a4669b02f 100644
+index 827774d12f..6088ddbe00 100644
 --- a/js/src/jit/ppc64/CodeGenerator-ppc64.cpp
 +++ b/js/src/jit/ppc64/CodeGenerator-ppc64.cpp
-@@ -1897,7 +1897,12 @@ void CodeGenerator::visitWrapInt64ToInt32(LWrapInt64ToInt32* lir) {
+@@ -1895,7 +1895,12 @@ void CodeGenerator::visitWrapInt64ToInt32(LWrapInt64ToInt32* lir) {
  
    if (lir->mir()->bottomHalf()) {
      if (input.value().isMemory()) {
@@ -3926,7 +4013,7 @@ index e518abe87b..3a4669b02f 100644
      } else {
        masm.move64To32(ToRegister64(input), output);
      }
-@@ -2116,12 +2121,26 @@ void CodeGenerator::visitWasmStoreI64(LWasmStoreI64* lir) {
+@@ -2114,12 +2119,26 @@ void CodeGenerator::visitWasmStoreI64(LWasmStoreI64* lir) {
  void CodeGenerator::visitWasmStackArg(LWasmStackArg* ins) {
    const MWasmStackArg* mir = ins->mir();
    if (ins->arg()->isConstant()) {
@@ -3957,7 +4044,7 @@ index e518abe87b..3a4669b02f 100644
      } else if (mir->input()->type() == MIRType::Double) {
        masm.storeDouble(ToFloatRegister(ins->arg()),
                         Address(StackPointer, mir->spOffset()));
-@@ -3323,7 +3342,9 @@ void CodeGenerator::visitWasmPermuteSimd128(LWasmPermuteSimd128* ins) {
+@@ -3321,7 +3340,9 @@ void CodeGenerator::visitWasmPermuteSimd128(LWasmPermuteSimd128* ins) {
        break;
      }
      case SimdPermuteOp::BROADCAST_16x8: {
@@ -3969,7 +4056,7 @@ index e518abe87b..3a4669b02f 100644
          rawLanes[i * 2] = lane * 2;
          rawLanes[i * 2 + 1] = lane * 2 + 1;
 diff --git a/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h b/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
-index 4165be132f..f190f92b8f 100644
+index dbb341eebb..56f68be56a 100644
 --- a/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
 +++ b/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
 @@ -575,6 +575,17 @@ void MacroAssembler::byteSwap16ZeroExtend(Register reg) {
@@ -4042,7 +4129,7 @@ index 4165be132f..f190f92b8f 100644
    }
  }
  
-@@ -3320,7 +3325,8 @@ void MacroAssembler::wasmMulI64WideHI64(Register lhs, Register rhs,
+@@ -3352,7 +3357,8 @@ void MacroAssembler::wasmMulI64WideHI64(Register lhs, Register rhs,
  //}}} check_macroassembler_style
  
  void MacroAssemblerPPC64Compat::incrementInt32Value(const Address& addr) {
@@ -4052,7 +4139,7 @@ index 4165be132f..f190f92b8f 100644
  }
  
  void MacroAssemblerPPC64Compat::retn(Imm32 n) {
-@@ -3430,6 +3436,8 @@ FaultingCodeRange MacroAssembler::loadUnalignedSimd128(const Address& src,
+@@ -3461,6 +3467,8 @@ FaultingCodeRange MacroAssembler::loadUnalignedSimd128(const Address& src,
      return FaultingCodeRange(as_lxvx(dest, src.base, scratch).getOffset());
    }
    // POWER8: lxvd2x loads with doubleword swap on LE. Fix with xxpermdi.
@@ -4061,7 +4148,7 @@ index 4165be132f..f190f92b8f 100644
    Register scratch = temps.Acquire();
    FaultingCodeRange fco;
    if (src.offset == 0) {
-@@ -3438,7 +3446,9 @@ FaultingCodeRange MacroAssembler::loadUnalignedSimd128(const Address& src,
+@@ -3469,7 +3477,9 @@ FaultingCodeRange MacroAssembler::loadUnalignedSimd128(const Address& src,
      movePtr(ImmWord(src.offset), scratch);
      fco = FaultingCodeRange(as_lxvd2x(dest, src.base, scratch).getOffset());
    }
@@ -4071,7 +4158,7 @@ index 4165be132f..f190f92b8f 100644
    return fco;
  }
  
-@@ -3456,7 +3466,9 @@ FaultingCodeRange MacroAssembler::loadUnalignedSimd128(const BaseIndex& src,
+@@ -3487,7 +3497,9 @@ FaultingCodeRange MacroAssembler::loadUnalignedSimd128(const BaseIndex& src,
      return FaultingCodeRange(as_lxvx(dest, r0, scratch).getOffset());
    }
    FaultingCodeRange fco(as_lxvd2x(dest, r0, scratch).getOffset());
@@ -4081,7 +4168,7 @@ index 4165be132f..f190f92b8f 100644
    return fco;
  }
  
-@@ -3481,18 +3493,24 @@ FaultingCodeRange MacroAssembler::storeUnalignedSimd128(FloatRegister src,
+@@ -3512,18 +3524,24 @@ FaultingCodeRange MacroAssembler::storeUnalignedSimd128(FloatRegister src,
      movePtr(ImmWord(dest.offset), scratch);
      return FaultingCodeRange(as_stxvx(src, dest.base, scratch).getOffset());
    }
@@ -4110,7 +4197,7 @@ index 4165be132f..f190f92b8f 100644
    }
    return fco;
  }
-@@ -3508,9 +3526,14 @@ FaultingCodeRange MacroAssembler::storeUnalignedSimd128(
+@@ -3539,9 +3557,14 @@ FaultingCodeRange MacroAssembler::storeUnalignedSimd128(
    if (HasPOWER9()) {
      return FaultingCodeRange(as_stxvx(src, r0, scratch).getOffset());
    }
@@ -4125,7 +4212,7 @@ index 4165be132f..f190f92b8f 100644
  }
  
  // ===============================================================
-@@ -3708,6 +3731,9 @@ void MacroAssembler::loadConstantSimd128(const SimdConstant& v,
+@@ -3739,6 +3762,9 @@ void MacroAssembler::loadConstantSimd128(const SimdConstant& v,
    }
    // Load 128-bit constant from inline constant pool.
    // Clobbers SecondScratchReg (r12).
@@ -4911,10 +4998,10 @@ index ef25a99034..93e3df76a8 100644
      default:
        MOZ_CRASH("unexpected array type");
 diff --git a/js/src/jit/ppc64/MacroAssembler-ppc64.h b/js/src/jit/ppc64/MacroAssembler-ppc64.h
-index 3f790af45c..6ed4eecf9d 100644
+index ee31ad77e1..83ecf6eb6b 100644
 --- a/js/src/jit/ppc64/MacroAssembler-ppc64.h
 +++ b/js/src/jit/ppc64/MacroAssembler-ppc64.h
-@@ -152,6 +152,15 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -158,6 +158,15 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
  
    bool buildOOLFakeExitFrame(void* fakeReturnAddr);
  
@@ -4930,7 +5017,7 @@ index 3f790af45c..6ed4eecf9d 100644
    // ===============================================================
    // Conversion functions
  
-@@ -164,7 +173,13 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -170,7 +179,13 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
      as_mtvsrwa(dest, src);
      as_fcfid(dest, dest);
    }
@@ -4945,7 +5032,7 @@ index 3f790af45c..6ed4eecf9d 100644
      // lfiwax (P7+): FPR.dw[0] = sign_ext_64(MEM[addr, 4]). X-form indexed
      // — no immediate offset, so when offset != 0 we add it into a scratch
      // first. Replaces lwz + extsw + mtvsrd with lfiwax (one insn) plus
-@@ -461,8 +476,11 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -467,8 +482,11 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
        // No LR clobber, no embedded data — pure instruction sequence.
        uint32_t lo32 = (uint32_t)(imm.value);
        uint32_t hi32 = (uint32_t)(imm.value >> 32);
@@ -4959,7 +5046,7 @@ index 3f790af45c..6ed4eecf9d 100644
        m_buffer.ensureSpace(5 * sizeof(uint32_t));
        xs_lis(dest, (int16_t)(lo32 >> 16));
        as_ori(dest, dest, lo32 & 0xFFFF);
-@@ -548,7 +566,19 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -554,7 +572,19 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
      uint32_t hint = ((uint32_t(dest.encoding()) & 0x1F) << 16) |
                      (uint32_t(PoolLoadSimd128) << 21) | 0xF0000000;
      uint32_t inst[5] = {hint, NopInst, NopInst, NopInst, NopInst};
@@ -4979,7 +5066,7 @@ index 3f790af45c..6ed4eecf9d 100644
    }
    void movePtr(wasm::SymbolicAddress imm, Register dest) {
      BufferOffset bo = emitLoad64Stanza(dest, (uint64_t)-1);
-@@ -1038,6 +1068,25 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -1044,6 +1074,25 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
      splitTag(value, tag);
    }
  
@@ -5005,7 +5092,7 @@ index 3f790af45c..6ed4eecf9d 100644
    void unboxNonDouble(const ValueOperand& operand, Register dest,
                        JSValueType type) {
      unboxNonDouble(operand.valueReg(), dest, type);
-@@ -1046,7 +1095,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -1052,7 +1101,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
    void unboxNonDouble(T src, Register dest, JSValueType type) {
      MOZ_ASSERT(type != JSVAL_TYPE_DOUBLE);
      if (type == JSVAL_TYPE_INT32 || type == JSVAL_TYPE_BOOLEAN) {
@@ -5014,7 +5101,7 @@ index 3f790af45c..6ed4eecf9d 100644
        return;
      }
      loadPtr(src, dest);
-@@ -1100,13 +1149,21 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -1106,13 +1155,21 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
    void unboxInt32(const ValueOperand& operand, Register dest) {
      as_extsw(dest, operand.valueReg());
    }
@@ -5155,7 +5242,7 @@ index 213b486c82..3121b90b40 100644
  static_assert(
      std::is_same_v<
 diff --git a/js/src/shell/js.cpp b/js/src/shell/js.cpp
-index 4f894962db..525492d181 100644
+index 7653697de7..8d76ed94a9 100644
 --- a/js/src/shell/js.cpp
 +++ b/js/src/shell/js.cpp
 @@ -11,6 +11,7 @@
@@ -5166,7 +5253,7 @@ index 4f894962db..525492d181 100644
  #include "mozilla/EnumSet.h"
  #include "mozilla/IntegerPrintfMacros.h"
  #include "mozilla/mozalloc.h"
-@@ -9596,9 +9597,11 @@ static bool CompressLZ4(JSContext* cx, unsigned argc, Value* vp) {
+@@ -9604,9 +9605,11 @@ static bool CompressLZ4(JSContext* cx, unsigned argc, Value* vp) {
      return false;
    }
  
@@ -5181,7 +5268,7 @@ index 4f894962db..525492d181 100644
  
    // Compress the bytes into the output
    char* compressedBytesStart = ((char*)output.get()) + LZ4HeaderSize;
-@@ -9635,9 +9638,12 @@ static bool DecompressLZ4(JSContext* cx, unsigned argc, Value* vp) {
+@@ -9643,9 +9646,12 @@ static bool DecompressLZ4(JSContext* cx, unsigned argc, Value* vp) {
      return false;
    }
  
@@ -5214,7 +5301,7 @@ index a7be3df83e..70931292bb 100644
  ###########################################################################
  # Generated jstests.list for test262 when inline |reftest| isn't possible #
 diff --git a/js/src/vm/ErrorObject.cpp b/js/src/vm/ErrorObject.cpp
-index 90b5f14894..15a71386b3 100644
+index 6db2cd4c01..78afcd0c72 100644
 --- a/js/src/vm/ErrorObject.cpp
 +++ b/js/src/vm/ErrorObject.cpp
 @@ -51,6 +51,7 @@
@@ -5388,10 +5475,10 @@ index 594179be7d..68d0c88ec1 100644
      return getFixedSlotOffsetTyped(SHARED_SLOT);
    }
 diff --git a/js/src/vm/StructuredClone.cpp b/js/src/vm/StructuredClone.cpp
-index bb7e668699..f8f32d411a 100644
+index 075aa36385..bc88e28068 100644
 --- a/js/src/vm/StructuredClone.cpp
 +++ b/js/src/vm/StructuredClone.cpp
-@@ -3581,8 +3581,8 @@ bool JSStructuredCloneReader::readTransferMap() {
+@@ -3602,8 +3602,8 @@ bool JSStructuredCloneReader::readTransferMap() {
      return false;
    }
  
@@ -5402,7 +5489,7 @@ index bb7e668699..f8f32d411a 100644
  
    uint64_t numTransferables;
    MOZ_ALWAYS_TRUE(in.readPair(&tag, &data));
-@@ -3692,7 +3692,8 @@ bool JSStructuredCloneReader::readTransferMap() {
+@@ -3713,7 +3713,8 @@ bool JSStructuredCloneReader::readTransferMap() {
  
      // Mark the SCTAG_TRANSFER_MAP_* entry as no longer owned by the input
      // buffer.
@@ -5412,7 +5499,7 @@ index bb7e668699..f8f32d411a 100644
      MOZ_ASSERT(!pos.done());
  
      if (!allObjs.append(ObjectValue(*obj))) {
-@@ -3706,8 +3707,8 @@ bool JSStructuredCloneReader::readTransferMap() {
+@@ -3727,8 +3728,8 @@ bool JSStructuredCloneReader::readTransferMap() {
    MOZ_ASSERT(tag == SCTAG_TRANSFER_MAP_HEADER);
    MOZ_ASSERT(TransferableMapHeader(data) == SCTAG_TM_TRANSFERRING);
  #endif
@@ -5499,10 +5586,10 @@ index eab3a303ba..20300a55cb 100644
  
  void BaseCompiler::boundsCheck4GBOrLargerAccess(uint32_t memoryIndex,
 diff --git a/js/src/wasm/WasmBaselineCompile.cpp b/js/src/wasm/WasmBaselineCompile.cpp
-index 99a2e1ac39..01b8588579 100644
+index 7f968735f3..915ed32c2f 100644
 --- a/js/src/wasm/WasmBaselineCompile.cpp
 +++ b/js/src/wasm/WasmBaselineCompile.cpp
-@@ -2134,11 +2134,16 @@ bool BaseCompiler::callIndirect(uint32_t funcTypeIndex, uint32_t tableIndex,
+@@ -2192,11 +2192,16 @@ bool BaseCompiler::callIndirect(uint32_t funcTypeIndex, uint32_t tableIndex,
      // therefore we only need WasmTableCallIndexReg.
    } else {
      loadI32(indexVal, RegI32(WasmTableCallIndexReg));
@@ -5524,7 +5611,7 @@ index 99a2e1ac39..01b8588579 100644
    }
  
    Label* nullCheckFailed = nullptr;
-@@ -2967,9 +2972,9 @@ Address BaseCompiler::addressOfTableField(uint32_t tableIndex,
+@@ -3025,9 +3030,9 @@ Address BaseCompiler::addressOfTableField(uint32_t tableIndex,
  
  void BaseCompiler::loadTableLength(uint32_t tableIndex, RegPtr instance,
                                     RegI32 length) {
@@ -5537,7 +5624,7 @@ index 99a2e1ac39..01b8588579 100644
  }
  
  void BaseCompiler::loadTableElements(uint32_t tableIndex, RegPtr instance,
-@@ -6417,6 +6422,12 @@ bool BaseCompiler::emitGetGlobal() {
+@@ -6475,6 +6480,12 @@ bool BaseCompiler::emitGetGlobal() {
      case ValType::V128: {
        RegV128 rv = needV128();
        masm.loadUnalignedSimd128(GlobalVarAddress(*this, global), rv);
@@ -5550,7 +5637,7 @@ index 99a2e1ac39..01b8588579 100644
        pushV128(rv);
        break;
      }
-@@ -6482,6 +6493,12 @@ bool BaseCompiler::emitSetGlobal() {
+@@ -6540,6 +6551,12 @@ bool BaseCompiler::emitSetGlobal() {
  #ifdef ENABLE_JIT_SIMD
      case ValType::V128: {
        RegV128 rv = popV128();
@@ -5563,7 +5650,7 @@ index 99a2e1ac39..01b8588579 100644
        masm.storeUnalignedSimd128(rv, GlobalVarAddress(*this, global));
        freeV128(rv);
        break;
-@@ -7388,8 +7405,7 @@ void BaseCompiler::emitTableBoundsCheck(uint32_t tableIndex, RegI32 address,
+@@ -7446,8 +7463,7 @@ void BaseCompiler::emitTableBoundsCheck(uint32_t tableIndex, RegI32 address,
    Label ok;
    masm.wasmBoundsCheck32(
        Assembler::Condition::Below, address,
@@ -5673,7 +5760,7 @@ index a37ce27c85..73575b9a48 100644
    if (!HasJitBackend()) {
      return false;
 diff --git a/js/src/wasm/WasmInstance.cpp b/js/src/wasm/WasmInstance.cpp
-index 4f1b351d62..87801ba361 100644
+index e928197cdb..797dfa3900 100644
 --- a/js/src/wasm/WasmInstance.cpp
 +++ b/js/src/wasm/WasmInstance.cpp
 @@ -235,9 +235,29 @@ static bool UnpackResults(JSContext* cx, const ValTypeVector& resultTypes,
@@ -5726,7 +5813,7 @@ index 4f1b351d62..87801ba361 100644
    }
  
    return true;
-@@ -3607,6 +3639,13 @@ bool wasm::ResultsToJSValue(JSContext* cx, ResultType type,
+@@ -3632,6 +3664,13 @@ bool wasm::ResultsToJSValue(JSContext* cx, ResultType type,
      const ABIResult& result = iter.cur();
      if (result.onStack()) {
        char* loc = stackResultsLoc.value() + result.stackOffset();
@@ -6157,7 +6244,7 @@ index 013ad5aee9..559c56646f 100644
      std::memcpy(&res, &bits, sizeof(E));
      return res;
 diff --git a/mfbt/Variant.h b/mfbt/Variant.h
-index 871b6b7b3c..2fdd5bdc12 100644
+index 3dceabc8f1..05e1175573 100644
 --- a/mfbt/Variant.h
 +++ b/mfbt/Variant.h
 @@ -31,7 +31,11 @@ class Variant;

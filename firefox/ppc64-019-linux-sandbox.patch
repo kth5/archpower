@@ -1,4 +1,4 @@
-From fe5f75ceda84736e395a294260be8e402acd2fb7 Mon Sep 17 00:00:00 2001
+From ac9c3c16df4773a5b41ce11d49d4d32a7898b262 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
 Date: Tue, 3 Nov 2026 00:26:47 +1100
 Subject: [PATCH 28/30] Enable the Linux sandbox on ppc64
@@ -28,12 +28,12 @@ beside the ipc() multiplexer and glibc uses them.
  .../sandbox/linux/system_headers/linux_stat.h |   22 +
  .../linux/system_headers/linux_syscalls.h     |    4 +
  .../system_headers/ppc64_linux_syscalls.h     | 1713 +++++++++++++++++
- security/sandbox/linux/SandboxFilter.cpp      |   42 +-
+ security/sandbox/linux/SandboxFilter.cpp      |   40 +-
  security/sandbox/linux/SandboxFilterUtil.cpp  |    8 +-
  security/sandbox/linux/SandboxFilterUtil.h    |   23 +-
  .../linux/reporter/SandboxReporter.cpp        |    4 +
  toolkit/moz.configure                         |    4 +-
- 14 files changed, 1976 insertions(+), 17 deletions(-)
+ 14 files changed, 1975 insertions(+), 16 deletions(-)
  create mode 100644 security/sandbox/chromium/sandbox/linux/system_headers/ppc64_linux_syscalls.h
 
 diff --git a/security/sandbox/chromium/sandbox/linux/bpf_dsl/linux_syscall_ranges.h b/security/sandbox/chromium/sandbox/linux/bpf_dsl/linux_syscall_ranges.h
@@ -2069,7 +2069,7 @@ index 0000000000..df407fb2da
 +
 +#endif  // SANDBOX_LINUX_SYSTEM_HEADERS_PPC64_LINUX_SYSCALLS_H_
 diff --git a/security/sandbox/linux/SandboxFilter.cpp b/security/sandbox/linux/SandboxFilter.cpp
-index 337bce4413..ede17aa1f3 100644
+index cb5ce6947b..223e3687d7 100644
 --- a/security/sandbox/linux/SandboxFilter.cpp
 +++ b/security/sandbox/linux/SandboxFilter.cpp
 @@ -6,6 +6,10 @@
@@ -2083,7 +2083,7 @@ index 337bce4413..ede17aa1f3 100644
  #include <errno.h>
  #include <fcntl.h>
  #include <linux/ioctl.h>
-@@ -150,14 +154,38 @@ static_assert(F_DUPFD_QUERY == (F_LINUX_SPECIFIC_BASE + 3));
+@@ -153,14 +157,38 @@ static_assert(F_DUPFD_QUERY == (F_LINUX_SPECIFIC_BASE + 3));
  namespace {
  static const unsigned long kIoctlTypeMask = _IOC_TYPEMASK << _IOC_TYPESHIFT;
  static const unsigned long kTtyIoctls = TIOCSTI & kIoctlTypeMask;
@@ -2125,7 +2125,7 @@ index 337bce4413..ede17aa1f3 100644
  };  // namespace
  
  // This file defines the seccomp-bpf system call filter policies.
-@@ -1615,9 +1643,9 @@ class ContentSandboxPolicy : public SandboxPolicyCommon {
+@@ -1617,9 +1645,9 @@ class ContentSandboxPolicy : public SandboxPolicyCommon {
              // Rust's stdlib also uses FIONBIO instead of equivalent fcntls.
              .ElseIf(request == FIONBIO, Allow())
              // Allow anything that isn't a tty ioctl, if level < 6
@@ -2138,15 +2138,6 @@ index 337bce4413..ede17aa1f3 100644
              .Else(SandboxPolicyCommon::EvaluateSyscall(sysno));
        }
  
-@@ -2414,7 +2442,7 @@ class SocketProcessSandboxPolicy final : public SandboxPolicyCommon {
-                    Allow())
-             .Default(
-                 // Allow anything that isn't a tty ioctl (if level < 2)
--                If(BelowLevel(2) ? shifted_type != kTtyIoctls
-+                If(BelowLevel(2) ? Not(IsTtyIoctl(shifted_type))
-                                  : BoolConst(false),
-                    Allow())
-                     .Else(SandboxPolicyCommon::EvaluateSyscall(sysno)));
 diff --git a/security/sandbox/linux/SandboxFilterUtil.cpp b/security/sandbox/linux/SandboxFilterUtil.cpp
 index 568fd4d58e..d368b599af 100644
 --- a/security/sandbox/linux/SandboxFilterUtil.cpp
@@ -2214,7 +2205,7 @@ index 76bd75f55a..a3a98a275f 100644
  #endif
  
 diff --git a/security/sandbox/linux/reporter/SandboxReporter.cpp b/security/sandbox/linux/reporter/SandboxReporter.cpp
-index f5dd1caa64..dc596283ec 100644
+index 36ec9983ae..5c2ce49608 100644
 --- a/security/sandbox/linux/reporter/SandboxReporter.cpp
 +++ b/security/sandbox/linux/reporter/SandboxReporter.cpp
 @@ -30,6 +30,10 @@
@@ -2229,10 +2220,10 @@ index f5dd1caa64..dc596283ec 100644
  #  error "unrecognized architecture"
  #endif
 diff --git a/toolkit/moz.configure b/toolkit/moz.configure
-index bc3cdce65c..dbddfbc112 100644
+index ad629b0067..260b0488f8 100644
 --- a/toolkit/moz.configure
 +++ b/toolkit/moz.configure
-@@ -4208,8 +4208,8 @@ def sandbox_default(target, tsan, asan):
+@@ -4196,8 +4196,8 @@ def sandbox_default(target, tsan, asan):
          # Bug 1287971: LSan also conflicts with sandboxing on Linux.
          if tsan or asan:
              return False
