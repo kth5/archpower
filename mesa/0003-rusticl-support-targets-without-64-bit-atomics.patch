@@ -1,0 +1,143 @@
+diff --git a/src/gallium/frontends/rusticl/core/event.rs b/src/gallium/frontends/rusticl/core/event.rs
+--- a/src/gallium/frontends/rusticl/core/event.rs
++++ b/src/gallium/frontends/rusticl/core/event.rs
+@@ -18,8 +18,8 @@
+ 
+ use std::collections::HashSet;
+ use std::mem;
+-use std::sync::atomic;
+-use std::sync::atomic::AtomicU64;
++#[cfg(target_has_atomic = "64")]
++use std::sync::atomic::{AtomicU64, Ordering};
+ use std::sync::Arc;
+ use std::sync::Condvar;
+ use std::sync::Mutex;
+@@ -37,7 +37,33 @@
+     Box<dyn FnOnce(&Context, &mut QueueContextWithState) -> CLResult<()> + Send + Sync>;
+ pub type CleanupSig = Box<dyn FnOnce(&Context) + Send + Sync>;
+ 
+-const PROFILING_ORDERING: atomic::Ordering = atomic::Ordering::SeqCst;
++#[derive(Default)]
++struct ProfilingTimestamp(
++    #[cfg(target_has_atomic = "64")] AtomicU64,
++    #[cfg(not(target_has_atomic = "64"))] Mutex<cl_ulong>,
++);
++
++impl ProfilingTimestamp {
++    #[cfg(target_has_atomic = "64")]
++    fn load(&self) -> cl_ulong {
++        self.0.load(Ordering::SeqCst)
++    }
++
++    #[cfg(not(target_has_atomic = "64"))]
++    fn load(&self) -> cl_ulong {
++        *self.0.lock().unwrap()
++    }
++
++    #[cfg(target_has_atomic = "64")]
++    fn store(&self, value: cl_ulong) {
++        self.0.store(value, Ordering::SeqCst);
++    }
++
++    #[cfg(not(target_has_atomic = "64"))]
++    fn store(&self, value: cl_ulong) {
++        *self.0.lock().unwrap() = value;
++    }
++}
+ 
+ pub enum EventTimes {
+     Queued = CL_PROFILING_COMMAND_QUEUED as isize,
+@@ -92,19 +118,19 @@
+ 
+ #[derive(Default)]
+ struct CPUProfiler {
+-    time_queued: AtomicU64,
+-    time_submit: AtomicU64,
+-    time_start: AtomicU64,
+-    time_end: AtomicU64,
++    time_queued: ProfilingTimestamp,
++    time_submit: ProfilingTimestamp,
++    time_start: ProfilingTimestamp,
++    time_end: ProfilingTimestamp,
+ }
+ 
+ impl CPUProfiler {
+     fn set_time(&self, which: EventTimes, value: cl_ulong) {
+         match which {
+-            EventTimes::Queued => &self.time_queued.store(value, PROFILING_ORDERING),
+-            EventTimes::Submit => &self.time_submit.store(value, PROFILING_ORDERING),
+-            EventTimes::Start => &self.time_start.store(value, PROFILING_ORDERING),
+-            EventTimes::End => &self.time_end.store(value, PROFILING_ORDERING),
++            EventTimes::Queued => self.time_queued.store(value),
++            EventTimes::Submit => self.time_submit.store(value),
++            EventTimes::Start => self.time_start.store(value),
++            EventTimes::End => self.time_end.store(value),
+         };
+     }
+ }
+@@ -134,10 +160,10 @@
+ 
+     fn get_time(&self, which: EventTimes) -> cl_ulong {
+         match which {
+-            EventTimes::Queued => self.time_queued.load(PROFILING_ORDERING),
+-            EventTimes::Submit => self.time_submit.load(PROFILING_ORDERING),
+-            EventTimes::Start => self.time_start.load(PROFILING_ORDERING),
+-            EventTimes::End => self.time_end.load(PROFILING_ORDERING),
++            EventTimes::Queued => self.time_queued.load(),
++            EventTimes::Submit => self.time_submit.load(),
++            EventTimes::Start => self.time_start.load(),
++            EventTimes::End => self.time_end.load(),
+         }
+     }
+ 
+@@ -147,8 +173,8 @@
+ }
+ 
+ struct GPUProfiler {
+-    time_queued: AtomicU64,
+-    time_submit: AtomicU64,
++    time_queued: ProfilingTimestamp,
++    time_submit: ProfilingTimestamp,
+     res: PipeResourceOwned,
+     dev: &'static Device,
+ }
+@@ -167,8 +193,8 @@
+             .ok_or(CL_OUT_OF_RESOURCES)?;
+ 
+         Ok(Self {
+-            time_queued: 0.into(),
+-            time_submit: 0.into(),
++            time_queued: ProfilingTimestamp::default(),
++            time_submit: ProfilingTimestamp::default(),
+             dev: dev,
+             res: res,
+         })
+@@ -208,8 +234,7 @@
+         ctx: &mut QueueContextWithState,
+         work: Option<EventSig>,
+     ) -> CLResult<()> {
+-        self.time_submit
+-            .store(ctx.dev.screen().get_timestamp(), PROFILING_ORDERING);
++        self.time_submit.store(ctx.dev.screen().get_timestamp());
+ 
+         let mut query_start = self.create_timestamp_query(ctx.ctx)?;
+         query_start.write_to_resource(&self.res, 0);
+@@ -226,15 +251,15 @@
+ 
+     fn get_time(&self, which: EventTimes) -> cl_ulong {
+         match which {
+-            EventTimes::Queued => self.time_queued.load(PROFILING_ORDERING),
+-            EventTimes::Submit => self.time_submit.load(PROFILING_ORDERING),
++            EventTimes::Queued => self.time_queued.load(),
++            EventTimes::Submit => self.time_submit.load(),
+             EventTimes::Start => self.read_timestamp_query(0),
+             EventTimes::End => self.read_timestamp_query(8),
+         }
+     }
+ 
+     fn mark_queued(&self, time: cl_ulong) {
+-        self.time_queued.store(time, PROFILING_ORDERING);
++        self.time_queued.store(time);
+     }
+ }
+ 

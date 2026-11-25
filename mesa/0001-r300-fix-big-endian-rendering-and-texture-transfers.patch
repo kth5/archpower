@@ -1,0 +1,165 @@
+From 92a11a52c5781161a8295af55244b8a7df1f9c48 Mon Sep 17 00:00:00 2001
+From: Peugeot205GTI <clovis.dubois@epitech.eu>
+Date: Mon, 23 Nov 2026 20:55:51 +0100
+Subject: [PATCH] r300: fix big-endian rendering
+
+Force vertex prefetching and handle aliased index buffers on big-endian
+systems. Also use swap blits for mapped color textures to preserve byte
+ordering.
+
+Generated-by: LLM
+---
+ src/gallium/drivers/r300/r300_emit.c     |  3 +-
+ src/gallium/drivers/r300/r300_render.c   | 52 ++++++++++++++++++++++++
+ src/gallium/drivers/r300/r300_transfer.c | 28 +++++++++++++
+ 3 files changed, 82 insertions(+), 1 deletion(-)
+
+diff --git a/src/gallium/drivers/r300/r300_emit.c b/src/gallium/drivers/r300/r300_emit.c
+index 4790e3243ba..828e08cb930 100644
+--- a/src/gallium/drivers/r300/r300_emit.c
++++ b/src/gallium/drivers/r300/r300_emit.c
+@@ -1065,7 +1065,8 @@ void r300_emit_vertex_arrays(struct r300_context* r300, int offset,
+ 
+     BEGIN_CS(2 + packet_size + vertex_array_count * 2);
+     OUT_CS_PKT3(R300_PACKET3_3D_LOAD_VBPNTR, packet_size);
+-    OUT_CS(vertex_array_count | (!indexed ? R300_VC_FORCE_PREFETCH : 0));
++    OUT_CS(vertex_array_count |
++           ((!indexed || UTIL_ARCH_BIG_ENDIAN) ? R300_VC_FORCE_PREFETCH : 0));
+ 
+     if (instance_id == -1) {
+         /* Non-instanced arrays. This ignores instance_divisor and instance_id. */
+diff --git a/src/gallium/drivers/r300/r300_render.c b/src/gallium/drivers/r300/r300_render.c
+index eec3f68a3fb..fa16d11caa9 100644
+--- a/src/gallium/drivers/r300/r300_render.c
++++ b/src/gallium/drivers/r300/r300_render.c
+@@ -18,6 +18,7 @@
+ #include "util/u_memory.h"
+ #include "util/u_upload_mgr.h"
+ #include "util/u_prim.h"
++#include "util/u_vbuf.h"
+ 
+ #include "r300_cs.h"
+ #include "r300_context.h"
+@@ -588,6 +589,25 @@ static void r300_draw_elements_immediate(struct r300_context *r300,
+     END_CS;
+ }
+ 
++#if UTIL_ARCH_BIG_ENDIAN
++static bool r300_index_buffer_aliases_vbo(struct r300_context *r300,
++                                          struct pipe_resource *ib)
++{
++    unsigned i;
++
++    if (!ib)
++        return false;
++
++    for (i = 0; i < r300->nr_vertex_buffers; i++) {
++        struct pipe_resource *vb = r300->vertex_buffer[i].buffer.resource;
++
++        if (vb && (vb == ib || r300_resource(vb)->buf == r300_resource(ib)->buf))
++            return true;
++    }
++    return false;
++}
++#endif
++
+ static void r300_draw_elements(struct r300_context *r300,
+                                const struct pipe_draw_info *info,
+                                const struct pipe_draw_start_count_bias *draw,
+@@ -611,6 +631,21 @@ static void r300_draw_elements(struct r300_context *r300,
+                               &index_offset);
+     }
+ 
++#if UTIL_ARCH_BIG_ENDIAN
++    if (!info->has_user_indices && indexSize == 4 && !index_offset &&
++        r300_index_buffer_aliases_vbo(r300, indexBuffer)) {
++        unsigned out_offset;
++        void *out_ptr;
++
++        indexBuffer = NULL;
++        u_upload_alloc_ref(r300->uploader, 0, count * sizeof(uint32_t), 4,
++                           &out_offset, &indexBuffer, &out_ptr);
++        r300_rebuild_elts_to_uint_userptr(&r300->context, info,
++                                          PIPE_MAP_UNSYNCHRONIZED, 0,
++                                          start, count, out_ptr);
++        start = out_offset / sizeof(uint32_t);
++    } else
++#endif
+     r300_translate_index_buffer(r300, info, &indexBuffer,
+                                 &indexSize, index_offset, &start, count, &local_ptr);
+ 
+@@ -899,8 +934,25 @@ static void r300_draw_vbo(struct pipe_context* pipe,
+            max_count = 0xffffff;
+         }
+ 
++#if UTIL_ARCH_BIG_ENDIAN
++        unsigned used_max = info.max_index;
++        bool used_valid = info.index_bounds_valid;
++#endif
++
+         info.max_index = max_count - 1;
+ 
++#if UTIL_ARCH_BIG_ENDIAN
++        {
++            unsigned used_min = 0;
++            unsigned bias = draw.index_bias < 0 ? -draw.index_bias : draw.index_bias;
++
++            if (!used_valid)
++                u_vbuf_get_minmax_index(pipe, &info, &draw, &used_min, &used_max);
++            if (used_max <= 0xffffff - bias && used_max + bias < info.max_index)
++                info.max_index = used_max + bias;
++        }
++#endif
++
+         if (info.instance_count <= 1) {
+             if (draw.count <= 8 && info.has_user_indices) {
+                 r300_draw_elements_immediate(r300, &info, &draw);
+diff --git a/src/gallium/drivers/r300/r300_transfer.c b/src/gallium/drivers/r300/r300_transfer.c
+index e07694842fb..4d886b934dc 100644
+--- a/src/gallium/drivers/r300/r300_transfer.c
++++ b/src/gallium/drivers/r300/r300_transfer.c
+@@ -143,6 +143,33 @@ static void r300_copy_into_tiled_texture(struct pipe_context *ctx,
+     r300_flush(ctx, 0, NULL);
+ }
+ 
++static bool r300_transfer_needs_swap_blit(struct r300_resource *tex,
++                                          unsigned usage)
++{
++#if UTIL_ARCH_BIG_ENDIAN
++    if (usage & PIPE_MAP_DIRECTLY)
++        return false;
++    if ((tex->b.bind & (PIPE_BIND_RENDER_TARGET | PIPE_BIND_SAMPLER_VIEW)) !=
++        (PIPE_BIND_RENDER_TARGET | PIPE_BIND_SAMPLER_VIEW) ||
++        (tex->b.flags & R300_RESOURCE_FLAG_TRANSFER) ||
++        util_format_is_depth_or_stencil(tex->b.format))
++        return false;
++    switch (tex->b.format) {
++    case PIPE_FORMAT_A8R8G8B8_UNORM:
++    case PIPE_FORMAT_X8R8G8B8_UNORM:
++    case PIPE_FORMAT_B8G8R8A8_UNORM:
++    case PIPE_FORMAT_B8G8R8X8_UNORM:
++        return true;
++    default:
++        return false;
++    }
++#else
++    (void)tex;
++    (void)usage;
++    return false;
++#endif
++}
++
+ void *
+ r300_texture_transfer_map(struct pipe_context *ctx,
+                           struct pipe_resource *texture,
+@@ -179,6 +206,7 @@ r300_texture_transfer_map(struct pipe_context *ctx,
+          * for this transfer.
+          * Also make write transfers pipelined. */
+         if (tex->tex.microtile || tex->tex.macrotile[level] ||
++            r300_transfer_needs_swap_blit(tex, usage) ||
+             (referenced_hw && !(usage & PIPE_MAP_READ) &&
+              r300_is_blit_supported(texture->format))) {
+             struct pipe_resource base;
+-- 
+2.39.2.windows.1
+
