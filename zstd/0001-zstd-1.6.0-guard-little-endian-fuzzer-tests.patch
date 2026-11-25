@@ -1,0 +1,46 @@
+Subject: [PATCH] fuzzer: guard little-endian dictionary hash fixtures
+
+The two dictionary collision cases use fixtures that depend on native
+byte order. Run them only on little-endian hosts.
+
+--- a/tests/fuzzer.c
++++ b/tests/fuzzer.c
+@@ -6719,5 +6719,7 @@
+ 
+         DISPLAYLEVEL(3, "test%3i : DDict hashset OOB T283341343 (ASAN) : ", testNb++);
+-        {
++        /* Both collision tests hash dictionary IDs in native byte order.
++         * The fixed IDs only collide in the required slot on little-endian hosts. */
++        if (MEM_isLittleEndian()) {
+             /* Simplified repro for T283341343 - relies on ASAN to catch OOB read.
+              * Original bug: probe does idx &= mask; idx++ -> idx can become 64 OOB.
+@@ -6825,10 +6827,12 @@
+             if (dictBufVictim) free(dictBufVictim);
+             goto _output_error;
+-        _oob_skip2: ;
+-        }
+-        DISPLAYLEVEL(3, "OK (ASAN would report OOB read if vulnerable)\n");
++        _oob_skip2:
++            DISPLAYLEVEL(3, "OK (ASAN would report OOB read if vulnerable)\n");
++        } else {
++            DISPLAYLEVEL(3, "skipped on big-endian hosts\n");
++        }
+ 
+         DISPLAYLEVEL(3, "test%3i : DDict hashset OOB write T283341343 (ASAN) : ", testNb++);
+-        {
++        if (MEM_isLittleEndian()) {
+             /* Write path version of above: same colliding IDs 3 and 47 → slot 63.
+              * Insertion does while(table[idx]!=NULL) { idx&=mask; idx++; }
+@@ -6897,7 +6901,9 @@
+             if (dictBufA2) free(dictBufA2);
+             goto _output_error;
+-        _oob_write_skip2: ;
+-        }
+-        DISPLAYLEVEL(3, "OK (ASAN would report OOB write if vulnerable)\n");
++        _oob_write_skip2:
++            DISPLAYLEVEL(3, "OK (ASAN would report OOB write if vulnerable)\n");
++        } else {
++            DISPLAYLEVEL(3, "skipped on big-endian hosts\n");
++        }
+ 
+         DISPLAYLEVEL(3, "test%3i : DDict hashset is dropped by reset and refDDict(NULL) : ", testNb++);
