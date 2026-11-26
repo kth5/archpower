@@ -1,4 +1,4 @@
-From 331844dd285a7b80c5d47e2b0493006169712c1c Mon Sep 17 00:00:00 2001
+From 94ef111d72a236cba3a5778a21027f209b368dd7 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
 Date: Wed, 22 Jul 2026 21:17:32 +1000
 Subject: [PATCH 05/30] Add PPC64 Linux support to the Gecko profiler
@@ -50,7 +50,7 @@ index e617c059e5..e41ae35d1f 100644
  #else
  #  error "bad platform"
 diff --git a/mozglue/baseprofiler/core/platform.cpp b/mozglue/baseprofiler/core/platform.cpp
-index d748e61199..06d7f0b564 100644
+index c8eef0b868..5a7f9d7caa 100644
 --- a/mozglue/baseprofiler/core/platform.cpp
 +++ b/mozglue/baseprofiler/core/platform.cpp
 @@ -1141,6 +1141,9 @@ static const char* const kMainThreadName = "GeckoMain";
@@ -124,7 +124,7 @@ index b8022d4648..002e97c4c1 100644
  
  #elif defined(__APPLE__) && defined(__aarch64__)
 diff --git a/tools/profiler/core/platform-linux-android.cpp b/tools/profiler/core/platform-linux-android.cpp
-index 9029e0e4f9..1f01c682b2 100644
+index 846120a388..c1e88ff598 100644
 --- a/tools/profiler/core/platform-linux-android.cpp
 +++ b/tools/profiler/core/platform-linux-android.cpp
 @@ -124,6 +124,13 @@ static void PopulateRegsFromContext(Registers& aRegs, ucontext_t* aContext) {
@@ -142,7 +142,7 @@ index 9029e0e4f9..1f01c682b2 100644
  #else
  #  error "bad platform"
 diff --git a/tools/profiler/core/platform.cpp b/tools/profiler/core/platform.cpp
-index 6742c16851..9e37f428a8 100644
+index 24ca47a7a8..053dfdb9fb 100644
 --- a/tools/profiler/core/platform.cpp
 +++ b/tools/profiler/core/platform.cpp
 @@ -245,11 +245,20 @@ BOOL WINAPI GetThreadInformation(
@@ -167,7 +167,7 @@ index 6742c16851..9e37f428a8 100644
  #  define HAVE_FASTINIT_NATIVE_UNWIND
  #endif
  
-@@ -2193,6 +2202,9 @@ static const char* const kMainThreadName = "GeckoMain";
+@@ -2194,6 +2203,9 @@ static const char* const kMainThreadName = "GeckoMain";
  #  define UNWINDING_REGS_HAVE_LR_R11
  #elif defined(GP_PLAT_loongarch64_linux) || defined(GP_PLAT_riscv64_linux)
  #  define UNWINDING_REGS_HAVE_RA_T3
@@ -177,7 +177,7 @@ index 6742c16851..9e37f428a8 100644
  #endif
  
  // The registers used for stack unwinding and a few other sampling purposes.
-@@ -2224,6 +2236,8 @@ class Registers {
+@@ -2225,6 +2237,8 @@ class Registers {
  #elif defined(UNWINDING_REGS_HAVE_RA_T3)
    Address mRA{nullptr};  // Return address register.
    Address mT3{nullptr};  // Temp for frame pointer.
@@ -186,7 +186,7 @@ index 6742c16851..9e37f428a8 100644
  #endif
  
  #if defined(GP_OS_linux) || defined(GP_OS_android) || defined(GP_OS_freebsd)
-@@ -2374,6 +2388,8 @@ static uint32_t ExtractJsFrames(
+@@ -2375,6 +2389,8 @@ static uint32_t ExtractJsFrames(
  #elif defined(UNWINDING_REGS_HAVE_RA_T3)
        registerState.tempRA = aRegs.mRA;
        registerState.tempFP = aRegs.mT3;
@@ -195,17 +195,17 @@ index 6742c16851..9e37f428a8 100644
  #endif
  
        // Non-periodic sampling passes Nothing() as the buffer write position to
-@@ -2639,7 +2655,8 @@ static void MergeStacks(
+@@ -2640,7 +2656,8 @@ static void MergeStacks(
    }
  }
  
 -#if defined(USE_FRAME_POINTER_STACK_WALK) || defined(USE_MOZ_STACK_WALK)
 +#if defined(USE_FRAME_POINTER_STACK_WALK) || defined(USE_MOZ_STACK_WALK) || \
 +    defined(USE_PPC64_BACKCHAIN_STACK_WALK)
- static void StackWalkCallback(uint32_t aFrameNumber, void* aPC, void* aSP,
-                               void* aClosure) {
+ static void StackWalkCallback([[maybe_unused]] uint32_t aFrameNumber, void* aPC,
+                               void* aSP, void* aClosure) {
    NativeStack* nativeStack = static_cast<NativeStack*>(aClosure);
-@@ -2728,6 +2745,48 @@ static void DoFramePointerBacktrace(
+@@ -2729,6 +2746,48 @@ static void DoFramePointerBacktrace(
  }
  #endif
  
@@ -254,7 +254,7 @@ index 6742c16851..9e37f428a8 100644
  #if defined(USE_MOZ_STACK_WALK)
  static void DoMozStackWalkBacktrace(
      const ThreadRegistration::UnlockedReaderAndAtomicRWOnThread& aThreadData,
-@@ -3006,6 +3065,9 @@ static void DoNativeBacktrace(
+@@ -3007,6 +3066,9 @@ static void DoNativeBacktrace(
  #  elif defined(USE_MOZ_STACK_WALK)
    DoMozStackWalkBacktrace(aThreadData, aRegs, aNativeStack,
                            aStackWalkControlIfSupported);
@@ -264,7 +264,7 @@ index 6742c16851..9e37f428a8 100644
  #  else
  #    error "Invalid configuration"
  #  endif
-@@ -3197,6 +3259,7 @@ static inline bool DoPeriodicSample(
+@@ -3198,6 +3260,7 @@ static inline bool DoPeriodicSample(
  #undef UNWINDING_REGS_HAVE_LR_R7
  #undef UNWINDING_REGS_HAVE_LR_R11
  #undef UNWINDING_REGS_HAVE_RA_T3
@@ -272,7 +272,7 @@ index 6742c16851..9e37f428a8 100644
  
  // END sampling/unwinding code
  ////////////////////////////////////////////////////////////////////////
-@@ -8461,6 +8524,9 @@ static void profiler_suspend_and_sample_thread(
+@@ -8465,6 +8528,9 @@ static void profiler_suspend_and_sample_thread(
  #  elif defined(USE_MOZ_STACK_WALK)
        DoMozStackWalkBacktrace(aThreadData, aRegs, nativeStack,
                                stackWalkControlIfSupported);

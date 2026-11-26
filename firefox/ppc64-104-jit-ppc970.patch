@@ -1,4 +1,4 @@
-From 84f7b7baae54676ff38c31381cc13826485b1962 Mon Sep 17 00:00:00 2001
+From 937baee64377a4d081c28f31ed9ecc909e9643d5 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Trung=20L=C3=AA?= <8@tle.id.au>
 Date: Mon, 3 Aug 2026 20:10:23 +1000
 Subject: [PATCH 10/30] Add POWERPC 970 (Apple G4/G5) JIT support
@@ -76,10 +76,10 @@ index c95bd87604..5c8c3fb717 100644
  MOZ_ALWAYS_INLINE
  uint8_t* AlignPtr(uint8_t* orig) {
 diff --git a/js/src/irregexp/RegExpNativeMacroAssembler.cpp b/js/src/irregexp/RegExpNativeMacroAssembler.cpp
-index 0c1d1f74e6..e226020d9a 100644
+index b7a8ea595a..25bf14dc07 100644
 --- a/js/src/irregexp/RegExpNativeMacroAssembler.cpp
 +++ b/js/src/irregexp/RegExpNativeMacroAssembler.cpp
-@@ -421,6 +421,87 @@ void SMRegExpMacroAssembler::EmitSkipUntilBitInTableSimd(
+@@ -429,6 +429,87 @@ void SMRegExpMacroAssembler::EmitSkipUntilBitInTableSimd(
    FloatRegister loNibbles = floatRegs.takeAny().asSimd128();
    FloatRegister bitmask = floatRegs.takeAny().asSimd128();
  
@@ -167,7 +167,7 @@ index 0c1d1f74e6..e226020d9a 100644
    // Hoist constants outside the loop.
    // nibbleTable: 16-byte Boyer-Moore nibble table from regexp data.
    masm_.movePtr(ImmPtr(nibble_table->data()), temp0_);
-@@ -531,6 +612,14 @@ bool SMRegExpMacroAssembler::SkipUntilBitInTableUseSimd(int advance_by) {
+@@ -539,6 +620,14 @@ bool SMRegExpMacroAssembler::SkipUntilBitInTableUseSimd(int advance_by) {
    if (!js::jit::Assembler::HasLSX()) {
      return false;
    }
@@ -269,10 +269,10 @@ index 0000000000..834deda8e0
 +  }
 +}
 diff --git a/js/src/jit/CodeGenerator.cpp b/js/src/jit/CodeGenerator.cpp
-index ac465ef7a1..cfac1f30dd 100644
+index f2cd92db24..efca1e6f5c 100644
 --- a/js/src/jit/CodeGenerator.cpp
 +++ b/js/src/jit/CodeGenerator.cpp
-@@ -14133,6 +14133,12 @@ static void ConcatInlineString(MacroAssembler& masm, Register lhs, Register rhs,
+@@ -14166,6 +14166,12 @@ static void ConcatInlineString(MacroAssembler& masm, Register lhs, Register rhs,
                                  ? JSThinInlineString::MAX_LENGTH_LATIN1
                                  : JSThinInlineString::MAX_LENGTH_TWO_BYTE;
  
@@ -285,7 +285,7 @@ index ac465ef7a1..cfac1f30dd 100644
    // Given that for the lhs we know we're copying into the start of an inline
    // string then on 64-bit we know we're safe to write 16 bytes, regardless
    // of the actual length.
-@@ -14140,8 +14146,16 @@ static void ConcatInlineString(MacroAssembler& masm, Register lhs, Register rhs,
+@@ -14173,8 +14179,16 @@ static void ConcatInlineString(MacroAssembler& masm, Register lhs, Register rhs,
      masm.loadStringLength(lhs, temp1);
      masm.loadInlineStringCharsForStore(lhs, temp3);
  
@@ -305,7 +305,7 @@ index ac465ef7a1..cfac1f30dd 100644
      Label lhsDone;
      masm.branch32(Assembler::BelowOrEqual, temp1, Imm32(thinInlineLength),
 diff --git a/js/src/jit/ppc64/Assembler-ppc64.cpp b/js/src/jit/ppc64/Assembler-ppc64.cpp
-index f93df6d3ac..a181644a04 100644
+index b8f27771ff..6da6e59a04 100644
 --- a/js/src/jit/ppc64/Assembler-ppc64.cpp
 +++ b/js/src/jit/ppc64/Assembler-ppc64.cpp
 @@ -499,6 +499,11 @@ BufferOffset Assembler::as_mtcrf(uint32_t mask, Register rs) {
@@ -776,7 +776,7 @@ index 2d9c5b40ad..75032e9ae6 100644
  
    if (!ins->hasUses()) {
 diff --git a/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h b/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
-index f190f92b8f..fb89d0f167 100644
+index 56f68be56a..a10000a63b 100644
 --- a/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
 +++ b/js/src/jit/ppc64/MacroAssembler-ppc64-inl.h
 @@ -28,11 +28,23 @@ void MacroAssembler::move64(Imm64 imm, Register64 dest) {
@@ -2400,10 +2400,10 @@ index 93e3df76a8..8b160eacb9 100644
        as_stdx(value.reg, memoryBase, ptr);
  #endif
 diff --git a/js/src/jit/ppc64/MacroAssembler-ppc64.h b/js/src/jit/ppc64/MacroAssembler-ppc64.h
-index 6ed4eecf9d..d3510c6cf8 100644
+index 83ecf6eb6b..17c6de498f 100644
 --- a/js/src/jit/ppc64/MacroAssembler-ppc64.h
 +++ b/js/src/jit/ppc64/MacroAssembler-ppc64.h
-@@ -170,7 +170,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -176,7 +176,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
    void convertInt32ToDouble(Register src, FloatRegister dest) {
      // mtvsrwa: VSR[dest].dw0 = sign_ext_64(src[32:63]); P8+ (ISA 2.07).
      // Replaces extsw + mtvsrd (2 insns + scratch GPR) with 1 insn.
@@ -2412,7 +2412,7 @@ index 6ed4eecf9d..d3510c6cf8 100644
      as_fcfid(dest, dest);
    }
    void convertInt32ToDouble(const Address& srcArg, FloatRegister dest) {
-@@ -180,6 +180,17 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -186,6 +186,17 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
      // unboxInt32(Address)'s valuePayload() shift so we read the low word rather
      // than the high word. No-op on little-endian.
      Address src = valuePayload(srcArg);
@@ -2430,7 +2430,7 @@ index 6ed4eecf9d..d3510c6cf8 100644
      // lfiwax (P7+): FPR.dw[0] = sign_ext_64(MEM[addr, 4]). X-form indexed
      // — no immediate offset, so when offset != 0 we add it into a scratch
      // first. Replaces lwz + extsw + mtvsrd with lfiwax (one insn) plus
-@@ -255,10 +266,20 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -261,10 +272,20 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
    }
    void convertInt32ToFloat32(Register src, FloatRegister dest) {
      // mtvsrwa + fcfids; same recipe as convertInt32ToDouble(Register).
@@ -2453,7 +2453,7 @@ index 6ed4eecf9d..d3510c6cf8 100644
      // lfiwax + fcfids; same recipe as convertInt32ToDouble(Address).
      if (src.offset == 0) {
        as_lfiwax(dest, r0, src.base);
-@@ -529,6 +550,153 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -535,6 +556,153 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
        movePtr(ImmWord(uintptr_t(addr)), dest);
      }
    }
@@ -2607,7 +2607,7 @@ index 6ed4eecf9d..d3510c6cf8 100644
    // Load a 32-bit FPR constant from the inline constant pool.
    // Same shape as loadFromPoolFloat64 (above). lfs/plfs auto-expand the
    // 32-bit single-precision value to double in the FPR, so no follow-up
-@@ -754,14 +922,24 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -760,14 +928,24 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
        }
        return;
      }
@@ -2634,7 +2634,7 @@ index 6ed4eecf9d..d3510c6cf8 100644
      }
    }
  
-@@ -786,21 +964,21 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -792,21 +970,21 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
        xs_li(scratch, 1);
        if ((base & BranchOptionMask) == BranchOnSet) {
          xs_li(dest, 0);
@@ -2660,7 +2660,7 @@ index 6ed4eecf9d..d3510c6cf8 100644
      }
    }
  
-@@ -809,9 +987,9 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -815,9 +993,9 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
      uint32_t base = uint32_t(cond) & 0xff;
      uint32_t setbase = (base & ~BranchOptionMask) | BranchOnSet;
      if ((base & BranchOptionMask) == BranchOnSet) {
@@ -2672,7 +2672,7 @@ index 6ed4eecf9d..d3510c6cf8 100644
      }
    }
  
-@@ -821,7 +999,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -827,7 +1005,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
    // does not make a zero condition read as non-zero.
    void moveIfZero(Register dst, Register src, Register cond) {
      as_cmpwi(cond, 0);
@@ -2681,7 +2681,7 @@ index 6ed4eecf9d..d3510c6cf8 100644
    }
  
    void ma_add32TestCarry(Condition cond, Register rd, Register rs, Imm32 imm,
-@@ -1138,7 +1316,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -1144,7 +1322,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
    }
  
    void boxDouble(FloatRegister src, const ValueOperand& dest, FloatRegister) {
@@ -2690,7 +2690,7 @@ index 6ed4eecf9d..d3510c6cf8 100644
    }
    void boxNonDouble(JSValueType type, Register src, const ValueOperand& dest) {
      boxValue(type, src, dest.valueReg());
-@@ -1165,7 +1343,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -1171,7 +1349,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
      load32(valuePayload(src), dest);
    }
    void unboxDouble(const ValueOperand& operand, FloatRegister dest) {
@@ -2699,7 +2699,7 @@ index 6ed4eecf9d..d3510c6cf8 100644
    }
    void unboxDouble(const Address& src, FloatRegister dest) {
      loadDouble(src, dest);
-@@ -1705,7 +1883,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -1708,7 +1886,7 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
    // `inhibitPools_ == 0`). The POWER8 inline path is unaffected.
    void loadConstantDouble(double dp, FloatRegister dest) {
      if (mozilla::IsPositiveZero(dp)) {
@@ -2708,7 +2708,7 @@ index 6ed4eecf9d..d3510c6cf8 100644
        return;
      }
      if (HasPOWER9()) {
-@@ -1720,11 +1898,11 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -1723,11 +1901,11 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
      } u;
      u.d = dp;
      movePtr(ImmWord(u.u), scratch);
@@ -2722,7 +2722,7 @@ index 6ed4eecf9d..d3510c6cf8 100644
        return;
      }
      if (HasPOWER9()) {
-@@ -1739,9 +1917,14 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -1742,9 +1920,14 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
      } u;
      u.f = f;
      movePtr(ImmWord(u.u), scratch);
@@ -2740,7 +2740,7 @@ index 6ed4eecf9d..d3510c6cf8 100644
    }
  
    void notBoolean(const ValueOperand& val) {
-@@ -2082,7 +2265,17 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
+@@ -2084,7 +2267,17 @@ class MacroAssemblerPPC64Compat : public MacroAssemblerPPC64 {
  
    inline void incrementInt32Value(const Address& addr);
  
